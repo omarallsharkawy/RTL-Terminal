@@ -86,13 +86,25 @@ theme: {
         return;
       }
 
+      let lastCtrlC = 0;
       term.attachCustomKeyEventHandler((event) => {
         if (event.ctrlKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === 'c') {
-          tauri.invoke('write_terminal', { input: '\\u0003' }).catch(console.error);
+          const now = Date.now();
+          if (now - lastCtrlC < 900) {
+            tauri.invoke('stop_terminal')
+              .then(() => {
+                term.reset();
+                return tauri.invoke('start_terminal', { cols: term.cols, rows: term.rows });
+              })
+              .catch(console.error);
+          } else {
+            tauri.invoke('write_terminal', { input: String.fromCharCode(3) }).catch(console.error);
+          }
+          lastCtrlC = now;
           return false;
         }
         if (event.ctrlKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === 'd') {
-          tauri.invoke('write_terminal', { input: '\\u0004' }).catch(console.error);
+          tauri.invoke('write_terminal', { input: String.fromCharCode(4) }).catch(console.error);
           return false;
         }
         return true;
@@ -130,6 +142,8 @@ theme: {
 
   return <div ref={hostRef} className="xterm-host" />;
 }
+
+
 
 
 
