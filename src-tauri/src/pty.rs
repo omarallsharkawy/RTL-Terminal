@@ -1,4 +1,4 @@
-use std::{io::{Read, Write}, sync::{Arc, Mutex}, thread};
+﻿use std::{io::{Read, Write}, sync::{Arc, Mutex}, thread};
 
 use anyhow::{anyhow, Result};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
@@ -42,7 +42,8 @@ impl PtySession {
                     Ok(count) => count,
                     Err(_) => break,
                 };
-                let chunk = String::from_utf8_lossy(&buffer[..count]);
+                let chunk = String::from_utf8_lossy(&buffer[..count]).to_string();
+                let _ = app.emit("terminal://data", chunk.clone());
                 let frame = {
                     let mut grid = read_grid.lock().expect("terminal grid poisoned");
                     parser.push(&chunk, &mut grid);
@@ -85,4 +86,5 @@ fn default_shell() -> String {
         std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
     }
 }
+
 
