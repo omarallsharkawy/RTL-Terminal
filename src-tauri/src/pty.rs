@@ -1,4 +1,4 @@
-﻿use std::{io::{Read, Write}, sync::{Arc, Mutex}, thread};
+use std::{io::{Read, Write}, process::Command, sync::{Arc, Mutex}, thread, time::Duration};
 
 use anyhow::{anyhow, Result};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
@@ -68,6 +68,20 @@ impl PtySession {
         Ok(())
     }
 
+    pub fn interrupt(&self) -> Result<()> {
+        self.write("\u{3}")?;
+
+        #[cfg(windows)]
+        if let Some(shell_pid) = self.child.process_id() {
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(650));
+                kill_descendants(shell_pid);
+            });
+        }
+
+        Ok(())
+    }
+
     pub fn resize(&mut self, cols: usize, rows: usize) -> Result<()> {
         self.master.resize(PtySize {
             rows: rows as u16,
@@ -84,6 +98,36 @@ impl PtySession {
     pub fn kill(&mut self) {
         let _ = self.child.kill();
     }
+}
+
+#[cfg(windows)]
+fn kill_descendants(root_pid: u32) {
+    let script = format!(
+        r#"
+$root = {root_pid}
+$seen = @{{}}
+$queue = New-Object System.Collections.Queue
+$queue.Enqueue($root)
+$targets = New-Object System.Collections.Generic.List[int]
+while ($queue.Count -gt 0) {{
+  $parent = $queue.Dequeue()
+  Get-CimInstance Win32_Process -Filter "ParentProcessId=$parent" | ForEach-Object {{
+    if (-not $seen.ContainsKey($_.ProcessId)) {{
+      $seen[$_.ProcessId] = $true
+      $targets.Add([int]$_.ProcessId)
+      $queue.Enqueue([int]$_.ProcessId)
+    }}
+  }}
+}}
+$targets | Sort-Object -Descending | ForEach-Object {{
+  Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue
+}}
+"#
+    );
+
+    let _ = Command::new("powershell.exe")
+        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script])
+        .status();
 }
 
 fn default_shell() -> String {

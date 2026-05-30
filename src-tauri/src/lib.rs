@@ -46,6 +46,15 @@ async fn write_terminal(state: State<'_, AppState>, input: String) -> Result<(),
 }
 
 #[tauri::command]
+async fn interrupt_terminal(state: State<'_, AppState>) -> Result<(), CommandError> {
+    let session = state.session.lock().expect("session lock poisoned");
+    if let Some(session) = session.as_ref() {
+        session.interrupt()?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn resize_terminal(state: State<'_, AppState>, cols: usize, rows: usize) -> Result<(), CommandError> {
     let mut session = state.session.lock().expect("session lock poisoned");
     if let Some(session) = session.as_mut() {
@@ -89,7 +98,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![start_terminal, write_terminal, resize_terminal, stop_terminal, shape_preview])
+        .invoke_handler(tauri::generate_handler![start_terminal, write_terminal, interrupt_terminal, resize_terminal, stop_terminal, shape_preview])
         .run(tauri::generate_context!())
         .expect("error while running RTL Terminal");
 }

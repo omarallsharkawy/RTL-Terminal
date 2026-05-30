@@ -95,7 +95,7 @@ export function XtermTerminal() {
 
         const plainCtrl = event.ctrlKey && !event.altKey && !event.metaKey;
         if (plainCtrl && event.code === 'KeyC') {
-          tauri.invoke('write_terminal', { input: String.fromCharCode(3) }).catch(console.error);
+          tauri.invoke('interrupt_terminal').catch(console.error);
           return false;
         }
         if (plainCtrl && event.code === 'KeyD') {
