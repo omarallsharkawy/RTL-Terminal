@@ -90,6 +90,22 @@ export function XtermTerminal() {
         return;
       }
 
+      term.attachCustomKeyEventHandler((event) => {
+        if (event.type !== 'keydown') return true;
+
+        const plainCtrl = event.ctrlKey && !event.altKey && !event.metaKey;
+        if (plainCtrl && event.code === 'KeyC') {
+          tauri.invoke('write_terminal', { input: String.fromCharCode(3) }).catch(console.error);
+          return false;
+        }
+        if (plainCtrl && event.code === 'KeyD') {
+          tauri.invoke('write_terminal', { input: String.fromCharCode(4) }).catch(console.error);
+          return false;
+        }
+
+        return true;
+      });
+
       cleanupData = await tauri.listen<string>('terminal://data', (event) => {
         term.write(event.payload);
       });
