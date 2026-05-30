@@ -61,6 +61,8 @@ theme: {
     term.loadAddon(fit);
     term.open(host);
     fit.fit();
+    term.focus();
+    host.addEventListener('mousedown', () => term.focus());
     terminalRef.current = term;
     fitRef.current = fit;
 
@@ -83,6 +85,18 @@ theme: {
         term.writeln('English stays LTR, العربية تظهر حسب دعم الخط والمتصفح.');
         return;
       }
+
+      term.attachCustomKeyEventHandler((event) => {
+        if (event.ctrlKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === 'c') {
+          tauri.invoke('write_terminal', { input: '\\u0003' }).catch(console.error);
+          return false;
+        }
+        if (event.ctrlKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === 'd') {
+          tauri.invoke('write_terminal', { input: '\\u0004' }).catch(console.error);
+          return false;
+        }
+        return true;
+      });
 
       cleanupData = await tauri.listen<string>('terminal://data', (event) => {
         term.write(event.payload);
@@ -116,5 +130,7 @@ theme: {
 
   return <div ref={hostRef} className="xterm-host" />;
 }
+
+
 
 
