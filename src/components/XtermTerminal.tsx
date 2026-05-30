@@ -34,14 +34,18 @@ export function XtermTerminal() {
       lineHeight: 1.12,
       letterSpacing: 0,
       scrollback: 10000,
-theme: {
-        background: '#050708',
-        foreground: '#d8e4ec',
-        cursor: '#d8e4ec',
-        selectionBackground: '#31404a',
-        black: '#050708',
+      windowsPty: {
+        backend: 'conpty',
+        buildNumber: 21376,
+      },
+      theme: {
+        background: '#0c0c0c',
+        foreground: '#cccccc',
+        cursor: '#cccccc',
+        selectionBackground: '#264f78',
+        black: '#0c0c0c',
         red: '#f87171',
-        green: '#a3e635',
+        green: '#16c60c',
         yellow: '#facc15',
         blue: '#7dd3fc',
         magenta: '#c084fc',
@@ -85,30 +89,6 @@ theme: {
         term.writeln('English stays LTR, العربية تظهر حسب دعم الخط والمتصفح.');
         return;
       }
-
-      let lastCtrlC = 0;
-      term.attachCustomKeyEventHandler((event) => {
-        if (event.ctrlKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === 'c') {
-          const now = Date.now();
-          if (now - lastCtrlC < 900) {
-            tauri.invoke('stop_terminal')
-              .then(() => {
-                term.reset();
-                return tauri.invoke('start_terminal', { cols: term.cols, rows: term.rows });
-              })
-              .catch(console.error);
-          } else {
-            tauri.invoke('write_terminal', { input: String.fromCharCode(3) }).catch(console.error);
-          }
-          lastCtrlC = now;
-          return false;
-        }
-        if (event.ctrlKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === 'd') {
-          tauri.invoke('write_terminal', { input: String.fromCharCode(4) }).catch(console.error);
-          return false;
-        }
-        return true;
-      });
 
       cleanupData = await tauri.listen<string>('terminal://data', (event) => {
         term.write(event.payload);
