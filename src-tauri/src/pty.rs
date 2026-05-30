@@ -19,12 +19,17 @@ impl PtySession {
         let pair = pty_system.openpty(PtySize {
             rows: rows as u16,
             cols: cols as u16,
-            pixel_width: 0,
-            pixel_height: 0,
+            pixel_width: (cols as u16).saturating_mul(8),
+            pixel_height: (rows as u16).saturating_mul(18),
         })?;
 
         let shell = default_shell();
-        let cmd = CommandBuilder::new(shell);
+        let mut cmd = CommandBuilder::new(shell);
+        cmd.env("TERM", "xterm-256color");
+        cmd.env("COLORTERM", "truecolor");
+        cmd.env("TERM_PROGRAM", "RTL Terminal");
+        cmd.env("FORCE_COLOR", "1");
+        cmd.env("CLICOLOR_FORCE", "1");
         let child = pair.slave.spawn_command(cmd)?;
         drop(pair.slave);
 
@@ -64,7 +69,12 @@ impl PtySession {
     }
 
     pub fn resize(&mut self, cols: usize, rows: usize) -> Result<()> {
-        self.master.resize(PtySize { rows: rows as u16, cols: cols as u16, pixel_width: 0, pixel_height: 0 })?;
+        self.master.resize(PtySize {
+            rows: rows as u16,
+            cols: cols as u16,
+            pixel_width: (cols as u16).saturating_mul(8),
+            pixel_height: (rows as u16).saturating_mul(18),
+        })?;
         if let Ok(mut grid) = self.grid.lock() {
             grid.resize(cols, rows);
         }
@@ -86,5 +96,6 @@ fn default_shell() -> String {
         std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
     }
 }
+
 
 
