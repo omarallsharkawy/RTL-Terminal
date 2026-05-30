@@ -1,0 +1,88 @@
+use std::{io::{Read, Write}, sync::{Arc, Mutex}, thread};
+
+use anyhow::{anyhow, Result};
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use tauri::{AppHandle, Emitter};
+
+use crate::{ansi::AnsiParser, terminal::TerminalGrid};
+
+pub struct PtySession {
+    master: Box<dyn MasterPty + Send>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    child: Box<dyn portable_pty::Child + Send>,
+    grid: Arc<Mutex<TerminalGrid>>,
+}
+
+impl PtySession {
+    pub fn spawn(app: AppHandle, cols: usize, rows: usize) -> Result<Self> {
+        let pty_system = native_pty_system();
+        let pair = pty_system.openpty(PtySize {
+            rows: rows as u16,
+            cols: cols as u16,
+            pixel_width: 0,
+            pixel_height: 0,
+        })?;
+
+        let shell = default_shell();
+        let cmd = CommandBuilder::new(shell);
+        let child = pair.slave.spawn_command(cmd)?;
+        drop(pair.slave);
+
+        let mut reader = pair.master.try_clone_reader()?;
+        let writer = Arc::new(Mutex::new(pair.master.take_writer()?));
+        let grid = Arc::new(Mutex::new(TerminalGrid::new(cols, rows)));
+        let read_grid = Arc::clone(&grid);
+
+        thread::spawn(move || {
+            let mut parser = AnsiParser::default();
+            let mut buffer = [0_u8; 8192];
+            loop {
+                let count = match reader.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(count) => count,
+                    Err(_) => break,
+                };
+                let chunk = String::from_utf8_lossy(&buffer[..count]);
+                let frame = {
+                    let mut grid = read_grid.lock().expect("terminal grid poisoned");
+                    parser.push(&chunk, &mut grid);
+                    grid.frame()
+                };
+                let _ = app.emit("terminal://frame", frame);
+            }
+        });
+
+        Ok(Self { master: pair.master, writer, child, grid })
+    }
+
+    pub fn write(&self, input: &str) -> Result<()> {
+        let mut writer = self.writer.lock().map_err(|_| anyhow!("PTY writer lock poisoned"))?;
+        writer.write_all(input.as_bytes())?;
+        writer.flush()?;
+        Ok(())
+    }
+
+    pub fn resize(&mut self, cols: usize, rows: usize) -> Result<()> {
+        self.master.resize(PtySize { rows: rows as u16, cols: cols as u16, pixel_width: 0, pixel_height: 0 })?;
+        if let Ok(mut grid) = self.grid.lock() {
+            grid.resize(cols, rows);
+        }
+        Ok(())
+    }
+
+    pub fn kill(&mut self) {
+        let _ = self.child.kill();
+    }
+}
+
+fn default_shell() -> String {
+    #[cfg(windows)]
+    {
+        std::env::var("COMSPEC").unwrap_or_else(|_| "powershell.exe".to_string())
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
+    }
+}
+

@@ -1,0 +1,42 @@
+{
+    "$schema":  "https://schema.tauri.app/config/2",
+    "productName":  "RTL Terminal",
+    "version":  "0.1.0",
+    "identifier":  "dev.rtl-terminal.app",
+    "build":  {
+                  "beforeDevCommand":  "npm run dev",
+                  "devUrl":  "http://127.0.0.1:1420",
+                  "beforeBuildCommand":  "npm run build",
+                  "frontendDist":  "../dist"
+              },
+    "app":  {
+                "security":  {
+                                 "csp":  null
+                             },
+                "windows":  [
+                                {
+                                    "title":  "RTL Terminal",
+                                    "width":  1180,
+                                    "height":  760,
+                                    "minWidth":  720,
+                                    "minHeight":  440,
+                                    "decorations":  true,
+                                    "transparent":  true,
+                                    "resizable":  true,
+                                    "center":  true
+                                }
+                            ]
+            },
+    "bundle":  {
+                   "active":  true,
+                   "targets":  [
+                                   "nsis"
+                               ],
+                   "icon":  [
+                                "icons/32x32.png",
+                                "icons/128x128.png",
+                                "icons/256x256.png",
+                                "icons/icon.ico"
+                            ]
+               }
+}
