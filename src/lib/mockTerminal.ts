@@ -1,13 +1,13 @@
-import type { TerminalFrame, TerminalLine } from './types';
+﻿import type { TerminalFrame, TerminalLine } from './types';
 
 const samples = [
-  'مرحبا بك في RTL Terminal',
-  'PS E:\\rtl terminal> cd C:\\Users\\Administrator\\مشاريع',
+  'Ù…Ø±Ø­Ø¨Ø§ Ø¨Ùƒ ÙÙŠ RTL Terminal',
+  'PS E:\\rtl terminal> cd C:\\Users\\Administrator\\Ù…Ø´Ø§Ø±ÙŠØ¹',
   'git status --short',
   ' M src-tauri/src/bidi.rs',
   '?? src/components/TerminalCanvas.tsx',
   'node --version => v24.15.0',
-  'خلط عربي English 123 ومسارات /var/www/app يعمل بدون قلب الكود',
+  'Ø®Ù„Ø· Ø¹Ø±Ø¨ÙŠ English 123 ÙˆÙ…Ø³Ø§Ø±Ø§Øª /var/www/app ÙŠØ¹Ù…Ù„ Ø¨Ø¯ÙˆÙ† Ù‚Ù„Ø¨ Ø§Ù„ÙƒÙˆØ¯',
   'npm run tauri:dev',
 ];
 
@@ -32,7 +32,7 @@ export function makeMockFrame(tick: number, cols = 96, rows = 28): TerminalFrame
         logicalIndex,
         width: 1,
         style: {
-          fg: row === 0 ? [122, 250, 195] : row > 2 && text.startsWith(' ') ? [153, 179, 198] : [228, 238, 247],
+          fg: row === 0 ? [216, 228, 236] : row > 2 && text.startsWith(' ') ? [153, 179, 198] : [228, 238, 247],
           bold: row === 0,
         },
       })),
@@ -48,3 +48,4 @@ export function makeMockFrame(tick: number, cols = 96, rows = 28): TerminalFrame
     lines,
   };
 }
+
