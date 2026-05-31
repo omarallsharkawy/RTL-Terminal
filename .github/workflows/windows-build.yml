@@ -71,13 +71,11 @@ jobs:
       - name: Upload Windows build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rtl-terminal-windows
+          name: twitty-windows-installer
           if-no-files-found: error
           path: |
-            src-tauri/target/x86_64-pc-windows-msvc/release/*.exe
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/**/*.exe
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/**/*.msi
-            src-tauri/target/release/*.exe
             src-tauri/target/release/bundle/**/*.exe
             src-tauri/target/release/bundle/**/*.msi
 
@@ -89,7 +87,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "windows-${{ github.run_number }}.${{ github.run_attempt }}"
-          $releaseName = "RTL Terminal Windows build ${{ github.run_number }}.${{ github.run_attempt }}"
+          $releaseName = "Twitty Windows build ${{ github.run_number }}.${{ github.run_attempt }}"
           $assets = @()
 
           $candidateRoots = @(
@@ -99,7 +97,6 @@ jobs:
 
           foreach ($root in $candidateRoots) {
             if (!(Test-Path $root)) { continue }
-            $assets += Get-ChildItem $root -Filter "*.exe" -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
             if (Test-Path "$root/bundle") {
               $assets += Get-ChildItem "$root/bundle" -Recurse -Include "*.exe", "*.msi" -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
             }

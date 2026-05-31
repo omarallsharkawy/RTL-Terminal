@@ -119,22 +119,10 @@ fn kill_descendants(root_pid: u32) {
     let script = format!(
         r#"
 $root = {root_pid}
-$seen = @{{}}
-$queue = New-Object System.Collections.Queue
-$queue.Enqueue($root)
-$targets = New-Object System.Collections.Generic.List[int]
-while ($queue.Count -gt 0) {{
-  $parent = $queue.Dequeue()
-  Get-CimInstance Win32_Process -Filter "ParentProcessId=$parent" | ForEach-Object {{
-    if (-not $seen.ContainsKey($_.ProcessId)) {{
-      $seen[$_.ProcessId] = $true
-      $targets.Add([int]$_.ProcessId)
-      $queue.Enqueue([int]$_.ProcessId)
-    }}
+Get-CimInstance Win32_Process -Filter "ParentProcessId=$root" | ForEach-Object {{
+  if ($_.Name -ne 'conhost.exe' -and $_.Name -ne 'openconsole.exe' -and $_.ProcessId -ne $root) {{
+    taskkill /F /T /PID $_.ProcessId *>$null
   }}
-}}
-$targets | Sort-Object -Descending | ForEach-Object {{
-  Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue
 }}
 "#
     );
