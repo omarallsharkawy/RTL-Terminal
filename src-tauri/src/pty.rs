@@ -1,5 +1,8 @@
 use std::{io::{Read, Write}, process::Command, sync::{Arc, Mutex}, thread, time::Duration};
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 use anyhow::{anyhow, Result};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use tauri::{AppHandle, Emitter};
@@ -120,21 +123,12 @@ $seen = @{{}}
 $queue = New-Object System.Collections.Queue
 $queue.Enqueue($root)
 $targets = New-Object System.Collections.Generic.List[int]
-$shells = @("powershell.exe", "pwsh.exe", "cmd.exe", "wsl.exe", "bash.exe", "zsh.exe")
 while ($queue.Count -gt 0) {{
   $parent = $queue.Dequeue()
   Get-CimInstance Win32_Process -Filter "ParentProcessId=$parent" | ForEach-Object {{
     if (-not $seen.ContainsKey($_.ProcessId)) {{
       $seen[$_.ProcessId] = $true
-      $name = $_.Name.ToLower()
-      if ($name -eq "cmd.exe") {{
-        # Kill cmd.exe if it's running a batch file or command (contains /c)
-        if ($_.CommandLine -and $_.CommandLine.ToLower().Contains("/c")) {{
-          $targets.Add([int]$_.ProcessId)
-        }}
-      }} elseif ($shells -notcontains $name) {{
-        $targets.Add([int]$_.ProcessId)
-      }}
+      $targets.Add([int]$_.ProcessId)
       $queue.Enqueue([int]$_.ProcessId)
     }}
   }}
@@ -146,6 +140,7 @@ $targets | Sort-Object -Descending | ForEach-Object {{
     );
 
     let _ = Command::new("powershell.exe")
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
         .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script])
         .status();
 }
