@@ -77,15 +77,14 @@ impl PtySession {
     }
 
     pub fn interrupt(&self) -> Result<()> {
-        self.write("\u{3}")?;
-
         #[cfg(windows)]
         if let Some(shell_pid) = self.child.process_id() {
-            thread::spawn(move || {
-                thread::sleep(Duration::from_millis(650));
-                kill_descendants(shell_pid);
-            });
+            unsafe {
+                send_ctrl_c(shell_pid);
+            }
         }
+        #[cfg(not(windows))]
+        self.write("\u{3}")?;
 
         Ok(())
     }
@@ -120,22 +119,23 @@ fn default_shell() -> (String, Vec<String>) {
 }
 
 #[cfg(windows)]
-fn kill_descendants(root_pid: u32) {
-    let script = format!(
-        r#"
-$root = {root_pid}
-Get-CimInstance Win32_Process -Filter "ParentProcessId=$root" | ForEach-Object {{
-  if ($_.Name -ne 'conhost.exe' -and $_.Name -ne 'openconsole.exe' -and $_.ProcessId -ne $root) {{
-    taskkill /F /T /PID $_.ProcessId *>$null
-  }}
-}}
-"#
-    );
+extern "system" {
+    fn AttachConsole(dwProcessId: u32) -> i32;
+    fn FreeConsole() -> i32;
+    fn GenerateConsoleCtrlEvent(dwCtrlEvent: u32, dwProcessGroupId: u32) -> i32;
+    fn SetConsoleCtrlHandler(HandlerRoutine: Option<unsafe extern "system" fn(u32) -> i32>, Add: i32) -> i32;
+}
 
-    let _ = Command::new("powershell.exe")
-        .creation_flags(0x08000000) // CREATE_NO_WINDOW
-        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script])
-        .status();
+#[cfg(windows)]
+unsafe fn send_ctrl_c(pid: u32) {
+    FreeConsole();
+    if AttachConsole(pid) != 0 {
+        SetConsoleCtrlHandler(None, 1);
+        GenerateConsoleCtrlEvent(0, 0); // 0 is CTRL_C_EVENT
+        thread::sleep(Duration::from_millis(50));
+        FreeConsole();
+        SetConsoleCtrlHandler(None, 0);
+    }
 }
 
 
