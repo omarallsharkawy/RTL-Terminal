@@ -26,8 +26,11 @@ impl PtySession {
             pixel_height: (rows as u16).saturating_mul(18),
         })?;
 
-        let shell = default_shell();
+        let (shell, shell_args) = default_shell();
         let mut cmd = CommandBuilder::new(shell);
+        for arg in shell_args {
+            cmd.arg(arg);
+        }
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "Twitty");
@@ -103,14 +106,14 @@ impl PtySession {
     }
 }
 
-fn default_shell() -> String {
+fn default_shell() -> (String, Vec<String>) {
     #[cfg(windows)]
     {
-        "cmd.exe".to_string()
+        ("powershell.exe".to_string(), vec!["-NoExit".to_string(), "-NoLogo".to_string()])
     }
     #[cfg(not(windows))]
     {
-        std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
+        (std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string()), vec![])
     }
 }
 
