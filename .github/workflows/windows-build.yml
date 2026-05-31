@@ -102,13 +102,13 @@ jobs:
             }
           }
 
-          $assets = $assets | Sort-Object -Unique
+          $assets = @($assets | Sort-Object -Unique)
           if ($assets.Count -eq 0) {
             Write-Error "No release assets found."
             exit 1
           }
 
-          gh release create $tag @assets `
+          gh release create $tag $assets `
             --repo $env:GITHUB_REPOSITORY `
             --target $env:GITHUB_SHA `
             --title $releaseName `
