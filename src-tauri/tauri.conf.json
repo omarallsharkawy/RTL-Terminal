@@ -41,7 +41,7 @@
     "licenseFile": "../LICENSE.txt",
     "windows": {
       "nsis": {
-        "oneClick": false
+        "installMode": "both"
       }
     }
   }
