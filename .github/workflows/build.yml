@@ -169,7 +169,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag="v1.0.3-build.${{ github.run_number }}.${{ github.run_attempt }}"
+          tag="v1.1.0-build.${{ github.run_number }}.${{ github.run_attempt }}"
           release_name="Twitty Build ${{ github.run_number }}.${{ github.run_attempt }}"
           
           # Find all release assets
