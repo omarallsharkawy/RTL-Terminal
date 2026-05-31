@@ -27,7 +27,7 @@ impl PtySession {
         let mut cmd = CommandBuilder::new(shell);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
-        cmd.env("TERM_PROGRAM", "RTL Terminal");
+        cmd.env("TERM_PROGRAM", "Twitty");
         cmd.env("FORCE_COLOR", "1");
         cmd.env("CLICOLOR_FORCE", "1");
         let child = pair.slave.spawn_command(cmd)?;
@@ -69,15 +69,12 @@ impl PtySession {
     }
 
     pub fn interrupt(&self) -> Result<()> {
-        println!("[BACKEND DEBUG] PtySession::interrupt called. Writing 0x03 byte.");
         self.write("\u{3}")?;
 
         #[cfg(windows)]
         if let Some(shell_pid) = self.child.process_id() {
-            println!("[BACKEND DEBUG] Spawning kill_descendants thread for shell PID {}", shell_pid);
             thread::spawn(move || {
                 thread::sleep(Duration::from_millis(650));
-                println!("[BACKEND DEBUG] Delayed thread calling kill_descendants");
                 kill_descendants(shell_pid);
             });
         }
@@ -116,7 +113,6 @@ fn default_shell() -> String {
 
 #[cfg(windows)]
 fn kill_descendants(root_pid: u32) {
-    println!("[BACKEND DEBUG] Running kill_descendants script for PID {}", root_pid);
     let script = format!(
         r#"
 $root = {root_pid}
@@ -131,34 +127,27 @@ while ($queue.Count -gt 0) {{
     if (-not $seen.ContainsKey($_.ProcessId)) {{
       $seen[$_.ProcessId] = $true
       $name = $_.Name.ToLower()
-      if ($shells -notcontains $name) {{
+      if ($name -eq "cmd.exe") {{
+        # Kill cmd.exe if it's running a batch file or command (contains /c)
+        if ($_.CommandLine -and $_.CommandLine.ToLower().Contains("/c")) {{
+          $targets.Add([int]$_.ProcessId)
+        }}
+      }} elseif ($shells -notcontains $name) {{
         $targets.Add([int]$_.ProcessId)
       }}
       $queue.Enqueue([int]$_.ProcessId)
     }}
   }}
 }}
-Write-Output "Found targets to kill: $($targets -join ', ')"
 $targets | Sort-Object -Descending | ForEach-Object {{
   Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue
 }}
 "#
     );
 
-    let output = Command::new("powershell.exe")
+    let _ = Command::new("powershell.exe")
         .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script])
-        .output();
-
-    match output {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-            println!("[BACKEND DEBUG] kill_descendants output:\nSTDOUT:\n{}\nSTDERR:\n{}", stdout, stderr);
-        }
-        Err(e) => {
-            println!("[BACKEND DEBUG] Failed to run kill_descendants script: {:?}", e);
-        }
-    }
+        .status();
 }
 
 

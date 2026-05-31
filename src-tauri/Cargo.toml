@@ -1,6 +1,6 @@
 [package]
-name = "rtl-terminal"
-version = "0.1.0"
+name = "twitty"
+version = "1.0.1"
 description = "RTL-first bidirectional terminal emulator"
 authors = ["RTL Terminal Contributors"]
 edition = "2021"

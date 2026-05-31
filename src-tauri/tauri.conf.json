@@ -1,8 +1,8 @@
 {
     "$schema":  "https://schema.tauri.app/config/2",
-    "productName":  "RTL Terminal",
-    "version":  "0.1.0",
-    "identifier":  "dev.rtl-terminal.app",
+    "productName":  "Twitty",
+    "version":  "1.0.1",
+    "identifier":  "dev.twitty.app",
     "build":  {
                   "beforeDevCommand":  "npm run dev",
                   "devUrl":  "http://127.0.0.1:1420",
@@ -15,7 +15,7 @@
                              },
                 "windows":  [
                                 {
-                                    "title":  "RTL Terminal",
+                                    "title":  "Twitty",
                                     "width":  1180,
                                     "height":  760,
                                     "minWidth":  720,
@@ -37,6 +37,10 @@
                                 "icons/128x128.png",
                                 "icons/256x256.png",
                                 "icons/icon.ico"
-                            ]
+                            ],
+                   "nsis": {
+                                "oneClick": false,
+                                "license": "../LICENSE.txt"
+                            }
                }
 }

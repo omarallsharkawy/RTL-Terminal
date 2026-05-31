@@ -84,7 +84,7 @@ export function XtermTerminal() {
     getTauri().then(async (tauri) => {
       if (cancelled) return;
       if (!tauri) {
-        term.writeln('RTL Terminal demo');
+        term.writeln('Twitty demo');
         term.writeln('npm run tauri:dev لتشغيل التيرمنال الحقيقي');
         term.writeln('English stays LTR, العربية تظهر حسب دعم الخط والمتصفح.');
         return;
@@ -95,10 +95,7 @@ export function XtermTerminal() {
 
         const plainCtrl = event.ctrlKey && !event.altKey && !event.metaKey;
         if (plainCtrl && event.code === 'KeyC') {
-          term.write('\r\n[DEBUG: Frontend captured Ctrl+C]\r\n');
-          tauri.invoke('interrupt_terminal').catch((err) => {
-            term.write(`\r\n[DEBUG: Tauri invoke error: ${String(err)}]\r\n`);
-          });
+          tauri.invoke('interrupt_terminal').catch(console.error);
           return false;
         }
         if (plainCtrl && event.code === 'KeyD') {
