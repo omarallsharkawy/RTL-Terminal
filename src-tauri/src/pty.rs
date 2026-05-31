@@ -62,6 +62,8 @@ impl PtySession {
                 };
                 let _ = app.emit("terminal://frame", frame);
             }
+            // Shell exited — notify frontend so it can auto-respawn
+            let _ = app.emit("terminal://exited", ());
         });
 
         Ok(Self { master: pair.master, writer, child, grid })
@@ -109,7 +111,7 @@ impl PtySession {
 fn default_shell() -> (String, Vec<String>) {
     #[cfg(windows)]
     {
-        ("powershell.exe".to_string(), vec!["-NoExit".to_string(), "-NoLogo".to_string()])
+        ("powershell.exe".to_string(), vec!["-NoLogo".to_string()])
     }
     #[cfg(not(windows))]
     {

@@ -109,6 +109,14 @@ export function XtermTerminal() {
       cleanupData = await tauri.listen<string>('terminal://data', (event) => {
         term.write(event.payload);
       });
+
+      const cleanupExited = await tauri.listen('terminal://exited', async () => {
+        term.write('\r\n\x1b[33m[Shell exited — restarting...]\x1b[0m\r\n\r\n');
+        await new Promise((r) => setTimeout(r, 300));
+        term.reset();
+        await tauri.invoke('start_terminal', { cols: term.cols, rows: term.rows });
+      });
+
       term.onData((data) => {
         tauri.invoke('write_terminal', { input: data }).catch(console.error);
       });
