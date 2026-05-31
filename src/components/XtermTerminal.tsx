@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
@@ -95,7 +95,10 @@ export function XtermTerminal() {
 
         const plainCtrl = event.ctrlKey && !event.altKey && !event.metaKey;
         if (plainCtrl && event.code === 'KeyC') {
-          tauri.invoke('interrupt_terminal').catch(console.error);
+          term.write('\r\n[DEBUG: Frontend captured Ctrl+C]\r\n');
+          tauri.invoke('interrupt_terminal').catch((err) => {
+            term.write(`\r\n[DEBUG: Tauri invoke error: ${String(err)}]\r\n`);
+          });
           return false;
         }
         if (plainCtrl && event.code === 'KeyD') {

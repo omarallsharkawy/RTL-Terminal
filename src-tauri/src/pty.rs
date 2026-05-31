@@ -69,12 +69,15 @@ impl PtySession {
     }
 
     pub fn interrupt(&self) -> Result<()> {
+        println!("[BACKEND DEBUG] PtySession::interrupt called. Writing 0x03 byte.");
         self.write("\u{3}")?;
 
         #[cfg(windows)]
         if let Some(shell_pid) = self.child.process_id() {
+            println!("[BACKEND DEBUG] Spawning kill_descendants thread for shell PID {}", shell_pid);
             thread::spawn(move || {
                 thread::sleep(Duration::from_millis(650));
+                println!("[BACKEND DEBUG] Delayed thread calling kill_descendants");
                 kill_descendants(shell_pid);
             });
         }
@@ -113,6 +116,7 @@ fn default_shell() -> String {
 
 #[cfg(windows)]
 fn kill_descendants(root_pid: u32) {
+    println!("[BACKEND DEBUG] Running kill_descendants script for PID {}", root_pid);
     let script = format!(
         r#"
 $root = {root_pid}
@@ -134,15 +138,27 @@ while ($queue.Count -gt 0) {{
     }}
   }}
 }}
+Write-Output "Found targets to kill: $($targets -join ', ')"
 $targets | Sort-Object -Descending | ForEach-Object {{
   Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue
 }}
 "#
     );
 
-    let _ = Command::new("powershell.exe")
+    let output = Command::new("powershell.exe")
         .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script])
-        .status();
+        .output();
+
+    match output {
+        Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+            println!("[BACKEND DEBUG] kill_descendants output:\nSTDOUT:\n{}\nSTDERR:\n{}", stdout, stderr);
+        }
+        Err(e) => {
+            println!("[BACKEND DEBUG] Failed to run kill_descendants script: {:?}", e);
+        }
+    }
 }
 
 

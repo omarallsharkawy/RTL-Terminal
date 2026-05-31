@@ -1,4 +1,4 @@
-﻿mod ansi;
+mod ansi;
 mod bidi;
 mod pty;
 mod terminal;
@@ -47,9 +47,13 @@ async fn write_terminal(state: State<'_, AppState>, input: String) -> Result<(),
 
 #[tauri::command]
 async fn interrupt_terminal(state: State<'_, AppState>) -> Result<(), CommandError> {
+    println!("[BACKEND DEBUG] interrupt_terminal command invoked");
     let session = state.session.lock().expect("session lock poisoned");
     if let Some(session) = session.as_ref() {
+        println!("[BACKEND DEBUG] Session is active, calling interrupt()");
         session.interrupt()?;
+    } else {
+        println!("[BACKEND DEBUG] Session is None!");
     }
     Ok(())
 }
