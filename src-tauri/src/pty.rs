@@ -118,11 +118,25 @@ fn default_shell() -> String {
 fn kill_descendants(root_pid: u32) {
     let script = format!(
         r#"
+$log = 'C:\Users\Administrator\.gemini\antigravity\brain\3793a041-eaad-4f9d-86b0-80e2815ce2a2\debug_kill.log'
+"--- Kill attempt at $(Get-Date) ---" | Out-File -FilePath $log -Append
 $root = {root_pid}
-Get-CimInstance Win32_Process -Filter "ParentProcessId=$root" | ForEach-Object {{
-  if ($_.Name -ne 'conhost.exe' -and $_.Name -ne 'openconsole.exe' -and $_.ProcessId -ne $root) {{
-    taskkill /F /T /PID $_.ProcessId *>$null
+"Root PID: $root" | Out-File -FilePath $log -Append
+try {{
+  $children = Get-CimInstance Win32_Process -Filter "ParentProcessId=$root" -ErrorAction Stop
+  "Found $($children.Count) direct children" | Out-File -FilePath $log -Append
+  $children | ForEach-Object {{
+    "Child: $($_.Name) ($($_.ProcessId))" | Out-File -FilePath $log -Append
+    if ($_.Name -ne 'conhost.exe' -and $_.Name -ne 'openconsole.exe' -and $_.ProcessId -ne $root) {{
+      "Killing $($_.Name) ($($_.ProcessId)) using taskkill" | Out-File -FilePath $log -Append
+      $out = taskkill /F /T /PID $_.ProcessId 2>&1
+      "Taskkill output: $out" | Out-File -FilePath $log -Append
+    }} else {{
+      "Skipping $($_.Name) ($($_.ProcessId)) (filtered out)" | Out-File -FilePath $log -Append
+    }}
   }}
+}} catch {{
+  "Error during query or execution: $_" | Out-File -FilePath $log -Append
 }}
 "#
     );
