@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<style>
+  @page { size: A4; margin: 0; }
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Naskh+Arabic:wght@400;600&display=swap');
+
+  :root {
+    --bg: #0b0d10;
+    --bg-card: #13161c;
+    --bg-card2: #1a1e26;
+    --border: #252a35;
+    --text: #c8cfd6;
+    --text-bright: #e8edf2;
+    --text-muted: #6b7a8d;
+    --accent: #3fb1ea;
+    --accent-dim: rgba(63,177,234,0.12);
+    --green: #16c60c;
+    --font: 'Inter', system-ui, sans-serif;
+    --font-ar: 'Noto Naskh Arabic', 'Segoe UI', sans-serif;
+    --page-w: 210mm;
+    --margin: 20mm;
+    --content-w: calc(var(--page-w) - var(--margin) * 2);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    width: var(--page-w);
+    margin: 0 auto;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 10pt;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    width: var(--page-w);
+    min-height: 297mm;
+    padding: var(--margin);
+    margin: 0 auto;
+    background: var(--bg);
+  }
+
+  .page-break { page-break-after: always; }
+
+  /* ─── Cover ─── */
+  .cover {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 257mm;
+    text-align: left;
+  }
+  .cover__label {
+    font-size: 9pt;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 12mm;
+  }
+  .cover__title {
+    font-size: 36pt;
+    font-weight: 700;
+    color: var(--text-bright);
+    line-height: 1.15;
+    letter-spacing: -0.03em;
+    max-width: 85%;
+  }
+  .cover__title span { color: var(--accent); }
+  .cover__subtitle {
+    font-size: 13pt;
+    font-weight: 300;
+    color: var(--text-muted);
+    margin-top: 8mm;
+    max-width: 75%;
+    line-height: 1.6;
+  }
+  .cover__ar {
+    font-family: var(--font-ar);
+    font-size: 16pt;
+    font-weight: 400;
+    color: var(--text);
+    direction: rtl;
+    margin-top: 14mm;
+    padding: 6mm 10mm;
+    border-right: 3px solid var(--accent);
+    line-height: 2;
+  }
+  .cover__meta {
+    font-size: 8.5pt;
+    color: var(--text-muted);
+    margin-top: auto;
+    padding-top: 8mm;
+    border-top: 1px solid var(--border);
+  }
+  .cover__meta span { color: var(--accent); font-weight: 500; }
+
+  /* ─── Section headings ─── */
+  h2 {
+    font-size: 16pt;
+    font-weight: 600;
+    color: var(--text-bright);
+    margin-top: 10mm;
+    margin-bottom: 5mm;
+    letter-spacing: -0.02em;
+    padding-bottom: 2mm;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 {
+    font-size: 11.5pt;
+    font-weight: 600;
+    color: var(--text-bright);
+    margin-top: 6mm;
+    margin-bottom: 3mm;
+  }
+
+  p { margin-bottom: 3.5mm; max-width: var(--content-w); }
+  strong { color: var(--text-bright); font-weight: 600; }
+  code {
+    font-family: 'Cascadia Mono', 'Consolas', monospace;
+    font-size: 8.5pt;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    padding: 0.5mm 2mm;
+    border-radius: 3px;
+    color: var(--accent);
+  }
+
+  /* ─── Features grid ─── */
+  .features {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4mm;
+    margin-top: 4mm;
+  }
+  .feature {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4mm 5mm;
+  }
+  .feature__title {
+    font-size: 9.5pt;
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 1.5mm;
+  }
+  .feature__desc {
+    font-size: 8.5pt;
+    color: var(--text-muted);
+    line-height: 1.55;
+  }
+
+  /* ─── Architecture diagram ─── */
+  .arch {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6mm;
+    margin: 5mm 0;
+    font-family: 'Cascadia Mono', 'Consolas', monospace;
+    font-size: 8pt;
+    line-height: 1.7;
+    color: var(--text-muted);
+    overflow-x: auto;
+  }
+  .arch strong { color: var(--accent); font-weight: 600; }
+
+  /* ─── Table ─── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 4mm 0;
+    font-size: 9pt;
+  }
+  thead th {
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-bright);
+    border-bottom: 1px solid var(--border);
+    padding: 2.5mm 3mm;
+    font-size: 8.5pt;
+    letter-spacing: 0.02em;
+  }
+  td {
+    padding: 2.5mm 3mm;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  td code { font-size: 8pt; }
+
+  /* ─── Screenshot ─── */
+  .screenshot {
+    margin: 5mm 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .screenshot img {
+    width: 100%;
+    display: block;
+  }
+  .screenshot__caption {
+    font-size: 8pt;
+    color: var(--text-muted);
+    padding: 2mm 3mm;
+    background: var(--bg-card);
+    border-top: 1px solid var(--border);
+  }
+
+  /* ─── RTL note ─── */
+  .rtl-note {
+    font-family: var(--font-ar);
+    direction: rtl;
+    text-align: right;
+    background: var(--accent-dim);
+    border: 1px solid rgba(63,177,234,0.25);
+    border-radius: 6px;
+    padding: 4mm 6mm;
+    margin: 5mm 0;
+    font-size: 10.5pt;
+    line-height: 2;
+    color: var(--text);
+  }
+
+  /* ─── Code block ─── */
+  pre {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4mm 5mm;
+    margin: 4mm 0;
+    font-family: 'Cascadia Mono', 'Consolas', monospace;
+    font-size: 8pt;
+    line-height: 1.6;
+    color: var(--text-muted);
+    overflow-x: auto;
+  }
+</style>
+</head>
+<body>
+
+<!-- ════════════ PAGE 1: Cover ════════════ -->
+<div class="page cover">
+  <div class="cover__label">Technical Overview</div>
+  <div class="cover__title">Twitty · <span>RTL Terminal</span></div>
+  <div class="cover__subtitle">
+    A bidirectional terminal emulator for mixed Arabic and English text.
+    Arabic shapes contextually and flows right-to-left, inline with
+    English, inside real shells and TUI applications.
+  </div>
+  <div class="cover__ar">
+    مرحباً بك في Twitty — طرفية تدعم العربية والإنجليزية معًا
+    العربية تتشكّل وتُعرض من اليمين لليسار
+  </div>
+  <div class="cover__meta">
+    <span>v1.1</span> · Tauri v2 + React 19 + xterm.js 6 · June 2026
+  </div>
+</div>
+
+<!-- ════════════ PAGE 2: Features + Screenshot ════════════ -->
+<div class="page page-break">
+  <h2>What It Does</h2>
+  <p>
+    Twitty runs a real shell (PowerShell, Bash, Zsh) inside a pseudo-terminal and
+    renders it with xterm.js. Mixed Arabic/English text is <strong>contextually
+    shaped</strong> (letters take their correct initial, medial, final, or
+    isolated forms and join) and <strong>ordered right-to-left</strong> per
+    Arabic run — without ever rewriting the byte stream, so cursor positioning
+    and TUI applications stay correct.
+  </p>
+
+  <div class="features">
+    <div class="feature">
+      <div class="feature__title">Contextual Arabic Shaping</div>
+      <div class="feature__desc">Letters join with correct presentation forms (U+FE70–FEFF). Bundled Noto Naskh Arabic font ensures rendering on every OS.</div>
+    </div>
+    <div class="feature">
+      <div class="feature__title">Per-Run Bidirectional Ordering</div>
+      <div class="feature__desc">Arabic flows right-to-left; English, digits, and symbols stay left-to-right, mixed on the same line.</div>
+    </div>
+    <div class="feature">
+      <div class="feature__title">Render-Layer Architecture</div>
+      <div class="feature__desc">Shaping happens as the browser draws cells, not in the byte stream. Buffer stays logical — cursor never desyncs.</div>
+    </div>
+    <div class="feature">
+      <div class="feature__title">TUI-Safe</div>
+      <div class="feature__desc">Works inside alternate-screen apps (editors, pagers). Box-drawing and block glyphs tile with seamless row alignment.</div>
+    </div>
+    <div class="feature">
+      <div class="feature__title">Cross-Platform</div>
+      <div class="feature__desc">Windows (ConPTY), Linux (Unix PTY). Single CI workflow produces NSIS installer + .deb / .rpm / AppImage.</div>
+    </div>
+    <div class="feature">
+      <div class="feature__title">Full ANSI Support</div>
+      <div class="feature__desc">24-bit color, alternate screen, scroll regions, mouse reporting, 10 000-line scrollback.</div>
+    </div>
+  </div>
+
+  <h2>Arabic Rendering in Action</h2>
+  <div class="screenshot">
+    <img src="assets/screenshot-hero.png" alt="Twitty rendering mixed Arabic and English text" />
+    <div class="screenshot__caption">Browser demo: Arabic shapes contextually and flows RTL while English stays LTR. Box-drawing table borders align cleanly.</div>
+  </div>
+</div>
+
+<!-- ════════════ PAGE 3: Architecture + How RTL Works ════════════ -->
+<div class="page page-break">
+  <h2>Architecture</h2>
+  <p>
+    The Rust backend spawns a real shell inside a PTY and streams raw output to
+    the frontend via Tauri events. xterm.js handles ANSI parsing, cursor
+    movement, colors, and scrollback. Keystrokes flow back via
+    <code>write_terminal</code>; window resizes via <code>resize_terminal</code>.
+  </p>
+
+  <div class="arch">
+<strong>┌─────────────┐</strong>   raw bytes    <strong>┌──────────────┐</strong>  logical-order   <strong>┌─────────────────────┐</strong>
+<strong>│</strong>  Real shell <strong>│</strong> ─────────────▶ <strong>│</strong>  Rust PTY    <strong>│</strong> ───────────────▶ <strong>│</strong>  xterm.js buffer    <strong>│</strong>
+<strong>│</strong> (PTY/ConPTY)<strong>│</strong>  terminal://   <strong>│</strong>  bridge      <strong>│</strong>   terminal://    <strong>│</strong>  (unchanged order)  <strong>│</strong>
+<strong>└─────────────┘</strong>     data       <strong>└──────────────┘</strong>     data         <strong>└──────────┬──────────┘</strong>
+                                                                        <strong>│</strong> render
+                                          character joiner <strong>◀────</strong> <strong>│</strong> each Arabic
+                                          marks Arabic runs     <strong>│</strong> run drawn via
+                                                                <strong>▼</strong> browser text
+                                                     <strong>┌─────────────────────┐</strong>
+                                                     <strong>│</strong>  Browser applies     <strong>│</strong>
+                                                     <strong>│</strong>  shaping + RTL       <strong>│</strong>
+                                                     <strong>│</strong>  *within the run*    <strong>│</strong>
+                                                     <strong>└─────────────────────┘</strong>
+  </div>
+
+  <h2>How the RTL Rendering Works</h2>
+  <p>
+    The hard part of an Arabic terminal isn't shaping — it's shaping
+    <strong>without corrupting the terminal</strong>. Stream-rewriting approaches
+    change cell counts and columns, which desyncs the cursor and produces
+    duplicated text in TUI apps. Twitty avoids this entirely:
+  </p>
+  <p>
+    <strong>1. The byte stream is never modified.</strong> Raw PTY output is
+    written into xterm.js exactly as received, so the buffer stays in logical
+    order.
+  </p>
+  <p>
+    <strong>2. A character joiner marks Arabic runs.</strong> A run begins and
+    ends on an Arabic letter and may include spaces between words, so
+    multi-word phrases order RTL together. The regex matches
+    <code>[\u0600-\u06FF…] (?:[\u0600-\u06FF… ]*[\u0600-\u06FF…])?</code>.
+  </p>
+  <p>
+    <strong>3. The DOM renderer draws each run through the browser's text
+    engine</strong>, which applies native contextual shaping and
+    right-to-left ordering inside the run only.
+  </p>
+  <p>
+    Because reordering happens at draw time and not in the buffer, cursor
+    math, scroll regions, and alternate-screen redraws all stay correct.
+  </p>
+
+  <div class="rtl-note">
+    العربية تتشكّل وتُعرض من اليمين لليسار داخل سطر الطرفية · الإنجليزية تبقى من اليسار لليمين · المواقع لا تتأثر
+  </div>
+
+  <h2>Key Files</h2>
+  <table>
+    <thead><tr><th>File</th><th>Responsibility</th></tr></thead>
+    <tbody>
+      <tr><td><code>XtermTerminal.tsx</code></td><td>xterm.js setup, Arabic character joiner, key handling</td></tr>
+      <tr><td><code>StatusBar.tsx</code></td><td>Live connection / shell / AR⇄EN status bar</td></tr>
+      <tr><td><code>pty.rs</code></td><td>PTY session lifecycle and raw I/O</td></tr>
+      <tr><td><code>lib.rs</code></td><td>Tauri commands: start, write, interrupt, resize, stop</td></tr>
+      <tr><td><code>build.yml</code></td><td>GitHub Actions: Windows + Linux builds and release</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Tech Stack</h2>
+  <table>
+    <thead><tr><th>Layer</th><th>Technology</th></tr></thead>
+    <tbody>
+      <tr><td>Shell</td><td>Tauri v2 (Rust core, system WebView)</td></tr>
+      <tr><td>Backend</td><td>Rust + <code>portable-pty</code> (ConPTY + Unix PTY)</td></tr>
+      <tr><td>Frontend</td><td>React 19 + Vite 6 + xterm.js 6 + addon-fit</td></tr>
+      <tr><td>Arabic Font</td><td>Noto Naskh Arabic (SIL OFL), bundled woff2</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ════════════ PAGE 4: Platform + Quick Start + Screenshot ════════════ -->
+<div class="page page-break">
+  <h2>Platform Support</h2>
+  <table>
+    <thead><tr><th>Platform</th><th>WebView</th><th>Build Output</th></tr></thead>
+    <tbody>
+      <tr><td>Windows</td><td>WebView2 (Chromium)</td><td>NSIS installer</td></tr>
+      <tr><td>Linux</td><td>webkit2gtk (WebKit)</td><td>.deb / .rpm / AppImage</td></tr>
+      <tr><td>macOS</td><td>WebKit</td><td>Buildable from source</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Quick Start</h2>
+  <h3>Browser demo (no shell)</h3>
+  <pre>npm install
+npm run dev</pre>
+  <p>Open the printed localhost URL. Shows a demo banner since there is no PTY in the browser.</p>
+
+  <h3>Desktop app (real shell)</h3>
+  <pre>npm install
+npm run tauri:dev</pre>
+  <p>Requires Rust. Windows launches PowerShell; Unix uses $SHELL, falling back to /bin/bash.</p>
+
+  <h3>Production build</h3>
+  <pre>npm run build
+npm run tauri:build</pre>
+
+  <h2>Screenshots</h2>
+  <div class="screenshot">
+    <img src="assets/screenshot-main.png" alt="Twitty full window with Arabic text and status bar" />
+    <div class="screenshot__caption">Full window: Arabic phrases shaped and ordered RTL, box-drawing table, live status bar with AR⇄EN indicator.</div>
+  </div>
+
+  <h2>Design Decisions</h2>
+  <p>
+    <strong>Why the DOM renderer, not WebGL?</strong> xterm.js offers a WebGL
+    renderer that rasterizes text into GPU glyph atlases. However, its atlas
+    clips Arabic glyph overhang strokes (like the descender arm of ك) and
+    inserts wide gaps between words in joined runs. The DOM renderer draws
+    Arabic through the browser's native text layout engine, which shapes and
+    orders it correctly. Box-drawing and block glyphs still tile seamlessly
+    with <code>lineHeight: 1.0</code> and a proper monospace font stack.
+  </p>
+  <p>
+    <strong>Why render-layer, not stream-layer?</strong> Earlier approaches
+    rewrote PTY output before handing it to the renderer. This changed cell
+    counts and desynced cursor positioning, producing duplicated and misplaced
+    text in TUI apps. By moving shaping to the render layer (via
+    <code>registerCharacterJoiner</code>), the buffer stays in logical order
+    and all terminal semantics remain correct.
+  </p>
+</div>
+
+</body>
+</html>

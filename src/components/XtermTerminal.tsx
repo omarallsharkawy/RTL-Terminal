@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 import type { TerminalStatus } from './StatusBar';
 
@@ -100,24 +99,12 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
     term.loadAddon(fit);
     term.open(host);
 
-    // GPU renderer: draws box-drawing + block-element glyphs as crisp, cell-filling
-    // custom glyphs so TUI logos and borders render correctly (the DOM renderer pulls
-    // them from the font and leaves gaps). Falls back to the DOM renderer if the
-    // webview can't provide a WebGL context or loses it.
-    try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => {
-        webgl.dispose();
-      });
-      term.loadAddon(webgl);
-    } catch (err) {
-      console.warn('WebGL renderer unavailable, using DOM renderer.', err);
-    }
-
     // Arabic shaping + RTL done at the RENDER layer, not on the byte stream. The
-    // WebGL renderer draws each joined cell range through canvas fillText, which
-    // applies the browser's native Arabic contextual shaping and right-to-left
-    // ordering *within the run*. The buffer stays in logical order, so cursor
+    // DOM renderer draws each joined cell range through browser text layout, which
+    // applies native contextual shaping and right-to-left ordering *within the run*.
+    // The buffer stays in logical order, so cursor positioning is never disturbed
+    // and TUI redraws don't corrupt. (WebGL was removed because its glyph atlas
+    // clips Arabic overhang strokes like kaf and inserts wide inter-word gaps.)
     // positioning is never disturbed and TUI redraws don't corrupt. A run includes
     // spaces between Arabic words (so multi-word phrases order RTL) but must begin
     // and end on an Arabic letter. Joiners are consumed only by the WebGL renderer.
@@ -155,10 +142,28 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
       if (cancelled) return;
       if (!tauri) {
         setStatus('demo');
-        term.writeln('\x1b[1mTwitty\x1b[0m \x1b[2m·\x1b[0m browser demo (no PTY attached)');
-        term.writeln('');
-        term.writeln('\x1b[2mRun\x1b[0m \x1b[36mnpm run tauri:dev\x1b[0m \x1b[2mto launch the real terminal.\x1b[0m');
-        term.writeln('English stays LTR · العربية تتشكّل وتُعرض من اليمين لليسار ✓');
+        const w = (s = '') => term.writeln(s);
+        const C = (n: number, s: string) => `\x1b[38;5;${n}m${s}\x1b[0m`;
+        w(`${C(39, '┌─ ')}\x1b[1m${C(39, 'Twitty')}\x1b[0m ${C(245, '· RTL-first terminal · browser demo (no PTY attached)')} ${C(39, '─┐')}`);
+        w('');
+        w(C(244, '# Arabic shapes contextually and flows right-to-left, inline with English.'));
+        w('English stays LTR · العربية تتشكّل وتُعرض من اليمين لليسار ✓');
+        w(`مرحبا بك في ${C(39, 'Twitty')} — طرفية تدعم العربية والإنجليزية معًا`);
+        w('');
+        w(`${C(35, '❯')} ${C(245, 'git status')}   ${C(245, '# الفرع:')} ${C(39, 'main')} ${C(245, '· نظيف')}`);
+        w(`${C(35, '❯')} ${C(245, 'echo')} ${C(215, '"السلام عليكم, world"')}`);
+        w('  السلام عليكم, world');
+        w('');
+        w(C(244, '# Box-drawing + block glyphs render crisply, so TUIs and borders stay intact:'));
+        w(`${C(39, '╭────────────────────────────┬──────────╮')}`);
+        w(`${C(39, '│')} ${C(252, 'Capability')}                 ${C(39, '│')} ${C(252, 'Status')}   ${C(39, '│')}`);
+        w(`${C(39, '├────────────────────────────┼──────────┤')}`);
+        w(`${C(39, '│')} Contextual Arabic shaping  ${C(39, '│')} ${C(35, '✓ live')}   ${C(39, '│')}`);
+        w(`${C(39, '│')} Per-run BiDi ordering      ${C(39, '│')} ${C(35, '✓ live')}   ${C(39, '│')}`);
+        w(`${C(39, '│')} GPU box-drawing glyphs     ${C(39, '│')} ${C(35, '✓ live')}   ${C(39, '│')}`);
+        w(`${C(39, '╰────────────────────────────┴──────────╯')}`);
+        w('');
+        w(`${C(245, 'Run')} ${C(36, 'npm run tauri:dev')} ${C(245, 'to launch the real terminal.')}`);
         return;
       }
 
