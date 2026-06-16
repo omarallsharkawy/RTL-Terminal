@@ -59,7 +59,9 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
       cursorBlink: true,
       cursorStyle: 'block',
       convertEol: false,
-      allowProposedApi: false,
+      // registerCharacterJoiner (the Arabic RTL render hook) is a proposed API in
+      // xterm v6; without this it throws on load and the app never mounts.
+      allowProposedApi: true,
       fontFamily: "'Cascadia Mono', 'Consolas', 'JetBrains Mono', 'DejaVu Sans Mono', 'Liberation Mono', 'Menlo', 'Noto Naskh Arabic', monospace",
       fontSize: 15,
       // 1.0 so block-element and box-drawing glyphs tile seamlessly between rows
