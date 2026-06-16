@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 import type { TerminalStatus } from './StatusBar';
 
@@ -61,7 +62,9 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
       allowProposedApi: false,
       fontFamily: "'Cascadia Mono', 'Consolas', 'JetBrains Mono', 'DejaVu Sans Mono', 'Liberation Mono', 'Menlo', 'Noto Naskh Arabic', monospace",
       fontSize: 15,
-      lineHeight: 1.12,
+      // 1.0 so block-element and box-drawing glyphs tile seamlessly between rows
+      // (anything taller inserts vertical gaps that shatter TUI logos and borders).
+      lineHeight: 1.0,
       letterSpacing: 0,
       scrollback: 10000,
       windowsPty: {
@@ -94,6 +97,40 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host);
+
+    // GPU renderer: draws box-drawing + block-element glyphs as crisp, cell-filling
+    // custom glyphs so TUI logos and borders render correctly (the DOM renderer pulls
+    // them from the font and leaves gaps). Falls back to the DOM renderer if the
+    // webview can't provide a WebGL context or loses it.
+    try {
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => {
+        webgl.dispose();
+      });
+      term.loadAddon(webgl);
+    } catch (err) {
+      console.warn('WebGL renderer unavailable, using DOM renderer.', err);
+    }
+
+    // Arabic shaping + RTL done at the RENDER layer, not on the byte stream. The
+    // WebGL renderer draws each joined cell range through canvas fillText, which
+    // applies the browser's native Arabic contextual shaping and right-to-left
+    // ordering *within the run*. The buffer stays in logical order, so cursor
+    // positioning is never disturbed and TUI redraws don't corrupt. A run includes
+    // spaces between Arabic words (so multi-word phrases order RTL) but must begin
+    // and end on an Arabic letter. Joiners are consumed only by the WebGL renderer.
+    const A = '\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF';
+    const arabicRun = new RegExp(`[${A}](?:[${A} ]*[${A}])?`, 'g');
+    term.registerCharacterJoiner((line) => {
+      const ranges: [number, number][] = [];
+      arabicRun.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = arabicRun.exec(line)) !== null) {
+        if (m[0].length > 1) ranges.push([m.index, m.index + m[0].length]);
+      }
+      return ranges;
+    });
+
     fit.fit();
     term.focus();
     host.addEventListener('mousedown', () => term.focus());
@@ -119,7 +156,7 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
         term.writeln('\x1b[1mTwitty\x1b[0m \x1b[2m·\x1b[0m browser demo (no PTY attached)');
         term.writeln('');
         term.writeln('\x1b[2mRun\x1b[0m \x1b[36mnpm run tauri:dev\x1b[0m \x1b[2mto launch the real terminal.\x1b[0m');
-        term.writeln('English stays LTR · ' + shapeArabicAndBiDi('العربية متصلة وتُعرض من اليمين لليسار') + ' ✓');
+        term.writeln('English stays LTR · العربية تتشكّل وتُعرض من اليمين لليسار ✓');
         return;
       }
 
@@ -144,9 +181,12 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
         return true;
       });
 
+      // Write raw PTY bytes unchanged. Arabic shaping + RTL is handled entirely at
+      // the render layer by the character joiner above, so the buffer stays in
+      // logical order — correct in both the normal shell and TUI alt-screen apps,
+      // with no cursor desync or duplicated-redraw corruption.
       cleanupData = await tauri.listen<string>('terminal://data', (event) => {
-        const transformed = shapeArabicAndBiDi(event.payload);
-        term.write(transformed);
+        term.write(event.payload);
       });
 
       const cleanupExited = await tauri.listen('terminal://exited', async () => {
@@ -202,130 +242,3 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
 
   return <div ref={hostRef} className="xterm-host" />;
 }
-
-// ==========================================
-// Robust Arabic Shaping & BiDi Reorder Engine
-// ==========================================
-type FormMap = {
-  isolated: string;
-  initial?: string;
-  medial?: string;
-  final?: string;
-  joining: 'dual' | 'right' | 'none';
-};
-
-const ARABIC_MAP: Record<string, FormMap> = {
-  '\u0621': { isolated: '\uFE80', joining: 'none' }, // Hamza
-  '\u0622': { isolated: '\uFE81', final: '\uFE82', joining: 'right' }, // Alef Madda
-  '\u0623': { isolated: '\uFE83', final: '\uFE84', joining: 'right' }, // Alef Hamza Above
-  '\u0624': { isolated: '\uFE85', final: '\uFE86', joining: 'right' }, // Waw Hamza
-  '\u0625': { isolated: '\uFE87', final: '\uFE88', joining: 'right' }, // Alef Hamza Below
-  '\u0626': { isolated: '\uFE89', final: '\uFE8A', initial: '\uFE8B', medial: '\uFE8C', joining: 'dual' }, // Yeh Hamza
-  '\u0627': { isolated: '\uFE8D', final: '\uFE8E', joining: 'right' }, // Alef
-  '\u0628': { isolated: '\uFE8F', final: '\uFE90', initial: '\uFE91', medial: '\uFE92', joining: 'dual' }, // Beh
-  '\u0629': { isolated: '\uFE93', final: '\uFE94', joining: 'right' }, // Teh Marbuta
-  '\u062A': { isolated: '\uFE95', final: '\uFE96', initial: '\uFE97', medial: '\uFE98', joining: 'dual' }, // Teh
-  '\u062B': { isolated: '\uFE99', final: '\uFE9A', initial: '\uFE9B', medial: '\uFE9C', joining: 'dual' }, // Theh
-  '\u062C': { isolated: '\uFE9D', final: '\uFE9E', initial: '\uFE9F', medial: '\uFEA0', joining: 'dual' }, // Jeem
-  '\u062D': { isolated: '\uFEA1', final: '\uFEA2', initial: '\uFEA3', medial: '\uFEA4', joining: 'dual' }, // Hah
-  '\u062E': { isolated: '\uFEA5', final: '\uFEA6', initial: '\uFEA7', medial: '\uFEA8', joining: 'dual' }, // Khah
-  '\u062F': { isolated: '\uFEA9', final: '\uFEAA', joining: 'right' }, // Dal
-  '\u0630': { isolated: '\uFEAB', final: '\uFEAC', joining: 'right' }, // Thal
-  '\u0631': { isolated: '\uFEAD', final: '\uFEAE', joining: 'right' }, // Ra
-  '\u0632': { isolated: '\uFEAF', final: '\uFEB0', joining: 'right' }, // Zay
-  '\u0633': { isolated: '\uFEB1', final: '\uFEB2', initial: '\uFEB3', medial: '\uFEB4', joining: 'dual' }, // Seen
-  '\u0634': { isolated: '\uFEB5', final: '\uFEB6', initial: '\uFEB7', medial: '\uFEB8', joining: 'dual' }, // Sheen
-  '\u0635': { isolated: '\uFEB9', final: '\uFEBA', initial: '\uFEBB', medial: '\uFEBC', joining: 'dual' }, // Sad
-  '\u0636': { isolated: '\uFEBD', final: '\uFEBE', initial: '\uFEBF', medial: '\uFEC0', joining: 'dual' }, // Dad
-  '\u0637': { isolated: '\uFEC1', final: '\uFEC2', initial: '\uFEC3', medial: '\uFEC4', joining: 'dual' }, // Tah
-  '\u0638': { isolated: '\uFEC5', final: '\uFEC6', initial: '\uFEC7', medial: '\uFEC8', joining: 'dual' }, // Zah
-  '\u0639': { isolated: '\uFEC9', final: '\uFECA', initial: '\uFECB', medial: '\uFECC', joining: 'dual' }, // Ain
-  '\u063A': { isolated: '\uFECD', final: '\uFECE', initial: '\uFECF', medial: '\uFED0', joining: 'dual' }, // Ghain
-  '\u0641': { isolated: '\uFED1', final: '\uFED2', initial: '\uFED3', medial: '\uFED4', joining: 'dual' }, // Feh
-  '\u0642': { isolated: '\uFED5', final: '\uFED6', initial: '\uFED7', medial: '\uFED8', joining: 'dual' }, // Qaf
-  '\u0643': { isolated: '\uFED9', final: '\uFEDA', initial: '\uFEDB', medial: '\uFEDC', joining: 'dual' }, // Kaf
-  '\u0644': { isolated: '\uFEDD', final: '\uFEDE', initial: '\uFEDF', medial: '\uFEE0', joining: 'dual' }, // Lam
-  '\u0645': { isolated: '\uFEE1', final: '\uFEE2', initial: '\uFEE3', medial: '\uFEE4', joining: 'dual' }, // Meem
-  '\u0646': { isolated: '\uFEE5', final: '\uFEE6', initial: '\uFEE7', medial: '\uFEE8', joining: 'dual' }, // Noon
-  '\u0647': { isolated: '\uFEE9', final: '\uFEEA', initial: '\uFEEB', medial: '\uFEEC', joining: 'dual' }, // Heh
-  '\u0648': { isolated: '\uFEED', final: '\uFEEE', joining: 'right' }, // Waw
-  '\u0649': { isolated: '\uFEEF', final: '\uFEF0', joining: 'right' }, // Alef Maksura
-  '\u064A': { isolated: '\uFEF1', final: '\uFEF2', initial: '\uFEF3', medial: '\uFEF4', joining: 'dual' }, // Yeh
-
-  // Lam-Alef Presentation Forms (Ligatures) mapped to allow proper adjacent joining
-  '\uFEFB': { isolated: '\uFEFB', final: '\uFEFC', joining: 'right' },
-  '\uFEF5': { isolated: '\uFEF5', final: '\uFEF6', joining: 'right' },
-  '\uFEF7': { isolated: '\uFEF7', final: '\uFEF8', joining: 'right' },
-  '\uFEF9': { isolated: '\uFEF9', final: '\uFEFA', joining: 'right' },
-};
-
-function preprocessLamAlef(word: string): string {
-  let processed = '';
-  let i = 0;
-  while (i < word.length) {
-    const ch = word[i];
-    const next = word[i + 1];
-    if (ch === '\u0644' && next) {
-      if (next === '\u0627') { processed += '\uFEFB'; i += 2; continue; }
-      if (next === '\u0622') { processed += '\uFEF5'; i += 2; continue; }
-      if (next === '\u0623') { processed += '\uFEF7'; i += 2; continue; }
-      if (next === '\u0625') { processed += '\uFEF9'; i += 2; continue; }
-    }
-    processed += ch;
-    i++;
-  }
-  return processed;
-}
-
-function shapeArabicWord(word: string): string {
-  const chars = [...word];
-  const shaped = chars.map((ch, i) => {
-    const entry = ARABIC_MAP[ch];
-    if (!entry) return ch;
-
-    const prevCh = chars[i - 1];
-    const nextCh = chars[i + 1];
-
-    const prevEntry = ARABIC_MAP[prevCh];
-    const nextEntry = ARABIC_MAP[nextCh];
-
-    // A letter connects to its PREVIOUS letter only when that previous letter
-    // joins forward — i.e. it is dual-joining. Right-joining letters (Alef, Ra,
-    // Dal, Waw, …) connect only to what precedes them, never to what follows.
-    const joinsPrev = !!prevEntry && prevEntry.joining === 'dual' && entry.joining !== 'none';
-    // A letter connects to its NEXT letter only when it is itself dual-joining
-    // and the next letter can receive a join (dual or right-joining).
-    const joinsNext = entry.joining === 'dual' && !!nextEntry && nextEntry.joining !== 'none';
-
-    if (joinsPrev && joinsNext) {
-      return entry.medial || entry.isolated;
-    } else if (joinsPrev) {
-      return entry.final || entry.isolated;
-    } else if (joinsNext) {
-      return entry.initial || entry.isolated;
-    } else {
-      return entry.isolated;
-    }
-  });
-
-  return shaped.join('');
-}
-
-function shapeArabicAndBiDi(text: string): string {
-  // Matches any consecutive sequence of standard Arabic characters and presentation forms
-  const arabicRegex = /[\u0600-\u06FF\uFE70-\uFEFF\uFEF5-\uFEFC]+/g;
-
-  return text.replace(arabicRegex, (match) => {
-    const preprocessed = preprocessLamAlef(match);
-    const shaped = shapeArabicWord(preprocessed);
-    // Reverse shaped string to present RTL visually in xterm.js LTR layout
-    return [...shaped].reverse().join('');
-  });
-}
-
-
-
-
-
-
-

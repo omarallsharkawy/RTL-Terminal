@@ -1,53 +1,40 @@
-// Validation harness for the Arabic shaping engine in src/components/XtermTerminal.tsx.
-// Mirrors the exact ARABIC_MAP entries + algorithm so we can assert correct output
-// without a GUI. Run: node scripts/test-shaping.mjs
-const M = {
-  '\u0628': { isolated: '\uFE8F', final: '\uFE90', initial: '\uFE91', medial: '\uFE92', joining: 'dual' },
-  '\u0627': { isolated: '\uFE8D', final: '\uFE8E', joining: 'right' },
-  '\u0631': { isolated: '\uFEAD', final: '\uFEAE', joining: 'right' },
-  '\u062D': { isolated: '\uFEA1', final: '\uFEA2', initial: '\uFEA3', medial: '\uFEA4', joining: 'dual' },
-  '\u0645': { isolated: '\uFEE1', final: '\uFEE2', initial: '\uFEE3', medial: '\uFEE4', joining: 'dual' },
-  '\u0644': { isolated: '\uFEDD', final: '\uFEDE', initial: '\uFEDF', medial: '\uFEE0', joining: 'dual' },
-  '\u0639': { isolated: '\uFEC9', final: '\uFECA', initial: '\uFECB', medial: '\uFECC', joining: 'dual' },
-  '\u064A': { isolated: '\uFEF1', final: '\uFEF2', initial: '\uFEF3', medial: '\uFEF4', joining: 'dual' },
-  '\u0646': { isolated: '\uFEE5', final: '\uFEE6', initial: '\uFEE7', medial: '\uFEE8', joining: 'dual' },
-};
+// Validates the Arabic-run detection used by the WebGL character joiner in
+// src/components/XtermTerminal.tsx. Shaping + RTL ordering itself is performed by
+// the browser's canvas text engine at render time (not unit-testable in Node), so
+// this test only asserts which cell ranges get handed to the joiner: each range
+// must start and end on an Arabic letter and may span spaces between Arabic words.
+// Run: node scripts/test-shaping.mjs
 
-function shape(word) {
-  const chars = [...word];
-  return chars.map((ch, i) => {
-    const e = M[ch];
-    if (!e) return ch;
-    const pe = M[chars[i - 1]];
-    const ne = M[chars[i + 1]];
-    const joinsPrev = !!pe && pe.joining === 'dual' && e.joining !== 'none';
-    const joinsNext = e.joining === 'dual' && !!ne && ne.joining !== 'none';
-    if (joinsPrev && joinsNext) return e.medial || e.isolated;
-    if (joinsPrev) return e.final || e.isolated;
-    if (joinsNext) return e.initial || e.isolated;
-    return e.isolated;
-  }).join('');
+const A = '\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF';
+const arabicRun = new RegExp(`[${A}](?:[${A} ]*[${A}])?`, 'g');
+
+function runs(line) {
+  const out = [];
+  arabicRun.lastIndex = 0;
+  let m;
+  while ((m = arabicRun.exec(line)) !== null) {
+    if (m[0].length > 1) out.push([m.index, m.index + m[0].length]);
+  }
+  return out;
 }
 
-const hex = (s) => [...s].map((c) => c.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')).join(' ');
-
 const cases = [
-  // مرحبا  Meem(initial) Ra(final, right-joining breaks the chain) Hah(initial) Beh(medial) Alef(final)
-  ['marhaba', '\u0645\u0631\u062D\u0628\u0627', 'FEE3 FEAE FEA3 FE92 FE8E'],
-  // علي  Ain(dual,initial) Lam(dual,medial) Yeh(dual,final)
-  ['ali',     '\u0639\u0644\u064A',             'FECB FEE0 FEF2'],
-  // بين  Beh(dual,initial) Yeh(dual,medial) Noon(dual,final)
-  ['bayn',    '\u0628\u064A\u0646',             'FE91 FEF4 FEE6'],
+  // label, input, expected ranges [start,end)
+  ['single word', 'مرحبا', [[0, 5]]],
+  ['two words joined across space', 'مرحبا بك', [[0, 8]]],
+  ['arabic between english', 'hi مرحبا bye', [[3, 8]]],
+  ['trailing space not included', 'مرحبا ', [[0, 5]]],
+  ['lone letter not joined (len 1)', 'a ب c', []],
+  ['english only', 'hello world', []],
+  ['english+arabic+english words', 'run علي now', [[4, 7]]],
 ];
 
 let pass = 0;
-for (const [name, input, expect] of cases) {
-  const out = hex(shape(input));
-  const ok = out === expect;
-  // Every output codepoint must be a presentation form (U+FE70..FEFF) since all letters join.
-  const allForms = [...shape(input)].every((c) => c.codePointAt(0) >= 0xFE70 && c.codePointAt(0) <= 0xFEFF);
-  console.log(`${ok ? 'PASS' : 'FAIL'} ${name.padEnd(8)} got=[${out}] forms=${allForms}`);
-  if (ok && allForms) pass++;
+for (const [label, input, expect] of cases) {
+  const got = runs(input);
+  const ok = JSON.stringify(got) === JSON.stringify(expect);
+  console.log(`${ok ? 'PASS' : 'FAIL'} ${label.padEnd(34)} got=${JSON.stringify(got)}`);
+  if (ok) pass++;
 }
 console.log(`\n${pass}/${cases.length} cases passed`);
 process.exit(pass === cases.length ? 0 : 1);
