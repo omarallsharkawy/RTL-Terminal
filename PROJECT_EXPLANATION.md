@@ -25,7 +25,7 @@ RTL Terminal هو تطبيق Terminal لسطح مكتب Windows مبني بـ Ta
 - `src-tauri/src/pty.rs`: تشغيل وإدارة جلسة الـ PTY وقراءة/كتابة بيانات الترمنال.
 - `src-tauri/src/lib.rs`: أوامر Tauri التي يستدعيها الـ frontend مثل بدء الجلسة والكتابة وتغيير الحجم.
 - `src-tauri/tauri.conf.json`: إعدادات تطبيق Tauri والـ bundle.
-- `.github/workflows/windows-build.yml`: GitHub Actions لبناء Release كامل لويندوز.
+- `.github/workflows/build.yml`: GitHub Actions لبناء Release كامل لويندوز.
 - `scripts/normalize-config.cjs`: سكربت لتظبيط encoding ملفات الإعداد قبل البناء.
 
 ## طريقة العمل داخليا
@@ -138,7 +138,7 @@ RTL Terminal Windows build <run_number>.<run_attempt>
 ## ملاحظات مهمة
 
 - مجلد `kitty/` ليس جزءا من build الحالي ويجب ألا يتم إضافته بالخطأ إلى Git.
-- المشروع يبني Windows فقط في GitHub Actions.
+- المشروع يبني Windows و Linux في GitHub Actions عبر workflow واحد.
 - لو ظهرت رسالة عن Node.js 20 في GitHub Actions، فالـ workflow مضبوط بالفعل على Node.js 24 ويحتوي على `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24`.
 - لو فشل البناء بسبب JSON parsing، تأكد من تشغيل `scripts/normalize-config.cjs` ضمن workflow كما هو موجود حاليا.
 

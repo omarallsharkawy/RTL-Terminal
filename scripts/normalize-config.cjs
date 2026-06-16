@@ -8,7 +8,7 @@ const roots = [
   'src-tauri/Cargo.toml',
   'src-tauri/tauri.conf.json',
   'src-tauri/capabilities/default.json',
-  '.github/workflows/windows-build.yml',
+  '.github/workflows/build.yml',
 ];
 
 for (const file of roots) {

@@ -11,7 +11,7 @@
   },
   "app": {
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:"
     },
     "windows": [
       {
@@ -21,7 +21,6 @@
         "minWidth": 720,
         "minHeight": 440,
         "decorations": true,
-        "transparent": true,
         "resizable": true,
         "center": true
       }

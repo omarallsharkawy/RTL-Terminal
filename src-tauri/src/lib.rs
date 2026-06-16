@@ -1,14 +1,11 @@
-mod ansi;
-mod bidi;
 mod pty;
-mod terminal;
 
 use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::{Manager, State};
+use tauri::State;
 
-use crate::{bidi::visual_line, pty::PtySession, terminal::{CellStyle, TerminalFrame}};
+use crate::pty::PtySession;
 
 #[derive(Default)]
 struct AppState {
@@ -73,21 +70,6 @@ async fn stop_terminal(state: State<'_, AppState>) -> Result<(), CommandError> {
     Ok(())
 }
 
-#[tauri::command]
-async fn shape_preview(text: String) -> TerminalFrame {
-    let style = CellStyle { fg: Some([228, 238, 247]), ..CellStyle::default() };
-    let logical: Vec<_> = text.chars().map(|ch| (ch, style.clone())).collect();
-    TerminalFrame {
-        cols: logical.len().max(1),
-        rows: 1,
-        cursor_col: 0,
-        cursor_row: 0,
-        cursor_visible: false,
-        title: "BiDi preview".to_string(),
-        lines: vec![visual_line(0, &logical, true)],
-    }
-}
-
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState::default())
@@ -98,7 +80,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![start_terminal, write_terminal, interrupt_terminal, resize_terminal, stop_terminal, shape_preview])
+        .invoke_handler(tauri::generate_handler![start_terminal, write_terminal, interrupt_terminal, resize_terminal, stop_terminal])
         .run(tauri::generate_context!())
         .expect("error while running RTL Terminal");
 }

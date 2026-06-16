@@ -1,4 +1,4 @@
-use std::{io::{Read, Write}, process::Command, sync::{Arc, Mutex}, thread, time::Duration};
+use std::{io::{Read, Write}, sync::{Arc, Mutex}, thread, time::Duration};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -7,13 +7,10 @@ use anyhow::{anyhow, Result};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use tauri::{AppHandle, Emitter};
 
-use crate::{ansi::AnsiParser, terminal::TerminalGrid};
-
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     child: Box<dyn portable_pty::Child + Send>,
-    grid: Arc<Mutex<TerminalGrid>>,
 }
 
 impl PtySession {
@@ -41,11 +38,8 @@ impl PtySession {
 
         let mut reader = pair.master.try_clone_reader()?;
         let writer = Arc::new(Mutex::new(pair.master.take_writer()?));
-        let grid = Arc::new(Mutex::new(TerminalGrid::new(cols, rows)));
-        let read_grid = Arc::clone(&grid);
 
         thread::spawn(move || {
-            let mut parser = AnsiParser::default();
             let mut buffer = [0_u8; 8192];
             loop {
                 let count = match reader.read(&mut buffer) {
@@ -53,20 +47,15 @@ impl PtySession {
                     Ok(count) => count,
                     Err(_) => break,
                 };
+                // Emit raw PTY bytes; xterm.js handles ANSI parsing and rendering.
                 let chunk = String::from_utf8_lossy(&buffer[..count]).to_string();
-                let _ = app.emit("terminal://data", chunk.clone());
-                let frame = {
-                    let mut grid = read_grid.lock().expect("terminal grid poisoned");
-                    parser.push(&chunk, &mut grid);
-                    grid.frame()
-                };
-                let _ = app.emit("terminal://frame", frame);
+                let _ = app.emit("terminal://data", chunk);
             }
-            // Shell exited — notify frontend so it can auto-respawn
+            // Shell exited - notify frontend so it can auto-respawn
             let _ = app.emit("terminal://exited", ());
         });
 
-        Ok(Self { master: pair.master, writer, child, grid })
+        Ok(Self { master: pair.master, writer, child })
     }
 
     pub fn write(&self, input: &str) -> Result<()> {
@@ -96,9 +85,6 @@ impl PtySession {
             pixel_width: (cols as u16).saturating_mul(8),
             pixel_height: (rows as u16).saturating_mul(18),
         })?;
-        if let Ok(mut grid) = self.grid.lock() {
-            grid.resize(cols, rows);
-        }
         Ok(())
     }
 
@@ -137,6 +123,3 @@ unsafe fn send_ctrl_c(pid: u32) {
         SetConsoleCtrlHandler(None, 0);
     }
 }
-
-
-
