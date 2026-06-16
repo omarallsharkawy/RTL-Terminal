@@ -1,9 +1,36 @@
 :root {
   color-scheme: dark;
-  --font-mono: 'Cascadia Mono', 'Consolas', 'JetBrains Mono', 'Segoe UI', Tahoma, monospace;
-  --font-arabic: 'Segoe UI', 'Tahoma', 'Arial', sans-serif;
-  --bg-app: #0c0c0c;
-  --text-primary: #cccccc;
+  --font-mono: 'Cascadia Mono', 'Consolas', 'JetBrains Mono', 'DejaVu Sans Mono', 'Liberation Mono', 'Menlo', monospace, 'Noto Naskh Arabic';
+  --font-arabic: 'Noto Naskh Arabic', 'Segoe UI', 'Tahoma', 'Arial', sans-serif;
+
+  /* Restrained product palette in OKLCH. One cool-neutral ramp + semantic state hues. */
+  --bg-app: oklch(0.16 0.006 250);
+  --bg-chrome: oklch(0.20 0.008 250);
+  --border-subtle: oklch(0.30 0.01 250);
+  --ink-primary: oklch(0.86 0.01 250);
+  --ink-muted: oklch(0.64 0.012 250);
+  --ink-faint: oklch(0.52 0.012 250);
+
+  --accent: oklch(0.72 0.13 235);
+  --state-ok: oklch(0.74 0.15 150);
+  --state-warn: oklch(0.80 0.13 85);
+  --state-error: oklch(0.66 0.18 25);
+  --state-idle: oklch(0.58 0.012 250);
+
+  --statusbar-h: 30px;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Bundled Arabic font so presentation forms (U+FE70–FEFF) render on every OS,
+   including Linux where no Arabic-capable monospace font is guaranteed. */
+@font-face {
+  font-family: 'Noto Naskh Arabic';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/NotoNaskhArabic.woff2') format('woff2');
+  /* Restrict to Arabic ranges so Latin/box-drawing glyphs stay with the mono font. */
+  unicode-range: U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
 }
 
 * {
@@ -17,7 +44,7 @@ html, body, #root {
   height: 100%;
   overflow: hidden;
   background-color: var(--bg-app);
-  color: var(--text-primary);
+  color: var(--ink-primary);
   font-family: var(--font-mono);
 }
 
@@ -39,7 +66,7 @@ html, body, #root {
 .xterm-host {
   position: absolute;
   inset: 0;
-  padding: 8px 12px;
+  padding: 10px 14px;
 }
 
 .xterm-host .xterm {
@@ -48,4 +75,140 @@ html, body, #root {
 
 .xterm-host .xterm-viewport {
   background-color: transparent !important;
+}
+
+/* Slimmer, calmer scrollbar that matches the chrome rather than the OS default. */
+.xterm-host .xterm-viewport::-webkit-scrollbar {
+  width: 10px;
+}
+.xterm-host .xterm-viewport::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border-radius: 6px;
+  border: 2px solid var(--bg-app);
+}
+.xterm-host .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-faint);
+}
+
+/* ============================== Status bar ============================== */
+.statusbar {
+  flex: 0 0 var(--statusbar-h);
+  height: var(--statusbar-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 12px;
+  background: var(--bg-chrome);
+  border-top: 1px solid var(--border-subtle);
+  font-size: 11.5px;
+  line-height: 1;
+  color: var(--ink-muted);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.statusbar__group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.statusbar__group--end {
+  gap: 7px;
+}
+
+.statusbar__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--state-idle);
+  box-shadow: 0 0 0 0 transparent;
+  transition: background 200ms var(--ease-out);
+}
+.statusbar__dot--connected   { background: var(--state-ok); }
+.statusbar__dot--connecting,
+.statusbar__dot--reconnecting { background: var(--state-warn); }
+.statusbar__dot--demo         { background: var(--accent); }
+.statusbar__dot--error        { background: var(--state-error); }
+
+.statusbar__dot.is-pulsing {
+  animation: status-pulse 1.4s var(--ease-out) infinite;
+}
+
+@keyframes status-pulse {
+  0%   { box-shadow: 0 0 0 0 color-mix(in oklab, var(--state-warn) 55%, transparent); }
+  70%  { box-shadow: 0 0 0 5px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+.statusbar__state {
+  color: var(--ink-primary);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.statusbar__shell {
+  color: var(--ink-muted);
+  padding-left: 8px;
+  margin-left: 2px;
+  border-left: 1px solid var(--border-subtle);
+}
+
+.statusbar__bidi {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--accent) 16%, transparent);
+  color: color-mix(in oklab, var(--accent) 78%, white);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+.statusbar__bidi-arrow {
+  margin: 0 1px;
+  opacity: 0.85;
+}
+
+.statusbar__key {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: oklch(0.26 0.008 250);
+  border: 1px solid var(--border-subtle);
+  color: var(--ink-primary);
+}
+
+.statusbar__hint {
+  color: var(--ink-faint);
+}
+
+.statusbar__sep {
+  width: 1px;
+  height: 12px;
+  background: var(--border-subtle);
+  margin: 0 3px;
+}
+
+.statusbar__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+  .statusbar__hint,
+  .statusbar__shell { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .statusbar__dot.is-pulsing { animation: none; }
+  .statusbar__dot { transition: none; }
 }

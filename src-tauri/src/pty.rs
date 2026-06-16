@@ -1,7 +1,7 @@
-use std::{io::{Read, Write}, sync::{Arc, Mutex}, thread, time::Duration};
+use std::{io::{Read, Write}, sync::{Arc, Mutex}, thread};
 
 #[cfg(windows)]
-use std::os::windows::process::CommandExt;
+use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};

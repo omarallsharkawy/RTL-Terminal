@@ -4,6 +4,8 @@ use std::sync::Mutex;
 
 use serde::Serialize;
 use tauri::State;
+#[cfg(target_os = "macos")]
+use tauri::Manager;
 
 use crate::pty::PtySession;
 
@@ -73,9 +75,9 @@ async fn stop_terminal(state: State<'_, AppState>) -> Result<(), CommandError> {
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState::default())
-        .setup(|app| {
-            if let Some(window) = app.get_webview_window("main") {
-                #[cfg(target_os = "macos")]
+        .setup(|_app| {
+            #[cfg(target_os = "macos")]
+            if let Some(window) = _app.get_webview_window("main") {
                 window.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)))?;
             }
             Ok(())

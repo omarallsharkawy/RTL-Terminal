@@ -2,9 +2,15 @@ import { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
+import type { TerminalStatus } from './StatusBar';
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 type Listen = <T>(event: string, cb: (event: { payload: T }) => void) => Promise<() => void>;
+
+interface XtermTerminalProps {
+  onStatusChange?: (status: TerminalStatus) => void;
+  onShellChange?: (shell: string | null) => void;
+}
 
 async function getTauri() {
   if (!('__TAURI_INTERNALS__' in window)) return null;
@@ -15,21 +21,45 @@ async function getTauri() {
   return { invoke: invoke as Invoke, listen: listen as Listen };
 }
 
-export function XtermTerminal() {
+async function toggleFullscreen() {
+  if (!('__TAURI_INTERNALS__' in window)) return;
+  const { getCurrentWindow } = await import('@tauri-apps/api/window');
+  const win = getCurrentWindow();
+  const isFull = await win.isFullscreen();
+  await win.setFullscreen(!isFull);
+}
+
+function detectShellName(): string {
+  // Mirrors the backend's default_shell() so the status bar reflects what spawned.
+  const platform = navigator.userAgent.toLowerCase();
+  if (platform.includes('windows')) return 'powershell';
+  if (platform.includes('mac')) return 'zsh';
+  return 'bash';
+}
+
+export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  const statusRef = useRef(onStatusChange);
+  const shellRef = useRef(onShellChange);
+  statusRef.current = onStatusChange;
+  shellRef.current = onShellChange;
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
+
+    const setStatus = (s: TerminalStatus) => statusRef.current?.(s);
+    const setShell = (s: string | null) => shellRef.current?.(s);
+    setStatus('connecting');
 
     const term = new Terminal({
       cursorBlink: true,
       cursorStyle: 'block',
       convertEol: false,
       allowProposedApi: false,
-      fontFamily: 'Cascadia Mono, Consolas, Segoe UI, Tahoma, monospace',
+      fontFamily: "'Cascadia Mono', 'Consolas', 'JetBrains Mono', 'DejaVu Sans Mono', 'Liberation Mono', 'Menlo', 'Noto Naskh Arabic', monospace",
       fontSize: 15,
       lineHeight: 1.12,
       letterSpacing: 0,
@@ -39,10 +69,10 @@ export function XtermTerminal() {
         buildNumber: 21376,
       },
       theme: {
-        background: '#0c0c0c',
-        foreground: '#cccccc',
-        cursor: '#cccccc',
-        selectionBackground: '#264f78',
+        background: '#0b0d10',
+        foreground: '#ccd2d7',
+        cursor: '#b4bfca',
+        selectionBackground: '#295b77',
         black: '#0c0c0c',
         red: '#f87171',
         green: '#16c60c',
@@ -85,14 +115,21 @@ export function XtermTerminal() {
     getTauri().then(async (tauri) => {
       if (cancelled) return;
       if (!tauri) {
-        term.writeln('Twitty demo');
-        term.writeln('npm run tauri:dev لتشغيل التيرمنال الحقيقي');
-        term.writeln('English stays LTR, العربية تظهر حسب دعم الخط والمتصفح.');
+        setStatus('demo');
+        term.writeln('\x1b[1mTwitty\x1b[0m \x1b[2m·\x1b[0m browser demo (no PTY attached)');
+        term.writeln('');
+        term.writeln('\x1b[2mRun\x1b[0m \x1b[36mnpm run tauri:dev\x1b[0m \x1b[2mto launch the real terminal.\x1b[0m');
+        term.writeln('English stays LTR · ' + shapeArabicAndBiDi('العربية متصلة وتُعرض من اليمين لليسار') + ' ✓');
         return;
       }
 
       term.attachCustomKeyEventHandler((event) => {
         if (event.type !== 'keydown') return true;
+
+        if (event.code === 'F11') {
+          toggleFullscreen().catch(console.error);
+          return false;
+        }
 
         const plainCtrl = event.ctrlKey && !event.altKey && !event.metaKey;
         if (plainCtrl && event.code === 'KeyC') {
@@ -113,7 +150,9 @@ export function XtermTerminal() {
       });
 
       const cleanupExited = await tauri.listen('terminal://exited', async () => {
+        setStatus('reconnecting');
         await tauri.invoke('start_terminal', { cols: term.cols, rows: term.rows });
+        setStatus('connected');
       });
 
       term.onData((data) => {
@@ -135,6 +174,8 @@ export function XtermTerminal() {
 
       await tauri.invoke('start_terminal', { cols: term.cols, rows: term.rows });
       await resize(tauri);
+      setStatus('connected');
+      setShell(detectShellName());
 
       const observer = new ResizeObserver(() => {
         if (resizeTimer) window.clearTimeout(resizeTimer);
@@ -144,7 +185,8 @@ export function XtermTerminal() {
       window.addEventListener('beforeunload', () => observer.disconnect(), { once: true });
     }).catch((error) => {
       console.error(error);
-      term.writeln(`Failed to start PTY: ${String(error)}`);
+      setStatus('error');
+      term.writeln(`\x1b[31mFailed to start PTY:\x1b[0m ${String(error)}`);
     });
 
     return () => {
@@ -197,18 +239,18 @@ const ARABIC_MAP: Record<string, FormMap> = {
   '\u0636': { isolated: '\uFEBD', final: '\uFEBE', initial: '\uFEBF', medial: '\uFEC0', joining: 'dual' }, // Dad
   '\u0637': { isolated: '\uFEC1', final: '\uFEC2', initial: '\uFEC3', medial: '\uFEC4', joining: 'dual' }, // Tah
   '\u0638': { isolated: '\uFEC5', final: '\uFEC6', initial: '\uFEC7', medial: '\uFEC8', joining: 'dual' }, // Zah
-  '\u0639': { isolated: '\uFEC9', final: '\uFECA', initial: '\xFECB', medial: '\uFECC', joining: 'dual' }, // Ain
-  '\u063A': { isolated: '\xFECD', final: '\xFECE', initial: '\xFECF', medial: '\xFED0', joining: 'dual' }, // Ghain
-  '\u0641': { isolated: '\xFED1', final: '\xFED2', initial: '\xFED3', medial: '\xFED4', joining: 'dual' }, // Feh
-  '\u0642': { isolated: '\xFED5', final: '\xFED6', initial: '\xFED7', medial: '\xFED8', joining: 'dual' }, // Qaf
-  '\u0643': { isolated: '\xFED9', final: '\xFEDA', initial: '\xFEDB', medial: '\xFEDC', joining: 'dual' }, // Kaf
-  '\u0644': { isolated: '\xFEDD', final: '\xFEDE', initial: '\xFEDF', medial: '\xFEE0', joining: 'dual' }, // Lam
-  '\u0645': { isolated: '\xFEE1', final: '\xFEE2', initial: '\xFEE3', medial: '\xFEE4', joining: 'dual' }, // Meem
-  '\u0646': { isolated: '\xFEE5', final: '\xFEE6', initial: '\xFEE7', medial: '\xFEE8', joining: 'dual' }, // Noon
-  '\u0647': { isolated: '\xFEE9', final: '\xFEEA', initial: '\xFEEB', medial: '\xFEEC', joining: 'dual' }, // Heh
-  '\u0648': { isolated: '\xFEED', final: '\xFEEE', joining: 'right' }, // Waw
-  '\u0649': { isolated: '\xFEEF', final: '\xFEF0', joining: 'right' }, // Alef Maksura
-  '\u064A': { isolated: '\xFEF1', final: '\xFEF2', initial: '\xFEF3', medial: '\xFEF4', joining: 'dual' }, // Yeh
+  '\u0639': { isolated: '\uFEC9', final: '\uFECA', initial: '\uFECB', medial: '\uFECC', joining: 'dual' }, // Ain
+  '\u063A': { isolated: '\uFECD', final: '\uFECE', initial: '\uFECF', medial: '\uFED0', joining: 'dual' }, // Ghain
+  '\u0641': { isolated: '\uFED1', final: '\uFED2', initial: '\uFED3', medial: '\uFED4', joining: 'dual' }, // Feh
+  '\u0642': { isolated: '\uFED5', final: '\uFED6', initial: '\uFED7', medial: '\uFED8', joining: 'dual' }, // Qaf
+  '\u0643': { isolated: '\uFED9', final: '\uFEDA', initial: '\uFEDB', medial: '\uFEDC', joining: 'dual' }, // Kaf
+  '\u0644': { isolated: '\uFEDD', final: '\uFEDE', initial: '\uFEDF', medial: '\uFEE0', joining: 'dual' }, // Lam
+  '\u0645': { isolated: '\uFEE1', final: '\uFEE2', initial: '\uFEE3', medial: '\uFEE4', joining: 'dual' }, // Meem
+  '\u0646': { isolated: '\uFEE5', final: '\uFEE6', initial: '\uFEE7', medial: '\uFEE8', joining: 'dual' }, // Noon
+  '\u0647': { isolated: '\uFEE9', final: '\uFEEA', initial: '\uFEEB', medial: '\uFEEC', joining: 'dual' }, // Heh
+  '\u0648': { isolated: '\uFEED', final: '\uFEEE', joining: 'right' }, // Waw
+  '\u0649': { isolated: '\uFEEF', final: '\uFEF0', joining: 'right' }, // Alef Maksura
+  '\u064A': { isolated: '\uFEF1', final: '\uFEF2', initial: '\uFEF3', medial: '\uFEF4', joining: 'dual' }, // Yeh
 
   // Lam-Alef Presentation Forms (Ligatures) mapped to allow proper adjacent joining
   '\uFEFB': { isolated: '\uFEFB', final: '\uFEFC', joining: 'right' },
@@ -247,14 +289,19 @@ function shapeArabicWord(word: string): string {
     const prevEntry = ARABIC_MAP[prevCh];
     const nextEntry = ARABIC_MAP[nextCh];
 
-    const connectsRight = prevEntry && prevEntry.joining !== 'none' && entry.joining !== 'none';
-    const connectsLeft = nextEntry && nextEntry.joining === 'dual' && entry.joining === 'dual';
+    // A letter connects to its PREVIOUS letter only when that previous letter
+    // joins forward — i.e. it is dual-joining. Right-joining letters (Alef, Ra,
+    // Dal, Waw, …) connect only to what precedes them, never to what follows.
+    const joinsPrev = !!prevEntry && prevEntry.joining === 'dual' && entry.joining !== 'none';
+    // A letter connects to its NEXT letter only when it is itself dual-joining
+    // and the next letter can receive a join (dual or right-joining).
+    const joinsNext = entry.joining === 'dual' && !!nextEntry && nextEntry.joining !== 'none';
 
-    if (connectsRight && connectsLeft) {
+    if (joinsPrev && joinsNext) {
       return entry.medial || entry.isolated;
-    } else if (connectsRight) {
+    } else if (joinsPrev) {
       return entry.final || entry.isolated;
-    } else if (connectsLeft) {
+    } else if (joinsNext) {
       return entry.initial || entry.isolated;
     } else {
       return entry.isolated;
