@@ -63,7 +63,7 @@ npm install
 npm run tauri:dev
 ```
 
-On Windows the backend uses `TWITTY_SHELL` when set, then falls back through `pwsh.exe`, `powershell.exe`, `%COMSPEC%`, and `cmd.exe`. On Unix it uses `$SHELL`, falling back to `/bin/zsh` on macOS and `/bin/bash` or `/bin/sh` elsewhere.
+On Windows the backend uses `TWITTY_SHELL` when set, then falls back through `pwsh.exe -NoLogo -NoProfile`, `powershell.exe -NoLogo -NoProfile`, `%COMSPEC%`, and `cmd.exe`. On Unix it uses `$SHELL`, falling back to `/bin/zsh` on macOS and `/bin/bash` or `/bin/sh` elsewhere.
 
 ### Production build
 

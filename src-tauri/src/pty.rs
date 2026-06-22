@@ -200,10 +200,16 @@ fn default_shell() -> (String, Vec<String>) {
     #[cfg(windows)]
     {
         if command_exists("pwsh.exe") {
-            return ("pwsh.exe".to_string(), vec!["-NoLogo".to_string()]);
+            return (
+                "pwsh.exe".to_string(),
+                vec!["-NoLogo".to_string(), "-NoProfile".to_string()],
+            );
         }
         if command_exists("powershell.exe") {
-            return ("powershell.exe".to_string(), vec!["-NoLogo".to_string()]);
+            return (
+                "powershell.exe".to_string(),
+                vec!["-NoLogo".to_string(), "-NoProfile".to_string()],
+            );
         }
         if let Ok(comspec) = env::var("COMSPEC") {
             if !comspec.trim().is_empty() {
