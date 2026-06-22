@@ -5,3 +5,13 @@ src-tauri/gen/
 *.log
 .DS_Store
 kitty/
+
+# Local troubleshooting/probe artifacts
+error-capture.txt
+probe.bat
+nul
+scripts/shot-*.png
+scripts/verify-twitty.png
+scripts/probe-visual.mjs
+scripts/verify-twitty.mjs
+web.html

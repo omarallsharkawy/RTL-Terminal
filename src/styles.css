@@ -67,6 +67,8 @@ html, body, #root {
   position: absolute;
   inset: 0;
   padding: 10px 14px;
+  direction: ltr;
+  unicode-bidi: isolate;
 }
 
 .xterm-host .xterm {

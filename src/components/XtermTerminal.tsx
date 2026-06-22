@@ -2,15 +2,25 @@ import { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
+import { shapeArabic } from './arabicReshaper';
 import type { TerminalStatus } from './StatusBar';
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 type Listen = <T>(event: string, cb: (event: { payload: T }) => void) => Promise<() => void>;
+type Disposable = { dispose: () => void };
 
 interface XtermTerminalProps {
   onStatusChange?: (status: TerminalStatus) => void;
   onShellChange?: (shell: string | null) => void;
 }
+
+interface StartTerminalResult {
+  sessionId: number;
+  shell: string;
+}
+
+type TerminalDataPayload = string | { sessionId: number; data: string };
+type TerminalExitPayload = undefined | null | { sessionId: number };
 
 async function getTauri() {
   if (!('__TAURI_INTERNALS__' in window)) return null;
@@ -30,11 +40,14 @@ async function toggleFullscreen() {
 }
 
 function detectShellName(): string {
-  // Mirrors the backend's default_shell() so the status bar reflects what spawned.
   const platform = navigator.userAgent.toLowerCase();
   if (platform.includes('windows')) return 'powershell';
   if (platform.includes('mac')) return 'zsh';
-  return 'bash';
+  return 'sh';
+}
+
+function eventTargetIsInside(host: HTMLElement, target: EventTarget | null) {
+  return target instanceof Node && host.contains(target);
 }
 
 export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalProps) {
@@ -58,13 +71,12 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
       cursorBlink: true,
       cursorStyle: 'block',
       convertEol: false,
-      // registerCharacterJoiner (the Arabic RTL render hook) is a proposed API in
-      // xterm v6; without this it throws on load and the app never mounts.
+      // registerCharacterJoiner is a proposed API in xterm v6; without this it
+      // throws on load and the app never mounts.
       allowProposedApi: true,
       fontFamily: "'Cascadia Mono', 'Consolas', 'JetBrains Mono', 'DejaVu Sans Mono', 'Liberation Mono', 'Menlo', 'Noto Naskh Arabic', monospace",
       fontSize: 15,
-      // 1.0 so block-element and box-drawing glyphs tile seamlessly between rows
-      // (anything taller inserts vertical gaps that shatter TUI logos and borders).
+      // 1.0 so block-element and box-drawing glyphs tile seamlessly between rows.
       lineHeight: 1.0,
       letterSpacing: 0,
       scrollback: 10000,
@@ -99,15 +111,9 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
     term.loadAddon(fit);
     term.open(host);
 
-    // Arabic shaping + RTL done at the RENDER layer, not on the byte stream. The
-    // DOM renderer draws each joined cell range through browser text layout, which
-    // applies native contextual shaping and right-to-left ordering *within the run*.
-    // The buffer stays in logical order, so cursor positioning is never disturbed
-    // and TUI redraws don't corrupt. (WebGL was removed because its glyph atlas
-    // clips Arabic overhang strokes like kaf and inserts wide inter-word gaps.)
-    // positioning is never disturbed and TUI redraws don't corrupt. A run includes
-    // spaces between Arabic words (so multi-word phrases order RTL) but must begin
-    // and end on an Arabic letter. Joiners are consumed only by the WebGL renderer.
+    // xterm's DOM renderer does not always apply Arabic contextual shaping for
+    // terminal cells. Incoming Arabic runs are shaped before they reach xterm,
+    // while the joiner remains as a harmless renderer fallback.
     const A = '\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF';
     const arabicRun = new RegExp(`[${A}](?:[${A} ]*[${A}])?`, 'g');
     term.registerCharacterJoiner((line) => {
@@ -122,27 +128,41 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
 
     fit.fit();
     term.focus();
-    host.addEventListener('mousedown', () => term.focus());
+    const focusHandler = () => term.focus();
+    host.addEventListener('mousedown', focusHandler);
     terminalRef.current = term;
     fitRef.current = fit;
 
     let cancelled = false;
     let cleanupData: (() => void) | undefined;
+    let cleanupExited: (() => void) | undefined;
+    let inputDisposable: Disposable | undefined;
     let resizeTimer: number | undefined;
     let pasteHandler: ((e: ClipboardEvent) => void) | undefined;
+    let observer: ResizeObserver | undefined;
+    let currentSessionId: number | null = null;
+    let sessionCounter = 0;
+
+    const size = () => {
+      fit.fit();
+      return {
+        cols: Math.min(500, Math.max(20, term.cols)),
+        rows: Math.min(300, Math.max(6, term.rows)),
+      };
+    };
 
     const resize = async (tauri?: { invoke: Invoke }) => {
-      fit.fit();
-      const cols = Math.max(20, term.cols);
-      const rows = Math.max(6, term.rows);
-      if (tauri) await tauri.invoke('resize_terminal', { cols, rows });
+      const next = size();
+      if (tauri && currentSessionId !== null) {
+        await tauri.invoke('resize_terminal', next);
+      }
     };
 
     getTauri().then(async (tauri) => {
       if (cancelled) return;
       if (!tauri) {
         setStatus('demo');
-        const w = (s = '') => term.writeln(s);
+        const w = (s = '') => term.writeln(shapeArabic(s));
         const C = (n: number, s: string) => `\x1b[38;5;${n}m${s}\x1b[0m`;
         w(`${C(39, '┌─ ')}\x1b[1m${C(39, 'Twitty')}\x1b[0m ${C(245, '· RTL-first terminal · browser demo (no PTY attached)')} ${C(39, '─┐')}`);
         w('');
@@ -160,12 +180,26 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
         w(`${C(39, '├────────────────────────────┼──────────┤')}`);
         w(`${C(39, '│')} Contextual Arabic shaping  ${C(39, '│')} ${C(35, '✓ live')}   ${C(39, '│')}`);
         w(`${C(39, '│')} Per-run BiDi ordering      ${C(39, '│')} ${C(35, '✓ live')}   ${C(39, '│')}`);
-        w(`${C(39, '│')} GPU box-drawing glyphs     ${C(39, '│')} ${C(35, '✓ live')}   ${C(39, '│')}`);
+        w(`${C(39, '│')} Box-drawing glyphs         ${C(39, '│')} ${C(35, '✓ live')}   ${C(39, '│')}`);
         w(`${C(39, '╰────────────────────────────┴──────────╯')}`);
         w('');
         w(`${C(245, 'Run')} ${C(36, 'npm run tauri:dev')} ${C(245, 'to launch the real terminal.')}`);
         return;
       }
+
+      const startSession = async (reconnecting = false) => {
+        if (cancelled) return;
+        setStatus(reconnecting ? 'reconnecting' : 'connecting');
+        const sessionId = ++sessionCounter;
+        currentSessionId = sessionId;
+        const result = await tauri.invoke<StartTerminalResult>('start_terminal', { ...size(), sessionId });
+        if (cancelled || currentSessionId !== sessionId) {
+          await tauri.invoke('stop_terminal').catch(console.error);
+          return;
+        }
+        setStatus('connected');
+        setShell(result.shell || detectShellName());
+      };
 
       term.attachCustomKeyEventHandler((event) => {
         if (event.type !== 'keydown') return true;
@@ -188,28 +222,45 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
         return true;
       });
 
-      // Write raw PTY bytes unchanged. Arabic shaping + RTL is handled entirely at
-      // the render layer by the character joiner above, so the buffer stays in
-      // logical order — correct in both the normal shell and TUI alt-screen apps,
-      // with no cursor desync or duplicated-redraw corruption.
-      cleanupData = await tauri.listen<string>('terminal://data', (event) => {
-        term.write(event.payload);
+      cleanupData = await tauri.listen<TerminalDataPayload>('terminal://data', (event) => {
+        const payload = event.payload;
+        if (typeof payload === 'string') {
+          term.write(shapeArabic(payload, { preserveCellCount: true }));
+          return;
+        }
+        if (payload.sessionId !== currentSessionId) return;
+        term.write(shapeArabic(payload.data, { preserveCellCount: true }));
       });
+      if (cancelled) {
+        cleanupData();
+        return;
+      }
 
-      const cleanupExited = await tauri.listen('terminal://exited', async () => {
-        setStatus('reconnecting');
-        await tauri.invoke('start_terminal', { cols: term.cols, rows: term.rows });
-        setStatus('connected');
+      cleanupExited = await tauri.listen<TerminalExitPayload>('terminal://exited', (event) => {
+        const payload = event.payload;
+        if (cancelled) return;
+        if (payload && payload.sessionId !== currentSessionId) return;
+        startSession(true).catch((error) => {
+          console.error(error);
+          setStatus('error');
+        });
       });
+      if (cancelled) {
+        cleanupExited();
+        return;
+      }
 
-      term.onData((data) => {
+      inputDisposable = term.onData((data) => {
         tauri.invoke('write_terminal', { input: data }).catch(console.error);
       });
 
-      // Intercept the browser's default paste event in the capturing phase at the window level.
-      // This guarantees we intercept the paste BEFORE xterm.js's hidden textarea consumes it,
-      // and completely bypasses the OS-level keyboard layout translation bug on Linux (X11/Wayland).
+      // Intercept paste only when it targets the terminal. This bypasses platform
+      // keyboard-layout paste issues without hijacking paste elsewhere in the app.
       pasteHandler = (e: ClipboardEvent) => {
+        const active = document.activeElement;
+        const belongsToTerminal = eventTargetIsInside(host, e.target) || eventTargetIsInside(host, active);
+        if (!belongsToTerminal) return;
+
         e.preventDefault();
         e.stopPropagation();
         const text = e.clipboardData?.getData('text');
@@ -219,33 +270,36 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
       };
       window.addEventListener('paste', pasteHandler, true);
 
-      await tauri.invoke('start_terminal', { cols: term.cols, rows: term.rows });
-      await resize(tauri);
-      setStatus('connected');
-      setShell(detectShellName());
-
-      const observer = new ResizeObserver(() => {
+      observer = new ResizeObserver(() => {
         if (resizeTimer) window.clearTimeout(resizeTimer);
         resizeTimer = window.setTimeout(() => resize(tauri).catch(console.error), 40);
       });
       observer.observe(host);
-      window.addEventListener('beforeunload', () => observer.disconnect(), { once: true });
+
+      await startSession();
+      if (!cancelled) await resize(tauri);
     }).catch((error) => {
       console.error(error);
-      setStatus('error');
-      term.writeln(`\x1b[31mFailed to start PTY:\x1b[0m ${String(error)}`);
+      if (!cancelled) {
+        setStatus('error');
+        term.writeln(`\x1b[31mFailed to start PTY:\x1b[0m ${String(error)}`);
+      }
     });
 
     return () => {
       cancelled = true;
       cleanupData?.();
+      cleanupExited?.();
+      inputDisposable?.dispose();
+      observer?.disconnect();
       if (resizeTimer) window.clearTimeout(resizeTimer);
       if (pasteHandler) window.removeEventListener('paste', pasteHandler, true);
+      host.removeEventListener('mousedown', focusHandler);
       term.dispose();
       terminalRef.current = null;
       fitRef.current = null;
     };
   }, []);
 
-  return <div ref={hostRef} className="xterm-host" />;
+  return <div ref={hostRef} className="xterm-host" dir="ltr" />;
 }
