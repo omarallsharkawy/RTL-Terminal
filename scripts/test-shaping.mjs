@@ -5,7 +5,7 @@
 // behavior (expected code points) instead of re-implementing them.
 // Run: npm run test:shaping
 
-import { shapeArabic } from '../src/components/arabicReshaper.ts';
+import { createArabicOutputBuffer, shapeArabic } from '../src/components/arabicReshaper.ts';
 
 const RLE = 0x202b; // RIGHT-TO-LEFT EMBEDDING: opens every shaped run
 const PDF = 0x202c; // POP DIRECTIONAL FORMATTING: closes every shaped run
@@ -134,6 +134,89 @@ expectCond(
     const out = shapeArabic(`می${ch(ZWNJ)}خواهم`, { preserveCellCount: true });
     return presentationFormCount(out) === 7 && cps(out).filter((cp) => cp === ZWNJ).length === 1;
   })(),
+);
+
+// -- Streaming/chunk boundaries ---------------------------------------------
+function stream(chunks, options = { preserveCellCount: true }) {
+  const buffer = createArabicOutputBuffer(options);
+  let output = '';
+  for (const chunk of chunks) output += buffer.push(chunk);
+  output += buffer.flush();
+  return output;
+}
+
+expectValue(
+  'stream: Arabic word is invariant across chunks',
+  stream(['مر', 'ح', 'با']),
+  shapeArabic('مرحبا', { preserveCellCount: true }),
+);
+expectValue(
+  'stream: mixed text is invariant across chunks',
+  stream(['run مر', 'حبا 12', ' ok']),
+  shapeArabic('run مرحبا 12 ok', { preserveCellCount: true }),
+);
+expectValue(
+  'stream: split CSI is preserved and Arabic is shaped',
+  stream(['\x1b[1;', '31mمر', 'حبا\x1b[', '0m']),
+  shapeArabic('\x1b[1;31mمرحبا\x1b[0m', { preserveCellCount: true }),
+);
+expectValue(
+  'stream: split OSC payload is never shaped',
+  stream(['\x1b]0;عنوان', ' عربي', '\x07مر', 'حبا']),
+  shapeArabic('\x1b]0;عنوان عربي\x07مرحبا', { preserveCellCount: true }),
+);
+expectValue(
+  'stream: timer flush keeps an incomplete CSI for the next chunk',
+  (() => {
+    const buffer = createArabicOutputBuffer({ preserveCellCount: true });
+    let output = buffer.push('\x1b[31');
+    output += buffer.flush();
+    const pendingAfterTimer = buffer.hasPending;
+    output += buffer.push('mمرحبا');
+    output += buffer.flush();
+    return `${pendingAfterTimer}|${output}`;
+  })(),
+  `true|${shapeArabic('\x1b[31mمرحبا', { preserveCellCount: true })}`,
+);
+expectValue(
+  'stream: timer flush releases Arabic before an incomplete control',
+  (() => {
+    const buffer = createArabicOutputBuffer({ preserveCellCount: true });
+    let output = buffer.push('مرحبا\x1b[');
+    output += buffer.flush();
+    output += buffer.push('0m done');
+    output += buffer.flush();
+    return output;
+  })(),
+  shapeArabic('مرحبا', { preserveCellCount: true }) + '\x1b[0m done',
+);
+expectValue(
+  'stream: English output remains immediate',
+  (() => {
+    const buffer = createArabicOutputBuffer({ preserveCellCount: true });
+    const output = buffer.push('plain output');
+    return `${output}|${buffer.hasPending}`;
+  })(),
+  'plain output|false',
+);
+expectValue(
+  'stream: flush releases a final Arabic prompt',
+  (() => {
+    const buffer = createArabicOutputBuffer({ preserveCellCount: true });
+    const immediate = buffer.push('اسم المستخدم ');
+    return `${immediate}|${buffer.hasPending}|${buffer.flush()}`;
+  })(),
+  `|true|${shapeArabic('اسم المستخدم ', { preserveCellCount: true })}`,
+);
+expectValue(
+  'stream: reset drops pending text between sessions',
+  (() => {
+    const buffer = createArabicOutputBuffer({ preserveCellCount: true });
+    buffer.push('قديم');
+    buffer.reset();
+    return buffer.push('new session') + buffer.flush();
+  })(),
+  'new session',
 );
 
 console.log(`\n${pass}/${total} cases passed`);

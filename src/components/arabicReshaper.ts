@@ -17,6 +17,13 @@ interface ShapeArabicOptions {
   preserveCellCount?: boolean;
 }
 
+export interface ArabicOutputBuffer {
+  push(input: string): string;
+  flush(): string;
+  reset(): void;
+  readonly hasPending: boolean;
+}
+
 const SHAPES: Record<string, ArabicShape> = {
   '\u0621': { isolated: '\uFE80' },
   '\u0622': { isolated: '\uFE81', final: '\uFE82' },
@@ -73,6 +80,7 @@ const LAM_ALEF: Record<string, { isolated: string; final: string }> = {
 
 const ARABIC_RANGE = '\\u0600-\\u06FF\\u0750-\\u077F\\u08A0-\\u08FF\\uFB50-\\uFDFF\\uFE70-\\uFEFF';
 const ARABIC_RUN = new RegExp(`[${ARABIC_RANGE}](?:[${ARABIC_RANGE} \\u200C\\u200D]*[${ARABIC_RANGE}])?`, 'g');
+const TRAILING_ARABIC_RUN = new RegExp(`[${ARABIC_RANGE}](?:[${ARABIC_RANGE} \\u200C\\u200D]*)$`);
 const ANSI_ESCAPE = /(\x1b\][\s\S]*?(?:\x07|\x1b\\)|\x1bP[\s\S]*?\x1b\\|\x1b\^[\s\S]*?\x1b\\|\x1b_[\s\S]*?\x1b\\|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-_])/g;
 
 function isTransparentMark(char: string): boolean {
@@ -177,4 +185,106 @@ export function shapeArabic(input: string, options: ShapeArabicOptions = {}): st
 
   output += shapePlainText(input.slice(lastIndex), normalizedOptions);
   return output;
+}
+
+function incompleteControlSequenceStart(input: string): number | null {
+  for (let i = 0; i < input.length;) {
+    if (input.charCodeAt(i) !== 0x1b) {
+      i += 1;
+      continue;
+    }
+
+    if (i + 1 >= input.length) return i;
+    const introducer = input[i + 1];
+
+    if (introducer === '[') {
+      let end = i + 2;
+      while (end < input.length) {
+        const code = input.charCodeAt(end);
+        if (code >= 0x40 && code <= 0x7e) break;
+        end += 1;
+      }
+      if (end >= input.length) return i;
+      i = end + 1;
+      continue;
+    }
+
+    if (introducer === ']' || introducer === 'P' || introducer === '^' || introducer === '_') {
+      const acceptsBell = introducer === ']';
+      let end = i + 2;
+      let complete = false;
+      while (end < input.length) {
+        if (acceptsBell && input.charCodeAt(end) === 0x07) {
+          end += 1;
+          complete = true;
+          break;
+        }
+        if (input.charCodeAt(end) === 0x1b && input[end + 1] === '\\') {
+          end += 2;
+          complete = true;
+          break;
+        }
+        end += 1;
+      }
+      if (!complete) return i;
+      i = end;
+      continue;
+    }
+
+    // Two-byte ESC sequences are complete once their second byte arrives.
+    i += 2;
+  }
+
+  return null;
+}
+
+function pendingSuffixStart(input: string): number {
+  const incompleteControl = incompleteControlSequenceStart(input);
+  const safeEnd = incompleteControl ?? input.length;
+  const trailingArabic = TRAILING_ARABIC_RUN.exec(input.slice(0, safeEnd));
+  return trailingArabic?.index ?? safeEnd;
+}
+
+/**
+ * Coalesces only the unfinished Arabic suffix of PTY output. English and
+ * completed terminal controls pass through immediately, while a caller-owned
+ * short timer can flush a final Arabic prompt when no later chunk arrives.
+ */
+export function createArabicOutputBuffer(options: ShapeArabicOptions = {}): ArabicOutputBuffer {
+  let pending = '';
+
+  return {
+    push(input) {
+      if (!input) return '';
+      const combined = pending + input;
+      const splitAt = pendingSuffixStart(combined);
+      pending = combined.slice(splitAt);
+      return shapeArabic(combined.slice(0, splitAt), options);
+    },
+
+    flush() {
+      if (!pending) return '';
+
+      const incompleteControl = incompleteControlSequenceStart(pending);
+      if (incompleteControl === null) {
+        const output = shapeArabic(pending, options);
+        pending = '';
+        return output;
+      }
+
+      // xterm can continue parsing a split control sequence. Keep that raw
+      // suffix buffered, but do not let it delay printable Arabic before it.
+      const printable = pending.slice(0, incompleteControl);
+      pending = pending.slice(incompleteControl);
+      return shapeArabic(printable, options);
+    },
+
+    reset() {
+      pending = '';
+    },
+
+    get hasPending() {
+      return pending.length > 0;
+    },
+  };
 }

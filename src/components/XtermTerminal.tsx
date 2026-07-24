@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
-import { shapeArabic } from './arabicReshaper';
+import { createArabicOutputBuffer, shapeArabic } from './arabicReshaper';
 import type { TerminalStatus } from './StatusBar';
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
@@ -21,6 +21,8 @@ interface StartTerminalResult {
 
 type TerminalDataPayload = string | { sessionId: number; data: string };
 type TerminalExitPayload = undefined | null | { sessionId: number };
+
+const ARABIC_OUTPUT_FLUSH_MS = 12;
 
 async function getTauri() {
   if (!('__TAURI_INTERNALS__' in window)) return null;
@@ -140,8 +142,26 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
     let resizeTimer: number | undefined;
     let pasteHandler: ((e: ClipboardEvent) => void) | undefined;
     let observer: ResizeObserver | undefined;
+    let outputFlushTimer: number | undefined;
     let currentSessionId: number | null = null;
     let sessionCounter = 0;
+    const outputBuffer = createArabicOutputBuffer({ preserveCellCount: true });
+
+    const flushOutput = () => {
+      outputFlushTimer = undefined;
+      const output = outputBuffer.flush();
+      if (output) term.write(output);
+    };
+
+    const writeOutput = (data: string) => {
+      const output = outputBuffer.push(data);
+      if (output) term.write(output);
+
+      if (outputFlushTimer) window.clearTimeout(outputFlushTimer);
+      if (outputBuffer.hasPending) {
+        outputFlushTimer = window.setTimeout(flushOutput, ARABIC_OUTPUT_FLUSH_MS);
+      }
+    };
 
     const size = () => {
       fit.fit();
@@ -225,11 +245,11 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
       cleanupData = await tauri.listen<TerminalDataPayload>('terminal://data', (event) => {
         const payload = event.payload;
         if (typeof payload === 'string') {
-          term.write(shapeArabic(payload, { preserveCellCount: true }));
+          writeOutput(payload);
           return;
         }
         if (payload.sessionId !== currentSessionId) return;
-        term.write(shapeArabic(payload.data, { preserveCellCount: true }));
+        writeOutput(payload.data);
       });
       if (cancelled) {
         cleanupData();
@@ -240,6 +260,9 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
         const payload = event.payload;
         if (cancelled) return;
         if (payload && payload.sessionId !== currentSessionId) return;
+        if (outputFlushTimer) window.clearTimeout(outputFlushTimer);
+        flushOutput();
+        outputBuffer.reset();
         startSession(true).catch((error) => {
           console.error(error);
           setStatus('error');
@@ -293,6 +316,8 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
       inputDisposable?.dispose();
       observer?.disconnect();
       if (resizeTimer) window.clearTimeout(resizeTimer);
+      if (outputFlushTimer) window.clearTimeout(outputFlushTimer);
+      outputBuffer.reset();
       if (pasteHandler) window.removeEventListener('paste', pasteHandler, true);
       host.removeEventListener('mousedown', focusHandler);
       term.dispose();
