@@ -1,6 +1,6 @@
 :root {
   color-scheme: dark;
-  --font-mono: 'Cascadia Mono', 'Consolas', 'JetBrains Mono', 'DejaVu Sans Mono', 'Liberation Mono', 'Menlo', monospace, 'Noto Naskh Arabic';
+  --font-mono: 'Cascadia Mono', 'Consolas', 'JetBrains Mono', 'DejaVu Sans Mono', 'Liberation Mono', 'Menlo', 'Noto Naskh Arabic', monospace;
   --font-arabic: 'Noto Naskh Arabic', 'Segoe UI', 'Tahoma', 'Arial', sans-serif;
 
   /* Restrained product palette in OKLCH. One cool-neutral ramp + semantic state hues. */
@@ -9,7 +9,7 @@
   --border-subtle: oklch(0.30 0.01 250);
   --ink-primary: oklch(0.86 0.01 250);
   --ink-muted: oklch(0.64 0.012 250);
-  --ink-faint: oklch(0.52 0.012 250);
+  --ink-faint: oklch(0.60 0.012 250);
 
   --accent: oklch(0.72 0.13 235);
   --state-ok: oklch(0.74 0.15 150);
@@ -190,12 +190,10 @@ html, body, #root {
 }
 
 .recovery-notice__copy span {
-  overflow: hidden;
   color: var(--ink-muted);
   font-size: 11px;
   line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .recovery-notice__action {

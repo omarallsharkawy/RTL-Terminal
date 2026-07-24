@@ -36,7 +36,7 @@ export function StatusBar({ status, shell }: StatusBarProps) {
   const pending = status === 'connecting' || status === 'reconnecting';
 
   return (
-    <footer className="statusbar" dir="ltr">
+    <footer className="statusbar" dir="ltr" lang="en">
       <div className="statusbar__group">
         <span
           className={`statusbar__dot statusbar__dot--${status}${pending ? ' is-pulsing' : ''}`}

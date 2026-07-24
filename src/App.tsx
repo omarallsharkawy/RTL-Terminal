@@ -18,7 +18,7 @@ export function App() {
 
   return (
     <main className="app">
-      <header className="terminal-rail" dir="ltr">
+      <header className="terminal-rail" dir="ltr" lang="en">
         <div className="terminal-rail__brand" aria-label="Twitty">
           <SquareTerminal size={15} strokeWidth={1.8} aria-hidden="true" />
           <span>Twitty</span>
@@ -42,12 +42,17 @@ export function App() {
           retryNonce={retryNonce}
         />
         {error && (
-          <section className="recovery-notice" role="alert" dir="ltr">
+          <section className="recovery-notice" role="alert" dir="ltr" lang="en">
             <div className="recovery-notice__copy">
               <strong>Terminal unavailable</strong>
               <span>{error}</span>
             </div>
-            <button className="recovery-notice__action" type="button" onClick={retry}>
+            <button
+              className="recovery-notice__action"
+              type="button"
+              onClick={retry}
+              autoFocus
+            >
               <RotateCcw size={14} strokeWidth={2} aria-hidden="true" />
               Retry
               <span lang="ar" dir="rtl">إعادة المحاولة</span>
