@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-24T00:00:00Z",
+  "title": "Design System: Twitty",
+  "extensions": {
+    "colorMeta": {
+      "terminal-bg": {
+        "role": "neutral",
+        "displayName": "Terminal Black",
+        "canonical": "oklch(0.16 0.006 250)",
+        "tonalRamp": ["#080a0c", "#0b0d10", "#15191e", "#20262d", "#39424c", "#697681", "#a7b0b8", "#eef1f4"]
+      },
+      "accent": {
+        "role": "primary",
+        "displayName": "Direction Cyan",
+        "canonical": "oklch(0.72 0.13 235)",
+        "tonalRamp": ["#071a24", "#0b2d3e", "#07526f", "#087da4", "#0ea5e9", "#38bdf8", "#8bdcff", "#e5f7ff"]
+      }
+    },
+    "typographyMeta": {
+      "terminal": {
+        "displayName": "Terminal Grid",
+        "purpose": "Terminal content, Arabic presentation forms, Latin commands, and box drawing."
+      },
+      "chrome": {
+        "displayName": "Application Chrome",
+        "purpose": "Compact status, shortcuts, and recovery controls."
+      }
+    },
+    "shadows": [],
+    "motion": [
+      {
+        "name": "state-change",
+        "value": "200ms cubic-bezier(0.22, 1, 0.36, 1)",
+        "purpose": "Connection, focus, and inline recovery state transitions."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "compact",
+        "value": "520px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Active Direction Chip",
+      "kind": "chip",
+      "refersTo": "status-chip",
+      "description": "Communicates active Arabic and English direction support.",
+      "html": "<span class=\"ds-direction-chip\">AR⇄EN</span>",
+      "css": ".ds-direction-chip { display:inline-flex; align-items:center; background:#20262d; color:#7dd3fc; border-radius:6px; padding:4px 8px; font:600 12px/1 'Cascadia Mono',Consolas,monospace; } .ds-direction-chip:focus-visible { outline:2px solid #38bdf8; outline-offset:2px; }"
+    },
+    {
+      "name": "Shortcut Keycap",
+      "kind": "custom",
+      "refersTo": "keycap",
+      "description": "Shows a terminal keyboard shortcut without becoming a button.",
+      "html": "<kbd class=\"ds-keycap\">Ctrl+C</kbd>",
+      "css": ".ds-keycap { background:#20262d; color:#d3d9df; border:1px solid #39424c; border-radius:4px; padding:2px 5px; font:500 11px/1 'Cascadia Mono',Consolas,monospace; }"
+    },
+    {
+      "name": "Retry Terminal",
+      "kind": "button",
+      "description": "Restarts a failed PTY session from the inline recovery notice.",
+      "html": "<button class=\"ds-retry\">Retry terminal</button>",
+      "css": ".ds-retry { background:#38bdf8; color:#07131a; border:0; border-radius:6px; padding:7px 11px; font:600 12px/1 'Cascadia Mono',Consolas,monospace; transition:background 200ms cubic-bezier(.22,1,.36,1); } .ds-retry:hover { background:#7dd3fc; } .ds-retry:active { background:#0ea5e9; } .ds-retry:focus-visible { outline:2px solid #d3d9df; outline-offset:2px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The terminal, made legible.",
+    "overview": "Twitty is a terminal-first product. Calm, dense application chrome clarifies state and recovery while the terminal remains the dominant surface.",
+    "keyCharacteristics": ["Terminal-first composition", "Cool near-black tonal layers", "Explicit state and recovery", "Scoped directionality"],
+    "rules": [
+      {"name": "The Disappearing Chrome Rule", "body": "Chrome becomes prominent only for state, recovery, or settings.", "section": "components"},
+      {"name": "The Cell Integrity Rule", "body": "Terminal typography changes require rendering regression tests.", "section": "typography"},
+      {"name": "The Flat Workspace Rule", "body": "The terminal and status chrome never use decorative shadows.", "section": "elevation"}
+    ],
+    "dos": ["Do keep the terminal dominant.", "Do validate mixed-direction behavior in real workflows."],
+    "donts": ["Don't build a flashy or gamified AI terminal.", "Don't apply full-page RTL to the terminal grid."]
+  }
+}
