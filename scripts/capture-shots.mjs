@@ -52,7 +52,7 @@ async function shot(name, width, height, clip) {
 
 await shot('screenshot-main.png', 1180, 760);
 await shot('screenshot-wide.png', 1320, 600);
-// Tight hero crop: the populated top region + the status bar look, no dead space.
+// Tight hero crop: the populated terminal region without unused lower canvas.
 await shot('screenshot-hero.png', 1180, 470, { x: 0, y: 0, width: 1180, height: 470 });
 
 await browser.close();

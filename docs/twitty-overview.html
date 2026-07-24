@@ -281,7 +281,7 @@
   <div class="features">
     <div class="feature">
       <div class="feature__title">Contextual Arabic Shaping</div>
-      <div class="feature__desc">Letters join with correct presentation forms (U+FE70–FEFF). Bundled Noto Naskh Arabic font ensures rendering on every OS.</div>
+      <div class="feature__desc">The DOM renderer reshapes the complete visible phrase after every character. Bundled Noto Naskh Arabic ensures consistent glyph coverage.</div>
     </div>
     <div class="feature">
       <div class="feature__title">Per-Run Bidirectional Ordering</div>
@@ -375,7 +375,7 @@
     <thead><tr><th>File</th><th>Responsibility</th></tr></thead>
     <tbody>
       <tr><td><code>XtermTerminal.tsx</code></td><td>xterm.js setup, Arabic character joiner, key handling</td></tr>
-      <tr><td><code>StatusBar.tsx</code></td><td>Live connection / shell / AR⇄EN status bar</td></tr>
+      <tr><td><code>arabicRenderer.ts</code></td><td>Arabic phrase detection for xterm's DOM character joiner</td></tr>
       <tr><td><code>pty.rs</code></td><td>PTY session lifecycle and raw I/O</td></tr>
       <tr><td><code>lib.rs</code></td><td>Tauri commands: start, write, interrupt, resize, stop</td></tr>
       <tr><td><code>build.yml</code></td><td>GitHub Actions: Windows + Linux builds and release</td></tr>
@@ -423,8 +423,8 @@ npm run tauri:build</pre>
 
   <h2>Screenshots</h2>
   <div class="screenshot">
-    <img src="assets/screenshot-main.png" alt="Twitty full window with Arabic text and status bar" />
-    <div class="screenshot__caption">Full window: Arabic phrases shaped and ordered RTL, box-drawing table, live status bar with AR⇄EN indicator.</div>
+    <img src="assets/screenshot-main.png" alt="Terminal-only Twitty window with mixed Arabic and English text" />
+    <div class="screenshot__caption">Full window: Arabic phrases shaped and ordered RTL on a clean terminal-only surface.</div>
   </div>
 
   <h2>Design Decisions</h2>

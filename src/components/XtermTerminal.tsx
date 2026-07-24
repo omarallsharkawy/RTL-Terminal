@@ -2,13 +2,13 @@ import { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
-import { createArabicOutputBuffer, shapeArabic } from './arabicReshaper';
+import { findArabicJoinRanges } from './arabicRenderer';
 import { getReconnectDecision } from './reconnectPolicy';
-import type { TerminalStatus } from './StatusBar';
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 type Listen = <T>(event: string, cb: (event: { payload: T }) => void) => Promise<() => void>;
 type Disposable = { dispose: () => void };
+type TerminalStatus = 'connecting' | 'connected' | 'reconnecting' | 'demo' | 'error';
 
 interface XtermTerminalProps {
   onStatusChange?: (status: TerminalStatus) => void;
@@ -25,7 +25,6 @@ interface StartTerminalResult {
 type TerminalDataPayload = string | { sessionId: number; data: string };
 type TerminalExitPayload = undefined | null | { sessionId: number };
 
-const ARABIC_OUTPUT_FLUSH_MS = 12;
 let nextTerminalSessionId = 0;
 
 async function getTauri() {
@@ -134,20 +133,12 @@ export function XtermTerminal({
     term.loadAddon(fit);
     term.open(host);
 
-    // xterm's DOM renderer does not always apply Arabic contextual shaping for
-    // terminal cells. Incoming Arabic runs are shaped before they reach xterm,
-    // while the joiner remains as a harmless renderer fallback.
-    const A = '\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF';
-    const arabicRun = new RegExp(`[${A}](?:[${A} ]*[${A}])?`, 'g');
-    term.registerCharacterJoiner((line) => {
-      const ranges: [number, number][] = [];
-      arabicRun.lastIndex = 0;
-      let m: RegExpExecArray | null;
-      while ((m = arabicRun.exec(line)) !== null) {
-        if (m[0].length > 1) ranges.push([m.index, m.index + m[0].length]);
-      }
-      return ranges;
-    });
+    // Keep the PTY stream byte-for-byte correct. xterm's DOM character joiner
+    // renders each complete Arabic phrase as one browser text run, so shaping
+    // is recalculated from the full visible line after every typed character.
+    // This avoids corrupting shell input with presentation forms and avoids
+    // timing-dependent shaping when a shell echoes one character at a time.
+    term.registerCharacterJoiner(findArabicJoinRanges);
 
     fit.fit();
     term.focus();
@@ -164,28 +155,10 @@ export function XtermTerminal({
     let reconnectTimer: number | undefined;
     let pasteHandler: ((e: ClipboardEvent) => void) | undefined;
     let observer: ResizeObserver | undefined;
-    let outputFlushTimer: number | undefined;
     let currentSessionId: number | null = null;
     let reconnectAttempts = 0;
     let sessionConnectedAt = 0;
     let tauriForCleanup: { invoke: Invoke } | undefined;
-    const outputBuffer = createArabicOutputBuffer({ preserveCellCount: true });
-
-    const flushOutput = () => {
-      outputFlushTimer = undefined;
-      const output = outputBuffer.flush();
-      if (output) term.write(output);
-    };
-
-    const writeOutput = (data: string) => {
-      const output = outputBuffer.push(data);
-      if (output) term.write(output);
-
-      if (outputFlushTimer) window.clearTimeout(outputFlushTimer);
-      if (outputBuffer.hasPending) {
-        outputFlushTimer = window.setTimeout(flushOutput, ARABIC_OUTPUT_FLUSH_MS);
-      }
-    };
 
     const size = () => {
       fit.fit();
@@ -206,7 +179,7 @@ export function XtermTerminal({
       if (cancelled) return;
       if (!tauri) {
         setStatus('demo');
-        const w = (s = '') => term.writeln(shapeArabic(s));
+        const w = (s = '') => term.writeln(s);
         const C = (n: number, s: string) => `\x1b[38;5;${n}m${s}\x1b[0m`;
         w(`${C(39, '┌─ ')}\x1b[1m${C(39, 'Twitty')}\x1b[0m ${C(245, '· RTL-first terminal · browser demo (no PTY attached)')} ${C(39, '─┐')}`);
         w('');
@@ -314,11 +287,11 @@ export function XtermTerminal({
       cleanupData = await tauri.listen<TerminalDataPayload>('terminal://data', (event) => {
         const payload = event.payload;
         if (typeof payload === 'string') {
-          writeOutput(payload);
+          term.write(payload);
           return;
         }
         if (payload.sessionId !== currentSessionId) return;
-        writeOutput(payload.data);
+        term.write(payload.data);
       });
       if (cancelled) {
         cleanupData();
@@ -330,9 +303,6 @@ export function XtermTerminal({
         if (cancelled) return;
         if (payload && payload.sessionId !== currentSessionId) return;
         const exitedSessionId = currentSessionId;
-        if (outputFlushTimer) window.clearTimeout(outputFlushTimer);
-        flushOutput();
-        outputBuffer.reset();
         // A crashed TUI can leave xterm in alternate-screen, mouse-reporting,
         // or other private modes. A new shell must start from a clean terminal
         // state rather than inheriting protocol state from the dead session.
@@ -399,8 +369,6 @@ export function XtermTerminal({
       observer?.disconnect();
       if (resizeTimer) window.clearTimeout(resizeTimer);
       if (reconnectTimer) window.clearTimeout(reconnectTimer);
-      if (outputFlushTimer) window.clearTimeout(outputFlushTimer);
-      outputBuffer.reset();
       if (pasteHandler) window.removeEventListener('paste', pasteHandler, true);
       host.removeEventListener('mousedown', focusHandler);
       if (sessionToStop !== null) {

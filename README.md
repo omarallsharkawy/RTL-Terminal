@@ -17,21 +17,21 @@ Mixed Arabic/English text shapes contextually and flows right-to-left — inline
 
 ## Why Twitty
 
-Most terminals treat Arabic as a stream of disconnected, left-to-right code points. Letters don't join, words read backwards, and anything bidirectional turns into noise. Twitty fixes that by pre-shaping printable Arabic runs before xterm.js renders them: Arabic is **contextually shaped** (letters take their correct initial/medial/final/isolated forms and join), each Arabic run is **ordered right-to-left**, and Latin text, numbers, ANSI styling, and box-drawing stay where they belong.
+Most terminals treat Arabic as a stream of disconnected, left-to-right cells. Letters don't join, words read backwards, and anything bidirectional turns into noise. Twitty keeps the PTY stream unchanged and groups each visible Arabic phrase into a single xterm.js DOM render run. The browser then recalculates contextual shaping and right-to-left order from the complete current line after every character, while Latin text, numbers, ANSI styling, and box-drawing keep their normal terminal positions.
 
 The app also hardens the PTY bridge around real terminal behavior: backend reads preserve split UTF-8 sequences, frontend listeners are cleaned up safely, and session IDs prevent stale shell events from respawning or writing into the wrong terminal instance.
 
 ## Features
 
-- **Contextual Arabic shaping** — initial / medial / final / isolated presentation forms with correct joining.
+- **Contextual Arabic shaping** — full-line browser shaping updates correctly even when a shell echoes one character at a time.
 - **Per-run bidirectional ordering** — Arabic flows right-to-left; English, digits, and symbols stay left-to-right, mixed on the same line.
-- **Terminal-safe shaping** — printable Arabic runs are shaped while ANSI/control sequences are preserved.
+- **Protocol-safe rendering** — Unicode and ANSI/control sequences reach xterm unchanged; direction handling exists only in the DOM renderer.
 - **Session-hardened PTY bridge** — split UTF-8 reads, stale shell events, and React StrictMode cleanup are handled defensively.
 - **Real shell, real PTY** — a genuine pseudo-terminal via Rust `portable-pty` (Windows ConPTY and Unix PTY).
 - **Full ANSI support** — 24-bit color, alternate screen, scroll regions, mouse reporting, 10k-line scrollback.
-- **Bundled Arabic font** — Noto Naskh Arabic ships with the app so presentation forms render on every OS, including Linux.
+- **Bundled Arabic font** — Noto Naskh Arabic ships with the app so joined Arabic glyphs render on every OS, including Linux.
 - **F11 fullscreen**, native **Ctrl+C** interrupt, auto-resize, and shell auto-respawn on exit.
-- **Live status bar** — connection state, active shell, and an AR⇄EN capability indicator.
+- **Terminal-only surface** — no internal title rail, shell selector, direction switch, status bar, or shortcut legend.
 - **Browser demo mode** — open without a PTY to preview the rendering (the screenshots above are this mode).
 - **Cross-platform builds** — Windows installer + Linux `.deb` / `.rpm` / AppImage from one GitHub Actions workflow.
 
@@ -74,40 +74,41 @@ npm run tauri:build   # produce native installers
 
 ## How the RTL rendering works
 
-The hard part of an Arabic terminal isn't only shaping — it's shaping while preserving terminal protocol behavior. Twitty keeps ANSI/control sequences intact, incrementally decodes PTY UTF-8 so Arabic characters are not split at read boundaries, and shapes only printable Arabic runs before xterm.js renders them.
+The hard part of an Arabic terminal isn't only shaping — it's shaping without changing terminal protocol data. Twitty incrementally decodes PTY UTF-8 so Arabic characters are not split at read boundaries, sends the original Unicode and ANSI stream into xterm, then joins Arabic phrases only at DOM-render time.
 
 ```
-┌─────────────┐   raw bytes    ┌──────────────┐  UTF-8 text events  ┌─────────────────────┐
-│  Real shell │ ─────────────▶ │  Rust PTY    │ ─────────────────▶ │  frontend bridge    │
-│ (PTY/ConPTY)│                │  bridge      │ session-scoped      │  Arabic pre-shaper  │
-└─────────────┘                └──────────────┘                     └──────────┬──────────┘
-                                                                                │ shaped printable text
-                                                                                ▼
-                                                                     ┌─────────────────────┐
-                                                                     │ xterm.js renderer   │
-                                                                     │ ANSI parsing + grid │
-                                                                     └─────────────────────┘
+┌─────────────┐   raw bytes    ┌──────────────┐  unchanged UTF-8/ANSI  ┌─────────────────────┐
+│  Real shell │ ─────────────▶ │  Rust PTY    │ ────────────────────▶ │ xterm.js buffer     │
+│ (PTY/ConPTY)│                │  bridge      │ session-scoped events  │ terminal grid       │
+└─────────────┘                └──────────────┘                         └──────────┬──────────┘
+                                                                                  │ visible line
+                                                                                  ▼
+                                                                       ┌─────────────────────┐
+                                                                       │ DOM character joiner│
+                                                                       │ browser Arabic/BiDi │
+                                                                       └─────────────────────┘
 ```
 
 1. **The backend preserves UTF-8 boundaries.** PTY bytes are decoded incrementally, so Arabic characters split across read chunks are not replaced with `�`.
 2. **Events are session-scoped.** `terminal://data` and `terminal://exited` include a session ID so stale killed shells cannot write to or respawn the current terminal.
-3. **Printable Arabic runs are pre-shaped.** Arabic letters are converted to presentation forms and wrapped with RTL direction marks while ANSI styling/control sequences are preserved.
-4. **The xterm host is isolated from page RTL.** The app shell can be Arabic/RTL while the terminal grid remains LTR for stable cell positioning.
+3. **The xterm buffer stays canonical.** Shell input and output remain ordinary Unicode; the app never replaces Arabic with presentation-form characters.
+4. **Arabic joins in the DOM renderer.** A character joiner groups each complete Arabic phrase so the browser shapes and orders the latest full line, including slow character-by-character echo.
+5. **The terminal grid stays LTR.** Arabic direction is scoped to joined text runs so Latin commands and cursor cell positions remain predictable.
 
-> **Note on `allowProposedApi`:** `registerCharacterJoiner` is a proposed API in xterm.js v6, so the terminal is constructed with `allowProposedApi: true`. The joiner remains as a renderer fallback and run detector.
+> **Note on `allowProposedApi`:** `registerCharacterJoiner` is a proposed API in xterm.js v6, so the terminal is constructed with `allowProposedApi: true`.
 
 ## Architecture
 
-The Rust backend spawns a real shell inside a PTY and streams incrementally decoded output to the frontend as session-scoped `terminal://data` events. The frontend preserves ANSI/control sequences, shapes printable Arabic runs, and writes the result into xterm.js, which handles cursor movement, colors, and scrollback. Keystrokes flow back to the PTY via `write_terminal`; window resizes via `resize_terminal`.
+The Rust backend spawns a real shell inside a PTY and streams incrementally decoded output to the frontend as session-scoped `terminal://data` events. The frontend writes that stream unchanged into xterm.js, whose DOM character joiner handles visible Arabic phrases. Keystrokes flow back to the PTY via `write_terminal`; window resizes via `resize_terminal`.
 
 ### Key files
 
 | File | Responsibility |
 | --- | --- |
-| `src/components/XtermTerminal.tsx` | xterm.js setup, Arabic shaping bridge, session-scoped event handling, key handling |
-| `src/components/StatusBar.tsx` | Live connection / shell / AR⇄EN status bar |
-| `src/App.tsx` | App shell; owns status state |
-| `src/styles.css` | OKLCH dark palette, bundled `@font-face`, layout |
+| `src/components/XtermTerminal.tsx` | xterm.js setup, session-scoped PTY events, key handling |
+| `src/components/arabicRenderer.ts` | Arabic phrase detection for xterm's DOM character joiner |
+| `src/App.tsx` | Terminal-only surface and contextual recovery notice |
+| `src/styles.css` | Full-window terminal layout and bundled Arabic `@font-face` |
 | `src-tauri/src/pty.rs` | PTY session lifecycle, incremental UTF-8 decoding, shell selection |
 | `src-tauri/src/lib.rs` | Tauri commands: `start_terminal`, `write_terminal`, `interrupt_terminal`, `resize_terminal`, `stop_terminal` |
 | `src-tauri/tauri.conf.json` | App + bundle config, CSP, window |
@@ -134,7 +135,7 @@ The Rust backend spawns a real shell inside a PTY and streams incrementally deco
 npm run dev           # Vite dev server (browser demo)
 npm run tauri:dev     # Tauri dev (real shell; PTY failure surfaces an inline retry notice)
 npm run build         # tsc + vite build
-npm test              # Arabic shaping + session/reconnect regression tests
+npm test              # Arabic DOM rendering + session/reconnect regression tests
 node scripts/capture-shots.mjs   # regenerate docs screenshots
 ```
 

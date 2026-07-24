@@ -1,36 +1,24 @@
 :root {
   color-scheme: dark;
-  --font-mono: 'Cascadia Mono', 'Consolas', 'JetBrains Mono', 'DejaVu Sans Mono', 'Liberation Mono', 'Menlo', 'Noto Naskh Arabic', monospace;
+  --font-mono: 'Cascadia Mono', 'Consolas', 'JetBrains Mono', 'DejaVu Sans Mono',
+    'Liberation Mono', 'Menlo', 'Noto Naskh Arabic', monospace;
   --font-arabic: 'Noto Naskh Arabic', 'Segoe UI', 'Tahoma', 'Arial', sans-serif;
-
-  /* Restrained product palette in OKLCH. One cool-neutral ramp + semantic state hues. */
-  --bg-app: oklch(0.16 0.006 250);
-  --bg-chrome: oklch(0.20 0.008 250);
-  --border-subtle: oklch(0.30 0.01 250);
-  --ink-primary: oklch(0.86 0.01 250);
-  --ink-muted: oklch(0.64 0.012 250);
-  --ink-faint: oklch(0.60 0.012 250);
-
-  --accent: oklch(0.72 0.13 235);
-  --state-ok: oklch(0.74 0.15 150);
-  --state-warn: oklch(0.80 0.13 85);
-  --state-error: oklch(0.66 0.18 25);
-  --state-idle: oklch(0.58 0.012 250);
-
-  --terminal-rail-h: 36px;
-  --statusbar-h: 30px;
-  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --terminal-bg: #0b0d10;
+  --ink-primary: #d3d9df;
+  --ink-muted: #9aa5af;
+  --border-subtle: #39424c;
+  --accent: #38bdf8;
+  --state-error: #f87171;
 }
 
-/* Bundled Arabic font so presentation forms (U+FE70–FEFF) render on every OS,
-   including Linux where no Arabic-capable monospace font is guaranteed. */
+/* The bundled fallback is restricted to Arabic so Latin, ANSI art, and box
+   drawing continue to use the user's normal terminal monospace font. */
 @font-face {
   font-family: 'Noto Naskh Arabic';
   font-style: normal;
   font-weight: 400;
   font-display: swap;
   src: url('/NotoNaskhArabic.woff2') format('woff2');
-  /* Restrict to Arabic ranges so Latin/box-drawing glyphs stay with the mono font. */
   unicode-range: U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
 }
 
@@ -40,99 +28,31 @@
   padding: 0;
 }
 
-html, body, #root {
+html,
+body,
+#root,
+.app,
+.terminal-workspace {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background-color: var(--bg-app);
+  background: var(--terminal-bg);
+}
+
+body {
   color: var(--ink-primary);
   font-family: var(--font-mono);
 }
 
-.app {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  background-color: var(--bg-app);
-}
-
-.terminal-rail {
-  flex: 0 0 var(--terminal-rail-h);
-  height: var(--terminal-rail-h);
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: end;
-  padding: 0 10px;
-  background: var(--bg-chrome);
-  border-bottom: 1px solid var(--border-subtle);
-  color: var(--ink-muted);
-  font-size: 11.5px;
-  line-height: 1;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-.terminal-rail__brand,
-.terminal-rail__tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.terminal-rail__brand {
-  align-self: center;
-  color: var(--ink-primary);
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-.terminal-rail__brand svg {
-  color: var(--accent);
-}
-
-.terminal-rail__tab {
-  align-self: stretch;
-  min-width: 140px;
-  justify-content: center;
-  padding: 0 18px;
-  border-bottom: 2px solid var(--accent);
-  color: var(--ink-primary);
-  background: color-mix(in oklab, var(--bg-app) 74%, var(--bg-chrome));
-}
-
-.terminal-rail__tab-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--state-idle);
-}
-
-.terminal-rail__tab-dot--connected { background: var(--state-ok); }
-.terminal-rail__tab-dot--connecting,
-.terminal-rail__tab-dot--reconnecting { background: var(--state-warn); }
-.terminal-rail__tab-dot--demo { background: var(--accent); }
-.terminal-rail__tab-dot--error { background: var(--state-error); }
-
-.terminal-rail__identity {
-  align-self: center;
-  justify-self: end;
-  color: var(--ink-faint);
-  font-family: var(--font-arabic);
-  font-size: 12.5px;
-}
-
+.app,
 .terminal-workspace {
-  flex: 1;
   position: relative;
-  min-height: 0;
-  background-color: var(--bg-app);
 }
 
 .xterm-host {
   position: absolute;
   inset: 0;
-  padding: 10px 14px;
+  padding: 8px 10px;
   direction: ltr;
   unicode-bidi: isolate;
 }
@@ -145,19 +65,9 @@ html, body, #root {
   background-color: transparent !important;
 }
 
-/* Slimmer, calmer scrollbar that matches the chrome rather than the OS default. */
-.xterm-host .xterm-viewport::-webkit-scrollbar {
-  width: 10px;
-}
-.xterm-host .xterm-viewport::-webkit-scrollbar-thumb {
-  background: var(--border-subtle);
-  border-radius: 6px;
-  border: 2px solid var(--bg-app);
-}
-.xterm-host .xterm-viewport::-webkit-scrollbar-thumb:hover {
-  background: var(--ink-faint);
-}
-
+/* Recovery is the only application UI. It exists only when the PTY cannot
+   recover automatically, leaving the healthy state indistinguishable from a
+   normal terminal window. */
 .recovery-notice {
   position: absolute;
   z-index: 5;
@@ -170,17 +80,16 @@ html, body, #root {
   justify-content: space-between;
   gap: 18px;
   padding: 12px 14px;
-  background: color-mix(in oklab, var(--bg-chrome) 96%, black);
+  background: #15191e;
   border: 1px solid color-mix(in oklab, var(--state-error) 45%, var(--border-subtle));
   border-radius: 7px;
-  box-shadow: 0 12px 28px oklch(0.05 0.01 250 / 0.42);
 }
 
 .recovery-notice__copy {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   gap: 5px;
-  min-width: 0;
 }
 
 .recovery-notice__copy strong {
@@ -199,13 +108,13 @@ html, body, #root {
 .recovery-notice__action {
   flex: none;
   display: inline-flex;
+  min-height: 32px;
   align-items: center;
   gap: 6px;
-  min-height: 32px;
   padding: 0 10px;
   border: 1px solid var(--border-subtle);
   border-radius: 5px;
-  background: oklch(0.26 0.01 250);
+  background: #20262d;
   color: var(--ink-primary);
   font: 500 11px/1 var(--font-mono);
   cursor: pointer;
@@ -220,7 +129,7 @@ html, body, #root {
 
 .recovery-notice__action:hover {
   border-color: color-mix(in oklab, var(--accent) 55%, var(--border-subtle));
-  background: oklch(0.29 0.014 245);
+  background: #29313a;
 }
 
 .recovery-notice__action:focus-visible {
@@ -228,142 +137,13 @@ html, body, #root {
   outline-offset: 2px;
 }
 
-/* ============================== Status bar ============================== */
-.statusbar {
-  flex: 0 0 var(--statusbar-h);
-  height: var(--statusbar-h);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 12px;
-  background: var(--bg-chrome);
-  border-top: 1px solid var(--border-subtle);
-  font-size: 11.5px;
-  line-height: 1;
-  color: var(--ink-muted);
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-.statusbar__group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.statusbar__group--end {
-  gap: 7px;
-}
-
-.statusbar__dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex: none;
-  background: var(--state-idle);
-  box-shadow: 0 0 0 0 transparent;
-  transition: background 200ms var(--ease-out);
-}
-.statusbar__dot--connected   { background: var(--state-ok); }
-.statusbar__dot--connecting,
-.statusbar__dot--reconnecting { background: var(--state-warn); }
-.statusbar__dot--demo         { background: var(--accent); }
-.statusbar__dot--error        { background: var(--state-error); }
-
-.statusbar__dot.is-pulsing {
-  animation: status-pulse 1.4s var(--ease-out) infinite;
-}
-
-@keyframes status-pulse {
-  0%   { box-shadow: 0 0 0 0 color-mix(in oklab, var(--state-warn) 55%, transparent); }
-  70%  { box-shadow: 0 0 0 5px transparent; }
-  100% { box-shadow: 0 0 0 0 transparent; }
-}
-
-.statusbar__state {
-  color: var(--ink-primary);
-  font-weight: 500;
-  letter-spacing: 0.01em;
-}
-
-.statusbar__shell {
-  color: var(--ink-muted);
-  padding-left: 8px;
-  margin-left: 2px;
-  border-left: 1px solid var(--border-subtle);
-}
-
-.statusbar__bidi {
-  display: inline-flex;
-  align-items: center;
-  gap: 1px;
-  padding: 2px 6px;
-  border-radius: 5px;
-  background: color-mix(in oklab, var(--accent) 16%, transparent);
-  color: color-mix(in oklab, var(--accent) 78%, white);
-  font-weight: 600;
-  letter-spacing: 0.03em;
-}
-.statusbar__bidi-arrow {
-  margin: 0 1px;
-  opacity: 0.85;
-}
-
-.statusbar__key {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  padding: 2px 5px;
-  border-radius: 4px;
-  background: oklch(0.26 0.008 250);
-  border: 1px solid var(--border-subtle);
-  color: var(--ink-primary);
-}
-
-.statusbar__hint {
-  color: var(--ink-faint);
-}
-
-.statusbar__sep {
-  width: 1px;
-  height: 12px;
-  background: var(--border-subtle);
-  margin: 0 3px;
-}
-
-.statusbar__sr {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-}
-
 @media (max-width: 520px) {
-  .terminal-rail {
-    grid-template-columns: auto 1fr;
-  }
-  .terminal-rail__identity {
-    display: none;
-  }
-  .terminal-rail__tab {
-    justify-self: end;
-    min-width: 120px;
-  }
-  .statusbar__hint,
-  .statusbar__shell { display: none; }
   .recovery-notice {
     align-items: stretch;
     flex-direction: column;
   }
+
   .recovery-notice__action {
     justify-content: center;
   }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .statusbar__dot.is-pulsing { animation: none; }
-  .statusbar__dot { transition: none; }
 }
