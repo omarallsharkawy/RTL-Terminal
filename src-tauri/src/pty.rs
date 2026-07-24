@@ -57,7 +57,7 @@ impl PtySession {
 
         thread::spawn(move || {
             let mut buffer = [0_u8; 8192];
-            let mut pending = Vec::<u8>::new();
+            let mut decoder = Utf8ChunkDecoder::default();
 
             loop {
                 let count = match reader.read(&mut buffer) {
@@ -66,12 +66,12 @@ impl PtySession {
                     Err(_) => break,
                 };
 
-                pending.extend_from_slice(&buffer[..count]);
-                emit_valid_utf8(&app, session_id, &mut pending);
+                for data in decoder.push(&buffer[..count]) {
+                    let _ = app.emit("terminal://data", PtyDataEvent { session_id, data });
+                }
             }
 
-            if !pending.is_empty() {
-                let data = String::from_utf8_lossy(&pending).to_string();
+            if let Some(data) = decoder.finish() {
                 let _ = app.emit("terminal://data", PtyDataEvent { session_id, data });
             }
 
@@ -116,8 +116,17 @@ impl PtySession {
         Ok(())
     }
 
-    pub fn kill(&mut self) {
-        let _ = self.child.kill();
+    pub fn shutdown(&mut self) -> Result<()> {
+        let kill_result = self.child.kill();
+        let wait_result = self.child.wait();
+
+        match (kill_result, wait_result) {
+            (_, Ok(_)) => Ok(()),
+            (Ok(()), Err(wait_error)) => Err(wait_error.into()),
+            (Err(kill_error), Err(wait_error)) => Err(anyhow!(
+                "failed to stop PTY child ({kill_error}); wait also failed ({wait_error})"
+            )),
+        }
     }
 }
 
@@ -140,53 +149,59 @@ fn pty_size(cols: usize, rows: usize) -> PtySize {
     }
 }
 
-fn emit_valid_utf8(app: &AppHandle, session_id: u64, pending: &mut Vec<u8>) {
-    loop {
-        match std::str::from_utf8(pending) {
-            Ok(valid) => {
-                if !valid.is_empty() {
-                    let _ = app.emit(
-                        "terminal://data",
-                        PtyDataEvent {
-                            session_id,
-                            data: valid.to_string(),
-                        },
-                    );
-                }
-                pending.clear();
-                break;
-            }
-            Err(error) => {
-                let valid_up_to = error.valid_up_to();
-                if valid_up_to > 0 {
-                    let valid = String::from_utf8_lossy(&pending[..valid_up_to]).to_string();
-                    let _ = app.emit(
-                        "terminal://data",
-                        PtyDataEvent {
-                            session_id,
-                            data: valid,
-                        },
-                    );
-                    pending.drain(..valid_up_to);
-                    continue;
-                }
+#[derive(Default)]
+struct Utf8ChunkDecoder {
+    pending: Vec<u8>,
+}
 
-                if let Some(error_len) = error.error_len() {
-                    let _ = app.emit(
-                        "terminal://data",
-                        PtyDataEvent {
-                            session_id,
-                            data: "\u{FFFD}".to_string(),
-                        },
-                    );
-                    pending.drain(..error_len);
-                    continue;
-                }
+impl Utf8ChunkDecoder {
+    fn push(&mut self, input: &[u8]) -> Vec<String> {
+        self.pending.extend_from_slice(input);
+        let mut output = Vec::new();
 
-                // Incomplete multibyte sequence at the end; keep it for the next read.
-                break;
+        loop {
+            match std::str::from_utf8(&self.pending) {
+                Ok(valid) => {
+                    if !valid.is_empty() {
+                        output.push(valid.to_string());
+                    }
+                    self.pending.clear();
+                    break;
+                }
+                Err(error) => {
+                    let valid_up_to = error.valid_up_to();
+                    if valid_up_to > 0 {
+                        let valid = std::str::from_utf8(&self.pending[..valid_up_to])
+                            .expect("UTF-8 validator returned a valid prefix")
+                            .to_string();
+                        output.push(valid);
+                        self.pending.drain(..valid_up_to);
+                        continue;
+                    }
+
+                    if let Some(error_len) = error.error_len() {
+                        output.push("\u{FFFD}".to_string());
+                        self.pending.drain(..error_len);
+                        continue;
+                    }
+
+                    // Incomplete multibyte sequence at the end; keep it for the next read.
+                    break;
+                }
             }
         }
+
+        output
+    }
+
+    fn finish(&mut self) -> Option<String> {
+        if self.pending.is_empty() {
+            return None;
+        }
+
+        let output = String::from_utf8_lossy(&self.pending).to_string();
+        self.pending.clear();
+        Some(output)
     }
 }
 
@@ -293,4 +308,56 @@ fn command_exists(command: &str) -> bool {
     env::var_os("PATH")
         .map(|path| env::split_paths(&path).any(|dir| dir.join(command).exists()))
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{clamp_cols, clamp_rows, shell_name, Utf8ChunkDecoder};
+
+    #[test]
+    fn clamps_terminal_dimensions() {
+        assert_eq!(clamp_cols(0), 1);
+        assert_eq!(clamp_cols(80), 80);
+        assert_eq!(clamp_cols(900), 500);
+        assert_eq!(clamp_rows(0), 1);
+        assert_eq!(clamp_rows(24), 24);
+        assert_eq!(clamp_rows(900), 300);
+    }
+
+    #[test]
+    fn extracts_shell_name_from_paths() {
+        assert_eq!(shell_name("pwsh.exe"), "pwsh");
+        assert_eq!(
+            shell_name(r"C:\Program Files\PowerShell\7\pwsh.exe"),
+            "pwsh"
+        );
+        assert_eq!(shell_name("/bin/bash"), "bash");
+    }
+
+    #[test]
+    fn decodes_utf8_split_across_chunks() {
+        let mut decoder = Utf8ChunkDecoder::default();
+        let bytes = "مرحبا".as_bytes();
+        assert!(decoder.push(&bytes[..1]).is_empty());
+
+        let mut output = decoder.push(&bytes[1..5]);
+        output.extend(decoder.push(&bytes[5..]));
+        assert_eq!(output.concat(), "مرحبا");
+        assert_eq!(decoder.finish(), None);
+    }
+
+    #[test]
+    fn preserves_valid_text_around_invalid_utf8() {
+        let mut decoder = Utf8ChunkDecoder::default();
+        let output = decoder.push(&[b'o', b'k', 0xff, b'!']).concat();
+        assert_eq!(output, "ok\u{FFFD}!");
+    }
+
+    #[test]
+    fn finishes_incomplete_utf8_with_replacement_character() {
+        let mut decoder = Utf8ChunkDecoder::default();
+        assert!(decoder.push(&[0xd9]).is_empty());
+        assert_eq!(decoder.finish().as_deref(), Some("\u{FFFD}"));
+        assert_eq!(decoder.finish(), None);
+    }
 }

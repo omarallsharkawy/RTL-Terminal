@@ -34,6 +34,16 @@ impl From<anyhow::Error> for CommandError {
     }
 }
 
+fn session_is_current(active_session_id: Option<u64>, requested_session_id: u64) -> bool {
+    active_session_id == Some(requested_session_id)
+}
+
+fn stale_session_error(requested_session_id: u64) -> CommandError {
+    CommandError {
+        message: format!("terminal session {requested_session_id} is no longer active"),
+    }
+}
+
 #[tauri::command]
 async fn start_terminal(
     app: tauri::AppHandle,
@@ -42,9 +52,11 @@ async fn start_terminal(
     rows: usize,
     session_id: u64,
 ) -> Result<StartTerminalResult, CommandError> {
-    let mut session = state.session.lock().expect("session lock poisoned");
-    if let Some(existing) = session.as_mut() {
-        existing.kill();
+    let mut session = state.session.lock().map_err(|_| CommandError {
+        message: "terminal session lock poisoned".to_string(),
+    })?;
+    if let Some(mut existing) = session.take() {
+        existing.shutdown()?;
     }
     let next = PtySession::spawn(app, session_id, clamp_cols(cols), clamp_rows(rows))?;
     let result = StartTerminalResult {
@@ -56,8 +68,17 @@ async fn start_terminal(
 }
 
 #[tauri::command]
-async fn write_terminal(state: State<'_, AppState>, input: String) -> Result<(), CommandError> {
-    let session = state.session.lock().expect("session lock poisoned");
+async fn write_terminal(
+    state: State<'_, AppState>,
+    session_id: u64,
+    input: String,
+) -> Result<(), CommandError> {
+    let session = state.session.lock().map_err(|_| CommandError {
+        message: "terminal session lock poisoned".to_string(),
+    })?;
+    if !session_is_current(session.as_ref().map(PtySession::session_id), session_id) {
+        return Err(stale_session_error(session_id));
+    }
     if let Some(session) = session.as_ref() {
         session.write(&input)?;
     }
@@ -65,8 +86,16 @@ async fn write_terminal(state: State<'_, AppState>, input: String) -> Result<(),
 }
 
 #[tauri::command]
-async fn interrupt_terminal(state: State<'_, AppState>) -> Result<(), CommandError> {
-    let session = state.session.lock().expect("session lock poisoned");
+async fn interrupt_terminal(
+    state: State<'_, AppState>,
+    session_id: u64,
+) -> Result<(), CommandError> {
+    let session = state.session.lock().map_err(|_| CommandError {
+        message: "terminal session lock poisoned".to_string(),
+    })?;
+    if !session_is_current(session.as_ref().map(PtySession::session_id), session_id) {
+        return Err(stale_session_error(session_id));
+    }
     if let Some(session) = session.as_ref() {
         session.interrupt()?;
     }
@@ -76,10 +105,16 @@ async fn interrupt_terminal(state: State<'_, AppState>) -> Result<(), CommandErr
 #[tauri::command]
 async fn resize_terminal(
     state: State<'_, AppState>,
+    session_id: u64,
     cols: usize,
     rows: usize,
 ) -> Result<(), CommandError> {
-    let mut session = state.session.lock().expect("session lock poisoned");
+    let mut session = state.session.lock().map_err(|_| CommandError {
+        message: "terminal session lock poisoned".to_string(),
+    })?;
+    if !session_is_current(session.as_ref().map(PtySession::session_id), session_id) {
+        return Err(stale_session_error(session_id));
+    }
     if let Some(session) = session.as_mut() {
         session.resize(clamp_cols(cols), clamp_rows(rows))?;
     }
@@ -87,12 +122,16 @@ async fn resize_terminal(
 }
 
 #[tauri::command]
-async fn stop_terminal(state: State<'_, AppState>) -> Result<(), CommandError> {
-    let mut session = state.session.lock().expect("session lock poisoned");
-    if let Some(session) = session.as_mut() {
-        session.kill();
+async fn stop_terminal(state: State<'_, AppState>, session_id: u64) -> Result<(), CommandError> {
+    let mut session = state.session.lock().map_err(|_| CommandError {
+        message: "terminal session lock poisoned".to_string(),
+    })?;
+    if !session_is_current(session.as_ref().map(PtySession::session_id), session_id) {
+        return Err(stale_session_error(session_id));
     }
-    *session = None;
+    if let Some(mut session) = session.take() {
+        session.shutdown()?;
+    }
     Ok(())
 }
 
@@ -115,4 +154,16 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running RTL Terminal");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::session_is_current;
+
+    #[test]
+    fn only_the_active_session_matches() {
+        assert!(session_is_current(Some(7), 7));
+        assert!(!session_is_current(Some(7), 6));
+        assert!(!session_is_current(None, 7));
+    }
 }

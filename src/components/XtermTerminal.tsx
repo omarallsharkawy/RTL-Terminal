@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { createArabicOutputBuffer, shapeArabic } from './arabicReshaper';
+import { getReconnectDecision } from './reconnectPolicy';
 import type { TerminalStatus } from './StatusBar';
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
@@ -12,6 +13,8 @@ type Disposable = { dispose: () => void };
 interface XtermTerminalProps {
   onStatusChange?: (status: TerminalStatus) => void;
   onShellChange?: (shell: string | null) => void;
+  onErrorChange?: (message: string | null) => void;
+  retryNonce?: number;
 }
 
 interface StartTerminalResult {
@@ -23,6 +26,7 @@ type TerminalDataPayload = string | { sessionId: number; data: string };
 type TerminalExitPayload = undefined | null | { sessionId: number };
 
 const ARABIC_OUTPUT_FLUSH_MS = 12;
+let nextTerminalSessionId = 0;
 
 async function getTauri() {
   if (!('__TAURI_INTERNALS__' in window)) return null;
@@ -52,14 +56,29 @@ function eventTargetIsInside(host: HTMLElement, target: EventTarget | null) {
   return target instanceof Node && host.contains(target);
 }
 
-export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalProps) {
+function describeError(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'object' && error && 'message' in error) {
+    return String(error.message);
+  }
+  return String(error);
+}
+
+export function XtermTerminal({
+  onStatusChange,
+  onShellChange,
+  onErrorChange,
+  retryNonce = 0,
+}: XtermTerminalProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const statusRef = useRef(onStatusChange);
   const shellRef = useRef(onShellChange);
+  const errorRef = useRef(onErrorChange);
   statusRef.current = onStatusChange;
   shellRef.current = onShellChange;
+  errorRef.current = onErrorChange;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -67,7 +86,9 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
 
     const setStatus = (s: TerminalStatus) => statusRef.current?.(s);
     const setShell = (s: string | null) => shellRef.current?.(s);
+    const setError = (message: string | null) => errorRef.current?.(message);
     setStatus('connecting');
+    setError(null);
 
     const term = new Terminal({
       cursorBlink: true,
@@ -140,11 +161,14 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
     let cleanupExited: (() => void) | undefined;
     let inputDisposable: Disposable | undefined;
     let resizeTimer: number | undefined;
+    let reconnectTimer: number | undefined;
     let pasteHandler: ((e: ClipboardEvent) => void) | undefined;
     let observer: ResizeObserver | undefined;
     let outputFlushTimer: number | undefined;
     let currentSessionId: number | null = null;
-    let sessionCounter = 0;
+    let reconnectAttempts = 0;
+    let sessionConnectedAt = 0;
+    let tauriForCleanup: { invoke: Invoke } | undefined;
     const outputBuffer = createArabicOutputBuffer({ preserveCellCount: true });
 
     const flushOutput = () => {
@@ -174,7 +198,7 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
     const resize = async (tauri?: { invoke: Invoke }) => {
       const next = size();
       if (tauri && currentSessionId !== null) {
-        await tauri.invoke('resize_terminal', next);
+        await tauri.invoke('resize_terminal', { ...next, sessionId: currentSessionId });
       }
     };
 
@@ -207,18 +231,61 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
         return;
       }
 
+      tauriForCleanup = tauri;
+
+      const invokeForCurrentSession = <T,>(
+        command: string,
+        args: Record<string, unknown> = {},
+      ): Promise<T> | undefined => {
+        if (currentSessionId === null) return undefined;
+        return tauri.invoke<T>(command, { ...args, sessionId: currentSessionId });
+      };
+
       const startSession = async (reconnecting = false) => {
         if (cancelled) return;
         setStatus(reconnecting ? 'reconnecting' : 'connecting');
-        const sessionId = ++sessionCounter;
+        const sessionId = ++nextTerminalSessionId;
         currentSessionId = sessionId;
         const result = await tauri.invoke<StartTerminalResult>('start_terminal', { ...size(), sessionId });
         if (cancelled || currentSessionId !== sessionId) {
-          await tauri.invoke('stop_terminal').catch(console.error);
+          await tauri.invoke('stop_terminal', { sessionId }).catch(console.error);
           return;
         }
+        if (result.sessionId !== sessionId) {
+          throw new Error(`PTY returned session ${result.sessionId}; expected ${sessionId}`);
+        }
+        sessionConnectedAt = performance.now();
+        setError(null);
         setStatus('connected');
         setShell(result.shell || detectShellName());
+      };
+
+      const scheduleReconnect = (error: unknown) => {
+        if (cancelled) return;
+
+        const connectedForMs = sessionConnectedAt
+          ? performance.now() - sessionConnectedAt
+          : 0;
+        const decision = getReconnectDecision(reconnectAttempts, connectedForMs);
+        sessionConnectedAt = 0;
+        currentSessionId = null;
+        setShell(null);
+
+        if (!decision) {
+          const message = `Unable to start the terminal after several attempts. ${describeError(error)}`;
+          setStatus('error');
+          setError(message);
+          term.writeln(`\r\n\x1b[31mTerminal unavailable:\x1b[0m ${message}`);
+          return;
+        }
+
+        reconnectAttempts = decision.attempt;
+        setStatus('reconnecting');
+        if (reconnectTimer) window.clearTimeout(reconnectTimer);
+        reconnectTimer = window.setTimeout(() => {
+          reconnectTimer = undefined;
+          startSession(true).catch(scheduleReconnect);
+        }, decision.delayMs);
       };
 
       term.attachCustomKeyEventHandler((event) => {
@@ -231,11 +298,13 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
 
         const plainCtrl = event.ctrlKey && !event.altKey && !event.metaKey;
         if (plainCtrl && event.code === 'KeyC') {
-          tauri.invoke('interrupt_terminal').catch(console.error);
+          invokeForCurrentSession('interrupt_terminal')?.catch(console.error);
           return false;
         }
         if (plainCtrl && event.code === 'KeyD') {
-          tauri.invoke('write_terminal', { input: String.fromCharCode(4) }).catch(console.error);
+          invokeForCurrentSession('write_terminal', {
+            input: String.fromCharCode(4),
+          })?.catch(console.error);
           return false;
         }
 
@@ -260,13 +329,14 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
         const payload = event.payload;
         if (cancelled) return;
         if (payload && payload.sessionId !== currentSessionId) return;
+        const exitedSessionId = currentSessionId;
         if (outputFlushTimer) window.clearTimeout(outputFlushTimer);
         flushOutput();
         outputBuffer.reset();
-        startSession(true).catch((error) => {
-          console.error(error);
-          setStatus('error');
-        });
+        if (exitedSessionId !== null) {
+          tauri.invoke('stop_terminal', { sessionId: exitedSessionId }).catch(console.error);
+        }
+        scheduleReconnect(new Error('The shell exited unexpectedly.'));
       });
       if (cancelled) {
         cleanupExited();
@@ -274,7 +344,7 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
       }
 
       inputDisposable = term.onData((data) => {
-        tauri.invoke('write_terminal', { input: data }).catch(console.error);
+        invokeForCurrentSession('write_terminal', { input: data })?.catch(console.error);
       });
 
       // Intercept paste only when it targets the terminal. This bypasses platform
@@ -288,7 +358,7 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
         e.stopPropagation();
         const text = e.clipboardData?.getData('text');
         if (text) {
-          tauri.invoke('write_terminal', { input: text }).catch(console.error);
+          invokeForCurrentSession('write_terminal', { input: text })?.catch(console.error);
         }
       };
       window.addEventListener('paste', pasteHandler, true);
@@ -299,32 +369,44 @@ export function XtermTerminal({ onStatusChange, onShellChange }: XtermTerminalPr
       });
       observer.observe(host);
 
-      await startSession();
-      if (!cancelled) await resize(tauri);
+      try {
+        await startSession();
+        if (!cancelled) await resize(tauri);
+      } catch (error) {
+        scheduleReconnect(error);
+      }
     }).catch((error) => {
       console.error(error);
       if (!cancelled) {
         setStatus('error');
-        term.writeln(`\x1b[31mFailed to start PTY:\x1b[0m ${String(error)}`);
+        const message = `Failed to initialize the terminal bridge. ${describeError(error)}`;
+        setError(message);
+        term.writeln(`\x1b[31mTerminal unavailable:\x1b[0m ${message}`);
       }
     });
 
     return () => {
       cancelled = true;
+      const sessionToStop = currentSessionId;
+      currentSessionId = null;
       cleanupData?.();
       cleanupExited?.();
       inputDisposable?.dispose();
       observer?.disconnect();
       if (resizeTimer) window.clearTimeout(resizeTimer);
+      if (reconnectTimer) window.clearTimeout(reconnectTimer);
       if (outputFlushTimer) window.clearTimeout(outputFlushTimer);
       outputBuffer.reset();
       if (pasteHandler) window.removeEventListener('paste', pasteHandler, true);
       host.removeEventListener('mousedown', focusHandler);
+      if (sessionToStop !== null) {
+        tauriForCleanup?.invoke('stop_terminal', { sessionId: sessionToStop }).catch(console.error);
+      }
       term.dispose();
       terminalRef.current = null;
       fitRef.current = null;
     };
-  }, []);
+  }, [retryNonce]);
 
   return <div ref={hostRef} className="xterm-host" dir="ltr" />;
 }
