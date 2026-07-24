@@ -1,5 +1,6 @@
 const RLE = '\u202B';
 const PDF = '\u202C';
+const ZWJ = '\u200D';
 
 interface ArabicShape {
   isolated: string;
@@ -90,7 +91,7 @@ function canJoinNext(char: string): boolean {
 
 function previousShapeableIndex(chars: string[], start: number): number {
   for (let i = start - 1; i >= 0; i -= 1) {
-    if (isTransparentMark(chars[i])) continue;
+    if (isTransparentMark(chars[i]) || chars[i] === ZWJ) continue;
     return SHAPES[chars[i]] ? i : -1;
   }
   return -1;
@@ -98,7 +99,7 @@ function previousShapeableIndex(chars: string[], start: number): number {
 
 function nextShapeableIndex(chars: string[], start: number): number {
   for (let i = start + 1; i < chars.length; i += 1) {
-    if (isTransparentMark(chars[i])) continue;
+    if (isTransparentMark(chars[i]) || chars[i] === ZWJ) continue;
     return SHAPES[chars[i]] ? i : -1;
   }
   return -1;
