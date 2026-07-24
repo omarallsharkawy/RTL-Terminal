@@ -132,9 +132,9 @@ The Rust backend spawns a real shell inside a PTY and streams incrementally deco
 
 ```bash
 npm run dev           # Vite dev server (browser demo)
-npm run tauri:dev     # Tauri dev (real shell)
+npm run tauri:dev     # Tauri dev (real shell; PTY failure surfaces an inline retry notice)
 npm run build         # tsc + vite build
-npm run test:shaping            # Arabic run/shaping smoke tests
+npm test              # Arabic shaping + session/reconnect regression tests
 node scripts/capture-shots.mjs   # regenerate docs screenshots
 ```
 
