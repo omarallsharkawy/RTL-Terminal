@@ -333,6 +333,10 @@ export function XtermTerminal({
         if (outputFlushTimer) window.clearTimeout(outputFlushTimer);
         flushOutput();
         outputBuffer.reset();
+        // A crashed TUI can leave xterm in alternate-screen, mouse-reporting,
+        // or other private modes. A new shell must start from a clean terminal
+        // state rather than inheriting protocol state from the dead session.
+        term.reset();
         if (exitedSessionId !== null) {
           tauri.invoke('stop_terminal', { sessionId: exitedSessionId }).catch(console.error);
         }

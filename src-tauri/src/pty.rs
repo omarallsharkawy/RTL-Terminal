@@ -2,12 +2,16 @@ use std::{
     env,
     io::{Read, Write},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     thread,
+    time::Duration,
 };
 
 use anyhow::{anyhow, Result};
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
@@ -27,7 +31,8 @@ pub struct PtyExitEvent {
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    child: Box<dyn portable_pty::Child + Send>,
+    killer: Box<dyn ChildKiller + Send + Sync>,
+    exited: Arc<AtomicBool>,
     session_id: u64,
     shell_name: String,
 }
@@ -49,11 +54,24 @@ impl PtySession {
         cmd.env("TERM_PROGRAM", "Twitty");
         cmd.env("FORCE_COLOR", "1");
         cmd.env("CLICOLOR_FORCE", "1");
-        let child = pair.slave.spawn_command(cmd)?;
+        let mut child = pair.slave.spawn_command(cmd)?;
+        let killer = child.clone_killer();
+        let exited = Arc::new(AtomicBool::new(false));
         drop(pair.slave);
 
         let mut reader = pair.master.try_clone_reader()?;
         let writer = Arc::new(Mutex::new(pair.master.take_writer()?));
+        let exit_app = app.clone();
+        let exit_flag = Arc::clone(&exited);
+
+        // ConPTY may keep its output pipe open through conhost even after the
+        // spawned shell has exited, so EOF is not a reliable process-exit
+        // signal on Windows. Wait on the child handle independently.
+        thread::spawn(move || {
+            let _ = child.wait();
+            exit_flag.store(true, Ordering::Release);
+            let _ = exit_app.emit("terminal://exited", PtyExitEvent { session_id });
+        });
 
         thread::spawn(move || {
             let mut buffer = [0_u8; 8192];
@@ -74,14 +92,13 @@ impl PtySession {
             if let Some(data) = decoder.finish() {
                 let _ = app.emit("terminal://data", PtyDataEvent { session_id, data });
             }
-
-            let _ = app.emit("terminal://exited", PtyExitEvent { session_id });
         });
 
         Ok(Self {
             master: pair.master,
             writer,
-            child,
+            killer,
+            exited,
             session_id,
             shell_name,
         })
@@ -117,15 +134,23 @@ impl PtySession {
     }
 
     pub fn shutdown(&mut self) -> Result<()> {
-        let kill_result = self.child.kill();
-        let wait_result = self.child.wait();
+        if self.exited.load(Ordering::Acquire) {
+            return Ok(());
+        }
 
-        match (kill_result, wait_result) {
-            (_, Ok(_)) => Ok(()),
-            (Ok(()), Err(wait_error)) => Err(wait_error.into()),
-            (Err(kill_error), Err(wait_error)) => Err(anyhow!(
-                "failed to stop PTY child ({kill_error}); wait also failed ({wait_error})"
-            )),
+        match self.killer.kill() {
+            Ok(()) => Ok(()),
+            Err(kill_error) => {
+                // The waiter can win the race between the first state check
+                // and kill(). Give it a brief chance to publish normal exit.
+                for _ in 0..10 {
+                    if self.exited.load(Ordering::Acquire) {
+                        return Ok(());
+                    }
+                    thread::sleep(Duration::from_millis(1));
+                }
+                Err(kill_error.into())
+            }
         }
     }
 }
