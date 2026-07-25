@@ -29,13 +29,13 @@ The app also hardens the PTY bridge around real terminal behavior: backend reads
 - **Session-hardened PTY bridge** — split UTF-8 reads, stale shell events, and reconnect cleanup are handled defensively.
 - **Ordered mixed-script input** — burst typing and paste are serialized per session, preserving Arabic, English, and control-key order exactly.
 - **Fast native startup** — the Tauri bridge is bundled eagerly, shell listeners register in parallel, and Windows shell discovery avoids slow PATH scans.
-- **Real shell, real PTY** — a genuine pseudo-terminal via Rust `portable-pty` (Windows ConPTY and Unix PTY).
-- **Full ANSI support** — 24-bit color, alternate screen, scroll regions, mouse reporting, 10k-line scrollback.
-- **Bundled Arabic font** — Noto Naskh Arabic ships with the app so joined Arabic glyphs render on every OS, including Linux.
+- **Real Windows shell, real PTY** — PowerShell runs inside Windows ConPTY via Rust `portable-pty`.
+- **Full ANSI support** — xterm's dynamic 24-bit palette stylesheet is permitted by the native CSP; alternate screen, scroll regions, mouse reporting, and 10k-line scrollback remain intact.
+- **Windows-native typography** — Cascadia Mono/Consolas for the grid, Segoe UI for shaped Arabic, and bundled Noto Naskh Arabic as fallback.
 - **F11 fullscreen**, native **Ctrl+C** interrupt, auto-resize, and shell auto-respawn on exit.
 - **Terminal-only surface** — no internal title rail, shell selector, direction switch, status bar, or shortcut legend.
 - **Browser demo mode** — open without a PTY to preview the rendering (the screenshots above are this mode).
-- **Cross-platform builds** — Windows installer + Linux `.deb` / `.rpm` / AppImage from one GitHub Actions workflow.
+- **Windows-focused builds** — one tested x64 NSIS installer and Windows-native CI gates.
 
 ## Screenshots
 
@@ -65,7 +65,7 @@ npm install
 npm run tauri:dev
 ```
 
-On Windows the backend uses `TWITTY_SHELL` when set, then checks the standard PowerShell 7 and Windows PowerShell locations before falling back through PATH, `%COMSPEC%`, and `cmd.exe`. PowerShell starts with `-NoLogo -NoProfile`. On Unix it uses `$SHELL`, falling back to `/bin/zsh` on macOS and `/bin/bash` or `/bin/sh` elsewhere.
+The backend uses `TWITTY_SHELL` when set, then checks the standard PowerShell 7 and Windows PowerShell locations before falling back through PATH, `%COMSPEC%`, and `cmd.exe`. PowerShell starts with `-NoLogo -NoProfile`.
 
 ### Production build
 
@@ -95,8 +95,8 @@ The hard part of an Arabic terminal isn't only shaping — it's shaping without 
 2. **Events are session-scoped.** `terminal://data` and `terminal://exited` include a session ID so stale killed shells cannot write to or respawn the current terminal.
 3. **The xterm buffer stays canonical.** Shell input and output remain ordinary Unicode; the app never replaces Arabic with presentation-form characters.
 4. **Arabic joins in the DOM renderer.** A character joiner groups each complete Arabic phrase so the browser shapes and orders the latest full line, including slow character-by-character echo.
-5. **ANSI styles share one BiDi sequence.** Adjacent colored Arabic spans are not isolated from each other, so styling individual words does not reverse their sentence order.
-6. **The terminal grid stays LTR.** Arabic direction is scoped to Arabic text runs so Latin commands and cursor cell positions remain predictable.
+5. **ANSI styles share one local RTL group.** Adjacent colored Arabic spans keep their individual colors and cell widths inside one atomic RTL wrapper, so styling individual words does not reverse their sentence order.
+6. **The terminal grid stays LTR.** Active prompts remain on xterm's LTR grid; completed Arabic-led or Arabic-dominant prose receives a scoped RTL paragraph base while embedded Latin remains LTR.
 
 > **Note on `allowProposedApi`:** `registerCharacterJoiner` is a proposed API in xterm.js v6, so the terminal is constructed with `allowProposedApi: true`.
 
@@ -116,22 +116,20 @@ The Rust backend spawns a real shell inside a PTY and streams incrementally deco
 | `src-tauri/src/pty.rs` | PTY session lifecycle, incremental UTF-8 decoding, shell selection |
 | `src-tauri/src/lib.rs` | Tauri commands: `start_terminal`, `write_terminal`, `interrupt_terminal`, `resize_terminal`, `stop_terminal` |
 | `src-tauri/tauri.conf.json` | App + bundle config, CSP, window |
-| `.github/workflows/build.yml` | Windows + Linux builds and GitHub release |
+| `.github/workflows/build.yml` | Windows build, quality gates, and GitHub release |
 
 ### Tech stack
 
 - **Shell:** [Tauri v2](https://tauri.app/) (Rust core, system WebView).
-- **Backend:** Rust with [`portable-pty`](https://crates.io/crates/portable-pty) for cross-platform PTY.
+- **Backend:** Rust with [`portable-pty`](https://crates.io/crates/portable-pty) for Windows ConPTY.
 - **Frontend:** [React 19](https://react.dev/) + [Vite 6](https://vitejs.dev/) + [xterm.js 6](https://xtermjs.org/) with `@xterm/addon-fit`.
-- **Font:** Noto Naskh Arabic (SIL OFL), subset to Arabic Unicode ranges.
+- **Font:** Cascadia Mono/Consolas + Segoe UI, with Noto Naskh Arabic (SIL OFL) fallback.
 
 ## Platform support
 
 | Platform | WebView engine | Status |
 | --- | --- | --- |
-| Windows | WebView2 (Chromium) | Primary target |
-| Linux | webkit2gtk (WebKit) | Built via CI (`.deb` / `.rpm` / AppImage) |
-| macOS | WebKit | Buildable from source |
+| Windows 10/11 | WebView2 (Chromium) | Supported target |
 
 ## Development
 
@@ -155,4 +153,4 @@ Twitty is distributed under the End User License Agreement in [`LICENSE.txt`](LI
 ## Notes
 
 - The `kitty/` directory is vendored reference source, not part of the build, and is gitignored.
-- Windows and Linux installers are built by GitHub Actions; GitHub releases are created only for version tags.
+- The Windows installer is built by GitHub Actions; GitHub releases are created only for version tags.

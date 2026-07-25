@@ -2,17 +2,17 @@
 name: Twitty
 description: A calm, terminal-first desktop shell for dependable Arabic and English workflows.
 colors:
-  terminal-bg: "#0b0d10"
-  border-subtle: "#39424c"
-  ink-primary: "#d3d9df"
-  ink-muted: "#8f9aa5"
-  accent: "#38bdf8"
-  success: "#4ade80"
-  warning: "#facc15"
-  danger: "#f87171"
+  terminal-bg: "#0c0c0c"
+  border-subtle: "#767676"
+  ink-primary: "#cccccc"
+  ink-muted: "#767676"
+  accent: "#3a96dd"
+  success: "#13a10e"
+  warning: "#c19c00"
+  danger: "#c50f1f"
 typography:
   terminal:
-    fontFamily: "Cascadia Mono, Consolas, JetBrains Mono, DejaVu Sans Mono, Liberation Mono, Menlo, Noto Naskh Arabic, monospace"
+    fontFamily: "Cascadia Mono, Cascadia Code, Consolas, Segoe UI, Noto Naskh Arabic, monospace"
     fontSize: "15px"
     fontWeight: 400
     lineHeight: 1
@@ -45,7 +45,7 @@ Twitty is used for focused technical work, often for long sessions in mixed ambi
 
 ## Colors
 
-The palette uses a cool-neutral ramp with cyan reserved for active capability and focus. Green, yellow, and red are semantic state colors only. Inactive surfaces never use full-saturation accents.
+The palette is Windows Terminal's Campbell palette so ANSI applications retain the same semantic colors they use in the system terminal. Cyan identifies active capability and focus; green, yellow, and red remain semantic state colors.
 
 **The Semantic Accent Rule.** Cyan identifies focus, selection, and active direction support; it is forbidden as ambient decoration.
 
@@ -53,7 +53,7 @@ The palette uses a cool-neutral ramp with cyan reserved for active capability an
 
 ## Typography
 
-The terminal uses the configured mono stack with the bundled Noto Naskh Arabic font limited to Arabic Unicode ranges. Arabic-only render runs may compact word spacing while preserving their exact xterm-allocated width; Latin cells must retain zero kerning and zero optional ligatures. Application chrome uses the same mono voice at a compact fixed scale. No display type, fluid heading scale, or decorative letter spacing is permitted.
+The terminal uses Cascadia Mono/Consolas for the Windows grid, with Segoe UI and bundled Noto Naskh Arabic as Arabic fallbacks in the same xterm-measured stack. Arabic runs keep xterm's allocated span width but override its ligature compensation to zero letter spacing; xterm's compensation is designed for short programming ligatures and otherwise creates 15–25px Arabic word gaps. A scoped `-0.45ch` word-spacing correction removes the excess monospace cell width while leaving a readable gap. Latin cells retain zero kerning and zero optional ligatures. Application chrome uses the same mono voice at a compact fixed scale. No display type, fluid heading scale, or decorative letter spacing is permitted.
 
 **The Cell Integrity Rule.** Terminal font, size, line height, and letter spacing are part of rendering correctness. Changes require box-drawing, Arabic shaping, and cursor-position regression tests.
 

@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   findArabicJoinRanges,
+  findArabicRenderGroups,
   isArabicOnlyRenderRun,
+  isNeutralRenderRun,
+  shouldRenderLineRtl,
 } from '../src/components/arabicRenderer.ts';
 
 let passed = 0;
@@ -134,6 +137,46 @@ expect('Arabic diacritics remain eligible for compact layout', isArabicOnlyRende
 expect('Arabic punctuation remains eligible for RTL layout', isArabicOnlyRenderRun('مرحبًا!'), true);
 expect('Latin text is never compacted', isArabicOnlyRenderRun('Fix tests 123'), false);
 expect('mixed Arabic and Latin span is never compacted', isArabicOnlyRenderRun('مرحبا Fix'), false);
+expect('neutral whitespace span is detected', isNeutralRenderRun(' '), true);
+expect('neutral punctuation span is detected', isNeutralRenderRun(', '), true);
+expect('Latin span is not neutral', isNeutralRenderRun('Code123'), false);
+expect('box drawing span is not neutral', isNeutralRenderRun('│'), false);
+
+expect(
+  'contiguous Arabic spans group across neutral spans',
+  findArabicRenderGroups(
+    ['مرحبا', ' ', 'بالعالم', ' | ', 'English'],
+    isArabicOnlyRenderRun,
+    isNeutralRenderRun,
+  ),
+  [['مرحبا', ' ', 'بالعالم']],
+);
+
+expect(
+  'Arabic-dominant prose receives an RTL paragraph base',
+  shouldRenderLineRtl('agy هو الواجهة السطرية لمنصة Google Antigravity والمساعدة البرمجية'),
+  true,
+);
+expect(
+  'Arabic-led mixed output stays RTL even when the English segment is longer',
+  shouldRenderLineRtl("أهلاً وسهلاً! I'm doing great, thank you for asking! 😊"),
+  true,
+);
+expect(
+  'active input rows remain on the LTR terminal grid',
+  shouldRenderLineRtl('أهلاً وسهلاً بك، كيف أساعدك؟', true),
+  false,
+);
+expect(
+  'PowerShell command rows never move to the opposite edge',
+  shouldRenderLineRtl('PS C:\\Users\\Administrator> Write-Output "مرحبا بالعالم"'),
+  false,
+);
+expect(
+  'Latin-dominant mixed output remains LTR',
+  shouldRenderLineRtl('Build passed in Twitty with رسالة قصيرة'),
+  false,
+);
 
 const productionSource = readFileSync(
   new URL('../src/components/XtermTerminal.tsx', import.meta.url),
@@ -153,11 +196,19 @@ const productionStyles = readFileSync(
 );
 assert.match(
   productionStyles,
-  /\.xterm-arabic-run[\s\S]*unicode-bidi:\s*normal/,
-  'styled Arabic spans must share the browser BiDi sequence',
+  /\.xterm-arabic-run[\s\S]*unicode-bidi:\s*isolate/,
+  'Arabic spans must not reorder surrounding Latin cells',
 );
 passed += 1;
-console.log('  ✓ ANSI-styled Arabic spans share one BiDi sequence');
+console.log('  ✓ Arabic spans isolate surrounding Latin cells');
+
+assert.match(
+  productionSource,
+  /shouldRenderLineRtl\(/,
+  'production terminal must choose a paragraph base for Arabic-dominant prose',
+);
+passed += 1;
+console.log('  ✓ production terminal assigns Arabic prose an RTL paragraph base');
 
 assert.doesNotMatch(
   productionSource,

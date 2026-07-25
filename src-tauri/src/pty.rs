@@ -52,7 +52,10 @@ impl PtySession {
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "Twitty");
-        cmd.env("FORCE_COLOR", "1");
+        // Level 1 limits Node/Bun programs to 16 colors. Twitty is backed by
+        // Windows ConPTY + xterm truecolor, so advertise the full capability
+        // required by modern TUIs and gradient/block artwork.
+        cmd.env("FORCE_COLOR", "3");
         cmd.env("CLICOLOR_FORCE", "1");
         let mut child = pair.slave.spawn_command(cmd)?;
         let killer = child.clone_killer();
@@ -405,6 +408,19 @@ mod tests {
         output.extend(decoder.push(&bytes[5..]));
         assert_eq!(output.concat(), "مرحبا");
         assert_eq!(decoder.finish(), None);
+    }
+
+    #[test]
+    fn decodes_emoji_at_every_chunk_boundary() {
+        let bytes = "الحمد لله 🌞".as_bytes();
+
+        for split in 1..bytes.len() {
+            let mut decoder = Utf8ChunkDecoder::default();
+            let mut output = decoder.push(&bytes[..split]);
+            output.extend(decoder.push(&bytes[split..]));
+            assert_eq!(output.concat(), "الحمد لله 🌞", "split at byte {split}");
+            assert_eq!(decoder.finish(), None);
+        }
     }
 
     #[test]

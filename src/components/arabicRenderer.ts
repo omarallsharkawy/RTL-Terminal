@@ -14,6 +14,10 @@ const TRAILING_SENTENCE_PUNCTUATION = new RegExp(
   `^[\\s.,:;!?،؛؟…»”’\\)\\]\\}]+$`,
   'u',
 );
+const ARABIC_SCRIPT_CHARACTER = /\p{Script=Arabic}/gu;
+const LATIN_OR_NUMBER_CHARACTER = /[\p{Script=Latin}\p{Number}]/gu;
+const FIRST_STRONG_CHARACTER = /[\p{Script=Arabic}\p{Script=Latin}\p{Number}]/u;
+const FIXED_LTR_LINE_PREFIX = /^(?:PS\s+[A-Za-z]:\\|[A-Za-z]:\\|[>$❯]\s)/u;
 
 /**
  * Returns JavaScript string ranges for xterm's DOM character joiner.
@@ -67,4 +71,80 @@ export function findArabicJoinRanges(line: string): [number, number][] {
  */
 export function isArabicOnlyRenderRun(text: string): boolean {
   return HAS_ARABIC.test(text) && !HAS_NON_ARABIC_RUN_CONTENT.test(text);
+}
+
+/**
+ * Identifies renderer spans that contain neutral whitespace or punctuation,
+ * but no Arabic script and no Latin/code/number/box-drawing content.
+ */
+export function isNeutralRenderRun(text: string): boolean {
+  return (
+    text.length > 0 &&
+    !HAS_ARABIC.test(text) &&
+    !HAS_NON_ARABIC_RUN_CONTENT.test(text)
+  );
+}
+
+/**
+ * Groups contiguous renderer spans that form a single local RTL visual phrase.
+ * A group begins and ends with an Arabic-only span, and may include neutral
+ * whitespace/punctuation spans between them.
+ */
+export function findArabicRenderGroups<T>(
+  items: T[],
+  isArabic: (item: T) => boolean,
+  isNeutral: (item: T) => boolean,
+): T[][] {
+  const groups: T[][] = [];
+  let index = 0;
+
+  while (index < items.length) {
+    if (!isArabic(items[index])) {
+      index += 1;
+      continue;
+    }
+
+    const currentGroup: T[] = [items[index]];
+    let lastArabicIdx = index;
+    let scan = index + 1;
+
+    while (scan < items.length) {
+      const item = items[scan];
+      if (isArabic(item)) {
+        currentGroup.push(item);
+        lastArabicIdx = scan;
+        scan += 1;
+      } else if (isNeutral(item)) {
+        currentGroup.push(item);
+        scan += 1;
+      } else {
+        break;
+      }
+    }
+
+    const validLength = lastArabicIdx - index + 1;
+    groups.push(currentGroup.slice(0, validLength));
+    index = lastArabicIdx + 1;
+  }
+
+  return groups;
+}
+
+/**
+ * Arabic prose needs an RTL paragraph base so embedded English/code stays in
+ * the correct reading position. Keep shell prompts and the active cursor row
+ * anchored to the terminal's LTR grid.
+ */
+export function shouldRenderLineRtl(
+  text: string,
+  hasActiveCursor = false,
+): boolean {
+  if (hasActiveCursor || FIXED_LTR_LINE_PREFIX.test(text)) return false;
+
+  const arabicCount = text.match(ARABIC_SCRIPT_CHARACTER)?.length || 0;
+  const latinOrNumberCount = text.match(LATIN_OR_NUMBER_CHARACTER)?.length || 0;
+  const firstStrong = text.match(FIRST_STRONG_CHARACTER)?.[0];
+  if (firstStrong && HAS_ARABIC.test(firstStrong)) return true;
+
+  return arabicCount >= 6 && arabicCount > latinOrNumberCount * 1.15;
 }

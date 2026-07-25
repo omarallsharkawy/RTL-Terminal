@@ -1,6 +1,6 @@
 {
   "name": "twitty",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,8 @@
     "test:shaping": "node scripts/test-shaping.mjs",
     "test:session": "node scripts/test-session.mjs",
     "test:input": "node scripts/test-input-queue.mjs",
-    "test": "npm run test:shaping && npm run test:session && npm run test:input",
+    "test:windows": "node scripts/test-windows-rendering.mjs",
+    "test": "npm run test:shaping && npm run test:session && npm run test:input && npm run test:windows",
     "preview": "vite preview --host 127.0.0.1",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",

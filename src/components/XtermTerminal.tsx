@@ -7,7 +7,10 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import '@xterm/xterm/css/xterm.css';
 import {
   findArabicJoinRanges,
+  findArabicRenderGroups,
   isArabicOnlyRenderRun,
+  isNeutralRenderRun,
+  shouldRenderLineRtl,
 } from './arabicRenderer';
 import { getReconnectDecision } from './reconnectPolicy';
 import { TerminalInputQueue } from './terminalInputQueue';
@@ -65,6 +68,32 @@ function describeError(error: unknown) {
   return String(error);
 }
 
+function nextFrame() {
+  return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+async function settleInitialTerminalLayout(
+  term: Terminal,
+  fit: FitAddon,
+  host: HTMLElement,
+) {
+  // WebView2 can report the configured 1180px window for the first frame and
+  // maximize it immediately afterwards. Starting the PTY during that window
+  // produces an 80/132-column TUI header that never redraws at full width.
+  await document.fonts?.ready;
+
+  let previousSignature = '';
+  let stableFrames = 0;
+  for (let frame = 0; frame < 12; frame += 1) {
+    await nextFrame();
+    fit.fit();
+    const signature = `${host.clientWidth}x${host.clientHeight}:${term.cols}x${term.rows}`;
+    stableFrames = signature === previousSignature ? stableFrames + 1 : 0;
+    previousSignature = signature;
+    if (stableFrames >= 2) return;
+  }
+}
+
 export function XtermTerminal({
   onStatusChange,
   onShellChange,
@@ -98,8 +127,10 @@ export function XtermTerminal({
       // registerCharacterJoiner is a proposed API in xterm v6; without this it
       // throws on load and the app never mounts.
       allowProposedApi: true,
-      fontFamily: "'Cascadia Mono', 'Consolas', 'JetBrains Mono', 'DejaVu Sans Mono', 'Liberation Mono', 'Menlo', 'Noto Naskh Arabic', monospace",
+      fontFamily: "'Cascadia Mono', 'Cascadia Code', 'Consolas', 'Segoe UI', 'Noto Naskh Arabic', monospace",
       fontSize: 15,
+      fontWeight: 400,
+      fontWeightBold: 600,
       // 1.0 so block-element and box-drawing glyphs tile seamlessly between rows.
       lineHeight: 1.0,
       letterSpacing: 0,
@@ -109,26 +140,29 @@ export function XtermTerminal({
         buildNumber: 21376,
       },
       theme: {
-        background: '#0b0d10',
-        foreground: '#ccd2d7',
-        cursor: '#b4bfca',
-        selectionBackground: '#295b77',
+        // Windows Terminal's Campbell palette. Matching the system terminal
+        // keeps ANSI applications visually consistent instead of recoloring
+        // their semantic output with a custom pastel theme.
+        background: '#0c0c0c',
+        foreground: '#cccccc',
+        cursor: '#ffffff',
+        selectionBackground: '#ffffff40',
         black: '#0c0c0c',
-        red: '#f87171',
-        green: '#16c60c',
-        yellow: '#facc15',
-        blue: '#7dd3fc',
-        magenta: '#c084fc',
-        cyan: '#67e8f9',
-        white: '#d8e4ec',
-        brightBlack: '#64748b',
-        brightRed: '#fca5a5',
-        brightGreen: '#bef264',
-        brightYellow: '#fde047',
-        brightBlue: '#bae6fd',
-        brightMagenta: '#d8b4fe',
-        brightCyan: '#a5f3fc',
-        brightWhite: '#f8fafc',
+        red: '#c50f1f',
+        green: '#13a10e',
+        yellow: '#c19c00',
+        blue: '#0037da',
+        magenta: '#881798',
+        cyan: '#3a96dd',
+        white: '#cccccc',
+        brightBlack: '#767676',
+        brightRed: '#e74856',
+        brightGreen: '#16c60c',
+        brightYellow: '#f9f1a5',
+        brightBlue: '#3b78ff',
+        brightMagenta: '#b4009e',
+        brightCyan: '#61d6d6',
+        brightWhite: '#f2f2f2',
       },
     });
     const fit = new FitAddon();
@@ -164,24 +198,100 @@ export function XtermTerminal({
     let tauriForCleanup: { invoke: Invoke } | undefined;
     let inputQueue: TerminalInputQueue | undefined;
 
-    const decorateArabicRow = (row: HTMLElement) => {
-      for (const span of row.querySelectorAll<HTMLElement>('span')) {
-        const text = span.textContent || '';
-        if (!isArabicOnlyRenderRun(text)) {
-          if (span.classList.contains('xterm-arabic-run')) {
-            span.classList.remove('xterm-arabic-run');
-            span.style.removeProperty('--terminal-arabic-run-width');
-            span.removeAttribute('dir');
-          }
-          continue;
-        }
+    const unwrapArabicGroups = (row: HTMLElement) => {
+      for (const group of Array.from(row.querySelectorAll('.xterm-arabic-group'))) {
+        group.replaceWith(...Array.from(group.childNodes));
+      }
+    };
 
-        // xterm allocated this exact width from terminal cells. Preserve it
-        // while compacting only the visual word gap inside the Arabic run.
-        const allocatedWidth = span.getBoundingClientRect().width;
-        span.style.setProperty('--terminal-arabic-run-width', `${allocatedWidth}px`);
-        span.classList.add('xterm-arabic-run');
-        span.setAttribute('dir', 'rtl');
+    const rendererSpans = (row: HTMLElement) => Array.from(row.children).flatMap(
+      (child) => {
+        if (!(child instanceof HTMLElement) || child.tagName !== 'SPAN') return [];
+        if (!child.classList.contains('xterm-arabic-group')) return [child];
+        return Array.from(child.children).filter(
+          (nested): nested is HTMLElement => (
+            nested instanceof HTMLElement && nested.tagName === 'SPAN'
+          ),
+        );
+      },
+    );
+
+    const setArabicSpanLayout = (span: HTMLElement, enabled: boolean) => {
+      if (!enabled) {
+        span.classList.remove('xterm-arabic-run');
+        span.style.removeProperty('--terminal-arabic-run-width');
+        span.removeAttribute('dir');
+        return;
+      }
+
+      // xterm allocated this exact width from terminal cells. Preserve it
+      // while Windows shapes the Arabic text naturally inside those cells.
+      const allocatedWidth = span.getBoundingClientRect().width;
+      span.style.setProperty('--terminal-arabic-run-width', `${allocatedWidth}px`);
+      span.classList.add('xterm-arabic-run');
+      span.setAttribute('dir', 'rtl');
+    };
+
+    const decorateArabicRow = (row: HTMLElement) => {
+      const hasCursor = Boolean(row.querySelector('.xterm-cursor'));
+
+      // Cursor rows stay on xterm's LTR grid, but their Arabic spans still
+      // need contextual shaping and compact spacing while the user types.
+      if (hasCursor) unwrapArabicGroups(row);
+
+      let childSpans = rendererSpans(row);
+      for (const span of childSpans) {
+        setArabicSpanLayout(span, isArabicOnlyRenderRun(span.textContent || ''));
+      }
+
+      row.classList.toggle(
+        'xterm-rtl-line',
+        shouldRenderLineRtl(row.textContent || '', hasCursor),
+      );
+      if (hasCursor) return;
+
+      let groups = findArabicRenderGroups(
+        childSpans,
+        (span) => isArabicOnlyRenderRun(span.textContent || ''),
+        (span) => isNeutralRenderRun(span.textContent || ''),
+      ).filter((group) => group.length >= 2);
+
+      const existingWrappers = Array.from(
+        row.querySelectorAll<HTMLElement>(':scope > .xterm-arabic-group'),
+      );
+      const wrappersAreCanonical = (
+        existingWrappers.length === groups.length
+        && groups.every((group) => {
+          const parent = group[0].parentElement;
+          return (
+            parent?.classList.contains('xterm-arabic-group')
+            && group.every((span) => span.parentElement === parent)
+            && parent.children.length === group.length
+          );
+        })
+      );
+
+      // Our own observer callback must become a true no-op after one pass.
+      // Rebuilding a correct wrapper here would create an endless async
+      // MutationObserver unwrap/wrap cycle.
+      if (wrappersAreCanonical) return;
+
+      if (existingWrappers.length) {
+        unwrapArabicGroups(row);
+        childSpans = rendererSpans(row);
+        groups = findArabicRenderGroups(
+          childSpans,
+          (span) => isArabicOnlyRenderRun(span.textContent || ''),
+          (span) => isNeutralRenderRun(span.textContent || ''),
+        ).filter((group) => group.length >= 2);
+      }
+
+      for (const group of groups) {
+        const wrapper = document.createElement('span');
+        wrapper.className = 'xterm-arabic-group';
+        wrapper.setAttribute('dir', 'rtl');
+        group[0].before(wrapper);
+        wrapper.append(...group);
       }
     };
 
@@ -236,6 +346,13 @@ export function XtermTerminal({
         w(C(244, '# Arabic shapes contextually and flows right-to-left, inline with English.'));
         w('English stays LTR · العربية تتشكّل وتُعرض من اليمين لليسار ✓');
         w(`مرحبا بك في ${C(39, 'Twitty')} — طرفية تدعم العربية والإنجليزية معًا`);
+        w(
+          `${C(12, 'agy')} هو الواجهة السطرية ${C(244, '(CLI)')} لمنصة `
+          + `${C(15, 'Google Antigravity')} للذكاء الاصطناعي والمساعدة البرمجية `
+          + `${C(244, '(Terminal).')}`,
+        );
+        w(`${C(15, 'أهلاً وسهلاً!')} ${C(15, "I'm doing great, thank you for asking!")} 😊`);
+        w(`ANSI split: ${C(196, 'مرحبا')}${C(244, ' ')}${C(46, 'بالعالم')} | English123 🌞`);
         w('');
         w(`${C(35, '❯')} ${C(245, 'git status')}   ${C(245, '# الفرع:')} ${C(39, 'main')} ${C(245, '· نظيف')}`);
         w(`${C(35, '❯')} ${C(245, 'echo')} ${C(215, '"السلام عليكم, world"')}`);
@@ -251,6 +368,7 @@ export function XtermTerminal({
         w(`${C(39, '╰────────────────────────────┴──────────╯')}`);
         w('');
         w(`${C(245, 'Run')} ${C(36, 'npm run tauri:dev')} ${C(245, 'to launch the real terminal.')}`);
+        term.write(`${C(35, '❯')} كيفك how are you كويس؟`);
         return;
       }
 
@@ -398,6 +516,7 @@ export function XtermTerminal({
       observer.observe(host);
 
       try {
+        await settleInitialTerminalLayout(term, fit, host);
         await startSession();
         if (!cancelled) await resize(tauri);
       } catch (error) {

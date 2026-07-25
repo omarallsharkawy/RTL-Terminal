@@ -1,8 +1,8 @@
 :root {
   color-scheme: dark;
-  --font-mono: 'Cascadia Mono', 'Consolas', 'JetBrains Mono', 'DejaVu Sans Mono',
-    'Liberation Mono', 'Menlo', 'Noto Naskh Arabic', monospace;
-  --font-arabic: 'Noto Naskh Arabic', 'Segoe UI', 'Tahoma', 'Arial', sans-serif;
+  --font-mono: 'Cascadia Mono', 'Cascadia Code', 'Consolas', 'Segoe UI',
+    'Noto Naskh Arabic', monospace;
+  --font-arabic: 'Segoe UI', 'Noto Naskh Arabic', 'Tahoma', 'Arial', sans-serif;
   --terminal-bg: #0b0d10;
   --ink-primary: #d3d9df;
   --ink-muted: #9aa5af;
@@ -73,19 +73,49 @@ body {
   font-variant-ligatures: none;
 }
 
+.xterm-host .xterm-rows .xterm-arabic-group {
+  display: inline-flex;
+  direction: rtl;
+  unicode-bidi: isolate;
+  vertical-align: top;
+}
+
+.xterm-host .xterm-rows .xterm-arabic-group > span {
+  flex: none;
+}
+
 /* xterm reserves one cell per Arabic code point. Keep that cell allocation so
    cursors, selection, and TUI overlays stay exact, but stop a monospaced
    Arabic space plus both word side-bearings from looking like a triple gap. */
 .xterm-host .xterm-rows .xterm-arabic-run {
   width: var(--terminal-arabic-run-width);
   direction: rtl;
-  /* Let the browser's BiDi algorithm continue across adjacent ANSI-colored
-     spans. Isolating each style span would keep Arabic words in logical LTR
-     block order even though every individual word was shaped correctly. */
-  unicode-bidi: normal;
+  /* Keep each styled run isolated from surrounding Latin cells. When ANSI
+     splits one Arabic phrase, the local .xterm-arabic-group supplies the
+     shared RTL order without sacrificing per-span colors. */
+  unicode-bidi: isolate;
   text-align: center;
-  word-spacing: -0.55ch;
+  /* xterm's DOM joiner writes the whole cell-width delta as inline
+     letter-spacing. That is correct for short programming ligatures, but a
+     proportional Arabic phrase turns it into 15–25px gaps. Keep the allocated
+     span width while letting the browser shape the cursive run naturally. */
+  letter-spacing: 0 !important;
+  word-spacing: -0.45ch;
   font-variant-ligatures: normal;
+}
+
+/* Completed Arabic-dominant prose uses an RTL paragraph base so embedded
+   English/code keeps its local LTR order without moving to unrelated cells.
+   Prompt and cursor rows are deliberately excluded by the renderer policy. */
+.xterm-host .xterm-rows > .xterm-rtl-line {
+  direction: rtl;
+  unicode-bidi: isolate;
+  text-align: right;
+}
+
+.xterm-host .xterm-rows > .xterm-rtl-line > span:not(.xterm-arabic-run):not(.xterm-arabic-group) {
+  direction: ltr;
+  unicode-bidi: isolate;
 }
 
 /* Recovery is the only application UI. It exists only when the PTY cannot

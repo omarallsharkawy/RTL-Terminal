@@ -72,12 +72,28 @@ const arabicRows = await page.evaluate(() => (
           display: style.display,
           direction: style.direction,
           unicodeBidi: style.unicodeBidi,
+          color: style.color,
+          backgroundColor: style.backgroundColor,
           left: Number(rect.left.toFixed(1)),
           right: Number(rect.right.toFixed(1)),
         };
       }),
     }))
 ));
+const rendererStyles = await page.evaluate(() => (
+  Array.from(document.querySelectorAll('.xterm-screen style')).map((style) => ({
+    sheetLoaded: Boolean(style.sheet),
+    rules: style.sheet?.cssRules?.length || 0,
+  }))
+));
+assert.ok(
+  rendererStyles.length >= 3 && rendererStyles.every((style) => style.sheetLoaded),
+  `xterm dynamic styles must pass the native CSP: ${JSON.stringify(rendererStyles)}`,
+);
+assert.ok(
+  rendererStyles.some((style) => style.rules > 700),
+  `xterm ANSI palette stylesheet is missing: ${JSON.stringify(rendererStyles)}`,
+);
 const styledArabic = arabicRows
   .find((row) => row.text?.startsWith('STYLED='))
   ?.spans.filter((span) => span.className.includes('xterm-arabic-run'));
@@ -89,6 +105,11 @@ assert.ok(
   styledArabic[0].left > styledArabic[1].left,
   'the first logical Arabic word must render to the visual right across ANSI spans',
 );
+assert.notEqual(
+  styledArabic[0].color,
+  styledArabic[1].color,
+  'ANSI-styled Arabic words must retain distinct computed colors',
+);
 
 if (screenshot) {
   await page.screenshot({ path: screenshot });
@@ -98,6 +119,7 @@ console.log(JSON.stringify({
   processId: child.pid,
   firstPtyOutputMs: Number(firstPtyOutputMs.toFixed(1)),
   screenshot: screenshot || null,
+  rendererStyles,
   arabicRows,
 }));
 await browser.close();
