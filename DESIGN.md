@@ -43,6 +43,17 @@ Twitty is used for focused technical work, often for long sessions in mixed ambi
 
 **The Zero-Chrome Rule.** In the healthy state, every pixel inside the native window frame belongs to the terminal canvas. Product identity, shell labels, direction indicators, and shortcut legends do not compete with terminal output.
 
+## Brand Mark
+
+The mark uses two opposing terminal chevrons around one cursor. Cyan carries
+the active direction, neutral white carries the opposing direction, and green
+is reserved for the cursor. The geometry must remain recognizable at 16px;
+wordmarks, thin strokes, gradients, shadows, and extra decoration are excluded.
+
+**The Small-Silhouette Rule.** Every icon change is reviewed at 16, 24, 32,
+48, and 256px. If the mark requires the word “Twitty” to be understood, it is
+not an app icon.
+
 ## Colors
 
 The palette is Windows Terminal's Campbell palette so ANSI applications retain the same semantic colors they use in the system terminal. Cyan identifies active capability and focus; green, yellow, and red remain semantic state colors.
@@ -76,6 +87,20 @@ Twitty is flat by default. Depth is conveyed through tonal layers and single-pix
 
 - Floats above the terminal bottom edge rather than replacing or resizing the terminal.
 - States the failure in plain language, preserves diagnostic detail, and offers a keyboard-accessible retry action.
+
+### Windows Installer
+
+- Uses the standard NSIS Modern UI flow so controls and keyboard behavior are
+  familiar to Windows users.
+- Offers English and Arabic before the welcome page.
+- Installs for the current user by default, avoiding an elevation prompt.
+- Shows install location and Start Menu choices before copying files.
+- Leaves desktop shortcut creation off by default, while keeping it available
+  on the finish page.
+- Uses the same app mark for the executable, installer, uninstaller, language
+  selector, Start Menu, and desktop shortcuts.
+- Uses branded 164×314 sidebar artwork on welcome/finish and restrained 150×57
+  header artwork on task pages.
 
 ## Do's and Don'ts
 

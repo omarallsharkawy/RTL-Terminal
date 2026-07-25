@@ -16,6 +16,13 @@ Twitty is a Windows-native terminal whose TUI geometry, ANSI color, keyboard beh
 
 Native, precise, quiet. Twitty should feel like a serious Windows developer tool: familiar at first glance, visually stable during long sessions, and confident without decorative product chrome.
 
+## Brand Identity
+
+Twitty's mark is a bidirectional prompt: two opposing terminal chevrons meet
+around one cursor. It communicates mixed RTL/LTR work without copying the
+Windows Terminal prompt icon, using letters, or relying on detail that
+disappears at taskbar size.
+
 ## Anti-references
 
 - Browser-styled “terminal” mockups whose font metrics or colors differ from native terminal behavior.
@@ -31,6 +38,8 @@ Native, precise, quiet. Twitty should feel like a serious Windows developer tool
 3. Scope RTL to Arabic visual runs and completed Arabic prose; keep prompts, the terminal grid, and Latin commands LTR.
 4. Validate changes in real PowerShell and TUI programs, not only browser demos or unit fixtures.
 5. Keep the healthy application surface invisible: the user should see their terminal, not Twitty.
+6. Keep setup familiar and reversible: no elevation for a normal install,
+   explicit location and shortcut choices, and standard Windows controls.
 
 ## Accessibility & Inclusion
 

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 164 314" role="img" aria-labelledby="title desc">
+  <title id="title">Twitty installer sidebar</title>
+  <desc id="desc">Twitty identity and Arabic terminal tagline on a dark field.</desc>
+  <rect width="164" height="314" fill="#0c0c0c"/>
+
+  <g transform="translate(24 28) scale(.11328125)">
+    <rect width="1024" height="1024" rx="192" fill="#151515"/>
+    <path fill="#3a96dd" d="M176 276h144l236 236-236 236H176l236-236z"/>
+    <path fill="#cccccc" d="M848 276H704L468 512l236 236h144L612 512z"/>
+    <rect x="480" y="408" width="64" height="208" rx="12" fill="#13a10e"/>
+  </g>
+
+  <text x="24" y="177" fill="#f5f5f5" font-family="Segoe UI, sans-serif" font-size="25" font-weight="650">Twitty</text>
+  <rect x="24" y="193" width="42" height="3" rx="1.5" fill="#3a96dd"/>
+  <text x="24" y="222" fill="#cccccc" font-family="Segoe UI, sans-serif" font-size="11.5">Arabic, in the</text>
+  <text x="24" y="239" fill="#cccccc" font-family="Segoe UI, sans-serif" font-size="11.5">right direction.</text>
+  <text x="24" y="286" fill="#767676" font-family="Cascadia Mono, Consolas, monospace" font-size="9">WINDOWS · X64</text>
+</svg>

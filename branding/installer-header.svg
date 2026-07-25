@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 57" role="img" aria-labelledby="title desc">
+  <title id="title">Twitty installer header</title>
+  <desc id="desc">Compact Twitty mark and product name.</desc>
+  <rect width="150" height="57" fill="#0c0c0c"/>
+  <g transform="translate(9 9) scale(.0380859375)">
+    <rect width="1024" height="1024" rx="192" fill="#151515"/>
+    <path fill="#3a96dd" d="M176 276h144l236 236-236 236H176l236-236z"/>
+    <path fill="#cccccc" d="M848 276H704L468 512l236 236h144L612 512z"/>
+    <rect x="480" y="408" width="64" height="208" rx="12" fill="#13a10e"/>
+  </g>
+  <text x="56" y="27" fill="#f5f5f5" font-family="Segoe UI, sans-serif" font-size="16" font-weight="650">Twitty</text>
+  <text x="56" y="42" fill="#8b8b8b" font-family="Segoe UI, sans-serif" font-size="7.5">RTL terminal · Windows</text>
+</svg>

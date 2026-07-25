@@ -3,12 +3,12 @@
   --font-mono: 'Cascadia Mono', 'Cascadia Code', 'Consolas', 'Segoe UI',
     'Noto Naskh Arabic', monospace;
   --font-arabic: 'Segoe UI', 'Noto Naskh Arabic', 'Tahoma', 'Arial', sans-serif;
-  --terminal-bg: #0b0d10;
-  --ink-primary: #d3d9df;
-  --ink-muted: #9aa5af;
-  --border-subtle: #39424c;
-  --accent: #38bdf8;
-  --state-error: #f87171;
+  --terminal-bg: #0c0c0c;
+  --ink-primary: #cccccc;
+  --ink-muted: #767676;
+  --border-subtle: #767676;
+  --accent: #3a96dd;
+  --state-error: #c50f1f;
 }
 
 /* The bundled fallback is restricted to Arabic so Latin, ANSI art, and box

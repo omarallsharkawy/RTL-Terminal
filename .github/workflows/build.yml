@@ -155,5 +155,5 @@ jobs:
             --repo $env:GITHUB_REPOSITORY `
             --target $env:GITHUB_SHA `
             --title "Twitty $env:GITHUB_REF_NAME" `
-            --notes "Automated Windows build from workflow run ${{ github.run_number }}."
+            --notes-file CHANGELOG.md
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

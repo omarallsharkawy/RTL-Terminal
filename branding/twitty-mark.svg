@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Twitty bidirectional terminal mark</title>
+  <desc id="desc">Two opposing terminal chevrons meet around a cursor.</desc>
+  <rect width="1024" height="1024" rx="192" fill="#0c0c0c"/>
+  <path
+    fill="#3a96dd"
+    d="M176 276h144l236 236-236 236H176l236-236z"
+  />
+  <path
+    fill="#cccccc"
+    d="M848 276H704L468 512l236 236h144L612 512z"
+  />
+  <rect x="480" y="408" width="64" height="208" rx="12" fill="#13a10e"/>
+</svg>

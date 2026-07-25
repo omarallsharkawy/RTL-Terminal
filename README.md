@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/assets/twitty-logo.png" alt="Twitty bidirectional terminal mark" width="128">
+
 # Twitty · RTL Terminal
 
 **A bidirectional terminal emulator that renders Arabic the way it's meant to be read.**
@@ -47,6 +49,22 @@ The app also hardens the PTY bridge around real terminal behavior: backend reads
 
 ## Quick start
 
+### Install on Windows
+
+Download the x64 NSIS setup from the latest GitHub release and run it. The
+installer is available in English and Arabic and installs for the current user
+without an Administrator prompt.
+
+During setup you can:
+
+- keep the default `%LOCALAPPDATA%\Twitty` destination or choose another folder;
+- create the Start Menu folder, rename it, or opt out of Start Menu shortcuts;
+- optionally create a desktop shortcut on the finish page (off by default);
+- launch Twitty immediately after installation.
+
+The WebView2 bootstrapper is embedded so setup does not need a separate
+bootstrapper download before it can verify or install the runtime.
+
 ### Browser demo (no shell)
 
 ```bash
@@ -71,8 +89,11 @@ The backend uses `TWITTY_SHELL` when set, then checks the standard PowerShell 7 
 
 ```bash
 npm run build         # type-check + bundle the frontend
-npm run tauri:build   # produce native installers
+npm run tauri:build -- --bundles nsis --ci --no-sign
 ```
+
+The installer is written to
+`src-tauri/target/release/bundle/nsis/Twitty_<version>_x64-setup.exe`.
 
 ## How the RTL rendering works
 
@@ -115,7 +136,10 @@ The Rust backend spawns a real shell inside a PTY and streams incrementally deco
 | `src/styles.css` | Full-window terminal layout and bundled Arabic `@font-face` |
 | `src-tauri/src/pty.rs` | PTY session lifecycle, incremental UTF-8 decoding, shell selection |
 | `src-tauri/src/lib.rs` | Tauri commands: `start_terminal`, `write_terminal`, `interrupt_terminal`, `resize_terminal`, `stop_terminal` |
-| `src-tauri/tauri.conf.json` | App + bundle config, CSP, window |
+| `branding/` | Canonical app mark and branded NSIS artwork |
+| `src-tauri/installer-assets/` | Generated Windows installer ICO/BMP assets |
+| `src-tauri/installer-hooks.nsh` | Installer defaults such as the optional desktop shortcut |
+| `src-tauri/tauri.conf.json` | App + Windows installer config, CSP, window |
 | `.github/workflows/build.yml` | Windows build, quality gates, and GitHub release |
 
 ### Tech stack
@@ -140,11 +164,6 @@ npm run build         # tsc + vite build
 npm test              # Arabic rendering + session/reconnect + ordered-input regression tests
 node scripts/capture-shots.mjs   # regenerate docs screenshots
 ```
-
-## Documentation
-
-A full PDF write-up of the app and its design decisions lives at
-[`docs/twitty-overview.pdf`](docs/twitty-overview.pdf).
 
 ## License
 

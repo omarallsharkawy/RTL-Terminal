@@ -1,5 +1,6 @@
 ﻿node_modules/
 dist/
+branding/generated/
 src-tauri/target/
 src-tauri/gen/
 *.log

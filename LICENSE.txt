@@ -1,44 +1,56 @@
-======================================================================
-                     TWITTY TERMINAL EMULATOR
-                  END USER LICENSE AGREEMENT (EULA)
-======================================================================
+TWITTY END USER LICENSE AGREEMENT
+Last updated: July 2026
 
-بند اتفاقية ترخيص المستخدم النهائي لتطبيق Twitty:
-يرجى قراءة هذه الاتفاقية بعناية قبل تثبيت البرنامج أو استخدامه.
+النسخة العربية
 
-1. الترخيص (License Grant):
-يمنحك هذا الترخيص حقاً غير حصري وغير قابل للتحويل لتثبيت واستخدام برنامج 
-Twitty على أجهزتك الشخصية أو المهنية.
+يرجى قراءة هذه الاتفاقية قبل تثبيت Twitty أو استخدامه.
 
-2. حقوق الملكية (Intellectual Property):
-تطبيق Twitty وجميع شفراته البرمجية وتصميماته هي ملك للمطورين والمساهمين 
-في المشروع. محمي بموجب قوانين الملكية الفكرية المعمول بها.
+1. الترخيص
+يمنحك مشروع Twitty ترخيصًا محدودًا وغير حصري وغير قابل للتحويل لتثبيت
+التطبيق واستخدامه على أجهزتك الشخصية أو المهنية.
 
-3. شروط الاستخدام وقبول الضوابط (Acceptance of Terms):
-بتثبيتك لهذا التطبيق، فإنك توافق وتتعهد بالآتي:
-- عدم استخدام البرنامج في أي أنشطة غير قانونية أو ضارة بالغير.
-- قبول أن البرنامج يُقدَّم "كما هو" (AS IS) دون أي ضمانات صريحة أو ضمنية.
-- المطورون غير مسؤولين عن أي أضرار مباشرة أو غير مباشرة ناتجة عن استخدام 
-  أو عدم القدرة على استخدام البرنامج.
-- بما أن مشكلة الـ Ctrl+C تم حلها نهائياً بفضل الله والذكاء الاصطناعي، 
-  فإنك تتعهد بالاستمتاع بتجربة الاستخدام وعدم لوم البرنامج على أي إرهاق 
-  سابق سببه لك الـ Terminal القديم!
+2. الاستخدام المقبول
+لا يجوز استخدام التطبيق في نشاط غير قانوني، أو محاولة إزالة إشعارات
+الملكية، أو إعادة توزيع نسخة معدلة باسم Twitty دون إذن.
 
-======================================================================
-English Version:
+3. الملكية
+يظل التطبيق وعلامته وتصميمه وحقوقه مملوكًا لأصحابه والمساهمين فيه. لا
+تنقل هذه الاتفاقية إليك أي حق ملكية.
+
+4. إخلاء المسؤولية
+يُقدَّم التطبيق "كما هو" وبدون ضمانات صريحة أو ضمنية. إلى أقصى حد يسمح
+به القانون، لا يتحمل أصحاب المشروع أو المساهمون مسؤولية أي أضرار مباشرة
+أو غير مباشرة ناتجة عن استخدام التطبيق أو تعذر استخدامه.
+
+5. القبول
+بتثبيت التطبيق أو استخدامه، فإنك توافق على هذه الاتفاقية.
+
+----------------------------------------------------------------------
+
+English version
+
+Please read this agreement before installing or using Twitty.
 
 1. LICENSE GRANT
-Subject to the terms of this Agreement, Twitty Developers grant you a 
-non-exclusive, non-transferable license to install and use Twitty.
+The Twitty Project grants you a limited, non-exclusive, non-transferable
+license to install and use the application on personal or professional
+devices.
 
-2. DISCLAIMER OF WARRANTY
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS 
-OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE 
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER 
-LIABILITY.
+2. ACCEPTABLE USE
+You may not use the application for unlawful activity, remove proprietary
+notices, or redistribute a modified build under the Twitty name without
+permission.
 
-3. AGREEMENT
-By checking the box and installing this software, you confirm your 
-agreement to all terms listed above in both Arabic and English.
-======================================================================
+3. OWNERSHIP
+The application, brand, design, and associated rights remain the property
+of their respective owners and contributors. This agreement transfers no
+ownership rights to you.
+
+4. DISCLAIMER
+THE APPLICATION IS PROVIDED "AS IS", WITHOUT EXPRESS OR IMPLIED WARRANTY.
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE PROJECT OWNERS AND CONTRIBUTORS
+ARE NOT LIABLE FOR DIRECT OR INDIRECT DAMAGES ARISING FROM USE OF, OR
+INABILITY TO USE, THE APPLICATION.
+
+5. ACCEPTANCE
+By installing or using the application, you agree to this agreement.
