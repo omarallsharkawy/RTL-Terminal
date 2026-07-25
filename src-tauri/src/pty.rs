@@ -239,6 +239,11 @@ fn default_shell() -> (String, Vec<String>) {
 
     #[cfg(windows)]
     {
+        // Resolve the standard install locations first. Walking every PATH
+        // entry can block startup on stale or disconnected network paths.
+        if let Some(shell) = known_windows_shell() {
+            return (shell, vec!["-NoLogo".to_string(), "-NoProfile".to_string()]);
+        }
         if command_exists("pwsh.exe") {
             return (
                 "pwsh.exe".to_string(),
@@ -281,6 +286,34 @@ fn default_shell() -> (String, Vec<String>) {
     }
 }
 
+#[cfg(windows)]
+fn known_windows_shell() -> Option<String> {
+    for variable in ["ProgramW6432", "ProgramFiles"] {
+        if let Some(root) = env::var_os(variable) {
+            let candidate = PathBuf::from(root)
+                .join("PowerShell")
+                .join("7")
+                .join("pwsh.exe");
+            if candidate.is_file() {
+                return Some(candidate.to_string_lossy().into_owned());
+            }
+        }
+    }
+
+    if let Some(root) = env::var_os("SystemRoot") {
+        let candidate = PathBuf::from(root)
+            .join("System32")
+            .join("WindowsPowerShell")
+            .join("v1.0")
+            .join("powershell.exe");
+        if candidate.is_file() {
+            return Some(candidate.to_string_lossy().into_owned());
+        }
+    }
+
+    None
+}
+
 fn shell_name(shell: &str) -> String {
     Path::new(shell)
         .file_stem()
@@ -304,8 +337,11 @@ fn command_exists(command: &str) -> bool {
     let has_extension = command_path.extension().is_some();
 
     for dir in env::split_paths(&path) {
-        if has_extension && dir.join(command).exists() {
-            return true;
+        if has_extension {
+            if dir.join(command).is_file() {
+                return true;
+            }
+            continue;
         }
         for ext in pathext.split(';') {
             let ext = ext.trim();

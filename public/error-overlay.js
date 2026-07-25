@@ -6,6 +6,7 @@
 
   function show(label, body) {
     box.style.display = 'block';
+    box.dataset.reason = label;
     txt.textContent += '==== ' + label + ' ====\n' + body + '\n\n';
   }
 
@@ -25,9 +26,12 @@
     );
   });
 
-  // If React never populates #root after 6s, surface that explicitly.
-  setTimeout(function () {
-    var root = document.getElementById('root');
+  // Surface a genuinely stalled mount, but cancel the warning as soon as
+  // React populates the root. Development builds can take longer than six
+  // seconds on the first transform; a late successful mount must also clear a
+  // timeout-only warning rather than covering the working terminal forever.
+  var root = document.getElementById('root');
+  var mountTimer = setTimeout(function () {
     if (root && root.children.length === 0) {
       show(
         'mount-timeout',
@@ -36,4 +40,19 @@
       );
     }
   }, 6000);
+
+  if (root) {
+    var observer = new MutationObserver(function () {
+      if (root.children.length === 0) return;
+
+      clearTimeout(mountTimer);
+      observer.disconnect();
+      if (box.dataset.reason === 'mount-timeout') {
+        box.style.display = 'none';
+        box.removeAttribute('data-reason');
+        txt.textContent = '';
+      }
+    });
+    observer.observe(root, { childList: true });
+  }
 })();

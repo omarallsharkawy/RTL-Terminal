@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { findArabicJoinRanges } from '../src/components/arabicRenderer.ts';
+import {
+  findArabicJoinRanges,
+  isArabicOnlyRenderRun,
+} from '../src/components/arabicRenderer.ts';
 
 let passed = 0;
 
@@ -54,11 +57,32 @@ expect(
   [[0, punctuation.length]],
 );
 
+const asciiSentence = 'مرحبا! كيف حالك؟';
+expect(
+  'sentence punctuation stays visually attached to Arabic prose',
+  findArabicJoinRanges(asciiSentence),
+  [[0, asciiSentence.length]],
+);
+
+const parenthesized = 'يعمل (الآن)، بالتأكيد.';
+expect(
+  'parentheses and trailing punctuation stay inside Arabic prose',
+  findArabicJoinRanges(parenthesized),
+  [[0, parenthesized.length]],
+);
+
 const latinPunctuation = 'مرحبا | English';
 expect(
   'ASCII punctuation stays outside the Arabic run',
   findArabicJoinRanges(latinPunctuation),
   rangesIn(latinPunctuation, ['مرحبا']),
+);
+
+const markdownSeparator = 'مرحبا - English';
+expect(
+  'Markdown separators before Latin text stay outside the Arabic run',
+  findArabicJoinRanges(markdownSeparator),
+  rangesIn(markdownSeparator, ['مرحبا']),
 );
 
 const diacritics = 'مَرْحَبًا';
@@ -105,6 +129,12 @@ expect(
   [[0, 'مرحبا'.length]],
 );
 
+expect('Arabic-only renderer span is detected', isArabicOnlyRenderRun('مرحبا بالعالم'), true);
+expect('Arabic diacritics remain eligible for compact layout', isArabicOnlyRenderRun('مَرْحَبًا'), true);
+expect('Arabic punctuation remains eligible for RTL layout', isArabicOnlyRenderRun('مرحبًا!'), true);
+expect('Latin text is never compacted', isArabicOnlyRenderRun('Fix tests 123'), false);
+expect('mixed Arabic and Latin span is never compacted', isArabicOnlyRenderRun('مرحبا Fix'), false);
+
 const productionSource = readFileSync(
   new URL('../src/components/XtermTerminal.tsx', import.meta.url),
   'utf8',
@@ -116,6 +146,18 @@ assert.match(
 );
 passed += 1;
 console.log('  ✓ production terminal installs the tested Arabic joiner');
+
+const productionStyles = readFileSync(
+  new URL('../src/styles.css', import.meta.url),
+  'utf8',
+);
+assert.match(
+  productionStyles,
+  /\.xterm-arabic-run[\s\S]*unicode-bidi:\s*normal/,
+  'styled Arabic spans must share the browser BiDi sequence',
+);
+passed += 1;
+console.log('  ✓ ANSI-styled Arabic spans share one BiDi sequence');
 
 assert.doesNotMatch(
   productionSource,

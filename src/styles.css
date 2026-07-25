@@ -65,6 +65,29 @@ body {
   background-color: transparent !important;
 }
 
+/* Terminal cells must not inherit programming-font ligatures that visually
+   merge Latin operators or letters across cell boundaries. Arabic contextual
+   shaping uses script-required forms and remains active inside joined runs. */
+.xterm-host .xterm-rows {
+  font-kerning: none;
+  font-variant-ligatures: none;
+}
+
+/* xterm reserves one cell per Arabic code point. Keep that cell allocation so
+   cursors, selection, and TUI overlays stay exact, but stop a monospaced
+   Arabic space plus both word side-bearings from looking like a triple gap. */
+.xterm-host .xterm-rows .xterm-arabic-run {
+  width: var(--terminal-arabic-run-width);
+  direction: rtl;
+  /* Let the browser's BiDi algorithm continue across adjacent ANSI-colored
+     spans. Isolating each style span would keep Arabic words in logical LTR
+     block order even though every individual word was shaped correctly. */
+  unicode-bidi: normal;
+  text-align: center;
+  word-spacing: -0.55ch;
+  font-variant-ligatures: normal;
+}
+
 /* Recovery is the only application UI. It exists only when the PTY cannot
    recover automatically, leaving the healthy state indistinguishable from a
    normal terminal window. */

@@ -1,9 +1,16 @@
 import { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { invoke as tauriInvoke } from '@tauri-apps/api/core';
+import { listen as tauriListen } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import '@xterm/xterm/css/xterm.css';
-import { findArabicJoinRanges } from './arabicRenderer';
+import {
+  findArabicJoinRanges,
+  isArabicOnlyRenderRun,
+} from './arabicRenderer';
 import { getReconnectDecision } from './reconnectPolicy';
+import { TerminalInputQueue } from './terminalInputQueue';
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 type Listen = <T>(event: string, cb: (event: { payload: T }) => void) => Promise<() => void>;
@@ -29,16 +36,11 @@ let nextTerminalSessionId = 0;
 
 async function getTauri() {
   if (!('__TAURI_INTERNALS__' in window)) return null;
-  const [{ invoke }, { listen }] = await Promise.all([
-    import('@tauri-apps/api/core'),
-    import('@tauri-apps/api/event'),
-  ]);
-  return { invoke: invoke as Invoke, listen: listen as Listen };
+  return { invoke: tauriInvoke as Invoke, listen: tauriListen as Listen };
 }
 
 async function toggleFullscreen() {
   if (!('__TAURI_INTERNALS__' in window)) return;
-  const { getCurrentWindow } = await import('@tauri-apps/api/window');
   const win = getCurrentWindow();
   const isFull = await win.isFullscreen();
   await win.setFullscreen(!isFull);
@@ -155,10 +157,58 @@ export function XtermTerminal({
     let reconnectTimer: number | undefined;
     let pasteHandler: ((e: ClipboardEvent) => void) | undefined;
     let observer: ResizeObserver | undefined;
+    let arabicLayoutObserver: MutationObserver | undefined;
     let currentSessionId: number | null = null;
     let reconnectAttempts = 0;
     let sessionConnectedAt = 0;
     let tauriForCleanup: { invoke: Invoke } | undefined;
+    let inputQueue: TerminalInputQueue | undefined;
+
+    const decorateArabicRow = (row: HTMLElement) => {
+      for (const span of row.querySelectorAll<HTMLElement>('span')) {
+        const text = span.textContent || '';
+        if (!isArabicOnlyRenderRun(text)) {
+          if (span.classList.contains('xterm-arabic-run')) {
+            span.classList.remove('xterm-arabic-run');
+            span.style.removeProperty('--terminal-arabic-run-width');
+            span.removeAttribute('dir');
+          }
+          continue;
+        }
+
+        // xterm allocated this exact width from terminal cells. Preserve it
+        // while compacting only the visual word gap inside the Arabic run.
+        const allocatedWidth = span.getBoundingClientRect().width;
+        span.style.setProperty('--terminal-arabic-run-width', `${allocatedWidth}px`);
+        span.classList.add('xterm-arabic-run');
+        span.setAttribute('dir', 'rtl');
+      }
+    };
+
+    const rowContainer = host.querySelector<HTMLElement>('.xterm-rows');
+    if (rowContainer) {
+      arabicLayoutObserver = new MutationObserver((mutations) => {
+        const changedRows = new Set<HTMLElement>();
+        for (const mutation of mutations) {
+          const target = mutation.target instanceof HTMLElement
+            ? mutation.target
+            : mutation.target.parentElement;
+          const row = target?.matches('.xterm-rows > div')
+            ? target
+            : target?.closest<HTMLElement>('.xterm-rows > div');
+          if (row) changedRows.add(row);
+        }
+        for (const row of changedRows) decorateArabicRow(row);
+      });
+      arabicLayoutObserver.observe(rowContainer, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
+      for (const row of rowContainer.children) {
+        if (row instanceof HTMLElement) decorateArabicRow(row);
+      }
+    }
 
     const size = () => {
       fit.fit();
@@ -205,14 +255,13 @@ export function XtermTerminal({
       }
 
       tauriForCleanup = tauri;
-
-      const invokeForCurrentSession = <T,>(
-        command: string,
-        args: Record<string, unknown> = {},
-      ): Promise<T> | undefined => {
-        if (currentSessionId === null) return undefined;
-        return tauri.invoke<T>(command, { ...args, sessionId: currentSessionId });
-      };
+      inputQueue = new TerminalInputQueue(
+        async (sessionId, input) => {
+          if (cancelled || currentSessionId !== sessionId) return;
+          await tauri.invoke('write_terminal', { input, sessionId });
+        },
+        console.error,
+      );
 
       const startSession = async (reconnecting = false) => {
         if (cancelled) return;
@@ -271,54 +320,59 @@ export function XtermTerminal({
 
         const plainCtrl = event.ctrlKey && !event.altKey && !event.metaKey;
         if (plainCtrl && event.code === 'KeyC') {
-          invokeForCurrentSession('interrupt_terminal')?.catch(console.error);
+          if (currentSessionId !== null) {
+            inputQueue?.enqueueOperation(
+              currentSessionId,
+              (sessionId) => tauri.invoke('interrupt_terminal', { sessionId }),
+            );
+          }
           return false;
         }
         if (plainCtrl && event.code === 'KeyD') {
-          invokeForCurrentSession('write_terminal', {
-            input: String.fromCharCode(4),
-          })?.catch(console.error);
+          if (currentSessionId !== null) {
+            inputQueue?.enqueue(currentSessionId, String.fromCharCode(4));
+          }
           return false;
         }
 
         return true;
       });
 
-      cleanupData = await tauri.listen<TerminalDataPayload>('terminal://data', (event) => {
-        const payload = event.payload;
-        if (typeof payload === 'string') {
-          term.write(payload);
-          return;
-        }
-        if (payload.sessionId !== currentSessionId) return;
-        term.write(payload.data);
-      });
+      [cleanupData, cleanupExited] = await Promise.all([
+        tauri.listen<TerminalDataPayload>('terminal://data', (event) => {
+          const payload = event.payload;
+          if (typeof payload === 'string') {
+            term.write(payload);
+            return;
+          }
+          if (payload.sessionId !== currentSessionId) return;
+          term.write(payload.data);
+        }),
+        tauri.listen<TerminalExitPayload>('terminal://exited', (event) => {
+          const payload = event.payload;
+          if (cancelled) return;
+          if (payload && payload.sessionId !== currentSessionId) return;
+          const exitedSessionId = currentSessionId;
+          // A crashed TUI can leave xterm in alternate-screen, mouse-reporting,
+          // or other private modes. A new shell must start from a clean terminal
+          // state rather than inheriting protocol state from the dead session.
+          term.reset();
+          if (exitedSessionId !== null) {
+            tauri.invoke('stop_terminal', { sessionId: exitedSessionId }).catch(console.error);
+          }
+          scheduleReconnect(new Error('The shell exited unexpectedly.'));
+        }),
+      ]);
       if (cancelled) {
         cleanupData();
-        return;
-      }
-
-      cleanupExited = await tauri.listen<TerminalExitPayload>('terminal://exited', (event) => {
-        const payload = event.payload;
-        if (cancelled) return;
-        if (payload && payload.sessionId !== currentSessionId) return;
-        const exitedSessionId = currentSessionId;
-        // A crashed TUI can leave xterm in alternate-screen, mouse-reporting,
-        // or other private modes. A new shell must start from a clean terminal
-        // state rather than inheriting protocol state from the dead session.
-        term.reset();
-        if (exitedSessionId !== null) {
-          tauri.invoke('stop_terminal', { sessionId: exitedSessionId }).catch(console.error);
-        }
-        scheduleReconnect(new Error('The shell exited unexpectedly.'));
-      });
-      if (cancelled) {
         cleanupExited();
         return;
       }
 
       inputDisposable = term.onData((data) => {
-        invokeForCurrentSession('write_terminal', { input: data })?.catch(console.error);
+        if (currentSessionId !== null) {
+          inputQueue?.enqueue(currentSessionId, data);
+        }
       });
 
       // Intercept paste only when it targets the terminal. This bypasses platform
@@ -331,8 +385,8 @@ export function XtermTerminal({
         e.preventDefault();
         e.stopPropagation();
         const text = e.clipboardData?.getData('text');
-        if (text) {
-          invokeForCurrentSession('write_terminal', { input: text })?.catch(console.error);
+        if (text && currentSessionId !== null) {
+          inputQueue?.enqueue(currentSessionId, text);
         }
       };
       window.addEventListener('paste', pasteHandler, true);
@@ -367,8 +421,10 @@ export function XtermTerminal({
       cleanupExited?.();
       inputDisposable?.dispose();
       observer?.disconnect();
+      arabicLayoutObserver?.disconnect();
       if (resizeTimer) window.clearTimeout(resizeTimer);
       if (reconnectTimer) window.clearTimeout(reconnectTimer);
+      inputQueue?.dispose();
       if (pasteHandler) window.removeEventListener('paste', pasteHandler, true);
       host.removeEventListener('mousedown', focusHandler);
       if (sessionToStop !== null) {

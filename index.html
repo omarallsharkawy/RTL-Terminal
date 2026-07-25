@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ar" dir="rtl">
+<html lang="en" dir="ltr">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -9,23 +9,6 @@
     <title>Twitty</title>
     <style>
       html, body { margin: 0; padding: 0; height: 100%; background-color: #0b0d10; }
-      #root:empty::after {
-        content: "";
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        width: 22px;
-        height: 22px;
-        margin: -11px 0 0 -11px;
-        border: 2px solid #2a2f36;
-        border-top-color: #3fb1ea;
-        border-radius: 50%;
-        animation: twitty-spin 0.8s linear infinite;
-      }
-      @keyframes twitty-spin { to { transform: rotate(360deg); } }
-      @media (prefers-reduced-motion: reduce) {
-        #root:empty::after { animation: none; border-top-color: #2a2f36; }
-      }
       /* Visible on-screen error overlay so mount failures aren't a blank screen.
          Any uncaught error or mount timeout is rendered as red text the user
          can read and report, even without opening DevTools. */

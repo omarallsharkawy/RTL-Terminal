@@ -53,7 +53,7 @@ The palette uses a cool-neutral ramp with cyan reserved for active capability an
 
 ## Typography
 
-The terminal uses the configured mono stack with the bundled Noto Naskh Arabic font limited to Arabic Unicode ranges. Application chrome uses the same mono voice at a compact fixed scale. No display type, fluid heading scale, or decorative letter spacing is permitted.
+The terminal uses the configured mono stack with the bundled Noto Naskh Arabic font limited to Arabic Unicode ranges. Arabic-only render runs may compact word spacing while preserving their exact xterm-allocated width; Latin cells must retain zero kerning and zero optional ligatures. Application chrome uses the same mono voice at a compact fixed scale. No display type, fluid heading scale, or decorative letter spacing is permitted.
 
 **The Cell Integrity Rule.** Terminal font, size, line height, and letter spacing are part of rendering correctness. Changes require box-drawing, Arabic shaping, and cursor-position regression tests.
 
@@ -67,7 +67,7 @@ Twitty is flat by default. Depth is conveyed through tonal layers and single-pix
 
 ### Terminal Workspace
 
-- Fills the available window above the status area.
+- Fills the entire available window.
 - Keeps terminal grid direction LTR and isolates bidirectional content at the rendering layer.
 - Maintains visible keyboard focus without adding an ornamental frame.
 - Shows an inline, non-modal recovery surface when the PTY cannot start.
