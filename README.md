@@ -84,7 +84,7 @@ Open the printed `localhost` URL. There's no PTY in the browser, so this shows a
 
 ### Desktop app (real shell)
 
-Install [Rust](https://rustup.rs/) first, then:
+Install [Rust 1.88 or newer](https://rustup.rs/) first, then:
 
 ```bash
 npm ci

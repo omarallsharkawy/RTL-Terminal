@@ -5,7 +5,7 @@ description = "A Windows terminal that gets Arabic right"
 authors = ["Twitty Project Contributors"]
 homepage = "https://github.com/omarallsharkawy/RTL-Terminal"
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.88"
 
 [lib]
 name = "rtl_terminal_lib"

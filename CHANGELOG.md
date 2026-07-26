@@ -4,8 +4,9 @@
 
 ### Security and release integrity
 
-- Updated the vulnerable development-only PostCSS dependency and added
-  high-severity npm and Rust dependency audits to CI.
+- Updated the vulnerable development-only PostCSS and transitive Quick XML
+  dependencies, patched an Anyhow soundness advisory, and added high-severity
+  npm and Rust dependency audits to CI.
 - Hardened the native Content Security Policy against object embeds, base URL
   rewriting, and form submissions.
 - Made Vite fail closed when Tauri's fixed development port is already occupied.
