@@ -106,7 +106,8 @@ body {
 
 /* Completed Arabic-dominant prose uses an RTL paragraph base so embedded
    English/code keeps its local LTR order without moving to unrelated cells.
-   Prompt and cursor rows are deliberately excluded by the renderer policy. */
+   Prompt and cursor rows keep their LTR paragraph base; local Arabic groups
+   inside them still reorder phrases split by TUI colors or repaint spans. */
 .xterm-host .xterm-rows > .xterm-rtl-line {
   direction: rtl;
   unicode-bidi: isolate;

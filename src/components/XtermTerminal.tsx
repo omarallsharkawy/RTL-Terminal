@@ -8,6 +8,7 @@ import '@xterm/xterm/css/xterm.css';
 import {
   findArabicJoinRanges,
   findArabicRenderGroups,
+  includeAdjacentCursorInRenderGroups,
   isArabicOnlyRenderRun,
   isNeutralRenderRun,
   shouldRenderLineRtl,
@@ -235,9 +236,22 @@ export function XtermTerminal({
     const decorateArabicRow = (row: HTMLElement) => {
       const hasCursor = Boolean(row.querySelector('.xterm-cursor'));
 
-      // Cursor rows stay on xterm's LTR grid, but their Arabic spans still
-      // need contextual shaping and compact spacing while the user types.
-      if (hasCursor) unwrapArabicGroups(row);
+      const findRowArabicGroups = (spans: HTMLElement[]) => {
+        const groups = findArabicRenderGroups(
+          spans,
+          (span) => isArabicOnlyRenderRun(span.textContent || ''),
+          (span) => isNeutralRenderRun(span.textContent || ''),
+        ).filter((group) => group.length >= 2);
+
+        return hasCursor
+          ? includeAdjacentCursorInRenderGroups(
+            groups,
+            spans,
+            (span) => span.classList.contains('xterm-cursor'),
+            (span) => isNeutralRenderRun(span.textContent || ''),
+          )
+          : groups;
+      };
 
       let childSpans = rendererSpans(row);
       for (const span of childSpans) {
@@ -248,13 +262,13 @@ export function XtermTerminal({
         'xterm-rtl-line',
         shouldRenderLineRtl(row.textContent || '', hasCursor),
       );
-      if (hasCursor) return;
 
-      let groups = findArabicRenderGroups(
-        childSpans,
-        (span) => isArabicOnlyRenderRun(span.textContent || ''),
-        (span) => isNeutralRenderRun(span.textContent || ''),
-      ).filter((group) => group.length >= 2);
+      // Keep prompts and cursor rows on xterm's LTR grid, but still group every
+      // adjacent Arabic renderer span. TUIs commonly split one input phrase by
+      // cursor state, syntax color, or repaint boundaries; without this local
+      // wrapper its words appear in logical LTR span order. The inline wrapper
+      // retains the exact allocated cell width and does not move TUI geometry.
+      let groups = findRowArabicGroups(childSpans);
 
       const existingWrappers = Array.from(
         row.querySelectorAll<HTMLElement>(':scope > .xterm-arabic-group'),
@@ -279,11 +293,7 @@ export function XtermTerminal({
       if (existingWrappers.length) {
         unwrapArabicGroups(row);
         childSpans = rendererSpans(row);
-        groups = findArabicRenderGroups(
-          childSpans,
-          (span) => isArabicOnlyRenderRun(span.textContent || ''),
-          (span) => isNeutralRenderRun(span.textContent || ''),
-        ).filter((group) => group.length >= 2);
+        groups = findRowArabicGroups(childSpans);
       }
 
       for (const group of groups) {
@@ -368,7 +378,9 @@ export function XtermTerminal({
         w(`${C(39, '╰────────────────────────────┴──────────╯')}`);
         w('');
         w(`${C(245, 'Run')} ${C(36, 'npm run tauri:dev')} ${C(245, 'to launch the real terminal.')}`);
-        term.write(`${C(35, '❯')} كيفك how are you كويس؟`);
+        // Model an active TUI prompt whose renderer splits one Arabic phrase
+        // across colored spans, as Claude Code, Kimi Code, and similar CLIs do.
+        term.write(`${C(35, '❯')} ${C(15, 'مرحبا')}${C(245, ' ')}${C(39, 'بالعالم')}`);
         return;
       }
 

@@ -64,10 +64,10 @@ const result = await page.evaluate(async () => {
     (candidate) => candidate.textContent?.includes("I'm doing great"),
   );
   if (!arabicLedMixedRow) throw new Error('Arabic-led mixed output row was not rendered');
-  const activeMixedRow = rows.find(
-    (candidate) => candidate.textContent?.includes('كيفك how are you كويس؟'),
+  const activeTuiRow = rows.find(
+    (candidate) => candidate.textContent?.includes('❯ مرحبا بالعالم'),
   );
-  if (!activeMixedRow) throw new Error('Active mixed-language input row was not rendered');
+  if (!activeTuiRow) throw new Error('Active TUI Arabic input row was not rendered');
 
   let postLayoutMutations = 0;
   const stabilityObserver = new MutationObserver(
@@ -135,12 +135,21 @@ const result = await page.evaluate(async () => {
         };
       }),
     },
-    activeMixedInput: {
-      text: activeMixedRow.textContent,
-      className: activeMixedRow.className,
-      hasCursor: Boolean(activeMixedRow.querySelector('.xterm-cursor')),
-      wrappers: activeMixedRow.querySelectorAll('.xterm-arabic-group').length,
-      arabicRuns: activeMixedRow.querySelectorAll('.xterm-arabic-run').length,
+    activeTuiInput: {
+      text: activeTuiRow.textContent,
+      className: activeTuiRow.className,
+      hasCursor: Boolean(activeTuiRow.querySelector('.xterm-cursor')),
+      wrappers: activeTuiRow.querySelectorAll('.xterm-arabic-group').length,
+      arabicRuns: activeTuiRow.querySelectorAll('.xterm-arabic-run').length,
+      cursor: (() => {
+        const rect = activeTuiRow.querySelector('.xterm-cursor')?.getBoundingClientRect();
+        return rect ? { left: rect.left, right: rect.right } : null;
+      })(),
+      spans: Array.from(activeTuiRow.querySelectorAll('.xterm-arabic-group > span'))
+        .map((span) => {
+          const rect = span.getBoundingClientRect();
+          return { text: span.textContent, left: rect.left, right: rect.right };
+        }),
     },
     spans: Array.from(row.querySelectorAll('span.xterm-arabic-run'))
       .filter((span) => arabic.test(span.textContent || ''))
@@ -245,23 +254,35 @@ assert.ok(
 );
 assert.equal(englishReply.direction, 'ltr', 'embedded English must remain internally LTR');
 assert.equal(
-  result.activeMixedInput.hasCursor,
+  result.activeTuiInput.hasCursor,
   true,
-  'mixed-language input probe must exercise the active cursor row',
+  'TUI input probe must exercise the active cursor row',
 );
 assert.doesNotMatch(
-  result.activeMixedInput.className,
+  result.activeTuiInput.className,
   /xterm-rtl-line/,
-  'active mixed-language input must stay on xterm’s LTR grid',
+  'active TUI input must stay on xterm’s LTR grid',
 );
 assert.equal(
-  result.activeMixedInput.wrappers,
-  0,
-  'active input must not move terminal cells into an RTL wrapper',
+  result.activeTuiInput.wrappers,
+  1,
+  'active TUI input must group Arabic spans independently of the CLI',
 );
 assert.ok(
-  result.activeMixedInput.arabicRuns >= 2,
-  'active input must still shape and compact every Arabic run',
+  result.activeTuiInput.arabicRuns >= 2,
+  'active TUI input must shape and compact every Arabic run',
+);
+const activeFirstWord = result.activeTuiInput.spans.find((span) => span.text === 'مرحبا');
+const activeSecondWord = result.activeTuiInput.spans.find((span) => span.text === 'بالعالم');
+assert.ok(activeFirstWord && activeSecondWord, 'active TUI Arabic words are missing');
+assert.ok(
+  activeFirstWord.left > activeSecondWord.left,
+  'active TUI input must show the first logical Arabic word on the visual right',
+);
+assert.ok(result.activeTuiInput.cursor, 'active TUI cursor bounds are missing');
+assert.ok(
+  result.activeTuiInput.cursor.right <= activeSecondWord.left + 0.5,
+  'cursor at the logical end must render on the visual left of Arabic input',
 );
 for (const span of result.spans) {
   assert.match(span.className, /xterm-arabic-run/, 'Arabic span must receive layout class');

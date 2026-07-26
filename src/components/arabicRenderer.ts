@@ -131,9 +131,45 @@ export function findArabicRenderGroups<T>(
 }
 
 /**
+ * Keeps an active terminal cursor inside the adjacent RTL visual group. xterm
+ * represents the cursor as another renderer span. If it remains outside the
+ * group, ANSI-split Arabic words reorder correctly but the caret lands on the
+ * visual right instead of following the logical end on the visual left.
+ */
+export function includeAdjacentCursorInRenderGroups<T>(
+  groups: T[][],
+  items: T[],
+  isCursor: (item: T) => boolean,
+  isNeutral: (item: T) => boolean,
+): T[][] {
+  return groups.map((group) => {
+    if (group.some(isCursor)) return group;
+
+    const start = items.indexOf(group[0]);
+    const end = items.indexOf(group[group.length - 1]);
+    if (start < 0 || end < start) return group;
+
+    for (let scan = end + 1; scan < items.length; scan += 1) {
+      const item = items[scan];
+      if (isCursor(item)) return [...group, ...items.slice(end + 1, scan + 1)];
+      if (!isNeutral(item)) break;
+    }
+
+    for (let scan = start - 1; scan >= 0; scan -= 1) {
+      const item = items[scan];
+      if (isCursor(item)) return [...items.slice(scan, start), ...group];
+      if (!isNeutral(item)) break;
+    }
+
+    return group;
+  });
+}
+
+/**
  * Arabic prose needs an RTL paragraph base so embedded English/code stays in
  * the correct reading position. Keep shell prompts and the active cursor row
- * anchored to the terminal's LTR grid.
+ * anchored to the terminal's LTR grid; their local Arabic render groups are
+ * still reordered independently by the DOM decorator.
  */
 export function shouldRenderLineRtl(
   text: string,

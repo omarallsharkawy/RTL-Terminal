@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import {
   findArabicJoinRanges,
   findArabicRenderGroups,
+  includeAdjacentCursorInRenderGroups,
   isArabicOnlyRenderRun,
   isNeutralRenderRun,
   shouldRenderLineRtl,
@@ -153,6 +154,64 @@ expect(
 );
 
 expect(
+  'TUI input groups Arabic words split by prompt colors',
+  findArabicRenderGroups(
+    ['❯', ' ', 'مرحبا', ' ', 'بالعالم', ' '],
+    isArabicOnlyRenderRun,
+    isNeutralRenderRun,
+  ),
+  [['مرحبا', ' ', 'بالعالم']],
+);
+
+const tuiCursorAtEnd = [
+  { text: '❯', cursor: false },
+  { text: ' ', cursor: false },
+  { text: 'مرحبا', cursor: false },
+  { text: ' ', cursor: false },
+  { text: 'بالعالم', cursor: false },
+  { text: ' ', cursor: true },
+];
+const tuiCursorBaseGroup = findArabicRenderGroups(
+  tuiCursorAtEnd,
+  (item) => isArabicOnlyRenderRun(item.text),
+  (item) => isNeutralRenderRun(item.text),
+);
+expect(
+  'TUI cursor follows the logical end of an ANSI-split Arabic phrase',
+  includeAdjacentCursorInRenderGroups(
+    tuiCursorBaseGroup,
+    tuiCursorAtEnd,
+    (item) => item.cursor,
+    (item) => isNeutralRenderRun(item.text),
+  ),
+  [[...tuiCursorAtEnd.slice(2)]],
+);
+
+const tuiCursorAtStart = [
+  { text: '❯', cursor: false },
+  { text: ' ', cursor: false },
+  { text: ' ', cursor: true },
+  { text: 'مرحبا', cursor: false },
+  { text: ' ', cursor: false },
+  { text: 'بالعالم', cursor: false },
+];
+const tuiCursorStartGroup = findArabicRenderGroups(
+  tuiCursorAtStart,
+  (item) => isArabicOnlyRenderRun(item.text),
+  (item) => isNeutralRenderRun(item.text),
+);
+expect(
+  'TUI cursor stays at the logical start of an Arabic phrase',
+  includeAdjacentCursorInRenderGroups(
+    tuiCursorStartGroup,
+    tuiCursorAtStart,
+    (item) => item.cursor,
+    (item) => isNeutralRenderRun(item.text),
+  ),
+  [[...tuiCursorAtStart.slice(2)]],
+);
+
+expect(
   'Arabic-dominant prose receives an RTL paragraph base',
   shouldRenderLineRtl('agy هو الواجهة السطرية لمنصة Google Antigravity والمساعدة البرمجية'),
   true,
@@ -209,6 +268,14 @@ assert.match(
 );
 passed += 1;
 console.log('  ✓ production terminal assigns Arabic prose an RTL paragraph base');
+
+assert.doesNotMatch(
+  productionSource,
+  /if\s*\(hasCursor\)\s*(?:return|unwrapArabicGroups)/,
+  'cursor rows must still group Arabic spans emitted by arbitrary TUIs',
+);
+passed += 1;
+console.log('  ✓ active TUI input groups Arabic independently of the CLI');
 
 assert.doesNotMatch(
   productionSource,
