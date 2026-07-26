@@ -1,5 +1,6 @@
 export type TerminalWriter = (sessionId: number, input: string) => Promise<void>;
 export type TerminalOperation = (sessionId: number) => Promise<void>;
+export const MAX_PENDING_INPUT_CODE_UNITS = 64 * 1024;
 
 interface PendingInput {
   sessionId: number;
@@ -34,10 +35,33 @@ export class TerminalInputQueue {
       this.flush();
     }
 
-    if (this.pending) {
-      this.pending.input += input;
-    } else {
-      this.pending = { sessionId, input };
+    let offset = 0;
+    while (offset < input.length) {
+      if (!this.pending) this.pending = { sessionId, input: '' };
+
+      const capacity = MAX_PENDING_INPUT_CODE_UNITS - this.pending.input.length;
+      if (capacity <= 0) {
+        this.flush();
+        continue;
+      }
+
+      let end = Math.min(input.length, offset + capacity);
+      if (
+        end < input.length
+        && end > offset
+        && /[\uD800-\uDBFF]/u.test(input[end - 1])
+        && /[\uDC00-\uDFFF]/u.test(input[end])
+      ) {
+        end -= 1;
+      }
+      if (end === offset) {
+        this.flush();
+        continue;
+      }
+
+      this.pending.input += input.slice(offset, end);
+      offset = end;
+      if (this.pending.input.length >= MAX_PENDING_INPUT_CODE_UNITS) this.flush();
     }
 
     if (!this.flushScheduled) {

@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { TerminalInputQueue } from '../src/components/terminalInputQueue.ts';
+import {
+  MAX_PENDING_INPUT_CODE_UNITS,
+  TerminalInputQueue,
+} from '../src/components/terminalInputQueue.ts';
 
 let passed = 0;
 
@@ -34,6 +37,25 @@ await check('preserves mixed Arabic and English code points exactly', async () =
   await queue.whenIdle();
 
   assert.equal(writes.join(''), mixed);
+});
+
+await check('bounds large paste batches without splitting Unicode pairs', async () => {
+  const writes = [];
+  const queue = new TerminalInputQueue(async (_sessionId, input) => {
+    writes.push(input);
+  });
+  const largePaste = `${'س'.repeat(MAX_PENDING_INPUT_CODE_UNITS - 1)}🌞${'x'.repeat(257)}`;
+
+  queue.enqueue(12, largePaste);
+  await queue.whenIdle();
+
+  assert.equal(writes.join(''), largePaste);
+  assert.ok(writes.length >= 2, 'large paste must be split into bounded bridge writes');
+  assert.ok(
+    writes.every((write) => write.length <= MAX_PENDING_INPUT_CODE_UNITS),
+    'no pending bridge write may exceed the configured limit',
+  );
+  assert.ok(writes.every((write) => !write.includes('\uFFFD')));
 });
 
 await check('never starts a later bridge write before the earlier write finishes', async () => {

@@ -154,6 +154,15 @@ The Rust backend spawns a real shell inside a PTY and streams incrementally deco
 - **Frontend:** [React 19](https://react.dev/) + [Vite 6](https://vitejs.dev/) + [xterm.js 6](https://xtermjs.org/) with `@xterm/addon-fit`.
 - **Font:** Cascadia Mono/Consolas + Segoe UI, with Noto Naskh Arabic (SIL OFL) fallback.
 
+### CSP rationale
+
+Twitty permits no remote scripts or arbitrary remote content. The only CSP
+exception is inline `style-src`, because xterm.js generates its ANSI palette,
+cell positions, cursor rules, and renderer styles at runtime. Tauri's asset-CSP
+rewrite is disabled for `style-src` only; every other directive remains
+enforced. `npm run test:windows` guards this narrow exception and verifies that
+the explicit CSP does not broaden accidentally.
+
 ## Platform support
 
 | Platform | WebView engine | Status |
@@ -166,7 +175,8 @@ The Rust backend spawns a real shell inside a PTY and streams incrementally deco
 npm run dev           # Vite dev server (browser demo)
 npm run tauri:dev     # Tauri dev (real shell; PTY failure surfaces an inline retry notice)
 npm run build         # tsc + vite build
-npm test              # Arabic rendering + session/reconnect + ordered-input regression tests
+npm test              # rendering + session + input + Windows + 50k-line stress tests
+npm run test:stress   # run the mixed Arabic/English stress probe directly
 node scripts/capture-shots.mjs   # regenerate docs screenshots
 ```
 

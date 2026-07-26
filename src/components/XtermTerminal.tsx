@@ -195,6 +195,8 @@ export function XtermTerminal({
     let pasteHandler: ((e: ClipboardEvent) => void) | undefined;
     let observer: ResizeObserver | undefined;
     let arabicLayoutObserver: MutationObserver | undefined;
+    let arabicLayoutFrame: number | undefined;
+    const pendingArabicRows = new Set<HTMLElement>();
     let currentSessionId: number | null = null;
     let reconnectAttempts = 0;
     let sessionConnectedAt = 0;
@@ -349,8 +351,21 @@ export function XtermTerminal({
 
     const rowContainer = host.querySelector<HTMLElement>('.xterm-rows');
     if (rowContainer) {
+      const scheduleArabicRow = (row: HTMLElement) => {
+        pendingArabicRows.add(row);
+        if (arabicLayoutFrame !== undefined) return;
+
+        arabicLayoutFrame = window.requestAnimationFrame(() => {
+          arabicLayoutFrame = undefined;
+          const rows = Array.from(pendingArabicRows);
+          pendingArabicRows.clear();
+          for (const changedRow of rows) {
+            if (changedRow.parentElement === rowContainer) decorateArabicRow(changedRow);
+          }
+        });
+      };
+
       arabicLayoutObserver = new MutationObserver((mutations) => {
-        const changedRows = new Set<HTMLElement>();
         for (const mutation of mutations) {
           const target = mutation.target instanceof HTMLElement
             ? mutation.target
@@ -358,9 +373,8 @@ export function XtermTerminal({
           const row = target?.matches('.xterm-rows > div')
             ? target
             : target?.closest<HTMLElement>('.xterm-rows > div');
-          if (row) changedRows.add(row);
+          if (row) scheduleArabicRow(row);
         }
-        for (const row of changedRows) decorateArabicRow(row);
       });
       arabicLayoutObserver.observe(rowContainer, {
         childList: true,
@@ -601,6 +615,8 @@ export function XtermTerminal({
       inputDisposable?.dispose();
       observer?.disconnect();
       arabicLayoutObserver?.disconnect();
+      if (arabicLayoutFrame !== undefined) window.cancelAnimationFrame(arabicLayoutFrame);
+      pendingArabicRows.clear();
       if (resizeTimer) window.clearTimeout(resizeTimer);
       if (reconnectTimer) window.clearTimeout(reconnectTimer);
       inputQueue?.dispose();

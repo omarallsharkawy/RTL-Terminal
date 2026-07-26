@@ -308,6 +308,14 @@ assert.doesNotMatch(
 passed += 1;
 console.log('  ✓ active TUI input groups Arabic independently of the CLI');
 
+assert.match(
+  productionSource,
+  /requestAnimationFrame\([\s\S]*pendingArabicRows/,
+  'Arabic DOM mutations must be coalesced into one layout pass per frame',
+);
+passed += 1;
+console.log('  ✓ Arabic DOM mutation bursts are coalesced per frame');
+
 assert.doesNotMatch(
   productionSource,
   /shapeArabic|createArabicOutputBuffer/,
