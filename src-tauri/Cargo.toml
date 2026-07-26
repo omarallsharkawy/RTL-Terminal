@@ -1,6 +1,6 @@
 [package]
 name = "twitty"
-version = "1.2.0"
+version = "1.2.1"
 description = "A Windows terminal that gets Arabic right"
 authors = ["Twitty Project Contributors"]
 homepage = "https://github.com/omarallsharkawy/RTL-Terminal"
