@@ -51,24 +51,28 @@ The app also hardens the PTY bridge around real terminal behavior: backend reads
 
 ### Install on Windows
 
-Download the x64 NSIS setup from the latest GitHub release and run it. The
-installer is available in English and Arabic and installs for the current user
-without an Administrator prompt.
+1. Open the [latest Twitty release](https://github.com/omarallsharkawy/RTL-Terminal/releases/latest).
+2. Under **Assets**, download `Twitty_<version>_x64-setup.exe` and run it.
+3. Choose English or العربية, then continue through the setup pages.
+
+The x64 installer is for Windows 10/11 and installs for the current user, so
+the default installation does not require an Administrator prompt.
 
 During setup you can:
 
-- keep the default `%LOCALAPPDATA%\Twitty` destination or choose another folder;
+- keep the default `%LOCALAPPDATA%\Twitty` destination or choose another writable folder;
 - create the Start Menu folder, rename it, or opt out of Start Menu shortcuts;
 - optionally create a desktop shortcut on the finish page (off by default);
 - launch Twitty immediately after installation.
 
-The WebView2 bootstrapper is embedded so setup does not need a separate
-bootstrapper download before it can verify or install the runtime.
+Setup includes the WebView2 bootstrapper: it detects an existing WebView2
+runtime and installs it when needed. An internet connection may therefore be
+needed on a fresh Windows installation. Setup also blocks accidental downgrades.
 
 ### Browser demo (no shell)
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
@@ -79,7 +83,7 @@ Open the printed `localhost` URL. There's no PTY in the browser, so this shows a
 Install [Rust](https://rustup.rs/) first, then:
 
 ```bash
-npm install
+npm ci
 npm run tauri:dev
 ```
 
@@ -88,6 +92,7 @@ The backend uses `TWITTY_SHELL` when set, then checks the standard PowerShell 7 
 ### Production build
 
 ```bash
+npm ci
 npm run build         # type-check + bundle the frontend
 npm run tauri:build -- --bundles nsis --ci --no-sign
 ```
