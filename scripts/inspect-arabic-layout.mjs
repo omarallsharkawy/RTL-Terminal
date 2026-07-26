@@ -41,6 +41,24 @@ const page = await browser.newPage({
   viewport: { width: 1536, height: 830 },
   deviceScaleFactor: 1.25,
 });
+await page.addInitScript(() => {
+  const metrics = { layoutReads: 0, styleWrites: 0 };
+  Object.defineProperty(window, '__twittyRenderMetrics', { value: metrics });
+
+  const originalBounds = Element.prototype.getBoundingClientRect;
+  Element.prototype.getBoundingClientRect = function (...args) {
+    if (this instanceof HTMLElement && this.closest('.xterm-rows')) {
+      metrics.layoutReads += 1;
+    }
+    return originalBounds.apply(this, args);
+  };
+
+  const originalSetProperty = CSSStyleDeclaration.prototype.setProperty;
+  CSSStyleDeclaration.prototype.setProperty = function (...args) {
+    metrics.styleWrites += 1;
+    return originalSetProperty.apply(this, args);
+  };
+});
 
 await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle' });
 await page.waitForSelector('.xterm-rows');
@@ -81,6 +99,18 @@ const result = await page.evaluate(async () => {
   await new Promise((resolve) => setTimeout(resolve, 250));
   stabilityObserver.disconnect();
 
+  const burstTarget = ansiSplitRow.querySelector('.xterm-arabic-run')?.firstChild;
+  const renderMetrics = window.__twittyRenderMetrics;
+  renderMetrics.layoutReads = 0;
+  renderMetrics.styleWrites = 0;
+  const originalBurstText = burstTarget?.data;
+  for (let index = 0; index < 200; index += 1) {
+    if (burstTarget) burstTarget.data = index % 2 === 0 ? 'أهلا' : 'مرحبا';
+  }
+  if (burstTarget && originalBurstText) burstTarget.data = originalBurstText;
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const renderBurstMetrics = { ...renderMetrics };
+
   const rowStyle = getComputedStyle(row);
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d');
@@ -88,6 +118,7 @@ const result = await page.evaluate(async () => {
 
   return {
     overlayDisplay: getComputedStyle(document.getElementById('err-overlay')).display,
+    renderBurstMetrics,
     rootChildren: document.getElementById('root')?.children.length || 0,
     rowText: row.textContent,
     rowWidth: row.getBoundingClientRect().width,
@@ -214,6 +245,14 @@ assert.equal(
   result.ansiSplit.postLayoutMutations,
   0,
   'Arabic grouping must settle instead of triggering a MutationObserver rebuild loop',
+);
+assert.ok(
+  result.renderBurstMetrics.layoutReads <= 16,
+  `200 DOM mutations caused too many layout reads: ${JSON.stringify(result.renderBurstMetrics)}`,
+);
+assert.ok(
+  result.renderBurstMetrics.styleWrites <= 16,
+  `200 DOM mutations caused too many style writes: ${JSON.stringify(result.renderBurstMetrics)}`,
 );
 assert.equal(result.ansiSplit.wrappers, 1, 'ANSI-split Arabic must use one local RTL group');
 assert.ok(

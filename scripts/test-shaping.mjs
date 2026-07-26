@@ -316,6 +316,18 @@ assert.match(
 passed += 1;
 console.log('  ✓ Arabic DOM mutation bursts are coalesced per frame');
 
+const rendererSource = readFileSync(
+  new URL('../src/components/arabicRenderer.ts', import.meta.url),
+  'utf8',
+);
+assert.doesNotMatch(
+  rendererSource,
+  /text\.match\(/,
+  'script counts must not allocate match arrays on the render hot path',
+);
+passed += 1;
+console.log('  ✓ script counting avoids temporary match arrays');
+
 assert.doesNotMatch(
   productionSource,
   /shapeArabic|createArabicOutputBuffer/,

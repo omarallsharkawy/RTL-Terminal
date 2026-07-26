@@ -177,6 +177,7 @@ npm run tauri:dev     # Tauri dev (real shell; PTY failure surfaces an inline re
 npm run build         # tsc + vite build
 npm test              # rendering + session + input + Windows + 50k-line stress tests
 npm run test:stress   # run the mixed Arabic/English stress probe directly
+node scripts/measure-pty-lifecycle.mjs <twitty.exe>  # Windows PTY handle/thread benchmark
 node scripts/capture-shots.mjs   # regenerate docs screenshots
 ```
 

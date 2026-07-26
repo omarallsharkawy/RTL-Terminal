@@ -79,22 +79,26 @@ async function settleInitialTerminalLayout(
   term: Terminal,
   fit: FitAddon,
   host: HTMLElement,
-) {
+  isCancelled: () => boolean,
+): Promise<boolean> {
   // WebView2 can report the configured 1180px window for the first frame and
   // maximize it immediately afterwards. Starting the PTY during that window
   // produces an 80/132-column TUI header that never redraws at full width.
   await document.fonts?.ready;
+  if (isCancelled()) return false;
 
   let previousSignature = '';
   let stableFrames = 0;
   for (let frame = 0; frame < 12; frame += 1) {
     await nextFrame();
+    if (isCancelled()) return false;
     fit.fit();
     const signature = `${host.clientWidth}x${host.clientHeight}:${term.cols}x${term.rows}`;
     stableFrames = signature === previousSignature ? stableFrames + 1 : 0;
     previousSignature = signature;
-    if (stableFrames >= 2) return;
+    if (stableFrames >= 2) return true;
   }
+  return !isCancelled();
 }
 
 export function XtermTerminal({
@@ -223,17 +227,13 @@ export function XtermTerminal({
       },
     );
 
-    const setArabicSpanLayout = (span: HTMLElement, enabled: boolean) => {
-      if (!enabled) {
-        span.classList.remove('xterm-arabic-run');
-        span.style.removeProperty('--terminal-arabic-run-width');
-        span.removeAttribute('dir');
-        return;
-      }
+    const clearArabicSpanLayout = (span: HTMLElement) => {
+      span.classList.remove('xterm-arabic-run');
+      span.style.removeProperty('--terminal-arabic-run-width');
+      span.removeAttribute('dir');
+    };
 
-      // xterm allocated this exact width from terminal cells. Preserve it
-      // while Windows shapes the Arabic text naturally inside those cells.
-      const allocatedWidth = span.getBoundingClientRect().width;
+    const applyArabicSpanLayout = (span: HTMLElement, allocatedWidth: number) => {
       span.style.setProperty('--terminal-arabic-run-width', `${allocatedWidth}px`);
       span.classList.add('xterm-arabic-run');
       span.setAttribute('dir', 'rtl');
@@ -262,7 +262,7 @@ export function XtermTerminal({
       return true;
     };
 
-    const decorateArabicRow = (row: HTMLElement) => {
+    const prepareArabicRow = (row: HTMLElement): HTMLElement[] => {
       const hasCursor = Boolean(row.querySelector('.xterm-cursor'));
 
       const findRowArabicGroups = (spans: HTMLElement[]) => {
@@ -298,10 +298,6 @@ export function XtermTerminal({
       }
       row.classList.toggle('xterm-tui-logical-input', restoredTuiInput);
 
-      for (const span of childSpans) {
-        setArabicSpanLayout(span, isArabicOnlyRenderRun(span.textContent || ''));
-      }
-
       row.classList.toggle(
         'xterm-rtl-line',
         shouldRenderLineRtl(row.textContent || '', hasCursor),
@@ -332,20 +328,41 @@ export function XtermTerminal({
       // Our own observer callback must become a true no-op after one pass.
       // Rebuilding a correct wrapper here would create an endless async
       // MutationObserver unwrap/wrap cycle.
-      if (wrappersAreCanonical) return;
+      if (!wrappersAreCanonical) {
+        if (existingWrappers.length) {
+          unwrapArabicGroups(row);
+          childSpans = rendererSpans(row);
+          groups = findRowArabicGroups(childSpans);
+        }
 
-      if (existingWrappers.length) {
-        unwrapArabicGroups(row);
-        childSpans = rendererSpans(row);
-        groups = findRowArabicGroups(childSpans);
+        for (const group of groups) {
+          const wrapper = document.createElement('span');
+          wrapper.className = 'xterm-arabic-group';
+          wrapper.setAttribute('dir', 'rtl');
+          group[0].before(wrapper);
+          wrapper.append(...group);
+        }
       }
 
-      for (const group of groups) {
-        const wrapper = document.createElement('span');
-        wrapper.className = 'xterm-arabic-group';
-        wrapper.setAttribute('dir', 'rtl');
-        group[0].before(wrapper);
-        wrapper.append(...group);
+      const arabicSpans: HTMLElement[] = [];
+      for (const span of rendererSpans(row)) {
+        if (isArabicOnlyRenderRun(span.textContent || '')) arabicSpans.push(span);
+        clearArabicSpanLayout(span);
+      }
+      return arabicSpans;
+    };
+
+    const decorateArabicRows = (rows: HTMLElement[]) => {
+      // Complete every DOM/class/structure write first, measure all Arabic
+      // spans second, then apply widths in one final write phase. This avoids
+      // alternating getBoundingClientRect/style mutations for every span.
+      const arabicSpans = rows.flatMap(prepareArabicRow);
+      const measurements = arabicSpans.map((span) => ({
+        span,
+        allocatedWidth: span.getBoundingClientRect().width,
+      }));
+      for (const { span, allocatedWidth } of measurements) {
+        applyArabicSpanLayout(span, allocatedWidth);
       }
     };
 
@@ -359,9 +376,9 @@ export function XtermTerminal({
           arabicLayoutFrame = undefined;
           const rows = Array.from(pendingArabicRows);
           pendingArabicRows.clear();
-          for (const changedRow of rows) {
-            if (changedRow.parentElement === rowContainer) decorateArabicRow(changedRow);
-          }
+          decorateArabicRows(
+            rows.filter((changedRow) => changedRow.parentElement === rowContainer),
+          );
         });
       };
 
@@ -381,9 +398,11 @@ export function XtermTerminal({
         characterData: true,
         subtree: true,
       });
-      for (const row of rowContainer.children) {
-        if (row instanceof HTMLElement) decorateArabicRow(row);
-      }
+      decorateArabicRows(
+        Array.from(rowContainer.children).filter(
+          (row): row is HTMLElement => row instanceof HTMLElement,
+        ),
+      );
     }
 
     const size = () => {
@@ -590,7 +609,13 @@ export function XtermTerminal({
       observer.observe(host);
 
       try {
-        await settleInitialTerminalLayout(term, fit, host);
+        const layoutReady = await settleInitialTerminalLayout(
+          term,
+          fit,
+          host,
+          () => cancelled,
+        );
+        if (!layoutReady || cancelled) return;
         await startSession();
         if (!cancelled) await resize(tauri);
       } catch (error) {

@@ -11,6 +11,7 @@
     "test:input": "node scripts/test-input-queue.mjs",
     "test:windows": "node scripts/test-windows-rendering.mjs",
     "test:stress": "node scripts/test-stress.mjs",
+    "bench:pty": "node scripts/measure-pty-lifecycle.mjs",
     "test": "npm run test:shaping && npm run test:session && npm run test:input && npm run test:windows && npm run test:stress",
     "preview": "vite preview --host 127.0.0.1",
     "tauri": "tauri",

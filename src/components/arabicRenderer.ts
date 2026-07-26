@@ -14,8 +14,8 @@ const TRAILING_SENTENCE_PUNCTUATION = new RegExp(
   `^[\\s.,:;!?،؛؟…»”’\\)\\]\\}]+$`,
   'u',
 );
-const ARABIC_SCRIPT_CHARACTER = /\p{Script=Arabic}/gu;
-const LATIN_OR_NUMBER_CHARACTER = /[\p{Script=Latin}\p{Number}]/gu;
+const ARABIC_SCRIPT_CHARACTER = /\p{Script=Arabic}/u;
+const LATIN_OR_NUMBER_CHARACTER = /[\p{Script=Latin}\p{Number}]/u;
 const FIRST_STRONG_CHARACTER = /[\p{Script=Arabic}\p{Script=Latin}\p{Number}]/u;
 const FIXED_LTR_LINE_PREFIX = /^(?:PS\s+[A-Za-z]:\\|[A-Za-z]:\\|[>$❯]\s)/u;
 const ARABIC_GRAPHEME_SEGMENTER = new Intl.Segmenter('ar', { granularity: 'grapheme' });
@@ -25,6 +25,21 @@ function reverseGraphemes(text: string): string {
     ARABIC_GRAPHEME_SEGMENTER.segment(text),
     ({ segment }) => segment,
   ).reverse().join('');
+}
+
+function countCodePoints(text: string, matcher: RegExp): number {
+  let count = 0;
+  for (const character of text) {
+    if (matcher.test(character)) count += 1;
+  }
+  return count;
+}
+
+function firstStrongCharacter(text: string): string | undefined {
+  for (const character of text) {
+    if (FIRST_STRONG_CHARACTER.test(character)) return character;
+  }
+  return undefined;
 }
 
 /**
@@ -207,9 +222,9 @@ export function shouldRenderLineRtl(
 ): boolean {
   if (hasActiveCursor || FIXED_LTR_LINE_PREFIX.test(text)) return false;
 
-  const arabicCount = text.match(ARABIC_SCRIPT_CHARACTER)?.length || 0;
-  const latinOrNumberCount = text.match(LATIN_OR_NUMBER_CHARACTER)?.length || 0;
-  const firstStrong = text.match(FIRST_STRONG_CHARACTER)?.[0];
+  const arabicCount = countCodePoints(text, ARABIC_SCRIPT_CHARACTER);
+  const latinOrNumberCount = countCodePoints(text, LATIN_OR_NUMBER_CHARACTER);
+  const firstStrong = firstStrongCharacter(text);
   if (firstStrong && HAS_ARABIC.test(firstStrong)) return true;
 
   return arabicCount >= 6 && arabicCount > latinOrNumberCount * 1.15;

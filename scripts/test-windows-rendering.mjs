@@ -39,8 +39,13 @@ assert.match(
 );
 assert.match(
   terminalSource,
-  /settleInitialTerminalLayout\(term,\s*fit,\s*host\)/,
+  /settleInitialTerminalLayout\([\s\S]*?\(\)\s*=>\s*cancelled/,
   'the PTY must wait for stable maximized geometry before spawning',
 );
+assert.match(
+  terminalSource,
+  /if\s*\(!layoutReady\s*\|\|\s*cancelled\)\s*return/,
+  'closing the window must cancel initial layout before PTY startup',
+);
 
-console.log('Windows rendering policy: 6/6 checks passed');
+console.log('Windows rendering policy: 7/7 checks passed');
