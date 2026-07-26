@@ -18,6 +18,14 @@ const ARABIC_SCRIPT_CHARACTER = /\p{Script=Arabic}/gu;
 const LATIN_OR_NUMBER_CHARACTER = /[\p{Script=Latin}\p{Number}]/gu;
 const FIRST_STRONG_CHARACTER = /[\p{Script=Arabic}\p{Script=Latin}\p{Number}]/u;
 const FIXED_LTR_LINE_PREFIX = /^(?:PS\s+[A-Za-z]:\\|[A-Za-z]:\\|[>$❯]\s)/u;
+const ARABIC_GRAPHEME_SEGMENTER = new Intl.Segmenter('ar', { granularity: 'grapheme' });
+
+function reverseGraphemes(text: string): string {
+  return Array.from(
+    ARABIC_GRAPHEME_SEGMENTER.segment(text),
+    ({ segment }) => segment,
+  ).reverse().join('');
+}
 
 /**
  * Returns JavaScript string ranges for xterm's DOM character joiner.
@@ -83,6 +91,28 @@ export function isNeutralRenderRun(text: string): boolean {
     !HAS_ARABIC.test(text) &&
     !HAS_NON_ARABIC_RUN_CONTENT.test(text)
   );
+}
+
+/**
+ * Some full-screen TUIs pre-apply BiDi visual ordering before painting their
+ * input cells. Match those visual Arabic cells against the exact unsent input
+ * Twitty observed, then return the original logical run for DOM-only display.
+ * PTY and xterm buffer data remain untouched.
+ */
+export function logicalArabicRunForVisualText(
+  visualText: string,
+  pendingInput: string,
+): string | null {
+  for (const [start, end] of findArabicJoinRanges(pendingInput)) {
+    const logicalRun = pendingInput.slice(start, end);
+    if (
+      logicalRun !== visualText
+      && reverseGraphemes(logicalRun) === visualText
+    ) {
+      return logicalRun;
+    }
+  }
+  return null;
 }
 
 /**

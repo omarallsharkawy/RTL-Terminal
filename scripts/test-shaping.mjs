@@ -6,8 +6,10 @@ import {
   includeAdjacentCursorInRenderGroups,
   isArabicOnlyRenderRun,
   isNeutralRenderRun,
+  logicalArabicRunForVisualText,
   shouldRenderLineRtl,
 } from '../src/components/arabicRenderer.ts';
+import { updatePendingTerminalInput } from '../src/components/terminalInputMirror.ts';
 
 let passed = 0;
 
@@ -209,6 +211,35 @@ expect(
     (item) => isNeutralRenderRun(item.text),
   ),
   [[...tuiCursorAtStart.slice(2)]],
+);
+
+expect(
+  'pre-visualized TUI Arabic is restored from exact pending input',
+  logicalArabicRunForVisualText('ملاعلاب ابحرم', 'مرحبا بالعالم'),
+  'مرحبا بالعالم',
+);
+expect(
+  'mixed TUI Arabic runs are restored without touching embedded English',
+  [
+    logicalArabicRunForVisualText('ملاعلاب', 'مرحبا hello بالعالم'),
+    logicalArabicRunForVisualText('ابحرم', 'مرحبا hello بالعالم'),
+  ],
+  ['بالعالم', 'مرحبا'],
+);
+expect(
+  'already-logical Arabic is never reversed',
+  logicalArabicRunForVisualText('مرحبا بالعالم', 'مرحبا بالعالم'),
+  null,
+);
+expect(
+  'pending input mirror preserves Arabic typing and backspace',
+  updatePendingTerminalInput('مرحبا بالعالم', '\x7f!'),
+  'مرحبا بالعال!',
+);
+expect(
+  'pending input mirror clears submitted input',
+  updatePendingTerminalInput('مرحبا بالعالم', '\r'),
+  '',
 );
 
 expect(

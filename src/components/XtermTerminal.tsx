@@ -11,9 +11,11 @@ import {
   includeAdjacentCursorInRenderGroups,
   isArabicOnlyRenderRun,
   isNeutralRenderRun,
+  logicalArabicRunForVisualText,
   shouldRenderLineRtl,
 } from './arabicRenderer';
 import { getReconnectDecision } from './reconnectPolicy';
+import { updatePendingTerminalInput } from './terminalInputMirror';
 import { TerminalInputQueue } from './terminalInputQueue';
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
@@ -198,6 +200,8 @@ export function XtermTerminal({
     let sessionConnectedAt = 0;
     let tauriForCleanup: { invoke: Invoke } | undefined;
     let inputQueue: TerminalInputQueue | undefined;
+    let pendingUserInput = '';
+    const tuiVisualTextState = new WeakMap<HTMLElement, { visual: string; logical: string }>();
 
     const unwrapArabicGroups = (row: HTMLElement) => {
       for (const group of Array.from(row.querySelectorAll('.xterm-arabic-group'))) {
@@ -233,6 +237,29 @@ export function XtermTerminal({
       span.setAttribute('dir', 'rtl');
     };
 
+    const restoreTuiLogicalArabicText = (
+      span: HTMLElement,
+      enabled: boolean,
+    ): boolean => {
+      const current = span.textContent || '';
+      const previous = tuiVisualTextState.get(span);
+      if (enabled && previous?.logical === current) return true;
+      if (!enabled) {
+        tuiVisualTextState.delete(span);
+        return false;
+      }
+
+      const logical = logicalArabicRunForVisualText(current, pendingUserInput);
+      if (!logical) {
+        tuiVisualTextState.delete(span);
+        return false;
+      }
+
+      tuiVisualTextState.set(span, { visual: current, logical });
+      span.textContent = logical;
+      return true;
+    };
+
     const decorateArabicRow = (row: HTMLElement) => {
       const hasCursor = Boolean(row.querySelector('.xterm-cursor'));
 
@@ -254,6 +281,21 @@ export function XtermTerminal({
       };
 
       let childSpans = rendererSpans(row);
+      const hasPaintedTuiCursor = childSpans.some((span) => (
+        /^\s*$/u.test(span.textContent || '')
+        && Array.from(span.classList).some((name) => /^xterm-bg-\d+$/u.test(name))
+      ));
+      const looksLikeTuiPrompt = /^\s*[>❯›»][\s\u00a0]/u.test(row.textContent || '');
+      const mayContainVisualTuiInput = hasPaintedTuiCursor || looksLikeTuiPrompt;
+      let restoredTuiInput = false;
+      for (const span of childSpans) {
+        restoredTuiInput = restoreTuiLogicalArabicText(
+          span,
+          mayContainVisualTuiInput,
+        ) || restoredTuiInput;
+      }
+      row.classList.toggle('xterm-tui-logical-input', restoredTuiInput);
+
       for (const span of childSpans) {
         setArabicSpanLayout(span, isArabicOnlyRenderRun(span.textContent || ''));
       }
@@ -398,6 +440,7 @@ export function XtermTerminal({
         setStatus(reconnecting ? 'reconnecting' : 'connecting');
         const sessionId = ++nextTerminalSessionId;
         currentSessionId = sessionId;
+        pendingUserInput = '';
         const result = await tauri.invoke<StartTerminalResult>('start_terminal', { ...size(), sessionId });
         if (cancelled || currentSessionId !== sessionId) {
           await tauri.invoke('stop_terminal', { sessionId }).catch(console.error);
@@ -421,6 +464,7 @@ export function XtermTerminal({
         const decision = getReconnectDecision(reconnectAttempts, connectedForMs);
         sessionConnectedAt = 0;
         currentSessionId = null;
+        pendingUserInput = '';
         setShell(null);
 
         if (!decision) {
@@ -450,6 +494,7 @@ export function XtermTerminal({
 
         const plainCtrl = event.ctrlKey && !event.altKey && !event.metaKey;
         if (plainCtrl && event.code === 'KeyC') {
+          pendingUserInput = '';
           if (currentSessionId !== null) {
             inputQueue?.enqueueOperation(
               currentSessionId,
@@ -487,6 +532,7 @@ export function XtermTerminal({
           // or other private modes. A new shell must start from a clean terminal
           // state rather than inheriting protocol state from the dead session.
           term.reset();
+          pendingUserInput = '';
           if (exitedSessionId !== null) {
             tauri.invoke('stop_terminal', { sessionId: exitedSessionId }).catch(console.error);
           }
@@ -501,6 +547,7 @@ export function XtermTerminal({
 
       inputDisposable = term.onData((data) => {
         if (currentSessionId !== null) {
+          pendingUserInput = updatePendingTerminalInput(pendingUserInput, data);
           inputQueue?.enqueue(currentSessionId, data);
         }
       });
@@ -516,6 +563,7 @@ export function XtermTerminal({
         e.stopPropagation();
         const text = e.clipboardData?.getData('text');
         if (text && currentSessionId !== null) {
+          pendingUserInput = updatePendingTerminalInput(pendingUserInput, text);
           inputQueue?.enqueue(currentSessionId, text);
         }
       };
