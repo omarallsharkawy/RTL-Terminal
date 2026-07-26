@@ -12,6 +12,10 @@ const ptySource = readFileSync(
   new URL('../src-tauri/src/pty.rs', import.meta.url),
   'utf8',
 );
+const viteSource = readFileSync(
+  new URL('../vite.config.ts', import.meta.url),
+  'utf8',
+);
 
 assert.deepEqual(
   tauriConfig.bundle.targets,
@@ -26,6 +30,26 @@ assert.match(
   tauriConfig.app.security.csp,
   /style-src[^;]*'unsafe-inline'/,
   'the explicit CSP must allow xterm dynamic renderer styles',
+);
+assert.match(
+  tauriConfig.app.security.csp,
+  /object-src\s+'none'/,
+  'the CSP must block plugin and object embeds',
+);
+assert.match(
+  tauriConfig.app.security.csp,
+  /base-uri\s+'none'/,
+  'the CSP must block base URL rewriting',
+);
+assert.match(
+  tauriConfig.app.security.csp,
+  /form-action\s+'none'/,
+  'the CSP must block form submissions',
+);
+assert.match(
+  viteSource,
+  /port:\s*1420,[\s\S]*?strictPort:\s*true/,
+  'Vite must fail closed when the fixed Tauri development port is occupied',
 );
 assert.match(
   ptySource,
@@ -48,4 +72,4 @@ assert.match(
   'closing the window must cancel initial layout before PTY startup',
 );
 
-console.log('Windows rendering policy: 7/7 checks passed');
+console.log('Windows rendering policy: 11/11 checks passed');

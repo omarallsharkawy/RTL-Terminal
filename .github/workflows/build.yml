@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main, master]
-    tags: ['v*']
+    tags: ["v*"]
   pull_request:
     branches: [main, master]
 
@@ -43,6 +43,9 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm ci
+
+      - name: Audit frontend dependencies
+        run: npm audit --audit-level=high
 
       - name: Normalize config encoding
         run: node scripts/normalize-config.cjs
@@ -115,9 +118,26 @@ jobs:
       - name: Lint Rust with clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
+  rust-security:
+    name: Audit Rust dependencies
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Audit Rust dependencies
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: src-tauri
+
   release:
     name: Create GitHub Release
-    needs: [build-windows, rust-quality]
+    needs: [build-windows, rust-quality, rust-security]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
     permissions:
@@ -136,6 +156,26 @@ jobs:
         shell: pwsh
         run: Get-ChildItem -Recurse ./artifacts-windows | Select-Object FullName, Length
 
+      - name: Generate SHA-256 checksums
+        shell: pwsh
+        run: |
+          $releaseFiles = @(
+            Get-ChildItem -Recurse ./artifacts-windows -File |
+              Where-Object { $_.Extension -in '.exe', '.msi' }
+          )
+          if ($releaseFiles.Count -eq 0) {
+            Write-Error "No Windows release assets found."
+            exit 1
+          }
+
+          $checksums = @(
+            foreach ($file in $releaseFiles) {
+              $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              "$hash  $($file.Name)"
+            }
+          )
+          $checksums | Set-Content -LiteralPath ./artifacts-windows/SHA256SUMS.txt -Encoding ascii
+
       - name: Create GitHub release
         shell: pwsh
         env:
@@ -150,6 +190,7 @@ jobs:
             Write-Error "No Windows release assets found."
             exit 1
           }
+          $assets += (Resolve-Path ./artifacts-windows/SHA256SUMS.txt).Path
 
           & gh release create $env:GITHUB_REF_NAME @assets `
             --repo $env:GITHUB_REPOSITORY `

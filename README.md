@@ -52,8 +52,9 @@ The app also hardens the PTY bridge around real terminal behavior: backend reads
 ### Install on Windows
 
 1. Open the [latest Twitty release](https://github.com/omarallsharkawy/RTL-Terminal/releases/latest).
-2. Under **Assets**, download `Twitty_<version>_x64-setup.exe` and run it.
-3. Choose English or العربية, then continue through the setup pages.
+2. Under **Assets**, download `Twitty_<version>_x64-setup.exe`. If that release also lists `SHA256SUMS.txt`, download it too.
+3. When a checksum file is available, verify the installer with `Get-FileHash .\Twitty_<version>_x64-setup.exe -Algorithm SHA256` and compare it with `SHA256SUMS.txt`.
+4. Run the installer, choose English or العربية, then continue through the setup pages.
 
 The x64 installer is for Windows 10/11 and installs for the current user, so
 the default installation does not require an Administrator prompt.
@@ -68,6 +69,9 @@ During setup you can:
 Setup includes the WebView2 bootstrapper: it detects an existing WebView2
 runtime and installs it when needed. An internet connection may therefore be
 needed on a fresh Windows installation. Setup also blocks accidental downgrades.
+Current community builds are not Authenticode-signed, so Windows SmartScreen may
+show an unknown-publisher warning. The published SHA-256 checksum verifies file
+integrity; publisher identity will require a future code-signing certificate.
 
 ### Browser demo (no shell)
 
@@ -87,7 +91,11 @@ npm ci
 npm run tauri:dev
 ```
 
-The backend uses `TWITTY_SHELL` when set, then checks the standard PowerShell 7 and Windows PowerShell locations before falling back through PATH, `%COMSPEC%`, and `cmd.exe`. PowerShell starts with `-NoLogo -NoProfile`.
+The backend uses `TWITTY_SHELL` when set, then checks the standard PowerShell 7 and Windows PowerShell locations before falling back through PATH, `%COMSPEC%`, and `cmd.exe`. PowerShell starts with `-NoLogo -NoProfile`. `TWITTY_SHELL` is a trusted developer override: Twitty launches that executable with the current user's permissions and does not sandbox it, so only point it at software you trust.
+
+Each Twitty window owns one active PTY session. Starting a replacement session
+shuts down the previous one; tabs and multiple simultaneous sessions are not part
+of the current release.
 
 ### Production build
 
@@ -160,7 +168,8 @@ Twitty permits no remote scripts or arbitrary remote content. The only CSP
 exception is inline `style-src`, because xterm.js generates its ANSI palette,
 cell positions, cursor rules, and renderer styles at runtime. Tauri's asset-CSP
 rewrite is disabled for `style-src` only; every other directive remains
-enforced. `npm run test:windows` guards this narrow exception and verifies that
+enforced. Object embeds, base URL rewriting, and form submission are blocked
+explicitly. `npm run test:windows` guards this narrow exception and verifies that
 the explicit CSP does not broaden accidentally.
 
 ## Platform support
@@ -188,4 +197,5 @@ Twitty is distributed under the End User License Agreement in [`LICENSE.txt`](LI
 ## Notes
 
 - The `kitty/` directory is vendored reference source, not part of the build, and is gitignored.
-- The Windows installer is built by GitHub Actions; GitHub releases are created only for version tags.
+- GitHub Actions audits npm and Rust dependencies; Dependabot checks npm, Cargo, and workflow actions weekly.
+- The Windows installer is built by GitHub Actions; newly built version-tag releases include `SHA256SUMS.txt`.

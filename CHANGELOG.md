@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Security and release integrity
+
+- Updated the vulnerable development-only PostCSS dependency and added
+  high-severity npm and Rust dependency audits to CI.
+- Hardened the native Content Security Policy against object embeds, base URL
+  rewriting, and form submissions.
+- Made Vite fail closed when Tauri's fixed development port is already occupied.
+- Added weekly Dependabot coverage for npm, Cargo, and GitHub Actions.
+- Added SHA-256 checksum generation for future GitHub release assets.
+- Documented the `TWITTY_SHELL` trust boundary, unsigned installer status, and
+  the current single-session model.
+
 ## 1.2.0 — 2026-07-26
 
 ### Brand and installer
