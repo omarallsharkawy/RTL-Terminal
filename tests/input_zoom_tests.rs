@@ -17,8 +17,8 @@ fn test_ctrl_c_physical_key() {
     );
     assert_eq!(
         action,
-        Some(InputAction::Bytes(vec![3])),
-        "Ctrl+C must produce ASCII 3 (ETX) regardless of layout"
+        Some(InputAction::CopyOrInterrupt),
+        "Ctrl+C must produce CopyOrInterrupt (copy if selection, or SIGINT if empty)"
     );
 }
 
@@ -65,4 +65,80 @@ fn test_clipboard_shortcuts() {
         false,
     );
     assert_eq!(action, Some(InputAction::Paste));
+
+    // Ctrl+V without shift must also paste
+    let mut ctrl_only = ModifiersState::empty();
+    ctrl_only.insert(ModifiersState::CONTROL);
+    let action_no_shift = handle_key_raw(
+        Some(KeyCode::KeyV),
+        &Key::Character("v".into()),
+        None,
+        ElementState::Pressed,
+        ctrl_only,
+        false,
+    );
+    assert_eq!(action_no_shift, Some(InputAction::Paste));
+
+    // Ctrl+X must trigger Cut
+    let action_cut = handle_key_raw(
+        Some(KeyCode::KeyX),
+        &Key::Character("x".into()),
+        None,
+        ElementState::Pressed,
+        ctrl_only,
+        false,
+    );
+    assert_eq!(action_cut, Some(InputAction::Cut));
+
+    // Ctrl+Z must trigger Undo / SIGTSTP (byte 26)
+    let action_undo = handle_key_raw(
+        Some(KeyCode::KeyZ),
+        &Key::Character("z".into()),
+        None,
+        ElementState::Pressed,
+        ctrl_only,
+        false,
+    );
+    assert_eq!(action_undo, Some(InputAction::Bytes(vec![26])));
+
+    // Arabic keyboard layout verification (Physical key unidentified or Arabic logical)
+    let action_ar_c = handle_key_raw(
+        None,
+        &Key::Character("ؤ".into()),
+        None,
+        ElementState::Pressed,
+        ctrl_only,
+        false,
+    );
+    assert_eq!(action_ar_c, Some(InputAction::CopyOrInterrupt));
+
+    let action_ar_v = handle_key_raw(
+        None,
+        &Key::Character("ر".into()),
+        None,
+        ElementState::Pressed,
+        ctrl_only,
+        false,
+    );
+    assert_eq!(action_ar_v, Some(InputAction::Paste));
+
+    let action_ar_x = handle_key_raw(
+        None,
+        &Key::Character("ء".into()),
+        None,
+        ElementState::Pressed,
+        ctrl_only,
+        false,
+    );
+    assert_eq!(action_ar_x, Some(InputAction::Cut));
+
+    let action_ar_z = handle_key_raw(
+        None,
+        &Key::Character("ئ".into()),
+        None,
+        ElementState::Pressed,
+        ctrl_only,
+        false,
+    );
+    assert_eq!(action_ar_z, Some(InputAction::Bytes(vec![26])));
 }

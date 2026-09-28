@@ -31,6 +31,7 @@
 - Configured low-latency Mailbox present mode with single-frame presentation to eliminate input latency.
 - Supported SGR mouse reporting (`1000`, `1002`, `1006`), allowing mouse-wheel scrolling and click events to pass directly to interactive TUI applications.
 - Switched shortcut processing to hardware keycodes to keep core terminal controls (`Ctrl+C`, `Ctrl+D`, `Ctrl+Shift+V`) functional across non-Latin keyboard layouts.
+- Implemented native mouse text selection with visual contrast highlighting and integrated clipboard operations (`Ctrl+C`, `Ctrl+V`, `Ctrl+X`, `Ctrl+Z`, `Ctrl+A`) with full Arabic layout parity and bracketed paste support.
 
 ## 1.2.1 — 2026-07-26
 

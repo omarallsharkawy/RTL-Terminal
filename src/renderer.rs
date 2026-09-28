@@ -9,6 +9,7 @@ use winit::window::Window;
 use crate::color::{Palette, Rgba};
 use crate::quad::{try_render_box_or_block, QuadRenderer};
 use crate::terminal::{CellData, CursorState, LineData};
+use alacritty_terminal::vte::ansi::Color as AnsiColor;
 
 #[derive(Clone)]
 pub struct CachedSegment {
@@ -80,6 +81,7 @@ fn hash_cells(cells: &[CellData]) -> u64 {
         hash_color(&cell.fg, &mut hasher);
         hash_color(&cell.bg, &mut hasher);
         cell.flags.bits().hash(&mut hasher);
+        cell.is_selected.hash(&mut hasher);
     }
     hasher.finish()
 }
@@ -347,9 +349,20 @@ impl Renderer {
                 let mut geom_rendered = vec![false; cols];
 
                 for (c, cell) in line.cells.iter().enumerate() {
-                    let bg = self.palette.resolve(cell.bg, true);
-                    if bg != default_bg {
-                        bg_cells.push((c, cell.bg));
+                    if cell.is_selected {
+                        bg_cells.push((
+                            c,
+                            AnsiColor::Spec(alacritty_terminal::vte::ansi::Rgb {
+                                r: 54,
+                                g: 74,
+                                b: 130,
+                            }),
+                        ));
+                    } else {
+                        let bg = self.palette.resolve(cell.bg, true);
+                        if bg != default_bg {
+                            bg_cells.push((c, cell.bg));
+                        }
                     }
                     let mut test_quads = Vec::new();
                     let rendered = try_render_box_or_block(
@@ -426,7 +439,11 @@ impl Renderer {
                                 seg_has_rtl = true;
                             }
 
-                            let fg = self.palette.resolve(cell.fg, false);
+                            let fg = if cell.is_selected {
+                                crate::color::Rgba::from_rgb8(245, 245, 255)
+                            } else {
+                                self.palette.resolve(cell.fg, false)
+                            };
                             let mut attrs = default_attrs.clone().color(fg.to_glyphon());
                             if cell
                                 .flags

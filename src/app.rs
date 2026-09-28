@@ -30,6 +30,7 @@ pub struct App {
     mouse_row: usize,
     config: TwittyConfig,
     needs_redraw: bool,
+    is_selecting: bool,
 }
 
 impl App {
@@ -51,6 +52,7 @@ impl App {
             mouse_row: 0,
             config,
             needs_redraw: false,
+            is_selecting: false,
         }
     }
 
@@ -201,6 +203,14 @@ impl ApplicationHandler<AppEvent> for App {
                     self.mouse_col = col;
                     self.mouse_row = row;
 
+                    if self.is_selecting {
+                        if let Ok(mut term) = self.terminal.lock() {
+                            term.update_selection(col, row);
+                        }
+                        if let Some(ref r) = self.renderer {
+                            r.window.request_redraw();
+                        }
+                    }
                     let mode = self
                         .terminal
                         .lock()
@@ -222,14 +232,24 @@ impl ApplicationHandler<AppEvent> for App {
                     .unwrap_or(TermMode::NONE);
                 let col = self.mouse_col + 1;
                 let row = self.mouse_row + 1;
+                let in_mouse_mode =
+                    mode.intersects(TermMode::MOUSE_MODE) && !self.modifiers.shift_key();
 
                 match state {
                     ElementState::Pressed => match button {
                         MouseButton::Left => {
-                            if mode.intersects(TermMode::MOUSE_MODE) {
+                            if in_mouse_mode {
                                 let seq = format!("[<0;{};{}M", col, row);
                                 if let Some(ref pty) = self.pty {
                                     let _ = pty.write(seq.as_bytes());
+                                }
+                            } else {
+                                self.is_selecting = true;
+                                if let Ok(mut term) = self.terminal.lock() {
+                                    term.start_selection(self.mouse_col, self.mouse_row);
+                                }
+                                if let Some(ref r) = self.renderer {
+                                    r.window.request_redraw();
                                 }
                             }
                         }
@@ -237,16 +257,48 @@ impl ApplicationHandler<AppEvent> for App {
                             if let Ok(mut clipboard) = arboard::Clipboard::new() {
                                 if let Ok(text) = clipboard.get_text() {
                                     if let Some(ref pty) = self.pty {
-                                        let _ = pty.write(text.as_bytes());
+                                        let bracketed = self
+                                            .terminal
+                                            .lock()
+                                            .map(|t| t.mode().contains(TermMode::BRACKETED_PASTE))
+                                            .unwrap_or(false);
+                                        if bracketed {
+                                            let mut payload = Vec::with_capacity(text.len() + 12);
+                                            payload.extend_from_slice(b"[200~");
+                                            payload.extend_from_slice(text.as_bytes());
+                                            payload.extend_from_slice(b"[201~");
+                                            let _ = pty.write(&payload);
+                                        } else {
+                                            let _ = pty.write(text.as_bytes());
+                                        }
                                     }
                                 }
                             }
                         }
                         MouseButton::Right => {
-                            if mode.intersects(TermMode::MOUSE_MODE) {
+                            if in_mouse_mode {
                                 let seq = format!("[<2;{};{}M", col, row);
                                 if let Some(ref pty) = self.pty {
                                     let _ = pty.write(seq.as_bytes());
+                                }
+                            } else if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                if let Ok(text) = clipboard.get_text() {
+                                    if let Some(ref pty) = self.pty {
+                                        let bracketed = self
+                                            .terminal
+                                            .lock()
+                                            .map(|t| t.mode().contains(TermMode::BRACKETED_PASTE))
+                                            .unwrap_or(false);
+                                        if bracketed {
+                                            let mut payload = Vec::with_capacity(text.len() + 12);
+                                            payload.extend_from_slice(b"[200~");
+                                            payload.extend_from_slice(text.as_bytes());
+                                            payload.extend_from_slice(b"[201~");
+                                            let _ = pty.write(&payload);
+                                        } else {
+                                            let _ = pty.write(text.as_bytes());
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -254,11 +306,13 @@ impl ApplicationHandler<AppEvent> for App {
                     },
                     ElementState::Released => match button {
                         MouseButton::Left => {
-                            if mode.intersects(TermMode::MOUSE_MODE) {
+                            if in_mouse_mode {
                                 let seq = format!("[<0;{};{}m", col, row);
                                 if let Some(ref pty) = self.pty {
                                     let _ = pty.write(seq.as_bytes());
                                 }
+                            } else {
+                                self.is_selecting = false;
                             }
                         }
                         MouseButton::Right => {
@@ -354,12 +408,99 @@ impl ApplicationHandler<AppEvent> for App {
                             if let Ok(mut clipboard) = arboard::Clipboard::new() {
                                 if let Ok(text) = clipboard.get_text() {
                                     if let Some(ref pty) = self.pty {
-                                        let _ = pty.write(text.as_bytes());
+                                        let bracketed = self
+                                            .terminal
+                                            .lock()
+                                            .map(|t| t.mode().contains(TermMode::BRACKETED_PASTE))
+                                            .unwrap_or(false);
+                                        if bracketed {
+                                            let mut payload = Vec::with_capacity(text.len() + 12);
+                                            payload.extend_from_slice(b"[200~");
+                                            payload.extend_from_slice(text.as_bytes());
+                                            payload.extend_from_slice(b"[201~");
+                                            let _ = pty.write(&payload);
+                                        } else {
+                                            let _ = pty.write(text.as_bytes());
+                                        }
                                     }
                                 }
                             }
                         }
-                        InputAction::Copy => {}
+                        InputAction::Copy => {
+                            if let Ok(term) = self.terminal.lock() {
+                                if let Some(text) = term.selection_text() {
+                                    if !text.is_empty() {
+                                        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                            let _ = clipboard.set_text(text);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        InputAction::CopyOrInterrupt => {
+                            let copied = if let Ok(mut term) = self.terminal.lock() {
+                                if let Some(text) = term.selection_text() {
+                                    if !text.is_empty() {
+                                        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                            let _ = clipboard.set_text(text);
+                                        }
+                                        term.clear_selection();
+                                        if let Some(ref r) = self.renderer {
+                                            r.window.request_redraw();
+                                        }
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            };
+
+                            if !copied {
+                                if let Some(ref pty) = self.pty {
+                                    let _ = pty.write(&[3]); // SIGINT / Ctrl+C
+                                }
+                            }
+                        }
+                        InputAction::Cut => {
+                            let cut = if let Ok(mut term) = self.terminal.lock() {
+                                if let Some(text) = term.selection_text() {
+                                    if !text.is_empty() {
+                                        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                            let _ = clipboard.set_text(text);
+                                        }
+                                        term.clear_selection();
+                                        if let Some(ref r) = self.renderer {
+                                            r.window.request_redraw();
+                                        }
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            };
+
+                            if !cut {
+                                if let Some(ref pty) = self.pty {
+                                    let _ = pty.write(&[24]); // Ctrl+X byte 24
+                                }
+                            }
+                        }
+                        InputAction::SelectAll => {
+                            if let Ok(mut term) = self.terminal.lock() {
+                                term.select_all();
+                            }
+                            if let Some(ref r) = self.renderer {
+                                r.window.request_redraw();
+                            }
+                        }
                     }
                 }
             }
