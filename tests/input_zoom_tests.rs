@@ -3,6 +3,23 @@ use winit::event::ElementState;
 use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey};
 
 #[test]
+fn test_arboard_clipboard() {
+    for i in 0..5 {
+        match arboard::Clipboard::new() {
+            Ok(mut cb) => {
+                let t = format!("twitty_test_{}", i);
+                let _ = cb.set_text(&t);
+                let read = cb.get_text();
+                assert_eq!(read.unwrap(), t);
+            }
+            Err(e) => {
+                panic!("Failed at iter {}: {:?}", i, e);
+            }
+        }
+    }
+}
+
+#[test]
 fn test_ctrl_c_physical_key() {
     let mut modifiers = ModifiersState::empty();
     modifiers.insert(ModifiersState::CONTROL);

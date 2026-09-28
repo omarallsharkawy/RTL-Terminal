@@ -122,8 +122,19 @@ pub fn handle_key_raw(
         return None;
     }
 
-    let ctrl = modifiers.control_key();
+    let mut ctrl = modifiers.control_key();
     let shift = modifiers.shift_key();
+
+    if !ctrl {
+        if let Key::Character(ref s) = logical {
+            if let Some(ch) = s.chars().next() {
+                let code = ch as u32;
+                if (1..=26).contains(&code) && code != 9 && code != 10 && code != 13 {
+                    ctrl = true;
+                }
+            }
+        }
+    }
 
     // 1. Control Key Combinations (works in Arabic & English layout, physical & logical)
     if ctrl {

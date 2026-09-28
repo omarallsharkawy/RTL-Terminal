@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
-use winit::keyboard::ModifiersState;
+use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
 use winit::window::{WindowAttributes, WindowId};
 
 use crate::config::TwittyConfig;
@@ -98,6 +98,65 @@ impl App {
             r.set_font_size(clamped);
         }
         self.sync_grid();
+    }
+}
+
+fn get_clipboard_text() -> Option<String> {
+    if let Ok(mut cb) = arboard::Clipboard::new() {
+        if let Ok(text) = cb.get_text() {
+            if !text.is_empty() {
+                return Some(text);
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(output) = std::process::Command::new("wl-paste")
+            .arg("--no-newline")
+            .output()
+        {
+            if output.status.success() {
+                if let Ok(text) = String::from_utf8(output.stdout) {
+                    if !text.is_empty() {
+                        return Some(text);
+                    }
+                }
+            }
+        }
+        if let Ok(output) = std::process::Command::new("xclip")
+            .args(["-selection", "clipboard", "-o"])
+            .output()
+        {
+            if output.status.success() {
+                if let Ok(text) = String::from_utf8(output.stdout) {
+                    if !text.is_empty() {
+                        return Some(text);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn set_clipboard_text(text: &str) {
+    let mut ok = false;
+    if let Ok(mut cb) = arboard::Clipboard::new() {
+        if cb.set_text(text).is_ok() {
+            ok = true;
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if !ok {
+        use std::io::Write;
+        if let Ok(mut child) = std::process::Command::new("wl-copy")
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+        {
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+        }
     }
 }
 
@@ -254,23 +313,21 @@ impl ApplicationHandler<AppEvent> for App {
                             }
                         }
                         MouseButton::Middle => {
-                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                if let Ok(text) = clipboard.get_text() {
-                                    if let Some(ref pty) = self.pty {
-                                        let bracketed = self
-                                            .terminal
-                                            .lock()
-                                            .map(|t| t.mode().contains(TermMode::BRACKETED_PASTE))
-                                            .unwrap_or(false);
-                                        if bracketed {
-                                            let mut payload = Vec::with_capacity(text.len() + 12);
-                                            payload.extend_from_slice(b"[200~");
-                                            payload.extend_from_slice(text.as_bytes());
-                                            payload.extend_from_slice(b"[201~");
-                                            let _ = pty.write(&payload);
-                                        } else {
-                                            let _ = pty.write(text.as_bytes());
-                                        }
+                            if let Some(text) = get_clipboard_text() {
+                                if let Some(ref pty) = self.pty {
+                                    let bracketed = self
+                                        .terminal
+                                        .lock()
+                                        .map(|t| t.mode().contains(TermMode::BRACKETED_PASTE))
+                                        .unwrap_or(false);
+                                    if bracketed {
+                                        let mut payload = Vec::with_capacity(text.len() + 12);
+                                        payload.extend_from_slice(b"[200~");
+                                        payload.extend_from_slice(text.as_bytes());
+                                        payload.extend_from_slice(b"[201~");
+                                        let _ = pty.write(&payload);
+                                    } else {
+                                        let _ = pty.write(text.as_bytes());
                                     }
                                 }
                             }
@@ -281,23 +338,21 @@ impl ApplicationHandler<AppEvent> for App {
                                 if let Some(ref pty) = self.pty {
                                     let _ = pty.write(seq.as_bytes());
                                 }
-                            } else if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                if let Ok(text) = clipboard.get_text() {
-                                    if let Some(ref pty) = self.pty {
-                                        let bracketed = self
-                                            .terminal
-                                            .lock()
-                                            .map(|t| t.mode().contains(TermMode::BRACKETED_PASTE))
-                                            .unwrap_or(false);
-                                        if bracketed {
-                                            let mut payload = Vec::with_capacity(text.len() + 12);
-                                            payload.extend_from_slice(b"[200~");
-                                            payload.extend_from_slice(text.as_bytes());
-                                            payload.extend_from_slice(b"[201~");
-                                            let _ = pty.write(&payload);
-                                        } else {
-                                            let _ = pty.write(text.as_bytes());
-                                        }
+                            } else if let Some(text) = get_clipboard_text() {
+                                if let Some(ref pty) = self.pty {
+                                    let bracketed = self
+                                        .terminal
+                                        .lock()
+                                        .map(|t| t.mode().contains(TermMode::BRACKETED_PASTE))
+                                        .unwrap_or(false);
+                                    if bracketed {
+                                        let mut payload = Vec::with_capacity(text.len() + 12);
+                                        payload.extend_from_slice(b"[200~");
+                                        payload.extend_from_slice(text.as_bytes());
+                                        payload.extend_from_slice(b"[201~");
+                                        let _ = pty.write(&payload);
+                                    } else {
+                                        let _ = pty.write(text.as_bytes());
                                     }
                                 }
                             }
@@ -381,6 +436,30 @@ impl ApplicationHandler<AppEvent> for App {
                 }
             }
             WindowEvent::KeyboardInput { event, .. } => {
+                match event.physical_key {
+                    PhysicalKey::Code(KeyCode::ControlLeft | KeyCode::ControlRight) => {
+                        if event.state.is_pressed() {
+                            self.modifiers.insert(ModifiersState::CONTROL);
+                        } else {
+                            self.modifiers.remove(ModifiersState::CONTROL);
+                        }
+                    }
+                    PhysicalKey::Code(KeyCode::ShiftLeft | KeyCode::ShiftRight) => {
+                        if event.state.is_pressed() {
+                            self.modifiers.insert(ModifiersState::SHIFT);
+                        } else {
+                            self.modifiers.remove(ModifiersState::SHIFT);
+                        }
+                    }
+                    PhysicalKey::Code(KeyCode::AltLeft | KeyCode::AltRight) => {
+                        if event.state.is_pressed() {
+                            self.modifiers.insert(ModifiersState::ALT);
+                        } else {
+                            self.modifiers.remove(ModifiersState::ALT);
+                        }
+                    }
+                    _ => {}
+                }
                 let app_cursor = self
                     .terminal
                     .lock()
@@ -405,23 +484,21 @@ impl ApplicationHandler<AppEvent> for App {
                             self.update_font_size(14.5);
                         }
                         InputAction::Paste => {
-                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                if let Ok(text) = clipboard.get_text() {
-                                    if let Some(ref pty) = self.pty {
-                                        let bracketed = self
-                                            .terminal
-                                            .lock()
-                                            .map(|t| t.mode().contains(TermMode::BRACKETED_PASTE))
-                                            .unwrap_or(false);
-                                        if bracketed {
-                                            let mut payload = Vec::with_capacity(text.len() + 12);
-                                            payload.extend_from_slice(b"[200~");
-                                            payload.extend_from_slice(text.as_bytes());
-                                            payload.extend_from_slice(b"[201~");
-                                            let _ = pty.write(&payload);
-                                        } else {
-                                            let _ = pty.write(text.as_bytes());
-                                        }
+                            if let Some(text) = get_clipboard_text() {
+                                if let Some(ref pty) = self.pty {
+                                    let bracketed = self
+                                        .terminal
+                                        .lock()
+                                        .map(|t| t.mode().contains(TermMode::BRACKETED_PASTE))
+                                        .unwrap_or(false);
+                                    if bracketed {
+                                        let mut payload = Vec::with_capacity(text.len() + 12);
+                                        payload.extend_from_slice(b"[200~");
+                                        payload.extend_from_slice(text.as_bytes());
+                                        payload.extend_from_slice(b"[201~");
+                                        let _ = pty.write(&payload);
+                                    } else {
+                                        let _ = pty.write(text.as_bytes());
                                     }
                                 }
                             }
@@ -430,9 +507,7 @@ impl ApplicationHandler<AppEvent> for App {
                             if let Ok(term) = self.terminal.lock() {
                                 if let Some(text) = term.selection_text() {
                                     if !text.is_empty() {
-                                        if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                            let _ = clipboard.set_text(text);
-                                        }
+                                        set_clipboard_text(&text);
                                     }
                                 }
                             }
@@ -441,9 +516,7 @@ impl ApplicationHandler<AppEvent> for App {
                             let copied = if let Ok(mut term) = self.terminal.lock() {
                                 if let Some(text) = term.selection_text() {
                                     if !text.is_empty() {
-                                        if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                            let _ = clipboard.set_text(text);
-                                        }
+                                        set_clipboard_text(&text);
                                         term.clear_selection();
                                         if let Some(ref r) = self.renderer {
                                             r.window.request_redraw();
@@ -466,30 +539,39 @@ impl ApplicationHandler<AppEvent> for App {
                             }
                         }
                         InputAction::Cut => {
-                            let cut = if let Ok(mut term) = self.terminal.lock() {
-                                if let Some(text) = term.selection_text() {
-                                    if !text.is_empty() {
-                                        if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                            let _ = clipboard.set_text(text);
+                            let in_alt_screen = self
+                                .terminal
+                                .lock()
+                                .map(|t| t.mode().contains(TermMode::ALT_SCREEN))
+                                .unwrap_or(false);
+                            if in_alt_screen {
+                                if let Some(ref pty) = self.pty {
+                                    let _ = pty.write(&[24]);
+                                }
+                            } else {
+                                let cut = if let Ok(mut term) = self.terminal.lock() {
+                                    if let Some(text) = term.selection_text() {
+                                        if !text.is_empty() {
+                                            set_clipboard_text(&text);
+                                            term.clear_selection();
+                                            if let Some(ref r) = self.renderer {
+                                                r.window.request_redraw();
+                                            }
+                                            true
+                                        } else {
+                                            false
                                         }
-                                        term.clear_selection();
-                                        if let Some(ref r) = self.renderer {
-                                            r.window.request_redraw();
-                                        }
-                                        true
                                     } else {
                                         false
                                     }
                                 } else {
                                     false
-                                }
-                            } else {
-                                false
-                            };
+                                };
 
-                            if !cut {
-                                if let Some(ref pty) = self.pty {
-                                    let _ = pty.write(&[24]); // Ctrl+X byte 24
+                                if !cut {
+                                    if let Some(ref pty) = self.pty {
+                                        let _ = pty.write(&[24]); // Ctrl+X byte 24
+                                    }
                                 }
                             }
                         }

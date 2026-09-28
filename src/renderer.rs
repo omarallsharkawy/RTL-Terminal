@@ -395,6 +395,10 @@ impl Renderer {
                     let mut seg_end = col_idx;
 
                     while seg_end < cols && !geom_rendered[seg_end] {
+                        if line.cells[seg_end].bg != line.cells[seg_start].bg {
+                            break;
+                        }
+
                         if line.cells[seg_end].c == ' ' {
                             let mut space_run = 0;
                             let mut peek = seg_end;
@@ -402,26 +406,32 @@ impl Renderer {
                                 space_run += 1;
                                 peek += 1;
                             }
-                            if (space_run >= 15 && peek >= 70)
-                                || (peek < cols && geom_rendered[peek])
+                            if (peek < cols && geom_rendered[peek])
+                                || (peek < cols && line.cells[peek].bg != line.cells[seg_start].bg)
                             {
+                                break;
+                            }
+
+                            let is_active_input_space = cursor.is_visible
+                                && cursor.row == r
+                                && cursor.col >= seg_end
+                                && cursor.col <= peek;
+
+                            if space_run >= 3 && !is_active_input_space {
                                 break;
                             }
                         }
                         seg_end += 1;
                     }
 
-                    let max_active_col =
+                    let trim_limit =
                         if cursor.is_visible && cursor.row == r && cursor.col >= seg_start {
-                            seg_end.max(cursor.col)
+                            cursor.col
                         } else {
-                            seg_end
+                            seg_start
                         };
 
-                    while seg_end > seg_start
-                        && line.cells[seg_end - 1].c == ' '
-                        && seg_end > max_active_col
-                    {
+                    while seg_end > trim_limit && line.cells[seg_end - 1].c == ' ' {
                         seg_end -= 1;
                     }
 
