@@ -4,7 +4,7 @@ use twitty::terminal::Terminal;
 
 #[test]
 fn test_terminal_ansi_colors() {
-    let mut term = Terminal::new(80, 24);
+    let mut term = Terminal::new(80, 24, |_| {});
     
     // Output green text
     term.process_bytes(b"\x1b[32mGreen\x1b[0m\r\n");
@@ -28,7 +28,7 @@ fn test_terminal_ansi_colors() {
 
 #[test]
 fn test_terminal_cursor_tracking() {
-    let mut term = Terminal::new(80, 24);
+    let mut term = Terminal::new(80, 24, |_| {});
     
     // Move cursor to row 5, col 10 (1-based in ANSI: \x1b[5;10H)
     term.process_bytes(b"\x1b[5;10H");

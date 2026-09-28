@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::term::cell::Flags as CellFlags;
 use alacritty_terminal::term::test::TermSize;
@@ -5,9 +6,16 @@ use alacritty_terminal::term::{Config, Term, TermMode};
 use alacritty_terminal::vte::ansi::{Color as AnsiColor, Processor, StdSyncHandler};
 use unicode_bidi::{bidi_class, BidiClass};
 
-struct DummyListener;
-impl EventListener for DummyListener {
-    fn send_event(&self, _event: Event) {}
+struct ForwardListener {
+    on_pty_write: Arc<dyn Fn(String) + Send + Sync>,
+}
+
+impl EventListener for ForwardListener {
+    fn send_event(&self, event: Event) {
+        if let Event::PtyWrite(text) = event {
+            (self.on_pty_write)(text);
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -32,16 +40,22 @@ pub struct CursorState {
 }
 
 pub struct Terminal {
-    term: Term<DummyListener>,
+    term: Term<ForwardListener>,
     parser: Processor<StdSyncHandler>,
     cols: usize,
     rows: usize,
 }
 
 impl Terminal {
-    pub fn new(cols: usize, rows: usize) -> Self {
+    pub fn new<F>(cols: usize, rows: usize, on_pty_write: F) -> Self
+    where
+        F: Fn(String) + Send + Sync + 'static,
+    {
         let size = TermSize::new(cols, rows);
-        let term = Term::new(Config::default(), &size, DummyListener);
+        let listener = ForwardListener {
+            on_pty_write: Arc::new(on_pty_write),
+        };
+        let term = Term::new(Config::default(), &size, listener);
         let parser = Processor::<StdSyncHandler>::new();
         Self {
             term,

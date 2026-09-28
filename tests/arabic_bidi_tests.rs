@@ -3,7 +3,7 @@ use twitty::terminal::Terminal;
 
 #[test]
 fn test_terminal_rtl_detection() {
-    let mut term = Terminal::new(80, 24);
+    let mut term = Terminal::new(80, 24, |_| {});
     
     term.process_bytes(b"hello world\n");
     let (lines, _) = term.snapshot();
@@ -46,4 +46,27 @@ fn test_cosmic_arabic_shaping_and_bidi() {
         min_x_glyph.start > max_x_glyph.start,
         "Arabic text must be visually reordered RTL: left-most glyph (min x) should be later in string than right-most glyph (max x)"
     );
+}
+
+#[test]
+fn test_prompt_with_arabic_does_not_flip() {
+    let mut font_system = FontSystem::new();
+    let metrics = Metrics::new(14.5, 23.0);
+    let mut buf = Buffer::new_empty(metrics);
+
+    let raw_text = "~ ❯ الزايك";
+    let ltr_text = format!("‎{}", raw_text);
+    buf.set_text(&ltr_text, &Attrs::new().family(Family::Monospace), Shaping::Advanced, None);
+    buf.shape_until_scroll(&mut font_system, false);
+
+    let runs: Vec<_> = buf.layout_runs().collect();
+    assert_eq!(runs.len(), 1);
+
+    let glyphs = &runs[0].glyphs;
+    let tilde = glyphs.iter().find(|g| &ltr_text[g.start..g.end] == "~").unwrap();
+    let chevron = glyphs.iter().find(|g| &ltr_text[g.start..g.end] == "❯").unwrap();
+    let arabic = glyphs.iter().find(|g| g.level.is_rtl()).unwrap();
+
+    assert!(tilde.x < chevron.x, "Tilde must be to the left of chevron");
+    assert!(chevron.x < arabic.x, "Prompt chevron must be to the left of Arabic user input, never flipped!");
 }

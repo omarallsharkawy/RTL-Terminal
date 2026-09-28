@@ -3,6 +3,7 @@ use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping};
 use glyphon::{
     Cache, Resolution, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
 };
+use unicode_bidi::{bidi_class, BidiClass};
 use winit::window::Window;
 
 use crate::color::{Palette, Rgba};
@@ -287,14 +288,19 @@ impl Renderer {
                 }
 
                 if seg_start < seg_end {
-                    // Contiguous text segment without leading space drift!
                     let seg_x = self.padding_left + seg_start as f32 * self.char_width;
 
                     let mut spans_data: Vec<(String, cosmic_text::Attrs)> = Vec::new();
                     let mut cur_text = String::new();
                     let mut cur_attrs: Option<cosmic_text::Attrs> = None;
+                    let mut seg_has_rtl = false;
 
                     for cell in line.cells[seg_start..seg_end].iter() {
+                        let class = bidi_class(cell.c);
+                        if class == BidiClass::R || class == BidiClass::AL {
+                            seg_has_rtl = true;
+                        }
+
                         let fg = self.palette.resolve(cell.fg, false);
                         let mut attrs = default_attrs.clone().color(fg.to_glyphon());
                         if cell.flags.contains(alacritty_terminal::term::cell::Flags::BOLD) {
@@ -329,6 +335,12 @@ impl Renderer {
                     }
 
                     if !spans_data.is_empty() {
+                        // Prepend LRM (‎) if segment has RTL so base direction is ALWAYS LTR!
+                        // This prevents prompts like ~ ❯ from ever inverting or flipping!
+                        if seg_has_rtl {
+                            spans_data.insert(0, ("‎".to_string(), default_attrs.clone()));
+                        }
+
                         if pool_idx >= self.buffer_pool.len() {
                             self.buffer_pool.push(Buffer::new_empty(metrics));
                         }
@@ -344,10 +356,13 @@ impl Renderer {
 
                         // Cursor detection inside this segment
                         if cursor.is_visible && cursor.row == r && cursor.col >= seg_start && cursor.col <= seg_end {
-                            let byte_target: usize = line.cells[seg_start..cursor.col]
+                            let mut byte_target: usize = line.cells[seg_start..cursor.col]
                                 .iter()
                                 .map(|c| c.c.len_utf8())
                                 .sum();
+                            if seg_has_rtl {
+                                byte_target += "‎".len();
+                            }
 
                             let mut found_x = None;
                             for run in buf.layout_runs() {

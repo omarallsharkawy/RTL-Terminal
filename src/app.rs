@@ -13,6 +13,7 @@ use crate::terminal::Terminal;
 #[derive(Debug)]
 pub enum AppEvent {
     PtyData(Vec<u8>),
+    PtyWriteResponse(String),
     PtyExit,
 }
 
@@ -26,9 +27,14 @@ pub struct App {
 
 impl App {
     pub fn new(proxy: EventLoopProxy<AppEvent>) -> Self {
+        let proxy_clone = proxy.clone();
+        let terminal = Arc::new(Mutex::new(Terminal::new(80, 24, move |text| {
+            let _ = proxy_clone.send_event(AppEvent::PtyWriteResponse(text));
+        })));
+
         Self {
             proxy,
-            terminal: Arc::new(Mutex::new(Terminal::new(80, 24))),
+            terminal,
             pty: None,
             renderer: None,
             modifiers: ModifiersState::empty(),
@@ -118,6 +124,12 @@ impl ApplicationHandler<AppEvent> for App {
                     r.window.request_redraw();
                 }
             }
+            AppEvent::PtyWriteResponse(text) => {
+                // Terminal answered a query (DSR, DA, window size). Write response to PTY!
+                if let Some(ref pty) = self.pty {
+                    let _ = pty.write(text.as_bytes());
+                }
+            }
             AppEvent::PtyExit => {
                 let (cols, rows) = match self.renderer {
                     Some(ref r) => r.compute_grid_size(),
@@ -192,9 +204,7 @@ impl ApplicationHandler<AppEvent> for App {
                                 }
                             }
                         }
-                        InputAction::Copy => {
-                            // Clipboard copy hook
-                        }
+                        InputAction::Copy => {}
                     }
                 }
             }
