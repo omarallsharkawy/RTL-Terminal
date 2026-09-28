@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.0.1 — 2026-09-29
+
+### TUI layout and BiDi isolation
+
+- Isolated multi-column terminal layouts from bidirectional text bleed by treating space runs of 3 or more characters and background color changes as strict layout boundaries.
+- Confined wide whitespace tracking strictly to active cursor input fields, preventing TUI sidebars and tables (e.g. OpenCode, Neovim) from merging into chat text.
+- Extracted bidirectional text segmentation and shaping into a dedicated `src/shaping.rs` module, cleanly decoupling shaping passes from GPU surface rendering.
+
+### Mouse selection and clipboard
+
+- Added native click-and-drag text selection across all interactive TUIs without requiring Shift modifier keys.
+- Implemented double-click semantic word selection and triple-click whole-line selection with automatic clipboard population on release.
+- Added persistent Wayland clipboard preservation via `wl-copy` (both `CLIPBOARD` and `PRIMARY` selections) and `xclip` fallback.
+- Added right-click selection copy: right-clicking on active selection copies text immediately to the clipboard.
+- Added full Arabic layout parity for core control shortcuts (`Ctrl + C/V/X/Z/A` matching `ؤ/ر/ء/ئ/ش`).
+
+### Security, testing, and platforms
+
+- Added automated Cargo dependency security auditing via `cargo-audit` in CI.
+- Automated SHA-256 checksum generation for Linux and Windows release binaries.
+- Resolved Windows `%APPDATA%\twitty\config.json` configuration path resolution.
+- Expanded test coverage across 13 test suites (28 tests) including chunked UTF-8 streaming fuzzing, high-DPI scaling, font fallback chains, and PTY throughput benchmarks exceeding 97 MB/s.
+- Unified licensing to standard MIT License across `Cargo.toml`, `README.md`, and `LICENSE.txt`.
+
 ## 2.0.0 — 2026-09-28
 
 ### Architecture and rendering
