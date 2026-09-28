@@ -61,8 +61,8 @@ pub fn handle_key_raw(
                     KeyCode::Minus | KeyCode::NumpadSubtract => return Some(InputAction::ZoomOut),
                     KeyCode::Digit0 | KeyCode::Numpad0 => return Some(InputAction::ZoomReset),
 
-                    KeyCode::KeyC => return Some(InputAction::Bytes(vec![3])),  // SIGINT / Ctrl+C
-                    KeyCode::KeyD => return Some(InputAction::Bytes(vec![4])),  // EOF / Ctrl+D
+                    KeyCode::KeyC => return Some(InputAction::Bytes(vec![3])), // SIGINT / Ctrl+C
+                    KeyCode::KeyD => return Some(InputAction::Bytes(vec![4])), // EOF / Ctrl+D
                     KeyCode::KeyZ => return Some(InputAction::Bytes(vec![26])), // SIGTSTP / Ctrl+Z
                     KeyCode::KeyL => return Some(InputAction::Bytes(vec![12])), // Clear screen
                     KeyCode::KeyA => return Some(InputAction::Bytes(vec![1])),

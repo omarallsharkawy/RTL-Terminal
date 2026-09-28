@@ -1,3 +1,7 @@
+#![allow(clippy::collapsible_match)]
+#![allow(clippy::manual_range_contains)]
+#![allow(clippy::single_match)]
+
 pub mod app;
 pub mod color;
 pub mod config;

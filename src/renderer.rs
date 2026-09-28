@@ -1,8 +1,8 @@
-use std::sync::Arc;
 use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping};
 use glyphon::{
     Cache, Resolution, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
 };
+use std::sync::Arc;
 use unicode_bidi::{bidi_class, BidiClass};
 use winit::window::Window;
 
@@ -48,6 +48,7 @@ pub struct Renderer {
     pub padding_top: f32,
     pub is_srgb: bool,
     pub opacity: f32,
+    pub cursor_style: String,
     pub row_caches: Vec<CachedRow>,
 }
 
@@ -84,10 +85,16 @@ fn hash_cells(cells: &[CellData]) -> u64 {
 }
 
 impl Renderer {
-    pub async fn new(window: Arc<Window>, initial_font_size: f32, opacity: f32) -> anyhow::Result<Self> {
+    pub async fn new(
+        window: Arc<Window>,
+        initial_font_size: f32,
+        opacity: f32,
+        cursor_style: String,
+    ) -> anyhow::Result<Self> {
         let size = window.inner_size();
-        let width = size.width.max(1);
-        let height = size.height.max(1);
+        // Ensure safe default dimensions if compositor has not yet completed initial layout
+        let width = if size.width >= 100 { size.width } else { 960 };
+        let height = if size.height >= 100 { size.height } else { 580 };
 
         let instance = wgpu::Instance::default();
         let surface = instance.create_surface(window.clone())?;
@@ -121,18 +128,29 @@ impl Renderer {
             .unwrap_or(surface_caps.formats[0]);
         let is_srgb = format.is_srgb();
 
-        let present_mode = if surface_caps.present_modes.contains(&wgpu::PresentMode::Mailbox) {
+        let present_mode = if surface_caps
+            .present_modes
+            .contains(&wgpu::PresentMode::Mailbox)
+        {
             wgpu::PresentMode::Mailbox
-        } else if surface_caps.present_modes.contains(&wgpu::PresentMode::Immediate) {
+        } else if surface_caps
+            .present_modes
+            .contains(&wgpu::PresentMode::Immediate)
+        {
             wgpu::PresentMode::Immediate
         } else {
             wgpu::PresentMode::AutoVsync
         };
 
-        // Support Wayland transparency (PreMultiplied or PostMultiplied alpha)
-        let alpha_mode = if surface_caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::PreMultiplied) {
+        let alpha_mode = if surface_caps
+            .alpha_modes
+            .contains(&wgpu::CompositeAlphaMode::PreMultiplied)
+        {
             wgpu::CompositeAlphaMode::PreMultiplied
-        } else if surface_caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::PostMultiplied) {
+        } else if surface_caps
+            .alpha_modes
+            .contains(&wgpu::CompositeAlphaMode::PostMultiplied)
+        {
             wgpu::CompositeAlphaMode::PostMultiplied
         } else {
             surface_caps.alpha_modes[0]
@@ -212,6 +230,7 @@ impl Renderer {
             padding_top,
             is_srgb,
             opacity: opacity.clamp(0.1, 1.0),
+            cursor_style,
             row_caches: Vec::new(),
         })
     }
@@ -273,7 +292,8 @@ impl Renderer {
 
     pub fn render(&mut self, lines: &[LineData], cursor: &CursorState) -> anyhow::Result<()> {
         let surface_texture = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+            wgpu::CurrentSurfaceTexture::Success(t)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
             wgpu::CurrentSurfaceTexture::Outdated => return Ok(()),
             _ => return Ok(()),
         };
@@ -350,7 +370,8 @@ impl Renderer {
                 let mut segments = Vec::new();
                 let mut col_idx = 0;
                 while col_idx < cols {
-                    while col_idx < cols && (geom_rendered[col_idx] || line.cells[col_idx].c == ' ') {
+                    while col_idx < cols && (geom_rendered[col_idx] || line.cells[col_idx].c == ' ')
+                    {
                         col_idx += 1;
                     }
                     if col_idx >= cols {
@@ -360,7 +381,6 @@ impl Renderer {
                     let seg_start = col_idx;
                     let mut seg_end = col_idx;
 
-                    // Grow until a geometric boundary or a true layout panel gap (15+ spaces before right sidebar)
                     while seg_end < cols && !geom_rendered[seg_end] {
                         if line.cells[seg_end].c == ' ' {
                             let mut space_run = 0;
@@ -369,20 +389,26 @@ impl Renderer {
                                 space_run += 1;
                                 peek += 1;
                             }
-                            if (space_run >= 15 && peek >= 70) || (peek < cols && geom_rendered[peek]) {
+                            if (space_run >= 15 && peek >= 70)
+                                || (peek < cols && geom_rendered[peek])
+                            {
                                 break;
                             }
                         }
                         seg_end += 1;
                     }
 
-                    let max_active_col = if cursor.is_visible && cursor.row == r && cursor.col >= seg_start {
-                        seg_end.max(cursor.col)
-                    } else {
-                        seg_end
-                    };
+                    let max_active_col =
+                        if cursor.is_visible && cursor.row == r && cursor.col >= seg_start {
+                            seg_end.max(cursor.col)
+                        } else {
+                            seg_end
+                        };
 
-                    while seg_end > seg_start && line.cells[seg_end - 1].c == ' ' && seg_end > max_active_col {
+                    while seg_end > seg_start
+                        && line.cells[seg_end - 1].c == ' '
+                        && seg_end > max_active_col
+                    {
                         seg_end -= 1;
                     }
 
@@ -402,10 +428,16 @@ impl Renderer {
 
                             let fg = self.palette.resolve(cell.fg, false);
                             let mut attrs = default_attrs.clone().color(fg.to_glyphon());
-                            if cell.flags.contains(alacritty_terminal::term::cell::Flags::BOLD) {
+                            if cell
+                                .flags
+                                .contains(alacritty_terminal::term::cell::Flags::BOLD)
+                            {
                                 attrs = attrs.weight(cosmic_text::Weight::BOLD);
                             }
-                            if cell.flags.contains(alacritty_terminal::term::cell::Flags::ITALIC) {
+                            if cell
+                                .flags
+                                .contains(alacritty_terminal::term::cell::Flags::ITALIC)
+                            {
                                 attrs = attrs.style(cosmic_text::Style::Italic);
                             }
 
@@ -479,7 +511,13 @@ impl Renderer {
             for &(c, bg_color) in &cached.bg_cells {
                 let bg = self.palette.resolve(bg_color, true);
                 let x = self.padding_left + c as f32 * self.char_width;
-                background_quads.push((x, y, self.char_width, self.line_height, self.to_target_color(bg)));
+                background_quads.push((
+                    x,
+                    y,
+                    self.char_width,
+                    self.line_height,
+                    self.to_target_color(bg),
+                ));
             }
             for &(c, ch, fg_color) in &cached.geom_cells {
                 let fg = self.palette.resolve(fg_color, false);
@@ -495,8 +533,7 @@ impl Renderer {
                 );
             }
 
-            // Smooth Linear Cursor Calculation:
-            // Inside active input segment, cursor advances smoothly with each typed char and space!
+            // Cursor Calculation
             if cursor.is_visible && cursor.row == r {
                 for seg in &cached.segments {
                     if cursor.col >= seg.seg_start && cursor.col <= seg.seg_end + 15 {
@@ -512,13 +549,43 @@ impl Renderer {
             }
         }
 
-        // Cursor Quad
+        // Custom Cursor Style Rendering
         if let Some((cx, cy)) = cursor_visual_pos {
             let cursor_color = self.to_target_color(self.palette.cursor);
-            background_quads.push((cx, cy, self.char_width, self.line_height, cursor_color));
+            match self.cursor_style.as_str() {
+                "block" => {
+                    background_quads.push((
+                        cx,
+                        cy,
+                        self.char_width,
+                        self.line_height,
+                        cursor_color,
+                    ));
+                }
+                "underline" => {
+                    background_quads.push((
+                        cx,
+                        cy + self.line_height - 2.0,
+                        self.char_width,
+                        2.0,
+                        cursor_color,
+                    ));
+                }
+                _ => {
+                    // Sleek beam cursor (2.0px wide, vertically centered)
+                    background_quads.push((
+                        cx,
+                        cy + 1.0,
+                        2.0,
+                        self.line_height - 2.0,
+                        cursor_color,
+                    ));
+                }
+            }
         }
 
-        self.quad_renderer.set_rects(&self.device, &background_quads);
+        self.quad_renderer
+            .set_rects(&self.device, &background_quads);
 
         // Prepare text areas directly from cached row buffers
         let mut text_areas: Vec<TextArea> = Vec::new();

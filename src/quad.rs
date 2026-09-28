@@ -72,20 +72,19 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             mapped_at_creation: false,
         });
 
-        let bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("quad bind group layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-            });
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("quad bind group layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("quad bind group"),
@@ -96,12 +95,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             }],
         });
 
-        let pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("quad pipeline layout"),
-                bind_group_layouts: &[Some(&bind_group_layout)],
-                immediate_size: 0,
-            });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("quad pipeline layout"),
+            bind_group_layouts: &[Some(&bind_group_layout)],
+            immediate_size: 0,
+        });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("quad render pipeline"),
@@ -179,13 +177,31 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         for &(x, y, w, h, color) in quads {
             let x2 = x + w;
             let y2 = y + h;
-            vertices.push(QuadVertex { position: [x, y], color });
-            vertices.push(QuadVertex { position: [x2, y], color });
-            vertices.push(QuadVertex { position: [x, y2], color });
+            vertices.push(QuadVertex {
+                position: [x, y],
+                color,
+            });
+            vertices.push(QuadVertex {
+                position: [x2, y],
+                color,
+            });
+            vertices.push(QuadVertex {
+                position: [x, y2],
+                color,
+            });
 
-            vertices.push(QuadVertex { position: [x2, y], color });
-            vertices.push(QuadVertex { position: [x2, y2], color });
-            vertices.push(QuadVertex { position: [x, y2], color });
+            vertices.push(QuadVertex {
+                position: [x2, y],
+                color,
+            });
+            vertices.push(QuadVertex {
+                position: [x2, y2],
+                color,
+            });
+            vertices.push(QuadVertex {
+                position: [x, y2],
+                color,
+            });
         }
 
         self.vertex_count = vertices.len();

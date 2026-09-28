@@ -13,6 +13,7 @@ use crate::terminal::Terminal;
 use alacritty_terminal::term::TermMode;
 
 #[derive(Debug)]
+#[allow(clippy::enum_variant_names)]
 pub enum AppEvent {
     PtyData(Vec<u8>),
     PtyWriteResponse(String),
@@ -117,7 +118,12 @@ impl ApplicationHandler<AppEvent> for App {
             }
         };
 
-        let renderer = match pollster::block_on(Renderer::new(window.clone(), self.config.font_size, self.config.background_opacity)) {
+        let renderer = match pollster::block_on(Renderer::new(
+            window.clone(),
+            self.config.font_size,
+            self.config.background_opacity,
+            self.config.cursor_style.clone(),
+        )) {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("Failed to initialize renderer: {:?}", e);
@@ -188,12 +194,18 @@ impl ApplicationHandler<AppEvent> for App {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 if let Some(ref r) = self.renderer {
-                    let col = ((position.x - r.padding_left as f64) / r.char_width as f64).max(0.0) as usize;
-                    let row = ((position.y - r.padding_top as f64) / r.line_height as f64).max(0.0) as usize;
+                    let col = ((position.x - r.padding_left as f64) / r.char_width as f64).max(0.0)
+                        as usize;
+                    let row = ((position.y - r.padding_top as f64) / r.line_height as f64).max(0.0)
+                        as usize;
                     self.mouse_col = col;
                     self.mouse_row = row;
 
-                    let mode = self.terminal.lock().map(|t| t.mode()).unwrap_or(TermMode::NONE);
+                    let mode = self
+                        .terminal
+                        .lock()
+                        .map(|t| t.mode())
+                        .unwrap_or(TermMode::NONE);
                     if mode.contains(TermMode::MOUSE_MOTION) {
                         let seq = format!("[<35;{};{}M", col + 1, row + 1);
                         if let Some(ref pty) = self.pty {
@@ -203,62 +215,62 @@ impl ApplicationHandler<AppEvent> for App {
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                let mode = self.terminal.lock().map(|t| t.mode()).unwrap_or(TermMode::NONE);
+                let mode = self
+                    .terminal
+                    .lock()
+                    .map(|t| t.mode())
+                    .unwrap_or(TermMode::NONE);
                 let col = self.mouse_col + 1;
                 let row = self.mouse_row + 1;
 
                 match state {
-                    ElementState::Pressed => {
-                        match button {
-                            MouseButton::Left => {
-                                if mode.intersects(TermMode::MOUSE_MODE) {
-                                    let seq = format!("[<0;{};{}M", col, row);
-                                    if let Some(ref pty) = self.pty {
-                                        let _ = pty.write(seq.as_bytes());
-                                    }
+                    ElementState::Pressed => match button {
+                        MouseButton::Left => {
+                            if mode.intersects(TermMode::MOUSE_MODE) {
+                                let seq = format!("[<0;{};{}M", col, row);
+                                if let Some(ref pty) = self.pty {
+                                    let _ = pty.write(seq.as_bytes());
                                 }
                             }
-                            MouseButton::Middle => {
-                                if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                    if let Ok(text) = clipboard.get_text() {
-                                        if let Some(ref pty) = self.pty {
-                                            let _ = pty.write(text.as_bytes());
-                                        }
-                                    }
-                                }
-                            }
-                            MouseButton::Right => {
-                                if mode.intersects(TermMode::MOUSE_MODE) {
-                                    let seq = format!("[<2;{};{}M", col, row);
-                                    if let Some(ref pty) = self.pty {
-                                        let _ = pty.write(seq.as_bytes());
-                                    }
-                                }
-                            }
-                            _ => {}
                         }
-                    }
-                    ElementState::Released => {
-                        match button {
-                            MouseButton::Left => {
-                                if mode.intersects(TermMode::MOUSE_MODE) {
-                                    let seq = format!("[<0;{};{}m", col, row);
+                        MouseButton::Middle => {
+                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                if let Ok(text) = clipboard.get_text() {
                                     if let Some(ref pty) = self.pty {
-                                        let _ = pty.write(seq.as_bytes());
+                                        let _ = pty.write(text.as_bytes());
                                     }
                                 }
                             }
-                            MouseButton::Right => {
-                                if mode.intersects(TermMode::MOUSE_MODE) {
-                                    let seq = format!("[<2;{};{}m", col, row);
-                                    if let Some(ref pty) = self.pty {
-                                        let _ = pty.write(seq.as_bytes());
-                                    }
-                                }
-                            }
-                            _ => {}
                         }
-                    }
+                        MouseButton::Right => {
+                            if mode.intersects(TermMode::MOUSE_MODE) {
+                                let seq = format!("[<2;{};{}M", col, row);
+                                if let Some(ref pty) = self.pty {
+                                    let _ = pty.write(seq.as_bytes());
+                                }
+                            }
+                        }
+                        _ => {}
+                    },
+                    ElementState::Released => match button {
+                        MouseButton::Left => {
+                            if mode.intersects(TermMode::MOUSE_MODE) {
+                                let seq = format!("[<0;{};{}m", col, row);
+                                if let Some(ref pty) = self.pty {
+                                    let _ = pty.write(seq.as_bytes());
+                                }
+                            }
+                        }
+                        MouseButton::Right => {
+                            if mode.intersects(TermMode::MOUSE_MODE) {
+                                let seq = format!("[<2;{};{}m", col, row);
+                                if let Some(ref pty) = self.pty {
+                                    let _ = pty.write(seq.as_bytes());
+                                }
+                            }
+                        }
+                        _ => {}
+                    },
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
@@ -277,7 +289,11 @@ impl ApplicationHandler<AppEvent> for App {
                         self.update_font_size(cur - 1.0);
                     }
                 } else {
-                    let mode = self.terminal.lock().map(|t| t.mode()).unwrap_or(TermMode::NONE);
+                    let mode = self
+                        .terminal
+                        .lock()
+                        .map(|t| t.mode())
+                        .unwrap_or(TermMode::NONE);
                     let col = self.mouse_col + 1;
                     let row = self.mouse_row + 1;
 
@@ -290,7 +306,11 @@ impl ApplicationHandler<AppEvent> for App {
                         }
                     } else if mode.contains(TermMode::ALT_SCREEN) {
                         // Alternate screen without mouse mode (vim, less, opencode): send arrow keys
-                        let key = if delta_y > 0.0 { b"OAOAOA" } else { b"OBOBOB" };
+                        let key = if delta_y > 0.0 {
+                            b"OAOAOA"
+                        } else {
+                            b"OBOBOB"
+                        };
                         if let Some(ref pty) = self.pty {
                             let _ = pty.write(key);
                         }

@@ -1,10 +1,10 @@
-use std::sync::Arc;
 use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::Scroll;
 use alacritty_terminal::term::cell::Flags as CellFlags;
 use alacritty_terminal::term::test::TermSize;
 use alacritty_terminal::term::{Config, Term, TermMode};
 use alacritty_terminal::vte::ansi::{Color as AnsiColor, Processor, StdSyncHandler};
+use std::sync::Arc;
 use unicode_bidi::{bidi_class, BidiClass};
 
 struct ForwardListener {

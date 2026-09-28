@@ -4,10 +4,13 @@ use twitty::terminal::Terminal;
 #[test]
 fn test_terminal_rtl_detection() {
     let mut term = Terminal::new(80, 24, |_| {});
-    
+
     term.process_bytes(b"hello world\n");
     let (lines, _) = term.snapshot();
-    assert!(!lines[0].has_rtl, "English text should not be detected as RTL");
+    assert!(
+        !lines[0].has_rtl,
+        "English text should not be detected as RTL"
+    );
 
     let arabic_text = "مرحبا بالعالم\n";
     term.process_bytes(arabic_text.as_bytes());
@@ -37,10 +40,19 @@ fn test_cosmic_arabic_shaping_and_bidi() {
     let glyphs = &run.glyphs;
 
     let arabic_glyphs: Vec<_> = glyphs.iter().filter(|g| g.level.is_rtl()).collect();
-    assert!(!arabic_glyphs.is_empty(), "Should contain RTL glyphs for Arabic");
+    assert!(
+        !arabic_glyphs.is_empty(),
+        "Should contain RTL glyphs for Arabic"
+    );
 
-    let min_x_glyph = arabic_glyphs.iter().min_by(|a, b| a.x.partial_cmp(&b.x).unwrap()).unwrap();
-    let max_x_glyph = arabic_glyphs.iter().max_by(|a, b| a.x.partial_cmp(&b.x).unwrap()).unwrap();
+    let min_x_glyph = arabic_glyphs
+        .iter()
+        .min_by(|a, b| a.x.partial_cmp(&b.x).unwrap())
+        .unwrap();
+    let max_x_glyph = arabic_glyphs
+        .iter()
+        .max_by(|a, b| a.x.partial_cmp(&b.x).unwrap())
+        .unwrap();
 
     assert!(
         min_x_glyph.start > max_x_glyph.start,
@@ -56,17 +68,31 @@ fn test_prompt_with_arabic_does_not_flip() {
 
     let raw_text = "~ ❯ الزايك";
     let ltr_text = format!("‎{}", raw_text);
-    buf.set_text(&ltr_text, &Attrs::new().family(Family::Monospace), Shaping::Advanced, None);
+    buf.set_text(
+        &ltr_text,
+        &Attrs::new().family(Family::Monospace),
+        Shaping::Advanced,
+        None,
+    );
     buf.shape_until_scroll(&mut font_system, false);
 
     let runs: Vec<_> = buf.layout_runs().collect();
     assert_eq!(runs.len(), 1);
 
     let glyphs = &runs[0].glyphs;
-    let tilde = glyphs.iter().find(|g| &ltr_text[g.start..g.end] == "~").unwrap();
-    let chevron = glyphs.iter().find(|g| &ltr_text[g.start..g.end] == "❯").unwrap();
+    let tilde = glyphs
+        .iter()
+        .find(|g| &ltr_text[g.start..g.end] == "~")
+        .unwrap();
+    let chevron = glyphs
+        .iter()
+        .find(|g| &ltr_text[g.start..g.end] == "❯")
+        .unwrap();
     let arabic = glyphs.iter().find(|g| g.level.is_rtl()).unwrap();
 
     assert!(tilde.x < chevron.x, "Tilde must be to the left of chevron");
-    assert!(chevron.x < arabic.x, "Prompt chevron must be to the left of Arabic user input, never flipped!");
+    assert!(
+        chevron.x < arabic.x,
+        "Prompt chevron must be to the left of Arabic user input, never flipped!"
+    );
 }

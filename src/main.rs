@@ -1,3 +1,7 @@
+#![allow(clippy::collapsible_match)]
+#![allow(clippy::manual_range_contains)]
+#![allow(clippy::single_match)]
+
 mod app;
 mod color;
 mod config;

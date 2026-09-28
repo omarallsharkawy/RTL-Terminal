@@ -1,11 +1,12 @@
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TwittyConfig {
     pub font_size: f32,
     pub background_opacity: f32,
+    pub cursor_style: String,
 }
 
 impl Default for TwittyConfig {
@@ -13,6 +14,7 @@ impl Default for TwittyConfig {
         Self {
             font_size: 14.5,
             background_opacity: 0.92,
+            cursor_style: "beam".to_string(),
         }
     }
 }
