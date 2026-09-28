@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Twitty
+Comment=Native Bidirectional RTL Terminal Emulator
+GenericName=Terminal Emulator
+Exec=/home/omar/Documents/ChatGPT/twitty/target/release/twitty
+Icon=twitty
+Terminal=false
+Type=Application
+Categories=System;TerminalEmulator;
+StartupNotify=true
+Keywords=terminal;shell;prompt;command;pty;arabic;rtl;

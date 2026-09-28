@@ -117,7 +117,7 @@ impl ApplicationHandler<AppEvent> for App {
             }
         };
 
-        let renderer = match pollster::block_on(Renderer::new(window.clone(), self.config.font_size)) {
+        let renderer = match pollster::block_on(Renderer::new(window.clone(), self.config.font_size, self.config.background_opacity)) {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("Failed to initialize renderer: {:?}", e);

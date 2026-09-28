@@ -5,11 +5,15 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TwittyConfig {
     pub font_size: f32,
+    pub background_opacity: f32,
 }
 
 impl Default for TwittyConfig {
     fn default() -> Self {
-        Self { font_size: 14.5 }
+        Self {
+            font_size: 14.5,
+            background_opacity: 0.92,
+        }
     }
 }
 

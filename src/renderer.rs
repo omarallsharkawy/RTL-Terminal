@@ -16,6 +16,7 @@ pub struct CachedSegment {
     pub seg_end: usize,
     pub seg_x: f32,
     pub buffer: Buffer,
+    #[allow(dead_code)]
     pub has_rtl: bool,
 }
 
@@ -46,6 +47,7 @@ pub struct Renderer {
     pub padding_left: f32,
     pub padding_top: f32,
     pub is_srgb: bool,
+    pub opacity: f32,
     pub row_caches: Vec<CachedRow>,
 }
 
@@ -82,7 +84,7 @@ fn hash_cells(cells: &[CellData]) -> u64 {
 }
 
 impl Renderer {
-    pub async fn new(window: Arc<Window>, initial_font_size: f32) -> anyhow::Result<Self> {
+    pub async fn new(window: Arc<Window>, initial_font_size: f32, opacity: f32) -> anyhow::Result<Self> {
         let size = window.inner_size();
         let width = size.width.max(1);
         let height = size.height.max(1);
@@ -127,13 +129,22 @@ impl Renderer {
             wgpu::PresentMode::AutoVsync
         };
 
+        // Support Wayland transparency (PreMultiplied or PostMultiplied alpha)
+        let alpha_mode = if surface_caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::PreMultiplied) {
+            wgpu::CompositeAlphaMode::PreMultiplied
+        } else if surface_caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::PostMultiplied) {
+            wgpu::CompositeAlphaMode::PostMultiplied
+        } else {
+            surface_caps.alpha_modes[0]
+        };
+
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
             width,
             height,
             present_mode,
-            alpha_mode: surface_caps.alpha_modes[0],
+            alpha_mode,
             view_formats: vec![],
             desired_maximum_frame_latency: 1,
             color_space: Default::default(),
@@ -200,6 +211,7 @@ impl Renderer {
             padding_left,
             padding_top,
             is_srgb,
+            opacity: opacity.clamp(0.1, 1.0),
             row_caches: Vec::new(),
         })
     }
@@ -272,13 +284,21 @@ impl Renderer {
         let metrics = Metrics::new(self.font_size, self.line_height);
         let default_attrs = Attrs::new().family(Family::Name("JetBrainsMono Nerd Font"));
         let default_bg = self.palette.background;
-        let default_bg_color = self.to_target_color(default_bg);
+        let mut default_bg_color = self.to_target_color(default_bg);
+        default_bg_color[3] = self.opacity;
+
+        let is_premultiplied = self.config.alpha_mode == wgpu::CompositeAlphaMode::PreMultiplied;
+        if is_premultiplied {
+            default_bg_color[0] *= self.opacity;
+            default_bg_color[1] *= self.opacity;
+            default_bg_color[2] *= self.opacity;
+        }
 
         let mut background_quads = Vec::new();
         let win_w = self.config.width as f32;
         let win_h = self.config.height as f32;
 
-        // 1. Full window background
+        // 1. Full window background with opacity
         background_quads.push((0.0, 0.0, win_w, win_h, default_bg_color));
 
         if self.row_caches.len() < lines.len() {
@@ -340,6 +360,7 @@ impl Renderer {
                     let seg_start = col_idx;
                     let mut seg_end = col_idx;
 
+                    // Grow until a geometric boundary or a true layout panel gap (15+ spaces before right sidebar)
                     while seg_end < cols && !geom_rendered[seg_end] {
                         if line.cells[seg_end].c == ' ' {
                             let mut space_run = 0;
@@ -348,14 +369,20 @@ impl Renderer {
                                 space_run += 1;
                                 peek += 1;
                             }
-                            if space_run >= 8 || (peek < cols && geom_rendered[peek]) {
+                            if (space_run >= 15 && peek >= 70) || (peek < cols && geom_rendered[peek]) {
                                 break;
                             }
                         }
                         seg_end += 1;
                     }
 
-                    while seg_end > seg_start && line.cells[seg_end - 1].c == ' ' {
+                    let max_active_col = if cursor.is_visible && cursor.row == r && cursor.col >= seg_start {
+                        seg_end.max(cursor.col)
+                    } else {
+                        seg_end
+                    };
+
+                    while seg_end > seg_start && line.cells[seg_end - 1].c == ' ' && seg_end > max_active_col {
                         seg_end -= 1;
                     }
 
@@ -468,30 +495,13 @@ impl Renderer {
                 );
             }
 
-            // Compute cursor if on this row
+            // Smooth Linear Cursor Calculation:
+            // Inside active input segment, cursor advances smoothly with each typed char and space!
             if cursor.is_visible && cursor.row == r {
                 for seg in &cached.segments {
-                    if cursor.col >= seg.seg_start && cursor.col <= seg.seg_end + 10 {
-                        if cursor.col >= seg.seg_end {
-                            let text_width = seg.buffer.layout_runs().map(|run| run.line_w).fold(0.0, f32::max);
-                            cursor_visual_pos = Some((seg.seg_x + text_width, y));
-                        } else {
-                            let mut byte_target: usize = line.cells[seg.seg_start..cursor.col]
-                                .iter()
-                                .map(|c| c.c.len_utf8())
-                                .sum();
-                            if seg.has_rtl {
-                                byte_target += "‎".len();
-                            }
-                            for run in seg.buffer.layout_runs() {
-                                for glyph in run.glyphs.iter() {
-                                    if byte_target >= glyph.start && byte_target < glyph.end {
-                                        cursor_visual_pos = Some((seg.seg_x + glyph.x, y));
-                                        break;
-                                    }
-                                }
-                            }
-                        }
+                    if cursor.col >= seg.seg_start && cursor.col <= seg.seg_end + 15 {
+                        let cx = seg.seg_x + (cursor.col - seg.seg_start) as f32 * self.char_width;
+                        cursor_visual_pos = Some((cx, y));
                         break;
                     }
                 }
@@ -566,6 +576,7 @@ impl Renderer {
             } else {
                 default_bg.b as f64
             };
+            let clear_a = self.opacity as f64;
 
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("twitty render pass"),
@@ -577,7 +588,7 @@ impl Renderer {
                             r: clear_r,
                             g: clear_g,
                             b: clear_b,
-                            a: 1.0,
+                            a: clear_a,
                         }),
                         store: wgpu::StoreOp::Store,
                     },
