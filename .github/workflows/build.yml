@@ -121,3 +121,15 @@ jobs:
 
       - name: Lint Rust with clippy
         run: cargo clippy --all-targets -- -D warnings
+
+  security-audit:
+    name: Security audit (Cargo Audit)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Cargo Security Audit
+        uses: rustsec/audit-check@v1.4.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
