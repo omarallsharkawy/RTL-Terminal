@@ -16,3 +16,4 @@ scripts/verify-twitty.png
 scripts/probe-visual.mjs
 scripts/verify-twitty.mjs
 web.html
+target/

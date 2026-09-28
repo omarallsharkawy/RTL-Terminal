@@ -1,0 +1,394 @@
+use std::sync::Arc;
+use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping};
+use glyphon::{
+    Cache, Resolution, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
+};
+use winit::window::Window;
+
+use crate::color::Palette;
+use crate::quad::QuadRenderer;
+use crate::terminal::{CursorState, LineData};
+
+pub struct Renderer {
+    pub window: Arc<Window>,
+    pub surface: wgpu::Surface<'static>,
+    pub device: wgpu::Device,
+    pub queue: wgpu::Queue,
+    pub config: wgpu::SurfaceConfiguration,
+    pub quad_renderer: QuadRenderer,
+    pub font_system: FontSystem,
+    pub swash_cache: SwashCache,
+    pub text_atlas: TextAtlas,
+    pub text_renderer: TextRenderer,
+    pub viewport: Viewport,
+    pub palette: Palette,
+    pub char_width: f32,
+    pub line_height: f32,
+    pub font_size: f32,
+    pub padding_left: f32,
+    pub padding_top: f32,
+    pub line_buffers: Vec<Buffer>,
+}
+
+impl Renderer {
+    pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
+        let size = window.inner_size();
+        let width = size.width.max(1);
+        let height = size.height.max(1);
+
+        let instance = wgpu::Instance::default();
+        let surface = instance.create_surface(window.clone())?;
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+                apply_limit_buckets: false,
+            })
+            .await
+            .expect("Failed to find suitable GPU adapter");
+
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("twitty device"),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::default(),
+                experimental_features: wgpu::ExperimentalFeatures::disabled(),
+                trace: wgpu::Trace::Off,
+                memory_hints: Default::default(),
+            })
+            .await?;
+
+        let surface_caps = surface.get_capabilities(&adapter);
+        let format = surface_caps
+            .formats
+            .iter()
+            .copied()
+            .find(|f| f.is_srgb())
+            .unwrap_or(surface_caps.formats[0]);
+
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format,
+            width,
+            height,
+            present_mode: wgpu::PresentMode::AutoVsync,
+            alpha_mode: surface_caps.alpha_modes[0],
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+            color_space: Default::default(),
+        };
+        surface.configure(&device, &config);
+
+        let quad_renderer = QuadRenderer::new(&device, format);
+
+        let mut font_system = FontSystem::new();
+        let swash_cache = SwashCache::new();
+        let cache = Cache::new(&device);
+        let mut viewport = Viewport::new(&device, &cache);
+        viewport.update(&queue, Resolution { width, height });
+
+        let mut text_atlas = TextAtlas::new(&device, &queue, &cache, format);
+        let text_renderer = TextRenderer::new(
+            &mut text_atlas,
+            &device,
+            wgpu::MultisampleState::default(),
+            None,
+        );
+
+        let font_size = 15.0;
+        let line_height = 24.0;
+        let padding_left = 10.0;
+        let padding_top = 8.0;
+
+        let metrics = Metrics::new(font_size, line_height);
+        let mut test_buffer = Buffer::new_empty(metrics);
+        test_buffer.set_text(
+            "MMMMMMMMMM",
+            &Attrs::new().family(Family::Monospace),
+            Shaping::Advanced,
+            None,
+        );
+        test_buffer.shape_until_scroll(&mut font_system, false);
+
+        let mut measured_width = 9.0;
+        for run in test_buffer.layout_runs() {
+            if let Some(glyph) = run.glyphs.first() {
+                if glyph.w > 0.0 {
+                    measured_width = glyph.w;
+                }
+            }
+        }
+        let char_width = measured_width;
+
+        Ok(Self {
+            window,
+            surface,
+            device,
+            queue,
+            config,
+            quad_renderer,
+            font_system,
+            swash_cache,
+            text_atlas,
+            text_renderer,
+            viewport,
+            palette: Palette::default(),
+            char_width,
+            line_height,
+            font_size,
+            padding_left,
+            padding_top,
+            line_buffers: Vec::new(),
+        })
+    }
+
+    pub fn resize(&mut self, width: u32, height: u32) {
+        if width > 0 && height > 0 {
+            self.config.width = width;
+            self.config.height = height;
+            self.surface.configure(&self.device, &self.config);
+            self.viewport
+                .update(&self.queue, Resolution { width, height });
+            self.quad_renderer
+                .update_screen_size(&self.queue, width as f32, height as f32);
+        }
+    }
+
+    pub fn compute_grid_size(&self) -> (usize, usize) {
+        let avail_w = (self.config.width as f32 - self.padding_left * 2.0).max(10.0);
+        let avail_h = (self.config.height as f32 - self.padding_top * 2.0).max(10.0);
+        let cols = (avail_w / self.char_width).floor() as usize;
+        let rows = (avail_h / self.line_height).floor() as usize;
+        (cols.max(10), rows.max(4))
+    }
+
+    pub fn render(&mut self, lines: &[LineData], cursor: &CursorState) -> anyhow::Result<()> {
+        let surface_texture = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+            wgpu::CurrentSurfaceTexture::Outdated => return Ok(()),
+            _ => return Ok(()),
+        };
+        let view = surface_texture
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let metrics = Metrics::new(self.font_size, self.line_height);
+        let default_attrs = Attrs::new().family(Family::Monospace);
+        let default_bg = self.palette.background;
+
+        let mut background_quads = Vec::new();
+        let win_w = self.config.width as f32;
+        let win_h = self.config.height as f32;
+
+        // 1. Full window background
+        background_quads.push((0.0, 0.0, win_w, win_h, default_bg.to_array()));
+
+        // Ensure line buffers match row count
+        if self.line_buffers.len() < lines.len() {
+            self.line_buffers
+                .resize_with(lines.len(), || Buffer::new_empty(metrics));
+        }
+
+        let mut cursor_visual_pos: Option<(f32, f32)> = None;
+
+        for (r, line) in lines.iter().enumerate() {
+            let y = self.padding_top + r as f32 * self.line_height;
+
+            // Cell background quads
+            for (c, cell) in line.cells.iter().enumerate() {
+                let bg = self.palette.resolve(cell.bg, true);
+                if bg != default_bg {
+                    let x = self.padding_left + c as f32 * self.char_width;
+                    background_quads.push((x, y, self.char_width, self.line_height, bg.to_array()));
+                }
+            }
+
+            // Build text spans for this line
+            let mut spans_data: Vec<(String, cosmic_text::Attrs)> = Vec::new();
+            let mut cur_text = String::new();
+            let mut cur_attrs: Option<cosmic_text::Attrs> = None;
+
+            let last_non_space = line
+                .cells
+                .iter()
+                .rposition(|cell| cell.c != ' ')
+                .map(|idx| idx + 1)
+                .unwrap_or(0);
+
+            for cell in line.cells[..last_non_space].iter() {
+                let fg = self.palette.resolve(cell.fg, false);
+                let mut attrs = default_attrs.clone().color(fg.to_glyphon());
+                if cell.flags.contains(alacritty_terminal::term::cell::Flags::BOLD) {
+                    attrs = attrs.weight(cosmic_text::Weight::BOLD);
+                }
+                if cell.flags.contains(alacritty_terminal::term::cell::Flags::ITALIC) {
+                    attrs = attrs.style(cosmic_text::Style::Italic);
+                }
+
+                let attrs_match = cur_attrs
+                    .as_ref()
+                    .map(|a| a.color_opt == attrs.color_opt && a.weight == attrs.weight)
+                    .unwrap_or(false);
+
+                if attrs_match {
+                    cur_text.push(cell.c);
+                } else {
+                    if !cur_text.is_empty() {
+                        if let Some(prev) = cur_attrs.take() {
+                            spans_data.push((std::mem::take(&mut cur_text), prev));
+                        }
+                    }
+                    cur_text.push(cell.c);
+                    cur_attrs = Some(attrs);
+                }
+            }
+
+            if !cur_text.is_empty() {
+                if let Some(prev) = cur_attrs.take() {
+                    spans_data.push((cur_text, prev));
+                }
+            }
+
+            let buf = &mut self.line_buffers[r];
+            buf.set_metrics(metrics);
+
+            if spans_data.is_empty() {
+                buf.set_text("", &default_attrs, Shaping::Advanced, None);
+            } else {
+                let span_refs: Vec<(&str, cosmic_text::Attrs)> = spans_data
+                    .iter()
+                    .map(|(s, a)| (s.as_str(), a.clone()))
+                    .collect();
+                buf.set_rich_text(span_refs, &default_attrs, Shaping::Advanced, None);
+            }
+
+            buf.shape_until_scroll(&mut self.font_system, false);
+
+            // Compute visual cursor position if cursor is on this row
+            if cursor.is_visible && cursor.row == r {
+                if line.has_rtl {
+                    let target_col = cursor.col;
+                    let mut byte_offset = 0;
+                    for (idx, cell) in line.cells.iter().enumerate() {
+                        if idx == target_col {
+                            break;
+                        }
+                        byte_offset += cell.c.len_utf8();
+                    }
+
+                    let mut found_x = None;
+                    for run in buf.layout_runs() {
+                        for glyph in run.glyphs.iter() {
+                            if byte_offset >= glyph.start && byte_offset < glyph.end {
+                                found_x = Some(self.padding_left + glyph.x);
+                                break;
+                            }
+                        }
+                        if found_x.is_none() && target_col >= last_non_space {
+                            found_x = Some(self.padding_left + target_col as f32 * self.char_width);
+                        }
+                    }
+                    cursor_visual_pos = Some((
+                        found_x.unwrap_or(self.padding_left + target_col as f32 * self.char_width),
+                        y,
+                    ));
+                } else {
+                    let cx = self.padding_left + cursor.col as f32 * self.char_width;
+                    cursor_visual_pos = Some((cx, y));
+                }
+            }
+        }
+
+        // Add cursor quad
+        if let Some((cx, cy)) = cursor_visual_pos {
+            let cursor_color = self.palette.cursor.to_array();
+            background_quads.push((cx, cy, self.char_width, self.line_height, cursor_color));
+        }
+
+        self.quad_renderer
+            .set_rects(&self.device, &background_quads);
+
+        // Prepare text areas
+        let text_areas: Vec<TextArea> = self
+            .line_buffers
+            .iter()
+            .take(lines.len())
+            .enumerate()
+            .map(|(r, buf)| {
+                let y = self.padding_top + r as f32 * self.line_height;
+                TextArea {
+                    buffer: buf,
+                    left: self.padding_left,
+                    top: y,
+                    scale: 1.0,
+                    bounds: TextBounds {
+                        left: 0,
+                        top: 0,
+                        right: self.config.width as i32,
+                        bottom: self.config.height as i32,
+                    },
+                    default_color: self.palette.foreground.to_glyphon(),
+                    custom_glyphs: &[],
+                }
+            })
+            .collect();
+
+        self.text_renderer
+            .prepare(
+                &self.device,
+                &self.queue,
+                &mut self.font_system,
+                &mut self.text_atlas,
+                &self.viewport,
+                text_areas,
+                &mut self.swash_cache,
+            )
+            .map_err(|e| anyhow::anyhow!("Text prepare error: {:?}", e))?;
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("twitty render encoder"),
+            });
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("twitty render pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: default_bg.r as f64,
+                            g: default_bg.g as f64,
+                            b: default_bg.b as f64,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+
+            // 1. Draw Quads (backgrounds, cell colors, cursor)
+            self.quad_renderer.render(&mut pass);
+
+            // 2. Draw Glyphon Text
+            self.text_renderer
+                .render(&self.text_atlas, &self.viewport, &mut pass)
+                .map_err(|e| anyhow::anyhow!("Text render error: {:?}", e))?;
+        }
+
+        self.queue.submit(Some(encoder.finish()));
+        self.queue.present(surface_texture);
+
+        self.text_atlas.trim();
+
+        Ok(())
+    }
+}
