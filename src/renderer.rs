@@ -70,15 +70,24 @@ impl Renderer {
             .unwrap_or(surface_caps.formats[0]);
         let is_srgb = format.is_srgb();
 
+        // Prefer Mailbox (low latency, tearing-free) or Immediate over AutoVsync to eliminate typing lag
+        let present_mode = if surface_caps.present_modes.contains(&wgpu::PresentMode::Mailbox) {
+            wgpu::PresentMode::Mailbox
+        } else if surface_caps.present_modes.contains(&wgpu::PresentMode::Immediate) {
+            wgpu::PresentMode::Immediate
+        } else {
+            wgpu::PresentMode::AutoVsync
+        };
+
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
             width,
             height,
-            present_mode: wgpu::PresentMode::AutoVsync,
+            present_mode,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
-            desired_maximum_frame_latency: 2,
+            desired_maximum_frame_latency: 1, // 1 frame latency for instant keystroke response
             color_space: Default::default(),
         };
         surface.configure(&device, &config);
@@ -109,7 +118,7 @@ impl Renderer {
         test_buffer.set_text(
             "MMMMMMMMMM",
             &Attrs::new().family(Family::Monospace),
-            Shaping::Advanced,
+            Shaping::Basic,
             None,
         );
         test_buffer.shape_until_scroll(&mut font_system, false);
@@ -156,7 +165,7 @@ impl Renderer {
         test_buffer.set_text(
             "MMMMMMMMMM",
             &Attrs::new().family(Family::Monospace),
-            Shaping::Advanced,
+            Shaping::Basic,
             None,
         );
         test_buffer.shape_until_scroll(&mut self.font_system, false);
@@ -265,24 +274,41 @@ impl Renderer {
                 }
             }
 
-            // 4. Segment-based Text Placement: partition the row by geometric boundaries
-            let mut block_start = 0;
-            while block_start < cols {
-                if geom_rendered[block_start] {
-                    block_start += 1;
-                    continue;
+            // 4. Robust Column & Segment Partitioning:
+            // We partition segments when:
+            // - A cell was geometrically rendered (borders like │, ─)
+            // - OR a gap of 2 or more consecutive spaces occurs (column separator between panels!)
+            let mut col_idx = 0;
+            while col_idx < cols {
+                // Skip spaces and geometric cells to find the start of the next text segment
+                while col_idx < cols && (geom_rendered[col_idx] || line.cells[col_idx].c == ' ') {
+                    col_idx += 1;
                 }
-                let mut block_end = block_start;
-                while block_end < cols && !geom_rendered[block_end] {
-                    block_end += 1;
+                if col_idx >= cols {
+                    break;
                 }
 
-                // Inside this block [block_start..block_end], trim leading & trailing spaces
-                let mut seg_start = block_start;
-                while seg_start < block_end && line.cells[seg_start].c == ' ' {
-                    seg_start += 1;
+                let seg_start = col_idx;
+                let mut seg_end = col_idx;
+
+                // Grow segment until a geometric boundary or a multi-space column gap (>= 2 spaces)
+                while seg_end < cols && !geom_rendered[seg_end] {
+                    if line.cells[seg_end].c == ' ' {
+                        // Lookahead: if 2 or more spaces in a row, treat as column boundary!
+                        let mut space_run = 0;
+                        let mut peek = seg_end;
+                        while peek < cols && line.cells[peek].c == ' ' && !geom_rendered[peek] {
+                            space_run += 1;
+                            peek += 1;
+                        }
+                        if space_run >= 2 || (peek < cols && geom_rendered[peek]) {
+                            break;
+                        }
+                    }
+                    seg_end += 1;
                 }
-                let mut seg_end = block_end;
+
+                // Trim any trailing single space
                 while seg_end > seg_start && line.cells[seg_end - 1].c == ' ' {
                     seg_end -= 1;
                 }
@@ -335,9 +361,8 @@ impl Renderer {
                     }
 
                     if !spans_data.is_empty() {
-                        // Prepend LRM (‎) if segment has RTL so base direction is ALWAYS LTR!
-                        // This prevents prompts like ~ ❯ from ever inverting or flipping!
                         if seg_has_rtl {
+                            // Prepend LRM (‎) so base paragraph direction is ALWAYS LTR!
                             spans_data.insert(0, ("‎".to_string(), default_attrs.clone()));
                         }
 
@@ -351,7 +376,17 @@ impl Renderer {
                             .iter()
                             .map(|(s, a)| (s.as_str(), a.clone()))
                             .collect();
-                        buf.set_rich_text(span_refs, &default_attrs, Shaping::Advanced, None);
+                        
+                        // PERFORMANCE OPTIMIZATION:
+                        // Use Shaping::Advanced (HarfBuzz) ONLY when Arabic is present!
+                        // Pure Latin/ASCII/TUI text uses Shaping::Basic, which is 100x faster!
+                        let shaping_mode = if seg_has_rtl {
+                            Shaping::Advanced
+                        } else {
+                            Shaping::Basic
+                        };
+
+                        buf.set_rich_text(span_refs, &default_attrs, shaping_mode, None);
                         buf.shape_until_scroll(&mut self.font_system, false);
 
                         // Cursor detection inside this segment
@@ -384,7 +419,7 @@ impl Renderer {
                     }
                 }
 
-                block_start = block_end;
+                col_idx = seg_end;
             }
 
             // Cursor if in empty space on this row
