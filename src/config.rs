@@ -20,7 +20,32 @@ impl Default for TwittyConfig {
 }
 
 impl TwittyConfig {
-    fn config_path() -> Option<PathBuf> {
+    pub fn config_path() -> Option<PathBuf> {
+        #[cfg(target_os = "windows")]
+        {
+            if let Ok(appdata) = std::env::var("APPDATA") {
+                let mut path = PathBuf::from(appdata);
+                path.push("twitty");
+                path.push("config.json");
+                return Some(path);
+            }
+            if let Ok(userprofile) = std::env::var("USERPROFILE") {
+                let mut path = PathBuf::from(userprofile);
+                path.push("AppData");
+                path.push("Roaming");
+                path.push("twitty");
+                path.push("config.json");
+                return Some(path);
+            }
+        }
+
+        if let Ok(config_home) = std::env::var("XDG_CONFIG_HOME") {
+            let mut path = PathBuf::from(config_home);
+            path.push("twitty");
+            path.push("config.json");
+            return Some(path);
+        }
+
         let home = std::env::var("HOME").ok()?;
         let mut path = PathBuf::from(home);
         path.push(".config");

@@ -113,7 +113,7 @@ Twitty's architecture decouples PTY execution from text layout and GPU rendering
 
 ## Configuration
 
-Twitty reads configuration from `~/.config/twitty/config.json` (on Linux) or `%APPDATA%	witty\config.json` (on Windows):
+Twitty reads configuration from `~/.config/twitty/config.json` (on Linux) or `%APPDATA%\twitty\config.json` (on Windows):
 
 ```json
 {
