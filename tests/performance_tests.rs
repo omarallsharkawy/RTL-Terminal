@@ -40,11 +40,17 @@ fn test_pty_ingestion_throughput_mb_per_sec() {
         mb, duration, throughput_mb_s
     );
 
-    // Assert high throughput: must exceed at least 5.0 MB/s in unoptimized debug mode on shared CI runners (~100 MB/s in release)
+    // Profile-aware threshold: strict >= 50 MB/s in release mode to prevent regressions, with safe floor for debug CI runners
+    #[cfg(not(debug_assertions))]
+    let min_expected = 50.0;
+    #[cfg(debug_assertions)]
+    let min_expected = 8.0;
+
     assert!(
-        throughput_mb_s >= 5.0,
-        "PTY throughput must exceed 5.0 MB/s in debug mode, achieved: {:.2} MB/s",
-        throughput_mb_s
+        throughput_mb_s >= min_expected,
+        "PTY throughput ({:.2} MB/s) fell below expected threshold of {:.1} MB/s",
+        throughput_mb_s,
+        min_expected
     );
 }
 
