@@ -1,7 +1,7 @@
 use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Point, Side};
-use alacritty_terminal::selection::{Selection, SelectionType};
+pub use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::cell::Flags as CellFlags;
 use alacritty_terminal::term::test::TermSize;
 use alacritty_terminal::term::{viewport_to_point, Config, Term, TermMode};
@@ -92,11 +92,15 @@ impl Terminal {
     }
 
     pub fn start_selection(&mut self, col: usize, row: usize) {
+        self.start_selection_type(col, row, SelectionType::Simple);
+    }
+
+    pub fn start_selection_type(&mut self, col: usize, row: usize, ty: SelectionType) {
         let point = viewport_to_point(
             self.term.grid().display_offset(),
             Point::new(row, Column(col)),
         );
-        self.term.selection = Some(Selection::new(SelectionType::Simple, point, Side::Left));
+        self.term.selection = Some(Selection::new(ty, point, Side::Left));
     }
 
     pub fn update_selection(&mut self, col: usize, row: usize) {

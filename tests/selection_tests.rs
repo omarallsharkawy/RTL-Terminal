@@ -1,3 +1,4 @@
+use twitty::terminal::SelectionType;
 use twitty::terminal::Terminal;
 
 #[test]
@@ -51,4 +52,26 @@ fn test_terminal_select_all() {
     let content = selected.unwrap();
     assert!(content.contains("Line Alpha"));
     assert!(content.contains("Line Beta"));
+}
+
+#[test]
+fn test_semantic_word_and_lines_selection() {
+    let mut term = Terminal::new(80, 24, |_| {});
+    term.process_bytes(b"hello opencode_user_test\r\n");
+
+    // Double-click (Semantic) selection on the word "opencode_user_test"
+    term.start_selection_type(8, 0, SelectionType::Semantic);
+    let text = term.selection_text();
+    assert!(text.is_some());
+    let unwrapped = text.unwrap();
+    assert!(
+        unwrapped.contains("opencode_user_test"),
+        "Semantic selection should select whole word, got: {}",
+        unwrapped
+    );
+
+    // Triple-click (Lines) selection
+    term.start_selection_type(3, 0, SelectionType::Lines);
+    let line_text = term.selection_text().unwrap();
+    assert!(line_text.contains("hello opencode_user_test"));
 }

@@ -9,7 +9,7 @@ use crate::config::TwittyConfig;
 use crate::input::{handle_key, InputAction};
 use crate::pty::Pty;
 use crate::renderer::Renderer;
-use crate::terminal::Terminal;
+use crate::terminal::{SelectionType, Terminal};
 use alacritty_terminal::term::TermMode;
 
 #[derive(Debug)]
@@ -31,6 +31,12 @@ pub struct App {
     config: TwittyConfig,
     needs_redraw: bool,
     is_selecting: bool,
+    mouse_down: bool,
+    mouse_down_col: usize,
+    mouse_down_row: usize,
+    last_click_time: std::time::Instant,
+    last_click_pos: (usize, usize),
+    click_count: usize,
 }
 
 impl App {
@@ -53,6 +59,12 @@ impl App {
             config,
             needs_redraw: false,
             is_selecting: false,
+            mouse_down: false,
+            mouse_down_col: 0,
+            mouse_down_row: 0,
+            last_click_time: std::time::Instant::now(),
+            last_click_pos: (0, 0),
+            click_count: 0,
         }
     }
 
@@ -262,6 +274,16 @@ impl ApplicationHandler<AppEvent> for App {
                     self.mouse_col = col;
                     self.mouse_row = row;
 
+                    if self.mouse_down {
+                        let moved = col != self.mouse_down_col || row != self.mouse_down_row;
+                        if moved && !self.is_selecting {
+                            self.is_selecting = true;
+                            if let Ok(mut term) = self.terminal.lock() {
+                                term.start_selection(self.mouse_down_col, self.mouse_down_row);
+                            }
+                        }
+                    }
+
                     if self.is_selecting {
                         if let Ok(mut term) = self.terminal.lock() {
                             term.update_selection(col, row);
@@ -297,7 +319,48 @@ impl ApplicationHandler<AppEvent> for App {
                 match state {
                     ElementState::Pressed => match button {
                         MouseButton::Left => {
-                            if in_mouse_mode {
+                            self.mouse_down = true;
+                            self.mouse_down_col = self.mouse_col;
+                            self.mouse_down_row = self.mouse_row;
+
+                            let now = std::time::Instant::now();
+                            let is_multi_click =
+                                now.duration_since(self.last_click_time).as_millis() < 400
+                                    && self.last_click_pos == (self.mouse_col, self.mouse_row);
+
+                            if is_multi_click {
+                                self.click_count += 1;
+                            } else {
+                                self.click_count = 1;
+                            }
+                            self.last_click_time = now;
+                            self.last_click_pos = (self.mouse_col, self.mouse_row);
+
+                            if self.click_count == 2 {
+                                self.is_selecting = true;
+                                if let Ok(mut term) = self.terminal.lock() {
+                                    term.start_selection_type(
+                                        self.mouse_col,
+                                        self.mouse_row,
+                                        SelectionType::Semantic,
+                                    );
+                                }
+                                if let Some(ref r) = self.renderer {
+                                    r.window.request_redraw();
+                                }
+                            } else if self.click_count >= 3 {
+                                self.is_selecting = true;
+                                if let Ok(mut term) = self.terminal.lock() {
+                                    term.start_selection_type(
+                                        self.mouse_col,
+                                        self.mouse_row,
+                                        SelectionType::Lines,
+                                    );
+                                }
+                                if let Some(ref r) = self.renderer {
+                                    r.window.request_redraw();
+                                }
+                            } else if in_mouse_mode {
                                 let seq = format!("[<0;{};{}M", col, row);
                                 if let Some(ref pty) = self.pty {
                                     let _ = pty.write(seq.as_bytes());
@@ -361,13 +424,22 @@ impl ApplicationHandler<AppEvent> for App {
                     },
                     ElementState::Released => match button {
                         MouseButton::Left => {
-                            if in_mouse_mode {
+                            self.mouse_down = false;
+
+                            if self.is_selecting {
+                                if let Ok(term) = self.terminal.lock() {
+                                    if let Some(text) = term.selection_text() {
+                                        if !text.is_empty() {
+                                            set_clipboard_text(&text);
+                                        }
+                                    }
+                                }
+                                self.is_selecting = false;
+                            } else if in_mouse_mode {
                                 let seq = format!("[<0;{};{}m", col, row);
                                 if let Some(ref pty) = self.pty {
                                     let _ = pty.write(seq.as_bytes());
                                 }
-                            } else {
-                                self.is_selecting = false;
                             }
                         }
                         MouseButton::Right => {
