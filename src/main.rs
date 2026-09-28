@@ -9,6 +9,7 @@ mod input;
 mod pty;
 mod quad;
 mod renderer;
+mod shaping;
 mod terminal;
 
 use app::App;

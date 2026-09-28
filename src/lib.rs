@@ -9,4 +9,5 @@ pub mod input;
 pub mod pty;
 pub mod quad;
 pub mod renderer;
+pub mod shaping;
 pub mod terminal;
