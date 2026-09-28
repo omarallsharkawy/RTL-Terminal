@@ -1,0 +1,306 @@
+/* Cinematic editorial — design tokens.
+
+   This is the system itself, not a description of it. Link it first, then a
+   surface stylesheet that consumes these variables.
+
+   The world: warm near-black ground, high-contrast display serif at large
+   sizes with negative tracking, very small uppercase mono labels at wide
+   positive tracking, copper for numerals and markers, hairline rules instead
+   of boxes, asymmetric editorial grids. Square corners. No shadows anywhere. */
+
+:root {
+  /* Surfaces: three steps of the same warm black. Never neutral gray, never
+     pure white, never pure black. */
+  --ground: #14110f;
+  --panel: #1c1916;
+  --well: #100e0c;
+
+  /* Text: warm cream. muted holds about 7:1 on panel; faint is for large text,
+     labels and meta only — never body copy. */
+  --text: #e8decd;
+  --muted: #b4a99a;
+  --faint: #8d8171;
+
+  /* Copper is TYPOGRAPHIC: numerals, section markers, emphasis, note edges.
+     It is never a control. */
+  --copper: #b7825e;
+  --copper-ink: #d0a381;
+
+  /* Rules: warm translucent hairlines. Elevation is declared once, as a border.
+     There are no shadows in this system. */
+  --line: rgba(232, 222, 205, 0.16);
+  --line-strong: rgba(232, 222, 205, 0.34);
+
+  /* Severity: always colour AND a written label, never colour alone. */
+  --ok: #6f9f5f;
+  --ok-ink: #a3c98f;
+  --warn: #c08a3e;
+  --warn-ink: #e0b169;
+  --bad: #b4544a;
+  --bad-ink: #e08a80;
+
+  /* The action colour. Use a brand accent here; it appears on the primary
+     button and links, nowhere else. */
+  --action: #1d9bf0;
+  --action-deep: #1a8cd8;
+  --on-action: #ffffff;
+
+  /* Browser furniture belongs to the palette. */
+  --scroll-thumb: #3a322a;
+  --focus: #d0a381;
+
+  /* Type voice. The display face must be a high-contrast serif. Latin-only
+     display faces have no Arabic counterpart, so RTL documents re-point
+     --display at a Naskh face (see the Type section of SKILL.md). */
+  --display: "Bodoni Moda", Georgia, "Times New Roman", serif;
+  --sans: "Manrope", system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Type ramp. Marketing surfaces run the wide end; dense operational surfaces
+     run the narrow end plus readout and heading-sm. */
+  --size-micro: 10px;    /* mono labels, units */
+  --size-meta: 12px;     /* timestamps, captions, secondary status */
+  --size-small: 13px;    /* dense table and control text */
+  --size-body: 15px;     /* prose and form text */
+  --size-lead: 17.5px;   /* intro paragraph, lede */
+  --size-readout: 22px;  /* measured value, the number read first */
+  --size-heading-sm: 22px;
+
+  /* Layout */
+  --gutter: clamp(22px, 4.4vw, 72px);
+  --measure: 68ch;       /* prose never runs wider than this */
+  --panel-pad: 22px;
+
+  /* Label tracking. Only for Latin and code — see SKILL.md. */
+  --track-label: 1.7px;
+  --track-display: -0.035em;
+}
+
+/* RTL documents must re-point the display voice themselves. Amiri is a
+   high-contrast Naskh revival: the closest living relative of a didone in
+   Arabic, which is what preserves the system's character across scripts. */
+[dir="rtl"] {
+  --display: "Amiri", "Noto Naskh Arabic", Georgia, serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html {
+  scrollbar-color: var(--scroll-thumb) var(--ground);
+  scroll-behavior: smooth;
+  scroll-padding-top: 24px;
+}
+
+body {
+  background: var(--ground);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: var(--size-body);
+  line-height: 1.8;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection { background: var(--copper); color: var(--ground); }
+
+.mono, code, kbd, time, output { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* Numbers, paths, commands and code are LTR content even inside RTL prose.
+   Without this, a path or a number reorders and reads as gibberish. */
+.ltr { direction: ltr; unicode-bidi: isolate; }
+
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+
+a { color: var(--copper-ink); text-decoration: none; }
+a:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+
+/* --- Type roles -------------------------------------------------------- */
+
+h1, h2, h3 { font-family: var(--display); font-weight: 400; }
+
+.display {
+  font-size: clamp(38px, 6vw, 82px);
+  line-height: 1.03;
+  letter-spacing: var(--track-display);
+  text-wrap: balance;
+}
+.display em { font-style: italic; color: var(--copper-ink); }
+
+/* The mono label is the connective tissue of this system. Wide positive
+   tracking at a small size is what makes a technical label read as considered
+   rather than as a default. Never apply tracking to Arabic. */
+.label {
+  font-family: var(--mono);
+  font-size: var(--size-micro);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--muted);
+}
+[dir="rtl"] .label {
+  letter-spacing: 0;
+  text-transform: none;
+  font-family: var(--sans);
+}
+
+.num { font-family: var(--mono); color: var(--copper); }
+
+/* Section marker: number, rule, name. The number must be real — it should
+   match the table of contents and the reading order, so it carries
+   navigation rather than decoration. */
+.marker { display: flex; align-items: center; gap: 14px; }
+.marker .num { font-size: var(--size-micro); letter-spacing: 1px; }
+.marker .rule { flex: 1; min-width: 26px; height: 1px; background: var(--line); }
+
+/* --- Primitives -------------------------------------------------------- */
+
+.skip {
+  position: absolute; inset-inline-start: var(--gutter); top: 12px; z-index: 100;
+  padding: 12px 18px; background: var(--text); color: var(--ground) !important;
+  font-size: var(--size-small);
+  transform: translateY(-220%); transition: transform 150ms ease;
+}
+.skip:focus { transform: translateY(0); }
+
+/* Buttons: the outline treatment inverts on hover. Square. The primary variant
+   is the only place the action colour appears. */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 26px;
+  font-family: var(--mono); font-size: var(--size-micro);
+  letter-spacing: var(--track-label); text-transform: uppercase;
+  padding: 15px 20px; min-height: 48px;
+  border: 1px solid var(--line-strong); background: transparent; color: var(--text);
+  cursor: pointer;
+  transition: background 200ms ease, color 200ms ease, border-color 200ms ease;
+}
+.btn:hover { background: var(--text); color: var(--ground); border-color: var(--text); text-decoration: none; }
+.btn-primary { background: var(--action); border-color: var(--action); color: var(--on-action); }
+.btn-primary:hover { background: var(--action-deep); border-color: var(--action-deep); color: var(--on-action); }
+.btn[disabled] { opacity: 0.45; cursor: not-allowed; }
+.btn[disabled]:hover { background: transparent; color: var(--text); border-color: var(--line-strong); }
+.btn-primary[disabled]:hover { background: var(--action); border-color: var(--action); color: var(--on-action); }
+[dir="rtl"] .btn {
+  letter-spacing: 0; text-transform: none;
+  font-family: var(--sans); font-size: var(--size-small);
+}
+
+.panel { border: 1px solid var(--line); background: var(--panel); padding: var(--panel-pad); }
+
+/* Callouts: severity is stated in words as well as colour, and the edge is the
+   only place the tone colour appears. */
+.note {
+  border: 1px solid var(--line);
+  border-inline-start: 2px solid var(--faint);
+  background: var(--panel); padding: 16px 20px;
+}
+.note .tag {
+  display: block; font-family: var(--mono); font-size: var(--size-micro);
+  letter-spacing: 1.6px; text-transform: uppercase; margin-bottom: 7px;
+}
+.note p { margin: 0; font-size: var(--size-small); max-width: 64ch; }
+.note[data-tone="ok"] { border-inline-start-color: var(--ok); }
+.note[data-tone="ok"] .tag { color: var(--ok-ink); }
+.note[data-tone="warn"] { border-inline-start-color: var(--warn); }
+.note[data-tone="warn"] .tag { color: var(--warn-ink); }
+.note[data-tone="bad"] { border-inline-start-color: var(--bad); }
+.note[data-tone="bad"] .tag { color: var(--bad-ink); }
+.note[data-tone="info"] { border-inline-start-color: var(--copper); }
+.note[data-tone="info"] .tag { color: var(--copper-ink); }
+[dir="rtl"] .note .tag { letter-spacing: 0; text-transform: none; font-family: var(--sans); font-size: var(--size-meta); }
+
+/* Code block: a mono caption row, and a horizontal scroll that never moves the
+   page. The pre is LTR even on an RTL page. */
+.code { border: 1px solid var(--line); background: var(--well); }
+.code-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 11px 16px; border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: var(--size-micro);
+  letter-spacing: 1.5px; text-transform: uppercase; color: var(--faint);
+}
+.code pre {
+  direction: ltr; text-align: left; padding: 16px; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.8; color: #e2d9c9;
+}
+[dir="rtl"] .code-head { letter-spacing: 0; text-transform: none; font-family: var(--sans); }
+
+/* Tables: hairline rows, mono header caps, generous cell padding. */
+.tbl { border-top: 1px solid var(--line); overflow-x: auto; }
+.tbl table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.tbl th, .tbl td {
+  padding: 13px 18px 13px 0; text-align: start;
+  border-bottom: 1px solid var(--line); vertical-align: top;
+}
+.tbl thead th {
+  font-family: var(--mono); font-size: var(--size-micro);
+  letter-spacing: 1.5px; text-transform: uppercase; font-weight: 500; color: var(--faint);
+}
+[dir="rtl"] .tbl thead th { letter-spacing: 0; text-transform: none; font-family: var(--sans); font-size: var(--size-meta); }
+
+/* Inline code is LTR and must not break mid-token. */
+code {
+  font-size: 12.5px; background: var(--well); border: 1px solid var(--line);
+  padding: 1px 6px; color: var(--text);
+  direction: ltr; unicode-bidi: isolate; display: inline-block; max-width: 100%;
+}
+
+kbd {
+  display: inline-block; font-family: var(--mono); font-size: 11.5px;
+  background: var(--well); border: 1px solid var(--line-strong);
+  padding: 3px 8px; color: var(--text); white-space: nowrap;
+}
+
+/* Header: a quiet bar over one hairline rule. */
+.top { position: sticky; top: 0; z-index: 50; background: var(--ground); border-bottom: 1px solid var(--line); }
+.top-in { display: flex; align-items: center; gap: 26px; flex-wrap: wrap; padding: 21px var(--gutter); }
+.top .spacer { margin-inline-start: auto; }
+.top nav { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+.top nav a { color: var(--muted); }
+.top nav a:hover, .top nav a[aria-current="page"] { color: var(--text); text-decoration: none; }
+
+.lang { color: var(--muted); border: 1px solid var(--line-strong); padding: 6px 12px; }
+.lang:hover { color: var(--text); border-color: var(--text); text-decoration: none; }
+
+.wrap { max-width: 1240px; margin: 0 auto; padding: 0 var(--gutter); }
+
+.foot { margin-top: 90px; border-top: 1px solid var(--line); padding: 28px 0 60px; }
+.foot-in {
+  display: flex; align-items: center; gap: 24px; flex-wrap: wrap;
+  max-width: 1240px; margin: 0 auto; padding: 0 var(--gutter);
+}
+.foot a { color: var(--muted); }
+.foot a:hover { color: var(--text); text-decoration: none; }
+
+/* --- Asymmetric editorial sections ------------------------------------- */
+
+/* The signature layout: a lead column beside a body column at roughly 1:2,
+   separated by hairline rules. Sections get more space above a heading than
+   below it. */
+.band { padding-top: 96px; margin-top: 96px; border-top: 1px solid var(--line); }
+.band-in { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2.02fr); gap: 48px; }
+.band-head { align-self: start; padding-top: 10px; }
+.band-head h2 {
+  font-size: clamp(30px, 4.1vw, 60px);
+  line-height: 1.06;
+  letter-spacing: -0.032em;
+  text-wrap: balance;
+}
+.band-head h2 em { font-style: italic; color: var(--copper-ink); }
+.band-body > p { font-size: var(--size-body); color: var(--muted); max-width: 62ch; }
+.band-body > p + p { margin-top: 14px; }
+
+@media (max-width: 900px) {
+  .band { padding-top: 58px; margin-top: 58px; }
+  .band-in { grid-template-columns: minmax(0, 1fr); gap: 22px; }
+}
+
+/* --- Motion ------------------------------------------------------------ */
+
+/* One authored moment, not scattered effects. Everything is visible by
+   default; motion only ever reveals or confirms. */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

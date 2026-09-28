@@ -1,0 +1,98 @@
+/* Cinematic editorial — persuasion surface (landing page).
+
+   Pair with tokens.css. Composition: a full-height opening statement whose
+   bottom edge carries the product's real specifications, then asymmetric
+   editorial sections, ending on one clear action. */
+
+/* --- Opening ----------------------------------------------------------- */
+.hero {
+  position: relative;
+  min-height: min(88svh, 820px);
+  display: flex; flex-direction: column;
+  background: #2a211a;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+/* The field comes from the palette, not a photograph: one warm radial glow over
+   the ground. No image rights, no network dependency, no loading state. */
+.hero-ground {
+  position: absolute; inset: 0; z-index: -3;
+  background:
+    radial-gradient(120% 90% at 74% 8%, rgba(183, 130, 94, 0.42), transparent 58%),
+    radial-gradient(70% 60% at 12% 92%, rgba(120, 84, 60, 0.3), transparent 62%),
+    linear-gradient(178deg, #241c16, #140f0c 62%, #100d0b);
+}
+
+/* Hairline grid: the world's editorial armature, held far below the type so it
+   reads as structure rather than decoration. Masked so it never terminates on
+   a hard edge. */
+.hero-grid-lines {
+  position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background-image:
+    linear-gradient(to right, rgba(232, 222, 205, 0.055) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(232, 222, 205, 0.055) 1px, transparent 1px);
+  background-size: 148px 148px;
+  -webkit-mask-image: linear-gradient(180deg, transparent, #000 22%, #000 74%, transparent);
+  mask-image: linear-gradient(180deg, transparent, #000 22%, #000 74%, transparent);
+}
+
+.hero-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 30px; padding: 30px var(--gutter) 0; }
+.hero-top .label { color: var(--text); }
+
+.hero-body { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 40px var(--gutter) 24px; min-width: 0; }
+
+.hero h1 {
+  font-family: var(--display); font-weight: 400;
+  font-size: clamp(40px, 7.6vw, 126px);
+  line-height: 0.96;
+  letter-spacing: -0.045em;
+  max-width: 15ch;
+  text-wrap: balance;
+  overflow-wrap: break-word;
+}
+.hero h1 em { font-style: italic; color: var(--copper-ink); }
+
+/* The specification strip. Every value here must be true and verifiable — this
+   is the part of the page that earns the rest of it. */
+.hero-specs {
+  display: flex; align-items: stretch;
+  margin: 0 var(--gutter);
+  border-top: 1px solid var(--line-strong);
+}
+.spec { flex: 1; min-width: 0; padding: 22px 26px 24px 0; }
+.spec + .spec { padding-inline-start: 26px; border-inline-start: 1px solid var(--line); }
+.spec dt { font-family: var(--mono); font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--faint); }
+.spec dd { margin-top: 8px; font-family: var(--display); font-size: 21px; line-height: 1.2; }
+.spec dd small { display: block; margin-top: 5px; font-family: var(--sans); font-size: var(--size-meta); color: var(--muted); line-height: 1.6; }
+[dir="rtl"] .spec dt { letter-spacing: 0; text-transform: none; font-family: var(--sans); }
+
+/* --- Capability list --------------------------------------------------- */
+.cap-list { list-style: none; margin-top: 34px; border-top: 1px solid var(--line); }
+.cap-list li {
+  padding: 22px 0; border-bottom: 1px solid var(--line);
+  font-size: 14.5px; color: var(--muted); max-width: 74ch;
+}
+.cap-list li strong { color: var(--text); font-weight: 600; }
+
+/* --- Close ------------------------------------------------------------- */
+.cta {
+  display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 48px; align-items: end;
+  margin-top: 96px; padding-top: 64px; border-top: 1px solid var(--line);
+}
+.cta h2 { font-size: clamp(28px, 3.6vw, 52px); line-height: 1.06; letter-spacing: -0.03em; margin-top: 22px; }
+.cta p { margin-top: 16px; font-size: var(--size-body); color: var(--muted); max-width: 52ch; }
+.cta-actions { display: flex; flex-direction: column; gap: 10px; }
+
+@media (max-width: 900px) {
+  .cta { grid-template-columns: minmax(0, 1fr); gap: 26px; margin-top: 58px; padding-top: 40px; }
+  .hero-specs { flex-wrap: wrap; }
+  .spec { flex: 1 1 46%; padding: 18px 18px 18px 0; }
+  .spec + .spec { padding-inline-start: 18px; }
+}
+
+@media (max-width: 560px) {
+  .spec { flex: 1 1 100%; border-inline-start: none !important; padding-inline-start: 0 !important; border-top: 1px solid var(--line); }
+  .spec:first-child { border-top: none; }
+}

@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl"
+      data-label-copy="نسخ"
+      data-label-copy-aria="نسخ هذا النص"
+      data-label-copied="تم النسخ"
+      data-label-copy-manual="اضغط Ctrl+C">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#14110f">
+<title>Twitty · الطرفية الأصيلة ثنائية الاتجاه لدعم العربية</title>
+<meta name="description" content="طرفية سريعة ومسرّعة بالعتاد مبنية بلغة Rust، ترسم النصوص العربية وتدعم الـ RTL في واجهات الـ TUI المعقدة بدون أي انكسار.">
+<link rel="icon" href="assets/twitty-mark.svg" type="image/svg+xml">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Amiri:ital,wght@0,400;0,700;1,400&family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,500;1,6..96,400&family=JetBrains+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap">
+
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="surface.css">
+
+<style>
+/* Cinematic Editorial enhancements */
+.badge-copper {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: var(--type-label);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--copper);
+  border: 1px solid var(--border-contrast);
+  padding: 4px 10px;
+  margin-bottom: var(--space-4);
+}
+[dir="rtl"] .badge-copper {
+  letter-spacing: normal;
+  text-transform: none;
+}
+.term-hero-preview {
+  border: 1px solid var(--border);
+  background: #15161e;
+  padding: 20px;
+  font-family: "JetBrainsMono Nerd Font", var(--mono);
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: #c0caf5;
+  box-shadow: none;
+  border-radius: 0;
+  margin: var(--space-7) 0;
+  direction: ltr;
+  text-align: left;
+}
+.term-hero-preview .prompt { color: #7aa2f7; }
+.term-hero-preview .cmd { color: #bb9af7; }
+.term-hero-preview .arabic { color: #9ece6a; }
+.term-hero-preview .box { color: #7dcfff; }
+.term-hero-preview .cursor {
+  background: #f5e0dc;
+  color: #15161e;
+  padding: 0 4px;
+}
+.spec-strip .spec b {
+  font-feature-settings: "tnum" 1;
+  color: var(--copper);
+}
+.lang-toggle {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.lang-toggle:hover {
+  border-color: var(--copper);
+  color: var(--text-1);
+}
+</style>
+</head>
+<body>
+
+<a class="skip" href="#main">تخطي إلى المحتوى</a>
+
+<header class="top">
+  <div class="top-in">
+    <a class="mark" href="./">
+      <img src="assets/twitty-mark.svg" alt="Twitty mark" width="24" height="24">
+      <b>Twitty</b>
+    </a>
+    <nav class="nav" aria-label="الرئيسية">
+      <a href="#why">الرؤية</a>
+      <a href="#setup">التثبيت</a>
+      <a href="#comparison">المقارنة</a>
+      <a href="https://github.com/omarallsharkawy/RTL-Terminal" target="_blank" rel="noopener">GitHub</a>
+      <button id="toggle-lang" class="lang-toggle" type="button">English</button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+  <section class="hero">
+    <div class="hero-in">
+      <span class="badge-copper">الإصدار 2.0 الأصيل · Native Rust</span>
+      <h1 class="display ar-title">الطرفية ثنائية الاتجاه التي تعيد للعربية كرامتها على موجه الأوامر.</h1>
+      <p class="lede ar-desc">
+        طرفية سريعة، منخفضة التأخير، ومسرّعة بالعتاد عبر <span class="ltr">WGPU</span>. تعزل المقاطع العربية بسلاسة وتطبق خوارزمية <span class="ltr">UAX #9</span> وتشكيل الحروف المتصلة دون أن تُقلب موجه الأوامر أو تكسر واجهات الـ <span class="ltr">TUI</span>.
+      </p>
+
+      <div class="term-hero-preview">
+        <div><span class="prompt">~ ❯</span> <span class="cmd">echo</span> "<span class="arabic">مرحباً بك في عالم Twitty v2 الأصيل</span>"</div>
+        <div style="margin-top: 10px; color: #565f89;">┌─ <span style="color: #7aa2f7;">OpenCode 1.18.30</span> ────────────────────────────────┐</div>
+        <div>│ <span style="color: #bb9af7;">Context</span>: 0 tokens &nbsp;│ <span class="arabic">تحية طيبة! كيف يمكنني مساعدتك اليوم؟</span> │</div>
+        <div>└─────────────────────────────────── <span class="cursor">█</span> ──────────┘</div>
+      </div>
+
+      <div class="cta-row">
+        <a class="button action" href="#setup">ابدأ الإعداد والتثبيت</a>
+        <a class="ghost" href="KITTY_GHOSTTY_COMPARISON.md">مقارنة ميزات Kitty و Ghostty →</a>
+      </div>
+    </div>
+  </section>
+
+  <aside class="strip" aria-label="مواصفات الأداء">
+    <div class="spec-strip">
+      <div class="spec">
+        <span class="label">زمن التأخير (Frame Latency)</span>
+        <b>1 Frame</b>
+        <span class="sub">رسم فوري بنمط Mailbox</span>
+      </div>
+      <div class="spec">
+        <span class="label">معمارية الرسوميات</span>
+        <b>WGPU</b>
+        <span class="sub">Vulkan / Metal / DX12</span>
+      </div>
+      <div class="spec">
+        <span class="label">تشكيل الحروف العربية</span>
+        <b>UAX #9</b>
+        <span class="sub">تشبيك سياقي أصيل</span>
+      </div>
+      <div class="spec">
+        <span class="label">حجم البرنامج النهائي</span>
+        <b>13 MB</b>
+        <span class="sub">خفيف وبدون أي إلكترون</span>
+      </div>
+    </div>
+  </aside>
+
+  <section class="section" id="why">
+    <div class="split">
+      <div class="split-col">
+        <span class="badge-copper">معمارية الشبكة الصارمة</span>
+        <h2 class="display">لماذا تفشل الطرفيات الأخرى مع لغة الضاد؟</h2>
+      </div>
+      <div class="split-body">
+        <p>
+          الطرفيات الكلاسيكية تفترض أن الشاشة مجرد مصفوفة خلايا ثابتة تكتب من اليسار إلى اليمين فقط. عند كتابة جملة عربية داخل <span class="ltr">Bash</span> أو <span class="ltr">OpenCode</span>، تنفصل الحروف وتظهر معكوسة، أو ينقلب موجه الأوامر بالكامل.
+        </p>
+        <p>
+          في <b>Twitty v2</b>، اعتمدنا نظام <b>عزل المقاطع (Scoped RTL)</b> مع شبكة خلايا صارمة (<span class="ltr">Cell-Locked Grid</span>):
+        </p>
+        <ul style="margin: var(--space-4) 0; padding-inline-start: 20px;">
+          <li><b>موجه أوامر هجين ثابت:</b> الرموز مثل <span class="ltr">~ ❯</span> تبقى ثابتة على اليسار دائماً دون أن يقلبها النص العربي.</li>
+          <li><b>رسم هندسي مصمت:</b> خطوط الجداول وبلوكات الشعار (<span class="ltr">█, ▄, │</span>) تُرسم عبر كرت الشاشة بدون أي فجوات خطوط.</li>
+          <li><b>تخزين مؤقت للسطور (Line Cache):</b> معالجة فورية بمعدل 120 إطاراً في الثانية دون أي استهلاك زائد للمعالج.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="setup">
+    <div class="split">
+      <div class="split-col">
+        <span class="badge-copper">البداية السريعة</span>
+        <h2 class="display">خطوات التثبيت والتشغيل</h2>
+        <p>تتطلب بيئة Rust الحديثة (1.85+) على نظام Linux أو Windows.</p>
+      </div>
+      <div class="split-body">
+        
+        <h3 style="margin-top: 0; font-family: var(--sans);">1. استنساخ المستودع (الفرع الأصيل v2)</h3>
+        <pre><code class="ltr">git clone https://github.com/omarallsharkawy/RTL-Terminal.git -b v2-native
+cd RTL-Terminal</code></pre>
+
+        <h3 style="font-family: var(--sans);">2. البناء المحسّن فائق السرعة</h3>
+        <pre><code class="ltr">cargo build --release</code></pre>
+
+        <h3 style="font-family: var(--sans);">3. تشغيل الطرفية</h3>
+        <pre><code class="ltr">./target/release/twitty</code></pre>
+
+        <div style="margin-top: var(--space-5); border: 1px solid var(--border); padding: var(--space-4);">
+          <span class="badge-copper" style="margin-bottom: 8px;">ملف الإعدادات الدائم</span>
+          <p style="font-size: 13.5px; color: var(--text-2); margin: 0 0 10px 0;">
+            يتم حفظ حجم الخط وتفضيلاتك تلقائياً عند التكبير والتصغير بـ <span class="ltr">Ctrl + =</span> أو عجلة الماوس داخل:
+          </p>
+          <pre style="margin: 0;"><code class="ltr">~/.config/twitty/config.json</code></pre>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="comparison">
+    <div class="split">
+      <div class="split-col">
+        <span class="badge-copper">المقارنة المعمارية</span>
+        <h2 class="display">Twitty أمام Kitty و Ghostty</h2>
+      </div>
+      <div class="split-body">
+        <p>
+          درسنا معمارية أحدث الطرفيات مثل <span class="ltr">Ghostty</span> (المطورة بلغة Zig) و <span class="ltr">Kitty</span> (المطورة بـ C و Python). كلا الطرفيتين رائدتان في السرعة وبروتوكولات الصور، لكنهما تعجزان عن عرض جملة عربية واحدة منسقة داخل واجهة <span class="ltr">TUI</span>.
+        </p>
+        <p>
+          <b>Twitty</b> تسد هذه الفجوة التاريخية مع الحفاظ على الأداء المسرّع بالعتاد، وتضع دعماً كاملاً لميزات الحافظة ومفاتيح <span class="ltr">APP_CURSOR</span> والتمرير بالماوس.
+        </p>
+        <p>
+          <a class="action" href="KITTY_GHOSTTY_COMPARISON.md">قراءة جدول المقارنة والتحليل التقني الكامل ←</a>
+        </p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="bottom">
+  <div class="bottom-in">
+    <span class="copy">حقوق المشروع مفتوحة المصدر تحت ترخيص MIT © 2026 Twitty Terminal</span>
+    <span class="made">تصميم تحريري سينمائي بنظام Cinematic Editorial</span>
+  </div>
+</footer>
+
+<script src="enhance.js"></script>
+<script>
+// Language Toggle Logic
+const toggleBtn = document.getElementById('toggle-lang');
+let isArabic = true;
+
+toggleBtn.addEventListener('click', () => {
+  isArabic = !isArabic;
+  if (isArabic) {
+    document.documentElement.lang = 'ar';
+    document.documentElement.dir = 'rtl';
+    toggleBtn.textContent = 'English';
+  } else {
+    document.documentElement.lang = 'en';
+    document.documentElement.dir = 'ltr';
+    toggleBtn.textContent = 'العربية';
+  }
+});
+</script>
+</body>
+</html>

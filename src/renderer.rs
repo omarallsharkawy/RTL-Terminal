@@ -165,7 +165,7 @@ impl Renderer {
         let mut test_buffer = Buffer::new_empty(metrics);
         test_buffer.set_text(
             "MMMMMMMMMM",
-            &Attrs::new().family(Family::Monospace),
+            &Attrs::new().family(Family::Name("JetBrainsMono Nerd Font")),
             Shaping::Basic,
             None,
         );
@@ -212,7 +212,7 @@ impl Renderer {
         let mut test_buffer = Buffer::new_empty(metrics);
         test_buffer.set_text(
             "MMMMMMMMMM",
-            &Attrs::new().family(Family::Monospace),
+            &Attrs::new().family(Family::Name("JetBrainsMono Nerd Font")),
             Shaping::Basic,
             None,
         );
@@ -270,7 +270,7 @@ impl Renderer {
             .create_view(&wgpu::TextureViewDescriptor::default());
 
         let metrics = Metrics::new(self.font_size, self.line_height);
-        let default_attrs = Attrs::new().family(Family::Monospace);
+        let default_attrs = Attrs::new().family(Family::Name("JetBrainsMono Nerd Font"));
         let default_bg = self.palette.background;
         let default_bg_color = self.to_target_color(default_bg);
 
