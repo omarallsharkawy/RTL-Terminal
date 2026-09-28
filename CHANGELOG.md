@@ -1,5 +1,37 @@
 # Changelog
 
+## 2.0.0 — 2026-09-28
+
+### Architecture and rendering
+
+- Replaced the hybrid web/DOM architecture and xterm.js wrapper with an end-to-end native Rust core.
+- Implemented hardware-accelerated GPU surface rendering using WGPU 30 (Vulkan on Linux, Direct3D 12 on Windows).
+- Integrated Glyphon and Cosmic-Text for native text rasterization and caching.
+- Implemented zero-gap geometric rendering for VT box-drawing and block-character sequences (U+2500..U+259F) to eliminate font-margin gaps in TUIs.
+- Configured native surface alpha compositing (PreMultiplied and PostMultiplied modes) for Wayland compositor transparency and Hyprland background blur.
+
+### Terminal and BiDi engine
+
+- Implemented standard Unicode Bidirectional Algorithm (UAX #9) processing backed by pure-Rust HarfBuzz text shaping.
+- Introduced scoped RTL paragraph segmenting to prevent Arabic phrases from displacing adjacent TUI columns, sidebars, or prompt geometry.
+- Enforced an LTR paragraph base across terminal prompt lines to keep prompt chevrons and shell paths from inverting when followed by Arabic user input.
+- Anchored the text-editing cursor to the visual termination of the active shaped run, providing linear advance across whitespace and eliminating out-of-container cursor jumps.
+- Connected the VT engine query responder to the PTY write channel, correctly answering DSR, DA, and DECID queries without terminal escape sequence leakage.
+
+### Desktop and configuration
+
+- Added persistent user configuration via `~/.config/twitty/config.json` supporting custom font sizes, background opacity, and cursor styles.
+- Added support for customizable cursor geometries, defaulting to a 2px vertical beam (`beam`) with support for `underline` and `block`.
+- Created and installed a Linux desktop entry (`twitty.desktop`) and scalable vector application icon under `~/.local/share/applications` and `~/.local/share/icons`.
+- Implemented interactive keyboard and mouse zoom controls (`Ctrl + Plus`, `Ctrl + Minus`, `Ctrl + 0`, and `Ctrl + MouseWheel`) that write immediately to the persistent configuration.
+
+### Performance and input
+
+- Implemented full row-level differential caching, eliminating redundant font shaping and buffer recreation on unchanged screen lines.
+- Configured low-latency Mailbox present mode with single-frame presentation to eliminate input latency.
+- Supported SGR mouse reporting (`1000`, `1002`, `1006`), allowing mouse-wheel scrolling and click events to pass directly to interactive TUI applications.
+- Switched shortcut processing to hardware keycodes to keep core terminal controls (`Ctrl+C`, `Ctrl+D`, `Ctrl+Shift+V`) functional across non-Latin keyboard layouts.
+
 ## 1.2.1 — 2026-07-26
 
 ### Security and release integrity
