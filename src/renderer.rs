@@ -274,8 +274,6 @@ impl Renderer {
             }
 
             // 4. Panel & Segment Partitioning:
-            // Only split on geometric borders (│) or large column gaps (>= 8 spaces)
-            // User-typed spaces (1-7 spaces) stay INSIDE the segment and are never lost!
             let mut col_idx = 0;
             while col_idx < cols {
                 while col_idx < cols && (geom_rendered[col_idx] || line.cells[col_idx].c == ' ') {
@@ -303,7 +301,13 @@ impl Renderer {
                     seg_end += 1;
                 }
 
-                while seg_end > seg_start && line.cells[seg_end - 1].c == ' ' {
+                let max_active_col = if cursor.is_visible && cursor.row == r && cursor.col >= seg_start {
+                    seg_end.max(cursor.col)
+                } else {
+                    seg_end
+                };
+
+                while seg_end > seg_start && line.cells[seg_end - 1].c == ' ' && seg_end > max_active_col {
                     seg_end -= 1;
                 }
 
@@ -380,9 +384,8 @@ impl Renderer {
                         buf.shape_until_scroll(&mut self.font_system, false);
 
                         // Cursor detection inside this segment
-                        if cursor.is_visible && cursor.row == r && cursor.col >= seg_start && cursor.col <= seg_end + 1 {
+                        if cursor.is_visible && cursor.row == r && cursor.col >= seg_start && cursor.col <= seg_end + 10 {
                             if seg_has_rtl {
-                                // In RTL text, typing advances to the LEFT:
                                 if cursor.col >= seg_end {
                                     let min_x = buf.layout_runs()
                                         .flat_map(|run| run.glyphs.iter())
@@ -390,7 +393,9 @@ impl Renderer {
                                         .map(|g| g.x)
                                         .fold(f32::INFINITY, f32::min);
                                     if min_x.is_finite() {
-                                        cursor_visual_pos = Some((seg_x + min_x, y));
+                                        let extra_spaces = cursor.col.saturating_sub(seg_end);
+                                        let cx = seg_x + min_x - self.char_width - (extra_spaces as f32 * self.char_width);
+                                        cursor_visual_pos = Some((cx.max(self.padding_left), y));
                                     }
                                 } else {
                                     let mut byte_target: usize = line.cells[seg_start..cursor.col]
@@ -409,7 +414,6 @@ impl Renderer {
                                     }
                                 }
                             } else {
-                                // LTR cursor
                                 let cx = self.padding_left + cursor.col as f32 * self.char_width;
                                 cursor_visual_pos = Some((cx, y));
                             }
