@@ -13,6 +13,7 @@ use crate::terminal::Terminal;
 #[derive(Debug)]
 pub enum AppEvent {
     PtyData(Vec<u8>),
+    PtyExit,
 }
 
 pub struct App {
@@ -31,6 +32,27 @@ impl App {
             pty: None,
             renderer: None,
             modifiers: ModifiersState::empty(),
+        }
+    }
+
+    fn spawn_pty(&self, cols: u16, rows: u16) -> Option<Pty> {
+        let proxy = self.proxy.clone();
+        let proxy_exit = self.proxy.clone();
+        match Pty::spawn(
+            cols,
+            rows,
+            move |data| {
+                let _ = proxy.send_event(AppEvent::PtyData(data));
+            },
+            move || {
+                let _ = proxy_exit.send_event(AppEvent::PtyExit);
+            },
+        ) {
+            Ok(p) => Some(p),
+            Err(e) => {
+                eprintln!("Failed to spawn PTY: {:?}", e);
+                None
+            }
         }
     }
 }
@@ -68,19 +90,7 @@ impl ApplicationHandler<AppEvent> for App {
             term.resize(cols, rows);
         }
 
-        let proxy = self.proxy.clone();
-        let pty = match Pty::spawn(cols as u16, rows as u16, move |data| {
-            let _ = proxy.send_event(AppEvent::PtyData(data));
-        }) {
-            Ok(p) => p,
-            Err(e) => {
-                eprintln!("Failed to spawn PTY: {:?}", e);
-                event_loop.exit();
-                return;
-            }
-        };
-
-        self.pty = Some(pty);
+        self.pty = self.spawn_pty(cols as u16, rows as u16);
         self.renderer = Some(renderer);
         window.request_redraw();
     }
@@ -91,6 +101,17 @@ impl ApplicationHandler<AppEvent> for App {
                 if let Ok(mut term) = self.terminal.lock() {
                     term.process_bytes(&data);
                 }
+                if let Some(ref r) = self.renderer {
+                    r.window.request_redraw();
+                }
+            }
+            AppEvent::PtyExit => {
+                // Auto-respawn a fresh shell session so the terminal never dies on exit/ctrl+c
+                let (cols, rows) = match self.renderer {
+                    Some(ref r) => r.compute_grid_size(),
+                    None => (80, 24),
+                };
+                self.pty = self.spawn_pty(cols as u16, rows as u16);
                 if let Some(ref r) = self.renderer {
                     r.window.request_redraw();
                 }
@@ -125,7 +146,12 @@ impl ApplicationHandler<AppEvent> for App {
                 self.modifiers = mods.state();
             }
             WindowEvent::KeyboardInput { event, .. } => {
-                if let Some(bytes) = handle_key(&event, self.modifiers) {
+                let app_cursor = self
+                    .terminal
+                    .lock()
+                    .map(|t| t.is_app_cursor())
+                    .unwrap_or(false);
+                if let Some(bytes) = handle_key(&event, self.modifiers, app_cursor) {
                     if let Some(ref pty) = self.pty {
                         let _ = pty.write(&bytes);
                     }

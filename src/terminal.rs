@@ -1,7 +1,7 @@
 use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::term::cell::Flags as CellFlags;
 use alacritty_terminal::term::test::TermSize;
-use alacritty_terminal::term::{Config, Term};
+use alacritty_terminal::term::{Config, Term, TermMode};
 use alacritty_terminal::vte::ansi::{Color as AnsiColor, Processor, StdSyncHandler};
 use unicode_bidi::{bidi_class, BidiClass};
 
@@ -59,6 +59,10 @@ impl Terminal {
         self.cols = cols;
         self.rows = rows;
         self.term.resize(TermSize::new(cols, rows));
+    }
+
+    pub fn is_app_cursor(&self) -> bool {
+        self.term.mode().contains(TermMode::APP_CURSOR)
     }
 
     pub fn snapshot(&self) -> (Vec<LineData>, CursorState) {

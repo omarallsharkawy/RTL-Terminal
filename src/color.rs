@@ -23,6 +23,17 @@ impl Rgba {
         }
     }
 
+    pub fn to_linear(self) -> [f32; 4] {
+        let conv = |c: f32| {
+            if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        [conv(self.r), conv(self.g), conv(self.b), self.a]
+    }
+
     pub fn to_array(self) -> [f32; 4] {
         [self.r, self.g, self.b, self.a]
     }
@@ -46,27 +57,28 @@ pub struct Palette {
 
 impl Default for Palette {
     fn default() -> Self {
+        // Deep dark terminal palette (Tokyo Night / OpenCode compatible)
         Self {
-            background: Rgba::from_rgb8(30, 30, 46),
-            foreground: Rgba::from_rgb8(205, 214, 244),
-            cursor: Rgba::from_rgb8(245, 224, 220),
+            background: Rgba::from_rgb8(21, 22, 30),     // #15161e (crisp dark background)
+            foreground: Rgba::from_rgb8(192, 202, 245),  // #c0caf5
+            cursor: Rgba::from_rgb8(245, 224, 220),      // #f5e0dc
             ansi: [
-                Rgba::from_rgb8(69, 71, 90),
-                Rgba::from_rgb8(243, 139, 168),
-                Rgba::from_rgb8(166, 227, 161),
-                Rgba::from_rgb8(249, 226, 175),
-                Rgba::from_rgb8(137, 180, 250),
-                Rgba::from_rgb8(245, 194, 231),
-                Rgba::from_rgb8(148, 226, 213),
-                Rgba::from_rgb8(186, 194, 222),
-                Rgba::from_rgb8(88, 91, 112),
-                Rgba::from_rgb8(243, 139, 168),
-                Rgba::from_rgb8(166, 227, 161),
-                Rgba::from_rgb8(249, 226, 175),
-                Rgba::from_rgb8(137, 180, 250),
-                Rgba::from_rgb8(245, 194, 231),
-                Rgba::from_rgb8(148, 226, 213),
-                Rgba::from_rgb8(166, 173, 200),
+                Rgba::from_rgb8(21, 22, 30),     // 0: Black
+                Rgba::from_rgb8(247, 118, 142),  // 1: Red
+                Rgba::from_rgb8(158, 206, 106),  // 2: Green
+                Rgba::from_rgb8(224, 175, 104),  // 3: Yellow
+                Rgba::from_rgb8(122, 162, 247),  // 4: Blue
+                Rgba::from_rgb8(187, 154, 247),  // 5: Magenta
+                Rgba::from_rgb8(125, 207, 255),  // 6: Cyan
+                Rgba::from_rgb8(169, 177, 214),  // 7: White
+                Rgba::from_rgb8(65, 72, 104),    // 8: Bright Black (gutter/borders)
+                Rgba::from_rgb8(247, 118, 142),  // 9: Bright Red
+                Rgba::from_rgb8(158, 206, 106),  // 10: Bright Green
+                Rgba::from_rgb8(224, 175, 104),  // 11: Bright Yellow
+                Rgba::from_rgb8(122, 162, 247),  // 12: Bright Blue
+                Rgba::from_rgb8(187, 154, 247),  // 13: Bright Magenta
+                Rgba::from_rgb8(125, 207, 255),  // 14: Bright Cyan
+                Rgba::from_rgb8(192, 202, 245),  // 15: Bright White
             ],
         }
     }

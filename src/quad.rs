@@ -208,3 +208,101 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 }
+
+/// Direct geometric rendering of box-drawing and block elements.
+/// Avoids font margin gaps and ensures seamless borders.
+pub fn try_render_box_or_block(
+    c: char,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    color: [f32; 4],
+    quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>,
+) -> bool {
+    let line_w = 1.5;
+    let mid_x = x + (w - line_w) * 0.5;
+    let mid_y = y + (h - line_w) * 0.5;
+
+    match c {
+        // Full & partial blocks
+        '█' => {
+            quads.push((x, y, w, h, color));
+            true
+        }
+        '▀' => {
+            quads.push((x, y, w, h * 0.5, color));
+            true
+        }
+        '▄' => {
+            quads.push((x, y + h * 0.5, w, h * 0.5, color));
+            true
+        }
+        '▌' => {
+            quads.push((x, y, w * 0.5, h, color));
+            true
+        }
+        '▐' => {
+            quads.push((x + w * 0.5, y, w * 0.5, h, color));
+            true
+        }
+        // Vertical line
+        '│' | '┃' => {
+            quads.push((mid_x, y, line_w, h, color));
+            true
+        }
+        // Horizontal line
+        '─' | '━' => {
+            quads.push((x, mid_y, w, line_w, color));
+            true
+        }
+        // Corners
+        '┌' | '╭' => {
+            quads.push((mid_x, mid_y, line_w, h * 0.5, color));
+            quads.push((mid_x, mid_y, w * 0.5, line_w, color));
+            true
+        }
+        '┐' | '╮' => {
+            quads.push((mid_x, mid_y, line_w, h * 0.5, color));
+            quads.push((x, mid_y, w * 0.5 + line_w, line_w, color));
+            true
+        }
+        '└' | '╰' => {
+            quads.push((mid_x, y, line_w, h * 0.5 + line_w, color));
+            quads.push((mid_x, mid_y, w * 0.5, line_w, color));
+            true
+        }
+        '┘' | '╯' => {
+            quads.push((mid_x, y, line_w, h * 0.5 + line_w, color));
+            quads.push((x, mid_y, w * 0.5 + line_w, line_w, color));
+            true
+        }
+        // T-junctions
+        '├' => {
+            quads.push((mid_x, y, line_w, h, color));
+            quads.push((mid_x, mid_y, w * 0.5, line_w, color));
+            true
+        }
+        '┤' => {
+            quads.push((mid_x, y, line_w, h, color));
+            quads.push((x, mid_y, w * 0.5 + line_w, line_w, color));
+            true
+        }
+        '┬' => {
+            quads.push((x, mid_y, w, line_w, color));
+            quads.push((mid_x, mid_y, line_w, h * 0.5, color));
+            true
+        }
+        '┴' => {
+            quads.push((x, mid_y, w, line_w, color));
+            quads.push((mid_x, y, line_w, h * 0.5 + line_w, color));
+            true
+        }
+        '┼' => {
+            quads.push((mid_x, y, line_w, h, color));
+            quads.push((x, mid_y, w, line_w, color));
+            true
+        }
+        _ => false,
+    }
+}

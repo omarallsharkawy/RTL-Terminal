@@ -12,9 +12,10 @@ pub struct Pty {
 }
 
 impl Pty {
-    pub fn spawn<F>(cols: u16, rows: u16, mut on_data: F) -> Result<Self>
+    pub fn spawn<F, E>(cols: u16, rows: u16, mut on_data: F, mut on_exit: E) -> Result<Self>
     where
         F: FnMut(Vec<u8>) + Send + 'static,
+        E: FnMut() + Send + 'static,
     {
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -36,7 +37,7 @@ impl Pty {
         cmd.env("TERM_PROGRAM", "Twitty");
         cmd.env("LANG", "en_US.UTF-8");
 
-        let _child = pair
+        let mut child = pair
             .slave
             .spawn_command(cmd)
             .context("Failed to spawn shell in PTY")?;
@@ -63,6 +64,8 @@ impl Pty {
                     Err(_) => break,
                 }
             }
+            let _ = child.wait();
+            on_exit();
         });
 
         Ok(Self {

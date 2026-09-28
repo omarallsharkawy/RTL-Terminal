@@ -1,7 +1,7 @@
 use winit::event::KeyEvent;
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
-pub fn handle_key(event: &KeyEvent, modifiers: ModifiersState) -> Option<Vec<u8>> {
+pub fn handle_key(event: &KeyEvent, modifiers: ModifiersState, app_cursor: bool) -> Option<Vec<u8>> {
     if !event.state.is_pressed() {
         return None;
     }
@@ -53,12 +53,48 @@ pub fn handle_key(event: &KeyEvent, modifiers: ModifiersState) -> Option<Vec<u8>
                 }
             }
             NamedKey::Escape => return Some(vec![0x1b]),
-            NamedKey::ArrowUp => return Some(b"\x1b[A".to_vec()),
-            NamedKey::ArrowDown => return Some(b"\x1b[B".to_vec()),
-            NamedKey::ArrowRight => return Some(b"\x1b[C".to_vec()),
-            NamedKey::ArrowLeft => return Some(b"\x1b[D".to_vec()),
-            NamedKey::Home => return Some(b"\x1b[H".to_vec()),
-            NamedKey::End => return Some(b"\x1b[F".to_vec()),
+            NamedKey::ArrowUp => {
+                if app_cursor {
+                    return Some(b"\x1bOA".to_vec());
+                } else {
+                    return Some(b"\x1b[A".to_vec());
+                }
+            }
+            NamedKey::ArrowDown => {
+                if app_cursor {
+                    return Some(b"\x1bOB".to_vec());
+                } else {
+                    return Some(b"\x1b[B".to_vec());
+                }
+            }
+            NamedKey::ArrowRight => {
+                if app_cursor {
+                    return Some(b"\x1bOC".to_vec());
+                } else {
+                    return Some(b"\x1b[C".to_vec());
+                }
+            }
+            NamedKey::ArrowLeft => {
+                if app_cursor {
+                    return Some(b"\x1bOD".to_vec());
+                } else {
+                    return Some(b"\x1b[D".to_vec());
+                }
+            }
+            NamedKey::Home => {
+                if app_cursor {
+                    return Some(b"\x1bOH".to_vec());
+                } else {
+                    return Some(b"\x1b[H".to_vec());
+                }
+            }
+            NamedKey::End => {
+                if app_cursor {
+                    return Some(b"\x1bOF".to_vec());
+                } else {
+                    return Some(b"\x1b[F".to_vec());
+                }
+            }
             NamedKey::PageUp => return Some(b"\x1b[5~".to_vec()),
             NamedKey::PageDown => return Some(b"\x1b[6~".to_vec()),
             NamedKey::Delete => return Some(b"\x1b[3~".to_vec()),

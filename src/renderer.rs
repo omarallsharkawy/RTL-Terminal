@@ -5,8 +5,8 @@ use glyphon::{
 };
 use winit::window::Window;
 
-use crate::color::Palette;
-use crate::quad::QuadRenderer;
+use crate::color::{Palette, Rgba};
+use crate::quad::{try_render_box_or_block, QuadRenderer};
 use crate::terminal::{CursorState, LineData};
 
 pub struct Renderer {
@@ -27,6 +27,7 @@ pub struct Renderer {
     pub font_size: f32,
     pub padding_left: f32,
     pub padding_top: f32,
+    pub is_srgb: bool,
     pub line_buffers: Vec<Buffer>,
 }
 
@@ -60,12 +61,14 @@ impl Renderer {
             .await?;
 
         let surface_caps = surface.get_capabilities(&adapter);
+        // Prefer non-sRGB format to avoid double-gamma washed out dark colors
         let format = surface_caps
             .formats
             .iter()
             .copied()
-            .find(|f| f.is_srgb())
+            .find(|f| !f.is_srgb())
             .unwrap_or(surface_caps.formats[0]);
+        let is_srgb = format.is_srgb();
 
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -96,10 +99,10 @@ impl Renderer {
             None,
         );
 
-        let font_size = 15.0;
-        let line_height = 24.0;
-        let padding_left = 10.0;
-        let padding_top = 8.0;
+        let font_size = 14.5;
+        let line_height = 23.0;
+        let padding_left = 8.0;
+        let padding_top = 6.0;
 
         let metrics = Metrics::new(font_size, line_height);
         let mut test_buffer = Buffer::new_empty(metrics);
@@ -111,7 +114,7 @@ impl Renderer {
         );
         test_buffer.shape_until_scroll(&mut font_system, false);
 
-        let mut measured_width = 9.0;
+        let mut measured_width = 8.8;
         for run in test_buffer.layout_runs() {
             if let Some(glyph) = run.glyphs.first() {
                 if glyph.w > 0.0 {
@@ -139,6 +142,7 @@ impl Renderer {
             font_size,
             padding_left,
             padding_top,
+            is_srgb,
             line_buffers: Vec::new(),
         })
     }
@@ -163,6 +167,14 @@ impl Renderer {
         (cols.max(10), rows.max(4))
     }
 
+    fn to_target_color(&self, rgba: Rgba) -> [f32; 4] {
+        if self.is_srgb {
+            rgba.to_linear()
+        } else {
+            rgba.to_array()
+        }
+    }
+
     pub fn render(&mut self, lines: &[LineData], cursor: &CursorState) -> anyhow::Result<()> {
         let surface_texture = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
@@ -176,15 +188,16 @@ impl Renderer {
         let metrics = Metrics::new(self.font_size, self.line_height);
         let default_attrs = Attrs::new().family(Family::Monospace);
         let default_bg = self.palette.background;
+        let default_bg_color = self.to_target_color(default_bg);
 
         let mut background_quads = Vec::new();
         let win_w = self.config.width as f32;
         let win_h = self.config.height as f32;
 
         // 1. Full window background
-        background_quads.push((0.0, 0.0, win_w, win_h, default_bg.to_array()));
+        background_quads.push((0.0, 0.0, win_w, win_h, default_bg_color));
 
-        // Ensure line buffers match row count
+        // Ensure buffer pool has enough buffers for each row
         if self.line_buffers.len() < lines.len() {
             self.line_buffers
                 .resize_with(lines.len(), || Buffer::new_empty(metrics));
@@ -195,16 +208,41 @@ impl Renderer {
         for (r, line) in lines.iter().enumerate() {
             let y = self.padding_top + r as f32 * self.line_height;
 
-            // Cell background quads
+            // 2. Cell backgrounds
             for (c, cell) in line.cells.iter().enumerate() {
                 let bg = self.palette.resolve(cell.bg, true);
                 if bg != default_bg {
                     let x = self.padding_left + c as f32 * self.char_width;
-                    background_quads.push((x, y, self.char_width, self.line_height, bg.to_array()));
+                    background_quads.push((
+                        x,
+                        y,
+                        self.char_width,
+                        self.line_height,
+                        self.to_target_color(bg),
+                    ));
                 }
             }
 
-            // Build text spans for this line
+            // 3. Direct geometric rendering for Box & Block drawing
+            let mut geom_rendered = vec![false; line.cells.len()];
+            for (c, cell) in line.cells.iter().enumerate() {
+                let fg = self.palette.resolve(cell.fg, false);
+                let x = self.padding_left + c as f32 * self.char_width;
+                let rendered = try_render_box_or_block(
+                    cell.c,
+                    x,
+                    y,
+                    self.char_width,
+                    self.line_height,
+                    self.to_target_color(fg),
+                    &mut background_quads,
+                );
+                if rendered {
+                    geom_rendered[c] = true;
+                }
+            }
+
+            // 4. Text Spans Construction (Cell-Locked Grid)
             let mut spans_data: Vec<(String, cosmic_text::Attrs)> = Vec::new();
             let mut cur_text = String::new();
             let mut cur_attrs: Option<cosmic_text::Attrs> = None;
@@ -212,11 +250,14 @@ impl Renderer {
             let last_non_space = line
                 .cells
                 .iter()
-                .rposition(|cell| cell.c != ' ')
+                .enumerate()
+                .rposition(|(idx, cell)| cell.c != ' ' && !geom_rendered[idx])
                 .map(|idx| idx + 1)
                 .unwrap_or(0);
 
-            for cell in line.cells[..last_non_space].iter() {
+            for (c_idx, cell) in line.cells[..last_non_space].iter().enumerate() {
+                let c = if geom_rendered[c_idx] { ' ' } else { cell.c };
+
                 let fg = self.palette.resolve(cell.fg, false);
                 let mut attrs = default_attrs.clone().color(fg.to_glyphon());
                 if cell.flags.contains(alacritty_terminal::term::cell::Flags::BOLD) {
@@ -232,14 +273,14 @@ impl Renderer {
                     .unwrap_or(false);
 
                 if attrs_match {
-                    cur_text.push(cell.c);
+                    cur_text.push(c);
                 } else {
                     if !cur_text.is_empty() {
                         if let Some(prev) = cur_attrs.take() {
                             spans_data.push((std::mem::take(&mut cur_text), prev));
                         }
                     }
-                    cur_text.push(cell.c);
+                    cur_text.push(c);
                     cur_attrs = Some(attrs);
                 }
             }
@@ -265,7 +306,7 @@ impl Renderer {
 
             buf.shape_until_scroll(&mut self.font_system, false);
 
-            // Compute visual cursor position if cursor is on this row
+            // 5. Visual Cursor Calculation
             if cursor.is_visible && cursor.row == r {
                 if line.has_rtl {
                     let target_col = cursor.col;
@@ -300,16 +341,16 @@ impl Renderer {
             }
         }
 
-        // Add cursor quad
+        // 6. Cursor Quad
         if let Some((cx, cy)) = cursor_visual_pos {
-            let cursor_color = self.palette.cursor.to_array();
+            let cursor_color = self.to_target_color(self.palette.cursor);
             background_quads.push((cx, cy, self.char_width, self.line_height, cursor_color));
         }
 
         self.quad_renderer
             .set_rects(&self.device, &background_quads);
 
-        // Prepare text areas
+        // 7. Prepare and draw Text Areas
         let text_areas: Vec<TextArea> = self
             .line_buffers
             .iter()
@@ -353,6 +394,22 @@ impl Renderer {
             });
 
         {
+            let clear_r = if self.is_srgb {
+                default_bg_color[0] as f64
+            } else {
+                default_bg.r as f64
+            };
+            let clear_g = if self.is_srgb {
+                default_bg_color[1] as f64
+            } else {
+                default_bg.g as f64
+            };
+            let clear_b = if self.is_srgb {
+                default_bg_color[2] as f64
+            } else {
+                default_bg.b as f64
+            };
+
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("twitty render pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -360,9 +417,9 @@ impl Renderer {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: default_bg.r as f64,
-                            g: default_bg.g as f64,
-                            b: default_bg.b as f64,
+                            r: clear_r,
+                            g: clear_g,
+                            b: clear_b,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -375,7 +432,7 @@ impl Renderer {
                 multiview_mask: None,
             });
 
-            // 1. Draw Quads (backgrounds, cell colors, cursor)
+            // 1. Draw Quads (backgrounds, cell colors, cursor, geometric box/block art)
             self.quad_renderer.render(&mut pass);
 
             // 2. Draw Glyphon Text
