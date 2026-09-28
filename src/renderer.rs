@@ -107,8 +107,7 @@ impl Renderer {
                 force_fallback_adapter: false,
                 apply_limit_buckets: false,
             })
-            .await
-            .expect("Failed to find suitable GPU adapter");
+            .await?;
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {

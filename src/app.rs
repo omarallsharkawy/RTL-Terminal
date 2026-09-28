@@ -589,9 +589,12 @@ impl ApplicationHandler<AppEvent> for App {
             WindowEvent::RedrawRequested => {
                 self.needs_redraw = false;
                 if let Some(ref mut r) = self.renderer {
-                    let (lines, cursor) = self.terminal.lock().unwrap().snapshot();
-                    if let Err(e) = r.render(&lines, &cursor) {
-                        eprintln!("Render error: {:?}", e);
+                    if let Ok(term) = self.terminal.lock() {
+                        let (lines, cursor) = term.snapshot();
+                        drop(term);
+                        if let Err(e) = r.render(&lines, &cursor) {
+                            eprintln!("Render error: {:?}", e);
+                        }
                     }
                 }
             }
