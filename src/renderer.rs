@@ -70,7 +70,6 @@ impl Renderer {
             .unwrap_or(surface_caps.formats[0]);
         let is_srgb = format.is_srgb();
 
-        // Prefer Mailbox (low latency, tearing-free) or Immediate over AutoVsync to eliminate typing lag
         let present_mode = if surface_caps.present_modes.contains(&wgpu::PresentMode::Mailbox) {
             wgpu::PresentMode::Mailbox
         } else if surface_caps.present_modes.contains(&wgpu::PresentMode::Immediate) {
@@ -87,7 +86,7 @@ impl Renderer {
             present_mode,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
-            desired_maximum_frame_latency: 1, // 1 frame latency for instant keystroke response
+            desired_maximum_frame_latency: 1,
             color_space: Default::default(),
         };
         surface.configure(&device, &config);
@@ -274,13 +273,11 @@ impl Renderer {
                 }
             }
 
-            // 4. Robust Column & Segment Partitioning:
-            // We partition segments when:
-            // - A cell was geometrically rendered (borders like │, ─)
-            // - OR a gap of 2 or more consecutive spaces occurs (column separator between panels!)
+            // 4. Panel & Segment Partitioning:
+            // Only split on geometric borders (│) or large column gaps (>= 8 spaces)
+            // User-typed spaces (1-7 spaces) stay INSIDE the segment and are never lost!
             let mut col_idx = 0;
             while col_idx < cols {
-                // Skip spaces and geometric cells to find the start of the next text segment
                 while col_idx < cols && (geom_rendered[col_idx] || line.cells[col_idx].c == ' ') {
                     col_idx += 1;
                 }
@@ -291,24 +288,21 @@ impl Renderer {
                 let seg_start = col_idx;
                 let mut seg_end = col_idx;
 
-                // Grow segment until a geometric boundary or a multi-space column gap (>= 2 spaces)
                 while seg_end < cols && !geom_rendered[seg_end] {
                     if line.cells[seg_end].c == ' ' {
-                        // Lookahead: if 2 or more spaces in a row, treat as column boundary!
                         let mut space_run = 0;
                         let mut peek = seg_end;
                         while peek < cols && line.cells[peek].c == ' ' && !geom_rendered[peek] {
                             space_run += 1;
                             peek += 1;
                         }
-                        if space_run >= 2 || (peek < cols && geom_rendered[peek]) {
+                        if space_run >= 8 || (peek < cols && geom_rendered[peek]) {
                             break;
                         }
                     }
                     seg_end += 1;
                 }
 
-                // Trim any trailing single space
                 while seg_end > seg_start && line.cells[seg_end - 1].c == ' ' {
                     seg_end -= 1;
                 }
@@ -362,7 +356,6 @@ impl Renderer {
 
                     if !spans_data.is_empty() {
                         if seg_has_rtl {
-                            // Prepend LRM (‎) so base paragraph direction is ALWAYS LTR!
                             spans_data.insert(0, ("‎".to_string(), default_attrs.clone()));
                         }
 
@@ -376,10 +369,7 @@ impl Renderer {
                             .iter()
                             .map(|(s, a)| (s.as_str(), a.clone()))
                             .collect();
-                        
-                        // PERFORMANCE OPTIMIZATION:
-                        // Use Shaping::Advanced (HarfBuzz) ONLY when Arabic is present!
-                        // Pure Latin/ASCII/TUI text uses Shaping::Basic, which is 100x faster!
+
                         let shaping_mode = if seg_has_rtl {
                             Shaping::Advanced
                         } else {
@@ -390,28 +380,39 @@ impl Renderer {
                         buf.shape_until_scroll(&mut self.font_system, false);
 
                         // Cursor detection inside this segment
-                        if cursor.is_visible && cursor.row == r && cursor.col >= seg_start && cursor.col <= seg_end {
-                            let mut byte_target: usize = line.cells[seg_start..cursor.col]
-                                .iter()
-                                .map(|c| c.c.len_utf8())
-                                .sum();
+                        if cursor.is_visible && cursor.row == r && cursor.col >= seg_start && cursor.col <= seg_end + 1 {
                             if seg_has_rtl {
-                                byte_target += "‎".len();
-                            }
+                                // In RTL text, typing advances to the LEFT:
+                                if cursor.col >= seg_end {
+                                    let min_x = buf.layout_runs()
+                                        .flat_map(|run| run.glyphs.iter())
+                                        .filter(|g| g.level.is_rtl())
+                                        .map(|g| g.x)
+                                        .fold(f32::INFINITY, f32::min);
+                                    if min_x.is_finite() {
+                                        cursor_visual_pos = Some((seg_x + min_x, y));
+                                    }
+                                } else {
+                                    let mut byte_target: usize = line.cells[seg_start..cursor.col]
+                                        .iter()
+                                        .map(|c| c.c.len_utf8())
+                                        .sum();
+                                    byte_target += "‎".len();
 
-                            let mut found_x = None;
-                            for run in buf.layout_runs() {
-                                for glyph in run.glyphs.iter() {
-                                    if byte_target >= glyph.start && byte_target < glyph.end {
-                                        found_x = Some(seg_x + glyph.x);
-                                        break;
+                                    for run in buf.layout_runs() {
+                                        for glyph in run.glyphs.iter() {
+                                            if byte_target >= glyph.start && byte_target < glyph.end {
+                                                cursor_visual_pos = Some((seg_x + glyph.x, y));
+                                                break;
+                                            }
+                                        }
                                     }
                                 }
+                            } else {
+                                // LTR cursor
+                                let cx = self.padding_left + cursor.col as f32 * self.char_width;
+                                cursor_visual_pos = Some((cx, y));
                             }
-                            cursor_visual_pos = Some((
-                                found_x.unwrap_or(self.padding_left + cursor.col as f32 * self.char_width),
-                                y,
-                            ));
                         }
 
                         text_area_descriptors.push((pool_idx, seg_x, y));
