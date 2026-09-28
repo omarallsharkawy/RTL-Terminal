@@ -30,10 +30,11 @@ pub struct Renderer {
     pub padding_top: f32,
     pub is_srgb: bool,
     pub buffer_pool: Vec<Buffer>,
+    pub line_hashes: Vec<u64>,
 }
 
 impl Renderer {
-    pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
+    pub async fn new(window: Arc<Window>, initial_font_size: f32) -> anyhow::Result<Self> {
         let size = window.inner_size();
         let width = size.width.max(1);
         let height = size.height.max(1);
@@ -107,8 +108,8 @@ impl Renderer {
             None,
         );
 
-        let font_size = 14.5;
-        let line_height = 23.0;
+        let font_size = initial_font_size.clamp(8.0, 48.0);
+        let line_height = (font_size * 1.55).round();
         let padding_left = 8.0;
         let padding_top = 6.0;
 
@@ -152,6 +153,7 @@ impl Renderer {
             padding_top,
             is_srgb,
             buffer_pool: Vec::new(),
+            line_hashes: Vec::new(),
         })
     }
 
@@ -179,6 +181,7 @@ impl Renderer {
         }
         self.char_width = measured_width;
         self.buffer_pool.clear();
+        self.line_hashes.clear();
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -273,7 +276,7 @@ impl Renderer {
                 }
             }
 
-            // 4. Panel & Segment Partitioning:
+            // 4. Panel & Segment Partitioning
             let mut col_idx = 0;
             while col_idx < cols {
                 while col_idx < cols && (geom_rendered[col_idx] || line.cells[col_idx].c == ' ') {
@@ -301,8 +304,6 @@ impl Renderer {
                     seg_end += 1;
                 }
 
-                // If cursor is on this line and actively typing at or past this segment,
-                // preserve typed trailing spaces so cursor doesn't jump
                 let max_active_col = if cursor.is_visible && cursor.row == r && cursor.col >= seg_start {
                     seg_end.max(cursor.col)
                 } else {
@@ -385,15 +386,12 @@ impl Renderer {
                         buf.set_rich_text(span_refs, &default_attrs, shaping_mode, None);
                         buf.shape_until_scroll(&mut self.font_system, false);
 
-                        // Cursor placement:
+                        // Cursor detection inside this segment
                         if cursor.is_visible && cursor.row == r && cursor.col >= seg_start && cursor.col <= seg_end + 10 {
                             if cursor.col >= seg_end {
-                                // Active typing at the end of the text:
-                                // Place cursor seamlessly at the rendered visual end of the text!
                                 let text_width = buf.layout_runs().map(|r| r.line_w).fold(0.0, f32::max);
                                 cursor_visual_pos = Some((seg_x + text_width, y));
                             } else {
-                                // Internal navigation inside the segment
                                 let mut byte_target: usize = line.cells[seg_start..cursor.col]
                                     .iter()
                                     .map(|c| c.c.len_utf8())

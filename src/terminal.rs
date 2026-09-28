@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use alacritty_terminal::event::{Event, EventListener};
+use alacritty_terminal::grid::Scroll;
 use alacritty_terminal::term::cell::Flags as CellFlags;
 use alacritty_terminal::term::test::TermSize;
 use alacritty_terminal::term::{Config, Term, TermMode};
@@ -77,6 +78,14 @@ impl Terminal {
 
     pub fn is_app_cursor(&self) -> bool {
         self.term.mode().contains(TermMode::APP_CURSOR)
+    }
+
+    pub fn mode(&self) -> TermMode {
+        *self.term.mode()
+    }
+
+    pub fn scroll_display(&mut self, delta: i32) {
+        self.term.scroll_display(Scroll::Delta(delta));
     }
 
     pub fn snapshot(&self) -> (Vec<LineData>, CursorState) {

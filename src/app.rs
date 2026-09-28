@@ -1,14 +1,16 @@
 use std::sync::{Arc, Mutex};
 use winit::application::ApplicationHandler;
-use winit::event::WindowEvent;
+use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
 use winit::keyboard::ModifiersState;
 use winit::window::{WindowAttributes, WindowId};
 
+use crate::config::TwittyConfig;
 use crate::input::{handle_key, InputAction};
 use crate::pty::Pty;
 use crate::renderer::Renderer;
 use crate::terminal::Terminal;
+use alacritty_terminal::term::TermMode;
 
 #[derive(Debug)]
 pub enum AppEvent {
@@ -23,6 +25,10 @@ pub struct App {
     pty: Option<Pty>,
     renderer: Option<Renderer>,
     modifiers: ModifiersState,
+    mouse_col: usize,
+    mouse_row: usize,
+    config: TwittyConfig,
+    needs_redraw: bool,
 }
 
 impl App {
@@ -32,12 +38,18 @@ impl App {
             let _ = proxy_clone.send_event(AppEvent::PtyWriteResponse(text));
         })));
 
+        let config = TwittyConfig::load();
+
         Self {
             proxy,
             terminal,
             pty: None,
             renderer: None,
             modifiers: ModifiersState::empty(),
+            mouse_col: 0,
+            mouse_row: 0,
+            config,
+            needs_redraw: false,
         }
     }
 
@@ -74,6 +86,16 @@ impl App {
             r.window.request_redraw();
         }
     }
+
+    fn update_font_size(&mut self, new_size: f32) {
+        let clamped = new_size.clamp(8.0, 48.0);
+        self.config.font_size = clamped;
+        self.config.save();
+        if let Some(ref mut r) = self.renderer {
+            r.set_font_size(clamped);
+        }
+        self.sync_grid();
+    }
 }
 
 impl ApplicationHandler<AppEvent> for App {
@@ -95,7 +117,7 @@ impl ApplicationHandler<AppEvent> for App {
             }
         };
 
-        let renderer = match pollster::block_on(Renderer::new(window.clone())) {
+        let renderer = match pollster::block_on(Renderer::new(window.clone(), self.config.font_size)) {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("Failed to initialize renderer: {:?}", e);
@@ -121,11 +143,13 @@ impl ApplicationHandler<AppEvent> for App {
                     term.process_bytes(&data);
                 }
                 if let Some(ref r) = self.renderer {
-                    r.window.request_redraw();
+                    if !self.needs_redraw {
+                        self.needs_redraw = true;
+                        r.window.request_redraw();
+                    }
                 }
             }
             AppEvent::PtyWriteResponse(text) => {
-                // Terminal answered a query (DSR, DA, window size). Write response to PTY!
                 if let Some(ref pty) = self.pty {
                     let _ = pty.write(text.as_bytes());
                 }
@@ -162,6 +186,126 @@ impl ApplicationHandler<AppEvent> for App {
             WindowEvent::ModifiersChanged(mods) => {
                 self.modifiers = mods.state();
             }
+            WindowEvent::CursorMoved { position, .. } => {
+                if let Some(ref r) = self.renderer {
+                    let col = ((position.x - r.padding_left as f64) / r.char_width as f64).max(0.0) as usize;
+                    let row = ((position.y - r.padding_top as f64) / r.line_height as f64).max(0.0) as usize;
+                    self.mouse_col = col;
+                    self.mouse_row = row;
+
+                    let mode = self.terminal.lock().map(|t| t.mode()).unwrap_or(TermMode::NONE);
+                    if mode.contains(TermMode::MOUSE_MOTION) {
+                        let seq = format!("[<35;{};{}M", col + 1, row + 1);
+                        if let Some(ref pty) = self.pty {
+                            let _ = pty.write(seq.as_bytes());
+                        }
+                    }
+                }
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                let mode = self.terminal.lock().map(|t| t.mode()).unwrap_or(TermMode::NONE);
+                let col = self.mouse_col + 1;
+                let row = self.mouse_row + 1;
+
+                match state {
+                    ElementState::Pressed => {
+                        match button {
+                            MouseButton::Left => {
+                                if mode.intersects(TermMode::MOUSE_MODE) {
+                                    let seq = format!("[<0;{};{}M", col, row);
+                                    if let Some(ref pty) = self.pty {
+                                        let _ = pty.write(seq.as_bytes());
+                                    }
+                                }
+                            }
+                            MouseButton::Middle => {
+                                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                    if let Ok(text) = clipboard.get_text() {
+                                        if let Some(ref pty) = self.pty {
+                                            let _ = pty.write(text.as_bytes());
+                                        }
+                                    }
+                                }
+                            }
+                            MouseButton::Right => {
+                                if mode.intersects(TermMode::MOUSE_MODE) {
+                                    let seq = format!("[<2;{};{}M", col, row);
+                                    if let Some(ref pty) = self.pty {
+                                        let _ = pty.write(seq.as_bytes());
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    ElementState::Released => {
+                        match button {
+                            MouseButton::Left => {
+                                if mode.intersects(TermMode::MOUSE_MODE) {
+                                    let seq = format!("[<0;{};{}m", col, row);
+                                    if let Some(ref pty) = self.pty {
+                                        let _ = pty.write(seq.as_bytes());
+                                    }
+                                }
+                            }
+                            MouseButton::Right => {
+                                if mode.intersects(TermMode::MOUSE_MODE) {
+                                    let seq = format!("[<2;{};{}m", col, row);
+                                    if let Some(ref pty) = self.pty {
+                                        let _ = pty.write(seq.as_bytes());
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let delta_y = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => y,
+                    MouseScrollDelta::PixelDelta(p) => (p.y / 20.0) as f32,
+                };
+
+                if self.modifiers.control_key() {
+                    // Ctrl + Wheel: Zoom in / Zoom out & save config
+                    if delta_y > 0.1 {
+                        let cur = self.config.font_size;
+                        self.update_font_size(cur + 1.0);
+                    } else if delta_y < -0.1 {
+                        let cur = self.config.font_size;
+                        self.update_font_size(cur - 1.0);
+                    }
+                } else {
+                    let mode = self.terminal.lock().map(|t| t.mode()).unwrap_or(TermMode::NONE);
+                    let col = self.mouse_col + 1;
+                    let row = self.mouse_row + 1;
+
+                    if mode.intersects(TermMode::MOUSE_MODE) {
+                        // Send SGR mouse wheel reporting (64 = up, 65 = down)
+                        let btn = if delta_y > 0.0 { 64 } else { 65 };
+                        let seq = format!("[<{};{};{}M", btn, col, row);
+                        if let Some(ref pty) = self.pty {
+                            let _ = pty.write(seq.as_bytes());
+                        }
+                    } else if mode.contains(TermMode::ALT_SCREEN) {
+                        // Alternate screen without mouse mode (vim, less, opencode): send arrow keys
+                        let key = if delta_y > 0.0 { b"OAOAOA" } else { b"OBOBOB" };
+                        if let Some(ref pty) = self.pty {
+                            let _ = pty.write(key);
+                        }
+                    } else {
+                        // Terminal scrollback
+                        let lines = if delta_y > 0.0 { 3 } else { -3 };
+                        if let Ok(mut term) = self.terminal.lock() {
+                            term.scroll_display(lines);
+                        }
+                        if let Some(ref r) = self.renderer {
+                            r.window.request_redraw();
+                        }
+                    }
+                }
+            }
             WindowEvent::KeyboardInput { event, .. } => {
                 let app_cursor = self
                     .terminal
@@ -176,24 +320,15 @@ impl ApplicationHandler<AppEvent> for App {
                             }
                         }
                         InputAction::ZoomIn => {
-                            if let Some(ref mut r) = self.renderer {
-                                let cur = r.font_size;
-                                r.set_font_size(cur + 1.0);
-                            }
-                            self.sync_grid();
+                            let cur = self.config.font_size;
+                            self.update_font_size(cur + 1.0);
                         }
                         InputAction::ZoomOut => {
-                            if let Some(ref mut r) = self.renderer {
-                                let cur = r.font_size;
-                                r.set_font_size(cur - 1.0);
-                            }
-                            self.sync_grid();
+                            let cur = self.config.font_size;
+                            self.update_font_size(cur - 1.0);
                         }
                         InputAction::ZoomReset => {
-                            if let Some(ref mut r) = self.renderer {
-                                r.set_font_size(14.5);
-                            }
-                            self.sync_grid();
+                            self.update_font_size(14.5);
                         }
                         InputAction::Paste => {
                             if let Ok(mut clipboard) = arboard::Clipboard::new() {
@@ -209,6 +344,7 @@ impl ApplicationHandler<AppEvent> for App {
                 }
             }
             WindowEvent::RedrawRequested => {
+                self.needs_redraw = false;
                 if let Some(ref mut r) = self.renderer {
                     let (lines, cursor) = self.terminal.lock().unwrap().snapshot();
                     if let Err(e) = r.render(&lines, &cursor) {
