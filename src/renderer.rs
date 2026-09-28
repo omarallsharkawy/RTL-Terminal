@@ -301,6 +301,8 @@ impl Renderer {
                     seg_end += 1;
                 }
 
+                // If cursor is on this line and actively typing at or past this segment,
+                // preserve typed trailing spaces so cursor doesn't jump
                 let max_active_col = if cursor.is_visible && cursor.row == r && cursor.col >= seg_start {
                     seg_end.max(cursor.col)
                 } else {
@@ -383,39 +385,31 @@ impl Renderer {
                         buf.set_rich_text(span_refs, &default_attrs, shaping_mode, None);
                         buf.shape_until_scroll(&mut self.font_system, false);
 
-                        // Cursor detection inside this segment
+                        // Cursor placement:
                         if cursor.is_visible && cursor.row == r && cursor.col >= seg_start && cursor.col <= seg_end + 10 {
-                            if seg_has_rtl {
-                                if cursor.col >= seg_end {
-                                    let min_x = buf.layout_runs()
-                                        .flat_map(|run| run.glyphs.iter())
-                                        .filter(|g| g.level.is_rtl())
-                                        .map(|g| g.x)
-                                        .fold(f32::INFINITY, f32::min);
-                                    if min_x.is_finite() {
-                                        let extra_spaces = cursor.col.saturating_sub(seg_end);
-                                        let cx = seg_x + min_x - self.char_width - (extra_spaces as f32 * self.char_width);
-                                        cursor_visual_pos = Some((cx.max(self.padding_left), y));
-                                    }
-                                } else {
-                                    let mut byte_target: usize = line.cells[seg_start..cursor.col]
-                                        .iter()
-                                        .map(|c| c.c.len_utf8())
-                                        .sum();
+                            if cursor.col >= seg_end {
+                                // Active typing at the end of the text:
+                                // Place cursor seamlessly at the rendered visual end of the text!
+                                let text_width = buf.layout_runs().map(|r| r.line_w).fold(0.0, f32::max);
+                                cursor_visual_pos = Some((seg_x + text_width, y));
+                            } else {
+                                // Internal navigation inside the segment
+                                let mut byte_target: usize = line.cells[seg_start..cursor.col]
+                                    .iter()
+                                    .map(|c| c.c.len_utf8())
+                                    .sum();
+                                if seg_has_rtl {
                                     byte_target += "‎".len();
+                                }
 
-                                    for run in buf.layout_runs() {
-                                        for glyph in run.glyphs.iter() {
-                                            if byte_target >= glyph.start && byte_target < glyph.end {
-                                                cursor_visual_pos = Some((seg_x + glyph.x, y));
-                                                break;
-                                            }
+                                for run in buf.layout_runs() {
+                                    for glyph in run.glyphs.iter() {
+                                        if byte_target >= glyph.start && byte_target < glyph.end {
+                                            cursor_visual_pos = Some((seg_x + glyph.x, y));
+                                            break;
                                         }
                                     }
                                 }
-                            } else {
-                                let cx = self.padding_left + cursor.col as f32 * self.char_width;
-                                cursor_visual_pos = Some((cx, y));
                             }
                         }
 
