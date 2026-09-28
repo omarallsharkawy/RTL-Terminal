@@ -28,7 +28,7 @@ pub struct Renderer {
     pub padding_left: f32,
     pub padding_top: f32,
     pub is_srgb: bool,
-    pub line_buffers: Vec<Buffer>,
+    pub buffer_pool: Vec<Buffer>,
 }
 
 impl Renderer {
@@ -61,7 +61,6 @@ impl Renderer {
             .await?;
 
         let surface_caps = surface.get_capabilities(&adapter);
-        // Prefer non-sRGB format to avoid double-gamma washed out dark colors
         let format = surface_caps
             .formats
             .iter()
@@ -143,8 +142,34 @@ impl Renderer {
             padding_left,
             padding_top,
             is_srgb,
-            line_buffers: Vec::new(),
+            buffer_pool: Vec::new(),
         })
+    }
+
+    pub fn set_font_size(&mut self, new_size: f32) {
+        self.font_size = new_size.clamp(8.0, 48.0);
+        self.line_height = (self.font_size * 1.55).round();
+
+        let metrics = Metrics::new(self.font_size, self.line_height);
+        let mut test_buffer = Buffer::new_empty(metrics);
+        test_buffer.set_text(
+            "MMMMMMMMMM",
+            &Attrs::new().family(Family::Monospace),
+            Shaping::Advanced,
+            None,
+        );
+        test_buffer.shape_until_scroll(&mut self.font_system, false);
+
+        let mut measured_width = (self.font_size * 0.6).round();
+        for run in test_buffer.layout_runs() {
+            if let Some(glyph) = run.glyphs.first() {
+                if glyph.w > 0.0 {
+                    measured_width = glyph.w;
+                }
+            }
+        }
+        self.char_width = measured_width;
+        self.buffer_pool.clear();
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -197,16 +222,13 @@ impl Renderer {
         // 1. Full window background
         background_quads.push((0.0, 0.0, win_w, win_h, default_bg_color));
 
-        // Ensure buffer pool has enough buffers for each row
-        if self.line_buffers.len() < lines.len() {
-            self.line_buffers
-                .resize_with(lines.len(), || Buffer::new_empty(metrics));
-        }
-
+        let mut text_area_descriptors: Vec<(usize, f32, f32)> = Vec::new();
+        let mut pool_idx = 0;
         let mut cursor_visual_pos: Option<(f32, f32)> = None;
 
         for (r, line) in lines.iter().enumerate() {
             let y = self.padding_top + r as f32 * self.line_height;
+            let cols = line.cells.len();
 
             // 2. Cell backgrounds
             for (c, cell) in line.cells.iter().enumerate() {
@@ -224,7 +246,7 @@ impl Renderer {
             }
 
             // 3. Direct geometric rendering for Box & Block drawing
-            let mut geom_rendered = vec![false; line.cells.len()];
+            let mut geom_rendered = vec![false; cols];
             for (c, cell) in line.cells.iter().enumerate() {
                 let fg = self.palette.resolve(cell.fg, false);
                 let x = self.padding_left + c as f32 * self.char_width;
@@ -242,106 +264,122 @@ impl Renderer {
                 }
             }
 
-            // 4. Text Spans Construction (Cell-Locked Grid)
-            let mut spans_data: Vec<(String, cosmic_text::Attrs)> = Vec::new();
-            let mut cur_text = String::new();
-            let mut cur_attrs: Option<cosmic_text::Attrs> = None;
-
-            let last_non_space = line
-                .cells
-                .iter()
-                .enumerate()
-                .rposition(|(idx, cell)| cell.c != ' ' && !geom_rendered[idx])
-                .map(|idx| idx + 1)
-                .unwrap_or(0);
-
-            for (c_idx, cell) in line.cells[..last_non_space].iter().enumerate() {
-                let c = if geom_rendered[c_idx] { ' ' } else { cell.c };
-
-                let fg = self.palette.resolve(cell.fg, false);
-                let mut attrs = default_attrs.clone().color(fg.to_glyphon());
-                if cell.flags.contains(alacritty_terminal::term::cell::Flags::BOLD) {
-                    attrs = attrs.weight(cosmic_text::Weight::BOLD);
+            // 4. Segment-based Text Placement: partition the row by geometric boundaries
+            let mut block_start = 0;
+            while block_start < cols {
+                if geom_rendered[block_start] {
+                    block_start += 1;
+                    continue;
                 }
-                if cell.flags.contains(alacritty_terminal::term::cell::Flags::ITALIC) {
-                    attrs = attrs.style(cosmic_text::Style::Italic);
+                let mut block_end = block_start;
+                while block_end < cols && !geom_rendered[block_end] {
+                    block_end += 1;
                 }
 
-                let attrs_match = cur_attrs
-                    .as_ref()
-                    .map(|a| a.color_opt == attrs.color_opt && a.weight == attrs.weight)
-                    .unwrap_or(false);
+                // Inside this block [block_start..block_end], trim leading & trailing spaces
+                let mut seg_start = block_start;
+                while seg_start < block_end && line.cells[seg_start].c == ' ' {
+                    seg_start += 1;
+                }
+                let mut seg_end = block_end;
+                while seg_end > seg_start && line.cells[seg_end - 1].c == ' ' {
+                    seg_end -= 1;
+                }
 
-                if attrs_match {
-                    cur_text.push(c);
-                } else {
+                if seg_start < seg_end {
+                    // Contiguous text segment without leading space drift!
+                    let seg_x = self.padding_left + seg_start as f32 * self.char_width;
+
+                    let mut spans_data: Vec<(String, cosmic_text::Attrs)> = Vec::new();
+                    let mut cur_text = String::new();
+                    let mut cur_attrs: Option<cosmic_text::Attrs> = None;
+
+                    for cell in line.cells[seg_start..seg_end].iter() {
+                        let fg = self.palette.resolve(cell.fg, false);
+                        let mut attrs = default_attrs.clone().color(fg.to_glyphon());
+                        if cell.flags.contains(alacritty_terminal::term::cell::Flags::BOLD) {
+                            attrs = attrs.weight(cosmic_text::Weight::BOLD);
+                        }
+                        if cell.flags.contains(alacritty_terminal::term::cell::Flags::ITALIC) {
+                            attrs = attrs.style(cosmic_text::Style::Italic);
+                        }
+
+                        let attrs_match = cur_attrs
+                            .as_ref()
+                            .map(|a| a.color_opt == attrs.color_opt && a.weight == attrs.weight)
+                            .unwrap_or(false);
+
+                        if attrs_match {
+                            cur_text.push(cell.c);
+                        } else {
+                            if !cur_text.is_empty() {
+                                if let Some(prev) = cur_attrs.take() {
+                                    spans_data.push((std::mem::take(&mut cur_text), prev));
+                                }
+                            }
+                            cur_text.push(cell.c);
+                            cur_attrs = Some(attrs);
+                        }
+                    }
+
                     if !cur_text.is_empty() {
                         if let Some(prev) = cur_attrs.take() {
-                            spans_data.push((std::mem::take(&mut cur_text), prev));
+                            spans_data.push((cur_text, prev));
                         }
                     }
-                    cur_text.push(c);
-                    cur_attrs = Some(attrs);
-                }
-            }
 
-            if !cur_text.is_empty() {
-                if let Some(prev) = cur_attrs.take() {
-                    spans_data.push((cur_text, prev));
-                }
-            }
-
-            let buf = &mut self.line_buffers[r];
-            buf.set_metrics(metrics);
-
-            if spans_data.is_empty() {
-                buf.set_text("", &default_attrs, Shaping::Advanced, None);
-            } else {
-                let span_refs: Vec<(&str, cosmic_text::Attrs)> = spans_data
-                    .iter()
-                    .map(|(s, a)| (s.as_str(), a.clone()))
-                    .collect();
-                buf.set_rich_text(span_refs, &default_attrs, Shaping::Advanced, None);
-            }
-
-            buf.shape_until_scroll(&mut self.font_system, false);
-
-            // 5. Visual Cursor Calculation
-            if cursor.is_visible && cursor.row == r {
-                if line.has_rtl {
-                    let target_col = cursor.col;
-                    let mut byte_offset = 0;
-                    for (idx, cell) in line.cells.iter().enumerate() {
-                        if idx == target_col {
-                            break;
+                    if !spans_data.is_empty() {
+                        if pool_idx >= self.buffer_pool.len() {
+                            self.buffer_pool.push(Buffer::new_empty(metrics));
                         }
-                        byte_offset += cell.c.len_utf8();
-                    }
+                        let buf = &mut self.buffer_pool[pool_idx];
+                        buf.set_metrics(metrics);
 
-                    let mut found_x = None;
-                    for run in buf.layout_runs() {
-                        for glyph in run.glyphs.iter() {
-                            if byte_offset >= glyph.start && byte_offset < glyph.end {
-                                found_x = Some(self.padding_left + glyph.x);
-                                break;
+                        let span_refs: Vec<(&str, cosmic_text::Attrs)> = spans_data
+                            .iter()
+                            .map(|(s, a)| (s.as_str(), a.clone()))
+                            .collect();
+                        buf.set_rich_text(span_refs, &default_attrs, Shaping::Advanced, None);
+                        buf.shape_until_scroll(&mut self.font_system, false);
+
+                        // Cursor detection inside this segment
+                        if cursor.is_visible && cursor.row == r && cursor.col >= seg_start && cursor.col <= seg_end {
+                            let byte_target: usize = line.cells[seg_start..cursor.col]
+                                .iter()
+                                .map(|c| c.c.len_utf8())
+                                .sum();
+
+                            let mut found_x = None;
+                            for run in buf.layout_runs() {
+                                for glyph in run.glyphs.iter() {
+                                    if byte_target >= glyph.start && byte_target < glyph.end {
+                                        found_x = Some(seg_x + glyph.x);
+                                        break;
+                                    }
+                                }
                             }
+                            cursor_visual_pos = Some((
+                                found_x.unwrap_or(self.padding_left + cursor.col as f32 * self.char_width),
+                                y,
+                            ));
                         }
-                        if found_x.is_none() && target_col >= last_non_space {
-                            found_x = Some(self.padding_left + target_col as f32 * self.char_width);
-                        }
+
+                        text_area_descriptors.push((pool_idx, seg_x, y));
+                        pool_idx += 1;
                     }
-                    cursor_visual_pos = Some((
-                        found_x.unwrap_or(self.padding_left + target_col as f32 * self.char_width),
-                        y,
-                    ));
-                } else {
-                    let cx = self.padding_left + cursor.col as f32 * self.char_width;
-                    cursor_visual_pos = Some((cx, y));
                 }
+
+                block_start = block_end;
+            }
+
+            // Cursor if in empty space on this row
+            if cursor.is_visible && cursor.row == r && cursor_visual_pos.is_none() {
+                let cx = self.padding_left + cursor.col as f32 * self.char_width;
+                cursor_visual_pos = Some((cx, y));
             }
         }
 
-        // 6. Cursor Quad
+        // 5. Cursor Quad
         if let Some((cx, cy)) = cursor_visual_pos {
             let cursor_color = self.to_target_color(self.palette.cursor);
             background_quads.push((cx, cy, self.char_width, self.line_height, cursor_color));
@@ -350,18 +388,14 @@ impl Renderer {
         self.quad_renderer
             .set_rects(&self.device, &background_quads);
 
-        // 7. Prepare and draw Text Areas
-        let text_areas: Vec<TextArea> = self
-            .line_buffers
+        // 6. Text Areas prepared from the pool
+        let text_areas: Vec<TextArea> = text_area_descriptors
             .iter()
-            .take(lines.len())
-            .enumerate()
-            .map(|(r, buf)| {
-                let y = self.padding_top + r as f32 * self.line_height;
+            .map(|&(b_idx, seg_x, seg_y)| {
                 TextArea {
-                    buffer: buf,
-                    left: self.padding_left,
-                    top: y,
+                    buffer: &self.buffer_pool[b_idx],
+                    left: seg_x,
+                    top: seg_y,
                     scale: 1.0,
                     bounds: TextBounds {
                         left: 0,
@@ -432,10 +466,10 @@ impl Renderer {
                 multiview_mask: None,
             });
 
-            // 1. Draw Quads (backgrounds, cell colors, cursor, geometric box/block art)
+            // Draw Quads (backgrounds, cell colors, cursor, geometric box/block art)
             self.quad_renderer.render(&mut pass);
 
-            // 2. Draw Glyphon Text
+            // Draw Glyphon Text
             self.text_renderer
                 .render(&self.text_atlas, &self.viewport, &mut pass)
                 .map_err(|e| anyhow::anyhow!("Text render error: {:?}", e))?;

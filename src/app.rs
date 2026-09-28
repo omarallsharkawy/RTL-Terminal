@@ -5,7 +5,7 @@ use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
 use winit::keyboard::ModifiersState;
 use winit::window::{WindowAttributes, WindowId};
 
-use crate::input::handle_key;
+use crate::input::{handle_key, InputAction};
 use crate::pty::Pty;
 use crate::renderer::Renderer;
 use crate::terminal::Terminal;
@@ -53,6 +53,19 @@ impl App {
                 eprintln!("Failed to spawn PTY: {:?}", e);
                 None
             }
+        }
+    }
+
+    fn sync_grid(&mut self) {
+        if let Some(ref r) = self.renderer {
+            let (cols, rows) = r.compute_grid_size();
+            if let Ok(mut term) = self.terminal.lock() {
+                term.resize(cols, rows);
+            }
+            if let Some(ref pty) = self.pty {
+                let _ = pty.resize(cols as u16, rows as u16);
+            }
+            r.window.request_redraw();
         }
     }
 }
@@ -106,7 +119,6 @@ impl ApplicationHandler<AppEvent> for App {
                 }
             }
             AppEvent::PtyExit => {
-                // Auto-respawn a fresh shell session so the terminal never dies on exit/ctrl+c
                 let (cols, rows) = match self.renderer {
                     Some(ref r) => r.compute_grid_size(),
                     None => (80, 24),
@@ -132,15 +144,8 @@ impl ApplicationHandler<AppEvent> for App {
             WindowEvent::Resized(new_size) => {
                 if let Some(ref mut r) = self.renderer {
                     r.resize(new_size.width, new_size.height);
-                    let (cols, rows) = r.compute_grid_size();
-                    if let Ok(mut term) = self.terminal.lock() {
-                        term.resize(cols, rows);
-                    }
-                    if let Some(ref pty) = self.pty {
-                        let _ = pty.resize(cols as u16, rows as u16);
-                    }
-                    r.window.request_redraw();
                 }
+                self.sync_grid();
             }
             WindowEvent::ModifiersChanged(mods) => {
                 self.modifiers = mods.state();
@@ -151,9 +156,45 @@ impl ApplicationHandler<AppEvent> for App {
                     .lock()
                     .map(|t| t.is_app_cursor())
                     .unwrap_or(false);
-                if let Some(bytes) = handle_key(&event, self.modifiers, app_cursor) {
-                    if let Some(ref pty) = self.pty {
-                        let _ = pty.write(&bytes);
+                if let Some(action) = handle_key(&event, self.modifiers, app_cursor) {
+                    match action {
+                        InputAction::Bytes(bytes) => {
+                            if let Some(ref pty) = self.pty {
+                                let _ = pty.write(&bytes);
+                            }
+                        }
+                        InputAction::ZoomIn => {
+                            if let Some(ref mut r) = self.renderer {
+                                let cur = r.font_size;
+                                r.set_font_size(cur + 1.0);
+                            }
+                            self.sync_grid();
+                        }
+                        InputAction::ZoomOut => {
+                            if let Some(ref mut r) = self.renderer {
+                                let cur = r.font_size;
+                                r.set_font_size(cur - 1.0);
+                            }
+                            self.sync_grid();
+                        }
+                        InputAction::ZoomReset => {
+                            if let Some(ref mut r) = self.renderer {
+                                r.set_font_size(14.5);
+                            }
+                            self.sync_grid();
+                        }
+                        InputAction::Paste => {
+                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                if let Ok(text) = clipboard.get_text() {
+                                    if let Some(ref pty) = self.pty {
+                                        let _ = pty.write(text.as_bytes());
+                                    }
+                                }
+                            }
+                        }
+                        InputAction::Copy => {
+                            // Clipboard copy hook
+                        }
                     }
                 }
             }
