@@ -152,15 +152,10 @@ fn get_clipboard_text() -> Option<String> {
 }
 
 fn set_clipboard_text(text: &str) {
-    let mut ok = false;
-    if let Ok(mut cb) = arboard::Clipboard::new() {
-        if cb.set_text(text).is_ok() {
-            ok = true;
-        }
-    }
     #[cfg(target_os = "linux")]
-    if !ok {
+    {
         use std::io::Write;
+        // 1. Copy to standard Wayland clipboard
         if let Ok(mut child) = std::process::Command::new("wl-copy")
             .stdin(std::process::Stdio::piped())
             .spawn()
@@ -168,7 +163,33 @@ fn set_clipboard_text(text: &str) {
             if let Some(mut stdin) = child.stdin.take() {
                 let _ = stdin.write_all(text.as_bytes());
             }
+            let _ = child.wait();
         }
+        // 2. Also copy to primary selection
+        if let Ok(mut child) = std::process::Command::new("wl-copy")
+            .arg("--primary")
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+        {
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            let _ = child.wait();
+        }
+        // 3. Fallback for X11
+        if let Ok(mut child) = std::process::Command::new("xclip")
+            .args(["-selection", "clipboard"])
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+        {
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+        }
+    }
+
+    if let Ok(mut cb) = arboard::Clipboard::new() {
+        let _ = cb.set_text(text);
     }
 }
 
@@ -278,6 +299,22 @@ impl ApplicationHandler<AppEvent> for App {
                         let moved = col != self.mouse_down_col || row != self.mouse_down_row;
                         if moved && !self.is_selecting {
                             self.is_selecting = true;
+                            let mode = self
+                                .terminal
+                                .lock()
+                                .map(|t| t.mode())
+                                .unwrap_or(TermMode::NONE);
+                            if mode.intersects(TermMode::MOUSE_MODE) && !self.modifiers.shift_key()
+                            {
+                                let release_seq = format!(
+                                    "[<0;{};{}m",
+                                    self.mouse_down_col + 1,
+                                    self.mouse_down_row + 1
+                                );
+                                if let Some(ref pty) = self.pty {
+                                    let _ = pty.write(release_seq.as_bytes());
+                                }
+                            }
                             if let Ok(mut term) = self.terminal.lock() {
                                 term.start_selection(self.mouse_down_col, self.mouse_down_row);
                             }
@@ -291,16 +328,17 @@ impl ApplicationHandler<AppEvent> for App {
                         if let Some(ref r) = self.renderer {
                             r.window.request_redraw();
                         }
-                    }
-                    let mode = self
-                        .terminal
-                        .lock()
-                        .map(|t| t.mode())
-                        .unwrap_or(TermMode::NONE);
-                    if mode.contains(TermMode::MOUSE_MOTION) {
-                        let seq = format!("[<35;{};{}M", col + 1, row + 1);
-                        if let Some(ref pty) = self.pty {
-                            let _ = pty.write(seq.as_bytes());
+                    } else {
+                        let mode = self
+                            .terminal
+                            .lock()
+                            .map(|t| t.mode())
+                            .unwrap_or(TermMode::NONE);
+                        if mode.contains(TermMode::MOUSE_MOTION) {
+                            let seq = format!("[<35;{};{}M", col + 1, row + 1);
+                            if let Some(ref pty) = self.pty {
+                                let _ = pty.write(seq.as_bytes());
+                            }
                         }
                     }
                 }
@@ -396,6 +434,31 @@ impl ApplicationHandler<AppEvent> for App {
                             }
                         }
                         MouseButton::Right => {
+                            let copied = if let Ok(term) = self.terminal.lock() {
+                                if let Some(text) = term.selection_text() {
+                                    if !text.is_empty() {
+                                        set_clipboard_text(&text);
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            };
+
+                            if copied {
+                                if let Ok(mut term) = self.terminal.lock() {
+                                    term.clear_selection();
+                                }
+                                if let Some(ref r) = self.renderer {
+                                    r.window.request_redraw();
+                                }
+                                return;
+                            }
+
                             if in_mouse_mode {
                                 let seq = format!("[<2;{};{}M", col, row);
                                 if let Some(ref pty) = self.pty {
