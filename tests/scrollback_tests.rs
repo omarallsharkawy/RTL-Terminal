@@ -33,8 +33,8 @@ fn test_scrollback_display_offset_viewport_mapping() {
     );
 
     // No cells should be empty or erased across all 24 viewport lines
-    for r in 0..24 {
-        let row_prefix: String = lines_scrolled[r].cells[0..4].iter().map(|c| c.c).collect();
+    for (r, line) in lines_scrolled.iter().enumerate().take(24) {
+        let row_prefix: String = line.cells[0..4].iter().map(|c| c.c).collect();
         assert_eq!(
             row_prefix, "Line",
             "Row {} must contain valid history content, not blank/erased cells",
