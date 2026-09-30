@@ -135,6 +135,21 @@ fn get_clipboard_text() -> Option<String> {
     }
     #[cfg(target_os = "linux")]
     {
+        // 1. Try Omarchy / DMS desktop clipboard
+        if let Ok(output) = std::process::Command::new("dms")
+            .args(["clipboard", "paste"])
+            .output()
+        {
+            if output.status.success() {
+                if let Ok(text) = String::from_utf8(output.stdout) {
+                    if !text.is_empty() {
+                        return Some(text);
+                    }
+                }
+            }
+        }
+
+        // 2. Try wl-paste
         if let Ok(output) = std::process::Command::new("wl-paste")
             .arg("--no-newline")
             .output()
@@ -169,6 +184,18 @@ fn set_clipboard_text(text: &str) {
         #[cfg(target_os = "linux")]
         {
             use std::io::Write;
+            // 1. Sync to Omarchy / DMS desktop clipboard manager
+            if let Ok(mut child) = std::process::Command::new("dms")
+                .args(["clipboard", "copy"])
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+            {
+                if let Some(mut stdin) = child.stdin.take() {
+                    let _ = stdin.write_all(text.as_bytes());
+                }
+                let _ = child.wait();
+            }
+
             // 1. Copy to standard Wayland clipboard
             if let Ok(mut child) = std::process::Command::new("wl-copy")
                 .stdin(std::process::Stdio::piped())
