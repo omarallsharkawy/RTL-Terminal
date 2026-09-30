@@ -17,6 +17,7 @@ use alacritty_terminal::term::TermMode;
 pub enum AppEvent {
     PtyData(Vec<u8>),
     PtyWriteResponse(String),
+    ClipboardStore(String),
     PtyExit,
 }
 
@@ -42,9 +43,17 @@ pub struct App {
 impl App {
     pub fn new(proxy: EventLoopProxy<AppEvent>) -> Self {
         let proxy_clone = proxy.clone();
-        let terminal = Arc::new(Mutex::new(Terminal::new(80, 24, move |text| {
-            let _ = proxy_clone.send_event(AppEvent::PtyWriteResponse(text));
-        })));
+        let proxy_cb = proxy.clone();
+        let terminal = Arc::new(Mutex::new(Terminal::new_with_clipboard(
+            80,
+            24,
+            move |text| {
+                let _ = proxy_clone.send_event(AppEvent::PtyWriteResponse(text));
+            },
+            move |text| {
+                let _ = proxy_cb.send_event(AppEvent::ClipboardStore(text));
+            },
+        )));
 
         let config = TwittyConfig::load();
 
@@ -92,12 +101,15 @@ impl App {
     fn sync_grid(&mut self) {
         if let Some(ref r) = self.renderer {
             let (cols, rows) = r.compute_grid_size();
+            let cols = cols.max(80);
+            let rows = rows.max(24);
             if let Ok(mut term) = self.terminal.lock() {
                 term.resize(cols, rows);
             }
             if let Some(ref pty) = self.pty {
                 let _ = pty.resize(cols as u16, rows as u16);
             }
+            self.needs_redraw = true;
             r.window.request_redraw();
         }
     }
@@ -152,45 +164,48 @@ fn get_clipboard_text() -> Option<String> {
 }
 
 fn set_clipboard_text(text: &str) {
-    #[cfg(target_os = "linux")]
-    {
-        use std::io::Write;
-        // 1. Copy to standard Wayland clipboard
-        if let Ok(mut child) = std::process::Command::new("wl-copy")
-            .stdin(std::process::Stdio::piped())
-            .spawn()
+    let text = text.to_string();
+    std::thread::spawn(move || {
+        #[cfg(target_os = "linux")]
         {
-            if let Some(mut stdin) = child.stdin.take() {
-                let _ = stdin.write_all(text.as_bytes());
+            use std::io::Write;
+            // 1. Copy to standard Wayland clipboard
+            if let Ok(mut child) = std::process::Command::new("wl-copy")
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+            {
+                if let Some(mut stdin) = child.stdin.take() {
+                    let _ = stdin.write_all(text.as_bytes());
+                }
+                let _ = child.wait();
             }
-            let _ = child.wait();
-        }
-        // 2. Also copy to primary selection
-        if let Ok(mut child) = std::process::Command::new("wl-copy")
-            .arg("--primary")
-            .stdin(std::process::Stdio::piped())
-            .spawn()
-        {
-            if let Some(mut stdin) = child.stdin.take() {
-                let _ = stdin.write_all(text.as_bytes());
+            // 2. Also copy to primary selection
+            if let Ok(mut child) = std::process::Command::new("wl-copy")
+                .arg("--primary")
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+            {
+                if let Some(mut stdin) = child.stdin.take() {
+                    let _ = stdin.write_all(text.as_bytes());
+                }
+                let _ = child.wait();
             }
-            let _ = child.wait();
-        }
-        // 3. Fallback for X11
-        if let Ok(mut child) = std::process::Command::new("xclip")
-            .args(["-selection", "clipboard"])
-            .stdin(std::process::Stdio::piped())
-            .spawn()
-        {
-            if let Some(mut stdin) = child.stdin.take() {
-                let _ = stdin.write_all(text.as_bytes());
+            // 3. Fallback for X11
+            if let Ok(mut child) = std::process::Command::new("xclip")
+                .args(["-selection", "clipboard"])
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+            {
+                if let Some(mut stdin) = child.stdin.take() {
+                    let _ = stdin.write_all(text.as_bytes());
+                }
             }
         }
-    }
 
-    if let Ok(mut cb) = arboard::Clipboard::new() {
-        let _ = cb.set_text(text);
-    }
+        if let Ok(mut cb) = arboard::Clipboard::new() {
+            let _ = cb.set_text(&text);
+        }
+    });
 }
 
 impl ApplicationHandler<AppEvent> for App {
@@ -227,12 +242,15 @@ impl ApplicationHandler<AppEvent> for App {
         };
 
         let (cols, rows) = renderer.compute_grid_size();
+        let cols = cols.max(80);
+        let rows = rows.max(24);
         if let Ok(mut term) = self.terminal.lock() {
             term.resize(cols, rows);
         }
 
         self.pty = self.spawn_pty(cols as u16, rows as u16);
         self.renderer = Some(renderer);
+        self.needs_redraw = true;
         window.request_redraw();
     }
 
@@ -253,6 +271,9 @@ impl ApplicationHandler<AppEvent> for App {
                 if let Some(ref pty) = self.pty {
                     let _ = pty.write(text.as_bytes());
                 }
+            }
+            AppEvent::ClipboardStore(text) => {
+                set_clipboard_text(&text);
             }
             AppEvent::PtyExit => {
                 let (cols, rows) = match self.renderer {
@@ -278,10 +299,12 @@ impl ApplicationHandler<AppEvent> for App {
                 event_loop.exit();
             }
             WindowEvent::Resized(new_size) => {
-                if let Some(ref mut r) = self.renderer {
-                    r.resize(new_size.width, new_size.height);
+                if new_size.width >= 100 && new_size.height >= 100 {
+                    if let Some(ref mut r) = self.renderer {
+                        r.resize(new_size.width, new_size.height);
+                    }
+                    self.sync_grid();
                 }
-                self.sync_grid();
             }
             WindowEvent::ModifiersChanged(mods) => {
                 self.modifiers = mods.state();

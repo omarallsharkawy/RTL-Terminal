@@ -11,12 +11,15 @@ use unicode_bidi::{bidi_class, BidiClass};
 
 struct ForwardListener {
     on_pty_write: Arc<dyn Fn(String) + Send + Sync>,
+    on_clipboard_store: Arc<dyn Fn(String) + Send + Sync>,
 }
 
 impl EventListener for ForwardListener {
     fn send_event(&self, event: Event) {
-        if let Event::PtyWrite(text) = event {
-            (self.on_pty_write)(text);
+        match event {
+            Event::PtyWrite(text) => (self.on_pty_write)(text),
+            Event::ClipboardStore(_, text) => (self.on_clipboard_store)(text),
+            _ => {}
         }
     }
 }
@@ -24,6 +27,7 @@ impl EventListener for ForwardListener {
 #[derive(Clone, Debug)]
 pub struct CellData {
     pub c: char,
+    pub zerowidth: Vec<char>,
     pub fg: AnsiColor,
     pub bg: AnsiColor,
     pub flags: CellFlags,
@@ -51,13 +55,28 @@ pub struct Terminal {
 }
 
 impl Terminal {
+    #[allow(dead_code)]
     pub fn new<F>(cols: usize, rows: usize, on_pty_write: F) -> Self
     where
         F: Fn(String) + Send + Sync + 'static,
     {
+        Self::new_with_clipboard(cols, rows, on_pty_write, |_| {})
+    }
+
+    pub fn new_with_clipboard<F, C>(
+        cols: usize,
+        rows: usize,
+        on_pty_write: F,
+        on_clipboard_store: C,
+    ) -> Self
+    where
+        F: Fn(String) + Send + Sync + 'static,
+        C: Fn(String) + Send + Sync + 'static,
+    {
         let size = TermSize::new(cols, rows);
         let listener = ForwardListener {
             on_pty_write: Arc::new(on_pty_write),
+            on_clipboard_store: Arc::new(on_clipboard_store),
         };
         let term = Term::new(Config::default(), &size, listener);
         let parser = Processor::<StdSyncHandler>::new();
@@ -142,6 +161,7 @@ impl Terminal {
                 cells: vec![
                     CellData {
                         c: ' ',
+                        zerowidth: Vec::new(),
                         fg: AnsiColor::Named(alacritty_terminal::vte::ansi::NamedColor::Foreground),
                         bg: AnsiColor::Named(alacritty_terminal::vte::ansi::NamedColor::Background),
                         flags: CellFlags::empty(),
@@ -155,9 +175,10 @@ impl Terminal {
         ];
 
         for cell in content.display_iter {
-            let row = cell.point.line.0 as usize;
+            let viewport_row = cell.point.line.0 + content.display_offset as i32;
             let col = cell.point.column.0;
-            if row < self.rows && col < self.cols {
+            if viewport_row >= 0 && (viewport_row as usize) < self.rows && col < self.cols {
+                let row = viewport_row as usize;
                 let c = cell.c;
                 let class = bidi_class(c);
                 let is_rtl = class == BidiClass::R || class == BidiClass::AL;
@@ -168,8 +189,10 @@ impl Terminal {
                     .as_ref()
                     .map(|s| s.contains(cell.point))
                     .unwrap_or(false);
+                let zerowidth = cell.zerowidth().map(|z| z.to_vec()).unwrap_or_default();
                 lines[row].cells[col] = CellData {
                     c,
+                    zerowidth,
                     fg: cell.fg,
                     bg: cell.bg,
                     flags: cell.flags,
@@ -178,12 +201,19 @@ impl Terminal {
             }
         }
 
-        let cursor_row = content.cursor.point.line.0 as usize;
+        let cursor_viewport_line = content.cursor.point.line.0 + content.display_offset as i32;
         let cursor_col = content.cursor.point.column.0;
+        let is_cursor_in_viewport =
+            cursor_viewport_line >= 0 && (cursor_viewport_line as usize) < self.rows;
         let cursor = CursorState {
-            row: cursor_row.min(self.rows.saturating_sub(1)),
+            row: if is_cursor_in_viewport {
+                cursor_viewport_line as usize
+            } else {
+                0
+            },
             col: cursor_col.min(self.cols.saturating_sub(1)),
-            is_visible: content.cursor.shape != alacritty_terminal::vte::ansi::CursorShape::Hidden,
+            is_visible: is_cursor_in_viewport
+                && content.cursor.shape != alacritty_terminal::vte::ansi::CursorShape::Hidden,
         };
 
         (lines, cursor)

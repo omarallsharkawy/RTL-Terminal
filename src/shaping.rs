@@ -49,6 +49,7 @@ pub fn hash_cells(cells: &[CellData]) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     for cell in cells {
         cell.c.hash(&mut hasher);
+        cell.zerowidth.hash(&mut hasher);
         hash_color(&cell.fg, &mut hasher);
         hash_color(&cell.bg, &mut hasher);
         cell.flags.bits().hash(&mut hasher);
@@ -172,6 +173,13 @@ pub fn shape_row(
             let mut seg_has_rtl = false;
 
             for cell in line.cells[seg_start..seg_end].iter() {
+                if cell
+                    .flags
+                    .contains(alacritty_terminal::term::cell::Flags::WIDE_CHAR_SPACER)
+                {
+                    continue;
+                }
+
                 let class = bidi_class(cell.c);
                 if class == BidiClass::R || class == BidiClass::AL {
                     seg_has_rtl = true;
@@ -203,6 +211,9 @@ pub fn shape_row(
 
                 if attrs_match {
                     cur_text.push(cell.c);
+                    for &z in &cell.zerowidth {
+                        cur_text.push(z);
+                    }
                 } else {
                     if !cur_text.is_empty() {
                         if let Some(prev) = cur_attrs.take() {
@@ -210,6 +221,9 @@ pub fn shape_row(
                         }
                     }
                     cur_text.push(cell.c);
+                    for &z in &cell.zerowidth {
+                        cur_text.push(z);
+                    }
                     cur_attrs = Some(attrs);
                 }
             }
