@@ -116,9 +116,9 @@ fn default_shell() -> (String, Vec<String>) {
     {
         if let Ok(shell) = env::var("SHELL") {
             if !shell.trim().is_empty() {
-                return (shell, vec![]);
+                return (shell, vec!["-l".to_string()]);
             }
         }
-        ("/bin/bash".to_string(), vec![])
+        ("/bin/bash".to_string(), vec!["-l".to_string()])
     }
 }

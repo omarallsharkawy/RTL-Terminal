@@ -118,6 +118,8 @@ impl App {
             }
             if let Some(ref pty) = self.pty {
                 let _ = pty.resize(cols as u16, rows as u16);
+            } else {
+                self.pty = self.spawn_pty(cols as u16, rows as u16);
             }
             self.needs_redraw = true;
             r.window.request_redraw();
@@ -286,7 +288,6 @@ impl ApplicationHandler<AppEvent> for App {
         }
 
         window.set_ime_allowed(true);
-        self.pty = self.spawn_pty(cols as u16, rows as u16);
         self.renderer = Some(renderer);
         self.needs_redraw = true;
         window.request_redraw();
@@ -811,6 +812,9 @@ impl ApplicationHandler<AppEvent> for App {
             }
             WindowEvent::RedrawRequested => {
                 self.needs_redraw = false;
+                if self.pty.is_none() {
+                    self.sync_grid();
+                }
                 if let Some(ref mut r) = self.renderer {
                     if let Ok(term) = self.terminal.lock() {
                         let (lines, cursor) = term.snapshot();
