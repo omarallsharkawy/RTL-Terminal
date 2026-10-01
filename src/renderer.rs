@@ -240,10 +240,25 @@ impl Renderer {
     }
 
     pub fn render(&mut self, lines: &[LineData], cursor: &CursorState) -> anyhow::Result<()> {
+        let cur_size = self.window.inner_size();
+        if cur_size.width > 0
+            && cur_size.height > 0
+            && (cur_size.width != self.config.width || cur_size.height != self.config.height)
+        {
+            self.resize(cur_size.width, cur_size.height);
+        }
+
         let surface_texture = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t)
             | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
-            wgpu::CurrentSurfaceTexture::Outdated => return Ok(()),
+            wgpu::CurrentSurfaceTexture::Outdated => {
+                self.surface.configure(&self.device, &self.config);
+                match self.surface.get_current_texture() {
+                    wgpu::CurrentSurfaceTexture::Success(t)
+                    | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+                    _ => return Ok(()),
+                }
+            }
             _ => return Ok(()),
         };
         let view = surface_texture
