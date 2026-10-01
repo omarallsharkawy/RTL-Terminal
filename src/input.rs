@@ -124,6 +124,7 @@ pub fn handle_key_raw(
 
     let mut ctrl = modifiers.control_key();
     let shift = modifiers.shift_key();
+    let alt = modifiers.alt_key();
 
     if !ctrl {
         if let Key::Character(ref s) = logical {
@@ -248,15 +249,32 @@ pub fn handle_key_raw(
             NamedKey::PageDown => return Some(InputAction::Bytes(b"\x1b[6~".to_vec())),
             NamedKey::Delete => return Some(InputAction::Bytes(b"\x1b[3~".to_vec())),
             NamedKey::Insert => return Some(InputAction::Bytes(b"\x1b[2~".to_vec())),
+            NamedKey::F1 => return Some(InputAction::Bytes(b"\x1bOP".to_vec())),
+            NamedKey::F2 => return Some(InputAction::Bytes(b"\x1bOQ".to_vec())),
+            NamedKey::F3 => return Some(InputAction::Bytes(b"\x1bOR".to_vec())),
+            NamedKey::F4 => return Some(InputAction::Bytes(b"\x1bOS".to_vec())),
+            NamedKey::F5 => return Some(InputAction::Bytes(b"\x1b[15~".to_vec())),
+            NamedKey::F6 => return Some(InputAction::Bytes(b"\x1b[17~".to_vec())),
+            NamedKey::F7 => return Some(InputAction::Bytes(b"\x1b[18~".to_vec())),
+            NamedKey::F8 => return Some(InputAction::Bytes(b"\x1b[19~".to_vec())),
+            NamedKey::F9 => return Some(InputAction::Bytes(b"\x1b[20~".to_vec())),
+            NamedKey::F10 => return Some(InputAction::Bytes(b"\x1b[21~".to_vec())),
+            NamedKey::F11 => return Some(InputAction::Bytes(b"\x1b[23~".to_vec())),
+            NamedKey::F12 => return Some(InputAction::Bytes(b"\x1b[24~".to_vec())),
             _ => {}
         },
         _ => {}
     }
 
-    // 3. Normal typed text (Arabic, Latin, numbers, symbols)
+    // 3. Normal typed text (Arabic, Latin, numbers, symbols, with Alt ESC prefix support)
     if !ctrl {
         if let Some(t) = text {
             if !t.is_empty() {
+                if alt {
+                    let mut bytes = vec![0x1b];
+                    bytes.extend_from_slice(t.as_bytes());
+                    return Some(InputAction::Bytes(bytes));
+                }
                 return Some(InputAction::Bytes(t.as_bytes().to_vec()));
             }
         }

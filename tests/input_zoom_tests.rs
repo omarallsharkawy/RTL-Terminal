@@ -161,3 +161,69 @@ fn test_clipboard_shortcuts() {
     );
     assert_eq!(action_ar_z, Some(InputAction::Bytes(vec![26])));
 }
+
+#[test]
+fn test_function_keys_f1_to_f12() {
+    let modifiers = ModifiersState::empty();
+
+    // F1 -> ESC O P
+    let f1 = handle_key_raw(
+        Some(KeyCode::F1),
+        &Key::Named(NamedKey::F1),
+        None,
+        ElementState::Pressed,
+        modifiers,
+        false,
+    );
+    assert_eq!(f1, Some(InputAction::Bytes(b"\x1bOP".to_vec())));
+
+    // F5 -> ESC [ 1 5 ~
+    let f5 = handle_key_raw(
+        Some(KeyCode::F5),
+        &Key::Named(NamedKey::F5),
+        None,
+        ElementState::Pressed,
+        modifiers,
+        false,
+    );
+    assert_eq!(f5, Some(InputAction::Bytes(b"\x1b[15~".to_vec())));
+
+    // F12 -> ESC [ 2 4 ~
+    let f12 = handle_key_raw(
+        Some(KeyCode::F12),
+        &Key::Named(NamedKey::F12),
+        None,
+        ElementState::Pressed,
+        modifiers,
+        false,
+    );
+    assert_eq!(f12, Some(InputAction::Bytes(b"\x1b[24~".to_vec())));
+}
+
+#[test]
+fn test_alt_key_esc_prefix_encoding() {
+    let mut modifiers = ModifiersState::empty();
+    modifiers.insert(ModifiersState::ALT);
+
+    // Alt+B -> ESC b (move word backward)
+    let alt_b = handle_key_raw(
+        Some(KeyCode::KeyB),
+        &Key::Character("b".into()),
+        Some("b"),
+        ElementState::Pressed,
+        modifiers,
+        false,
+    );
+    assert_eq!(alt_b, Some(InputAction::Bytes(b"\x1bb".to_vec())));
+
+    // Alt+. -> ESC . (yank last argument)
+    let alt_dot = handle_key_raw(
+        Some(KeyCode::Period),
+        &Key::Character(".".into()),
+        Some("."),
+        ElementState::Pressed,
+        modifiers,
+        false,
+    );
+    assert_eq!(alt_dot, Some(InputAction::Bytes(b"\x1b.".to_vec())));
+}

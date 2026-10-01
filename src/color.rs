@@ -120,14 +120,16 @@ impl Palette {
                 if (idx as usize) < 16 {
                     self.ansi[idx as usize]
                 } else if (16..=231).contains(&idx) {
+                    // Standard xterm 6x6x6 color cube: steps [0, 95, 135, 175, 215, 255]
                     let i = idx - 16;
                     let r = (i / 36) % 6;
                     let g = (i / 6) % 6;
                     let b = i % 6;
-                    let conv = |v: u8| if v == 0 { 0 } else { v * 40 + 55 };
-                    Rgba::from_rgb8(conv(r), conv(g), conv(b))
+                    let steps = [0, 95, 135, 175, 215, 255];
+                    Rgba::from_rgb8(steps[r as usize], steps[g as usize], steps[b as usize])
                 } else {
-                    let gray = (idx - 232) * 10 + 8;
+                    // Standard xterm 24-step grayscale ramp: 8 + (idx - 232) * 10
+                    let gray = 8 + (idx - 232) * 10;
                     Rgba::from_rgb8(gray, gray, gray)
                 }
             }

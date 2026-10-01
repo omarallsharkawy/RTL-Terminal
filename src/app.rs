@@ -18,6 +18,8 @@ pub enum AppEvent {
     PtyData(Vec<u8>),
     PtyWriteResponse(String),
     ClipboardStore(String),
+    Title(String),
+    Bell,
     PtyExit,
 }
 
@@ -44,7 +46,9 @@ impl App {
     pub fn new(proxy: EventLoopProxy<AppEvent>) -> Self {
         let proxy_clone = proxy.clone();
         let proxy_cb = proxy.clone();
-        let terminal = Arc::new(Mutex::new(Terminal::new_with_clipboard(
+        let proxy_title = proxy.clone();
+        let proxy_bell = proxy.clone();
+        let terminal = Arc::new(Mutex::new(Terminal::new_full(
             80,
             24,
             move |text| {
@@ -52,6 +56,12 @@ impl App {
             },
             move |text| {
                 let _ = proxy_cb.send_event(AppEvent::ClipboardStore(text));
+            },
+            move |title| {
+                let _ = proxy_title.send_event(AppEvent::Title(title));
+            },
+            move || {
+                let _ = proxy_bell.send_event(AppEvent::Bell);
             },
         )));
 
@@ -275,6 +285,7 @@ impl ApplicationHandler<AppEvent> for App {
             term.resize(cols, rows);
         }
 
+        window.set_ime_allowed(true);
         self.pty = self.spawn_pty(cols as u16, rows as u16);
         self.renderer = Some(renderer);
         self.needs_redraw = true;
@@ -301,6 +312,18 @@ impl ApplicationHandler<AppEvent> for App {
             }
             AppEvent::ClipboardStore(text) => {
                 set_clipboard_text(&text);
+            }
+            AppEvent::Title(title) => {
+                if let Some(ref r) = self.renderer {
+                    r.window.set_title(&title);
+                }
+            }
+            AppEvent::Bell => {
+                if let Some(ref r) = self.renderer {
+                    r.window.request_user_attention(Some(
+                        winit::window::UserAttentionType::Informational,
+                    ));
+                }
             }
             AppEvent::PtyExit => {
                 let (cols, rows) = match self.renderer {
@@ -333,6 +356,21 @@ impl ApplicationHandler<AppEvent> for App {
                     self.sync_grid();
                 }
             }
+            WindowEvent::ScaleFactorChanged { .. } => {
+                if let Some(ref mut r) = self.renderer {
+                    let size = r.window.inner_size();
+                    r.resize(size.width, size.height);
+                }
+                self.sync_grid();
+            }
+            WindowEvent::Ime(ime) => match ime {
+                winit::event::Ime::Commit(text) => {
+                    if let Some(ref pty) = self.pty {
+                        let _ = pty.write(text.as_bytes());
+                    }
+                }
+                _ => {}
+            },
             WindowEvent::ModifiersChanged(mods) => {
                 self.modifiers = mods.state();
             }

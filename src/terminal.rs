@@ -12,6 +12,8 @@ use unicode_bidi::{bidi_class, BidiClass};
 struct ForwardListener {
     on_pty_write: Arc<dyn Fn(String) + Send + Sync>,
     on_clipboard_store: Arc<dyn Fn(String) + Send + Sync>,
+    on_title_change: Arc<dyn Fn(String) + Send + Sync>,
+    on_bell: Arc<dyn Fn() + Send + Sync>,
 }
 
 impl EventListener for ForwardListener {
@@ -19,6 +21,9 @@ impl EventListener for ForwardListener {
         match event {
             Event::PtyWrite(text) => (self.on_pty_write)(text),
             Event::ClipboardStore(_, text) => (self.on_clipboard_store)(text),
+            Event::Title(title) => (self.on_title_change)(title),
+            Event::ResetTitle => (self.on_title_change)("Twitty · RTL Terminal".to_string()),
+            Event::Bell => (self.on_bell)(),
             _ => {}
         }
     }
@@ -60,9 +65,10 @@ impl Terminal {
     where
         F: Fn(String) + Send + Sync + 'static,
     {
-        Self::new_with_clipboard(cols, rows, on_pty_write, |_| {})
+        Self::new_full(cols, rows, on_pty_write, |_| {}, |_| {}, || {})
     }
 
+    #[allow(dead_code)]
     pub fn new_with_clipboard<F, C>(
         cols: usize,
         rows: usize,
@@ -73,10 +79,29 @@ impl Terminal {
         F: Fn(String) + Send + Sync + 'static,
         C: Fn(String) + Send + Sync + 'static,
     {
+        Self::new_full(cols, rows, on_pty_write, on_clipboard_store, |_| {}, || {})
+    }
+
+    pub fn new_full<F, C, T, B>(
+        cols: usize,
+        rows: usize,
+        on_pty_write: F,
+        on_clipboard_store: C,
+        on_title_change: T,
+        on_bell: B,
+    ) -> Self
+    where
+        F: Fn(String) + Send + Sync + 'static,
+        C: Fn(String) + Send + Sync + 'static,
+        T: Fn(String) + Send + Sync + 'static,
+        B: Fn() + Send + Sync + 'static,
+    {
         let size = TermSize::new(cols, rows);
         let listener = ForwardListener {
             on_pty_write: Arc::new(on_pty_write),
             on_clipboard_store: Arc::new(on_clipboard_store),
+            on_title_change: Arc::new(on_title_change),
+            on_bell: Arc::new(on_bell),
         };
         let term = Term::new(Config::default(), &size, listener);
         let parser = Processor::<StdSyncHandler>::new();

@@ -59,4 +59,20 @@ fn test_palette_resolution() {
         false,
     );
     assert_eq!(rgb, Rgba::from_rgb8(255, 0, 128));
+
+    // Exact 256 color cube resolution: index 196 is standard xterm pure red #ff0000
+    let color_196 = palette.resolve(AnsiColor::Indexed(196), false);
+    assert_eq!(
+        color_196,
+        Rgba::from_rgb8(255, 0, 0),
+        "Index 196 must resolve to exact pure red #ff0000"
+    );
+
+    // Index 21 is pure blue (r=0, g=0, b=5)
+    let color_21 = palette.resolve(AnsiColor::Indexed(21), false);
+    assert_eq!(color_21, Rgba::from_rgb8(0, 0, 255));
+
+    // Grayscale ramp test: index 232 is 8, 8, 8
+    let color_232 = palette.resolve(AnsiColor::Indexed(232), false);
+    assert_eq!(color_232, Rgba::from_rgb8(8, 8, 8));
 }
