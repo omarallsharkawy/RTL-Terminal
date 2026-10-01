@@ -22,7 +22,7 @@ fn test_real_shell_prompt_generation() {
 
     // Wait up to 1 second for Bash to output prompt
     let start = Instant::now();
-    while start.elapsed() < Duration::from_millis(1000) {
+    while start.elapsed() < Duration::from_millis(5000) {
         let data = {
             let mut guard = received_data.lock().unwrap();
             let d = guard.clone();

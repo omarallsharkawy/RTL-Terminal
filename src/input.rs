@@ -189,78 +189,211 @@ pub fn handle_key_raw(
     // 2. Named Navigation / Control Keys
     match logical {
         Key::Named(named) => match named {
+            NamedKey::Backspace => {
+                let bytes = if alt { vec![0x1b, 0x7f] } else { vec![0x7f] };
+                return Some(InputAction::Bytes(bytes));
+            }
+            NamedKey::Enter => {
+                let bytes = if alt { vec![0x1b, b'\r'] } else { vec![b'\r'] };
+                return Some(InputAction::Bytes(bytes));
+            }
+            NamedKey::Tab => {
+                let mut bytes = if shift {
+                    b"\x1b[Z".to_vec()
+                } else {
+                    vec![b'\t']
+                };
+                if alt {
+                    bytes.insert(0, 0x1b);
+                }
+                return Some(InputAction::Bytes(bytes));
+            }
+            NamedKey::Escape => {
+                let bytes = if alt { vec![0x1b, 0x1b] } else { vec![0x1b] };
+                return Some(InputAction::Bytes(bytes));
+            }
             NamedKey::Copy => return Some(InputAction::Copy),
             NamedKey::Paste => return Some(InputAction::Paste),
             NamedKey::Cut => return Some(InputAction::Cut),
             NamedKey::Undo => return Some(InputAction::Bytes(vec![26])),
-            NamedKey::Enter => return Some(InputAction::Bytes(vec![b'\r'])),
-            NamedKey::Backspace => return Some(InputAction::Bytes(vec![0x7f])),
-            NamedKey::Tab => {
-                if shift {
-                    return Some(InputAction::Bytes(b"\x1b[Z".to_vec()));
-                } else {
-                    return Some(InputAction::Bytes(vec![b'\t']));
-                }
-            }
-            NamedKey::Escape => return Some(InputAction::Bytes(vec![0x1b])),
             NamedKey::ArrowUp => {
-                if app_cursor {
-                    return Some(InputAction::Bytes(b"\x1bOA".to_vec()));
+                let mut bytes = if app_cursor {
+                    b"\x1bOA".to_vec()
                 } else {
-                    return Some(InputAction::Bytes(b"\x1b[A".to_vec()));
+                    b"\x1b[A".to_vec()
+                };
+                if alt {
+                    bytes.insert(0, 0x1b);
                 }
+                return Some(InputAction::Bytes(bytes));
             }
             NamedKey::ArrowDown => {
-                if app_cursor {
-                    return Some(InputAction::Bytes(b"\x1bOB".to_vec()));
+                let mut bytes = if app_cursor {
+                    b"\x1bOB".to_vec()
                 } else {
-                    return Some(InputAction::Bytes(b"\x1b[B".to_vec()));
+                    b"\x1b[B".to_vec()
+                };
+                if alt {
+                    bytes.insert(0, 0x1b);
                 }
+                return Some(InputAction::Bytes(bytes));
             }
             NamedKey::ArrowRight => {
-                if app_cursor {
-                    return Some(InputAction::Bytes(b"\x1bOC".to_vec()));
+                let mut bytes = if app_cursor {
+                    b"\x1bOC".to_vec()
                 } else {
-                    return Some(InputAction::Bytes(b"\x1b[C".to_vec()));
+                    b"\x1b[C".to_vec()
+                };
+                if alt {
+                    bytes.insert(0, 0x1b);
                 }
+                return Some(InputAction::Bytes(bytes));
             }
             NamedKey::ArrowLeft => {
-                if app_cursor {
-                    return Some(InputAction::Bytes(b"\x1bOD".to_vec()));
+                let mut bytes = if app_cursor {
+                    b"\x1bOD".to_vec()
                 } else {
-                    return Some(InputAction::Bytes(b"\x1b[D".to_vec()));
+                    b"\x1b[D".to_vec()
+                };
+                if alt {
+                    bytes.insert(0, 0x1b);
                 }
+                return Some(InputAction::Bytes(bytes));
             }
             NamedKey::Home => {
-                if app_cursor {
-                    return Some(InputAction::Bytes(b"\x1bOH".to_vec()));
+                let mut bytes = if app_cursor {
+                    b"\x1bOH".to_vec()
                 } else {
-                    return Some(InputAction::Bytes(b"\x1b[H".to_vec()));
+                    b"\x1b[H".to_vec()
+                };
+                if alt {
+                    bytes.insert(0, 0x1b);
                 }
+                return Some(InputAction::Bytes(bytes));
             }
             NamedKey::End => {
-                if app_cursor {
-                    return Some(InputAction::Bytes(b"\x1bOF".to_vec()));
+                let mut bytes = if app_cursor {
+                    b"\x1bOF".to_vec()
                 } else {
-                    return Some(InputAction::Bytes(b"\x1b[F".to_vec()));
+                    b"\x1b[F".to_vec()
+                };
+                if alt {
+                    bytes.insert(0, 0x1b);
                 }
+                return Some(InputAction::Bytes(bytes));
             }
-            NamedKey::PageUp => return Some(InputAction::Bytes(b"\x1b[5~".to_vec())),
-            NamedKey::PageDown => return Some(InputAction::Bytes(b"\x1b[6~".to_vec())),
-            NamedKey::Delete => return Some(InputAction::Bytes(b"\x1b[3~".to_vec())),
-            NamedKey::Insert => return Some(InputAction::Bytes(b"\x1b[2~".to_vec())),
-            NamedKey::F1 => return Some(InputAction::Bytes(b"\x1bOP".to_vec())),
-            NamedKey::F2 => return Some(InputAction::Bytes(b"\x1bOQ".to_vec())),
-            NamedKey::F3 => return Some(InputAction::Bytes(b"\x1bOR".to_vec())),
-            NamedKey::F4 => return Some(InputAction::Bytes(b"\x1bOS".to_vec())),
-            NamedKey::F5 => return Some(InputAction::Bytes(b"\x1b[15~".to_vec())),
-            NamedKey::F6 => return Some(InputAction::Bytes(b"\x1b[17~".to_vec())),
-            NamedKey::F7 => return Some(InputAction::Bytes(b"\x1b[18~".to_vec())),
-            NamedKey::F8 => return Some(InputAction::Bytes(b"\x1b[19~".to_vec())),
-            NamedKey::F9 => return Some(InputAction::Bytes(b"\x1b[20~".to_vec())),
-            NamedKey::F10 => return Some(InputAction::Bytes(b"\x1b[21~".to_vec())),
-            NamedKey::F11 => return Some(InputAction::Bytes(b"\x1b[23~".to_vec())),
-            NamedKey::F12 => return Some(InputAction::Bytes(b"\x1b[24~".to_vec())),
+            NamedKey::PageUp => {
+                let mut bytes = b"\x1b[5~".to_vec();
+                if alt {
+                    bytes.insert(0, 0x1b);
+                }
+                return Some(InputAction::Bytes(bytes));
+            }
+            NamedKey::PageDown => {
+                let mut bytes = b"\x1b[6~".to_vec();
+                if alt {
+                    bytes.insert(0, 0x1b);
+                }
+                return Some(InputAction::Bytes(bytes));
+            }
+            NamedKey::Delete => {
+                let mut bytes = b"\x1b[3~".to_vec();
+                if alt {
+                    bytes.insert(0, 0x1b);
+                }
+                return Some(InputAction::Bytes(bytes));
+            }
+            NamedKey::Insert => {
+                let mut bytes = b"\x1b[2~".to_vec();
+                if alt {
+                    bytes.insert(0, 0x1b);
+                }
+                return Some(InputAction::Bytes(bytes));
+            }
+            NamedKey::F1 => {
+                let mut bytes = b"\x1bOP".to_vec();
+                if alt {
+                    bytes.insert(0, 0x1b);
+                }
+                return Some(InputAction::Bytes(bytes));
+            }
+            NamedKey::F2 => {
+                let mut bytes = b"\x1bOQ".to_vec();
+                if alt {
+                    bytes.insert(0, 0x1b);
+                }
+                return Some(InputAction::Bytes(bytes));
+            }
+            NamedKey::F3 => {
+                let mut bytes = b"\x1bOR".to_vec();
+                if alt {
+                    bytes.insert(0, 0x1b);
+                }
+                return Some(InputAction::Bytes(bytes));
+            }
+            NamedKey::F4 => {
+                let mut bytes = b"\x1bOS".to_vec();
+                if alt {
+                    bytes.insert(0, 0x1b);
+                }
+                return Some(InputAction::Bytes(bytes));
+            }
+            NamedKey::F5 => {
+                let mut bytes = b"\x1b[15~".to_vec();
+                if alt {
+                    bytes.insert(0, 0x1b);
+                }
+                return Some(InputAction::Bytes(bytes));
+            }
+            NamedKey::F6 => {
+                let mut bytes = b"\x1b[17~".to_vec();
+                if alt {
+                    bytes.insert(0, 0x1b);
+                }
+                return Some(InputAction::Bytes(bytes));
+            }
+            NamedKey::F7 => {
+                let mut bytes = b"\x1b[18~".to_vec();
+                if alt {
+                    bytes.insert(0, 0x1b);
+                }
+                return Some(InputAction::Bytes(bytes));
+            }
+            NamedKey::F8 => {
+                let mut bytes = b"\x1b[19~".to_vec();
+                if alt {
+                    bytes.insert(0, 0x1b);
+                }
+                return Some(InputAction::Bytes(bytes));
+            }
+            NamedKey::F9 => {
+                let mut bytes = b"\x1b[20~".to_vec();
+                if alt {
+                    bytes.insert(0, 0x1b);
+                }
+                return Some(InputAction::Bytes(bytes));
+            }
+            NamedKey::F10 => {
+                let mut bytes = b"\x1b[21~".to_vec();
+                if alt {
+                    bytes.insert(0, 0x1b);
+                }
+                return Some(InputAction::Bytes(bytes));
+            }
+            NamedKey::F11 => {
+                let mut bytes = b"\x1b[23~".to_vec();
+                if alt {
+                    bytes.insert(0, 0x1b);
+                }
+                return Some(InputAction::Bytes(bytes));
+            }
+            NamedKey::F12 => {
+                let mut bytes = b"\x1b[24~".to_vec();
+                if alt {
+                    bytes.insert(0, 0x1b);
+                }
+                return Some(InputAction::Bytes(bytes));
+            }
             _ => {}
         },
         _ => {}

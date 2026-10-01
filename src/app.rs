@@ -371,10 +371,10 @@ impl ApplicationHandler<AppEvent> for App {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 if let Some(ref r) = self.renderer {
-                    let col = ((position.x - r.padding_left as f64) / r.char_width as f64).max(0.0)
-                        as usize;
-                    let row = ((position.y - r.padding_top as f64) / r.line_height as f64).max(0.0)
-                        as usize;
+                    let col = ((position.x - (r.padding_left as f64)) / r.char_width as f64)
+                        .max(0.0) as usize;
+                    let row = ((position.y - (r.padding_top as f64)) / r.line_height as f64)
+                        .max(0.0) as usize;
                     self.mouse_col = col;
                     self.mouse_row = row;
 

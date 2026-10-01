@@ -227,3 +227,52 @@ fn test_alt_key_esc_prefix_encoding() {
     );
     assert_eq!(alt_dot, Some(InputAction::Bytes(b"\x1b.".to_vec())));
 }
+#[test]
+fn test_alt_named_keys_prefix() {
+    let mut modifiers = ModifiersState::empty();
+    modifiers.insert(ModifiersState::ALT);
+
+    // Alt+Backspace -> ESC + 0x7f
+    let alt_bs = handle_key_raw(
+        Some(KeyCode::Backspace),
+        &Key::Named(NamedKey::Backspace),
+        None,
+        ElementState::Pressed,
+        modifiers,
+        false,
+    );
+    assert_eq!(alt_bs, Some(InputAction::Bytes(vec![0x1b, 0x7f])));
+
+    // Alt+Enter -> ESC + \r
+    let alt_enter = handle_key_raw(
+        Some(KeyCode::Enter),
+        &Key::Named(NamedKey::Enter),
+        None,
+        ElementState::Pressed,
+        modifiers,
+        false,
+    );
+    assert_eq!(alt_enter, Some(InputAction::Bytes(vec![0x1b, b'\r'])));
+
+    // Alt+ArrowLeft -> ESC + ESC[D
+    let alt_left = handle_key_raw(
+        Some(KeyCode::ArrowLeft),
+        &Key::Named(NamedKey::ArrowLeft),
+        None,
+        ElementState::Pressed,
+        modifiers,
+        false,
+    );
+    assert_eq!(alt_left, Some(InputAction::Bytes(b"\x1b\x1b[D".to_vec())));
+
+    // Alt+F1 -> ESC + ESCOP
+    let alt_f1 = handle_key_raw(
+        Some(KeyCode::F1),
+        &Key::Named(NamedKey::F1),
+        None,
+        ElementState::Pressed,
+        modifiers,
+        false,
+    );
+    assert_eq!(alt_f1, Some(InputAction::Bytes(b"\x1b\x1bOP".to_vec())));
+}

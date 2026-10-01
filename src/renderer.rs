@@ -42,6 +42,8 @@ impl Renderer {
         cursor_style: String,
     ) -> anyhow::Result<Self> {
         let size = window.inner_size();
+        let scale = window.scale_factor() as f32;
+        let effective_font_size = initial_font_size * scale;
         // Ensure safe default dimensions if compositor has not yet completed initial layout
         let width = if size.width >= 100 { size.width } else { 960 };
         let height = if size.height >= 100 { size.height } else { 580 };
@@ -135,11 +137,11 @@ impl Renderer {
         );
 
         let font_size = initial_font_size.clamp(8.0, 48.0);
-        let line_height = (font_size * 1.55).round();
+        let line_height = (effective_font_size * 1.55).round();
         let padding_left = 8.0;
         let padding_top = 6.0;
 
-        let metrics = Metrics::new(font_size, line_height);
+        let metrics = Metrics::new(effective_font_size, line_height);
         let mut test_buffer = Buffer::new_empty(metrics);
         test_buffer.set_text(
             "MMMMMMMMMM",
@@ -185,10 +187,12 @@ impl Renderer {
     }
 
     pub fn set_font_size(&mut self, new_size: f32) {
+        let scale = self.window.scale_factor() as f32;
         self.font_size = new_size.clamp(8.0, 48.0);
-        self.line_height = (self.font_size * 1.55).round();
+        let effective_font_size = self.font_size * scale;
+        self.line_height = (effective_font_size * 1.55).round();
 
-        let metrics = Metrics::new(self.font_size, self.line_height);
+        let metrics = Metrics::new(effective_font_size, self.line_height);
         let mut test_buffer = Buffer::new_empty(metrics);
         test_buffer.set_text(
             "MMMMMMMMMM",
@@ -198,7 +202,7 @@ impl Renderer {
         );
         test_buffer.shape_until_scroll(&mut self.font_system, false);
 
-        let mut measured_width = (self.font_size * 0.6).round();
+        let mut measured_width = (effective_font_size * 0.6).round();
         for run in test_buffer.layout_runs() {
             if let Some(glyph) = run.glyphs.first() {
                 if glyph.w > 0.0 {
@@ -265,7 +269,9 @@ impl Renderer {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let metrics = Metrics::new(self.font_size, self.line_height);
+        let scale = self.window.scale_factor() as f32;
+        let effective_font_size = self.font_size * scale;
+        let metrics = Metrics::new(effective_font_size, self.line_height);
         let default_attrs = Attrs::new().family(Family::Name("JetBrainsMono Nerd Font"));
         let default_bg = self.palette.background;
         let mut default_bg_color = self.to_target_color(default_bg);
