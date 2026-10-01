@@ -32,7 +32,6 @@ pub struct App {
     mouse_col: usize,
     mouse_row: usize,
     config: TwittyConfig,
-    needs_redraw: bool,
     is_selecting: bool,
     mouse_down: bool,
     mouse_down_col: usize,
@@ -76,7 +75,6 @@ impl App {
             mouse_col: 0,
             mouse_row: 0,
             config,
-            needs_redraw: false,
             is_selecting: false,
             mouse_down: false,
             mouse_down_col: 0,
@@ -121,7 +119,6 @@ impl App {
             } else {
                 self.pty = self.spawn_pty(cols as u16, rows as u16);
             }
-            self.needs_redraw = true;
             r.window.request_redraw();
         }
     }
@@ -288,8 +285,8 @@ impl ApplicationHandler<AppEvent> for App {
         }
 
         window.set_ime_allowed(true);
+        self.pty = self.spawn_pty(cols as u16, rows as u16);
         self.renderer = Some(renderer);
-        self.needs_redraw = true;
         window.request_redraw();
     }
 
@@ -300,10 +297,7 @@ impl ApplicationHandler<AppEvent> for App {
                     term.process_bytes(&data);
                 }
                 if let Some(ref r) = self.renderer {
-                    if !self.needs_redraw {
-                        self.needs_redraw = true;
-                        r.window.request_redraw();
-                    }
+                    r.window.request_redraw();
                 }
             }
             AppEvent::PtyWriteResponse(text) => {
@@ -811,10 +805,6 @@ impl ApplicationHandler<AppEvent> for App {
                 }
             }
             WindowEvent::RedrawRequested => {
-                self.needs_redraw = false;
-                if self.pty.is_none() {
-                    self.sync_grid();
-                }
                 if let Some(ref mut r) = self.renderer {
                     if let Ok(term) = self.terminal.lock() {
                         let (lines, cursor) = term.snapshot();
