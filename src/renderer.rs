@@ -123,6 +123,14 @@ impl Renderer {
         let quad_renderer = QuadRenderer::new(&device, format);
 
         let mut font_system = FontSystem::new();
+        // Embedded Arabic fallback font (Noto Naskh Arabic) ensures text renders reliably
+        // on systems without Arabic fonts preinstalled.
+        static EMBEDDED_ARABIC_FONT: &[u8] =
+            include_bytes!("../assets/fonts/NotoNaskhArabic-Regular.ttf");
+        font_system
+            .db_mut()
+            .load_font_data(EMBEDDED_ARABIC_FONT.to_vec());
+
         let swash_cache = SwashCache::new();
         let cache = Cache::new(&device);
         let mut viewport = Viewport::new(&device, &cache);
@@ -141,25 +149,8 @@ impl Renderer {
         let padding_left = 8.0;
         let padding_top = 6.0;
 
-        let metrics = Metrics::new(effective_font_size, line_height);
-        let mut test_buffer = Buffer::new_empty(metrics);
-        test_buffer.set_text(
-            "MMMMMMMMMM",
-            &Attrs::new().family(Family::Name("JetBrainsMono Nerd Font")),
-            Shaping::Basic,
-            None,
-        );
-        test_buffer.shape_until_scroll(&mut font_system, false);
-
-        let mut measured_width = 8.8;
-        for run in test_buffer.layout_runs() {
-            if let Some(glyph) = run.glyphs.first() {
-                if glyph.w > 0.0 {
-                    measured_width = glyph.w;
-                }
-            }
-        }
-        let char_width = measured_width;
+        let char_width =
+            Self::measure_char_width(&mut font_system, effective_font_size, line_height);
 
         Ok(Self {
             window,
@@ -192,25 +183,8 @@ impl Renderer {
         let effective_font_size = self.font_size * scale;
         self.line_height = (effective_font_size * 1.55).round();
 
-        let metrics = Metrics::new(effective_font_size, self.line_height);
-        let mut test_buffer = Buffer::new_empty(metrics);
-        test_buffer.set_text(
-            "MMMMMMMMMM",
-            &Attrs::new().family(Family::Name("JetBrainsMono Nerd Font")),
-            Shaping::Basic,
-            None,
-        );
-        test_buffer.shape_until_scroll(&mut self.font_system, false);
-
-        let mut measured_width = (effective_font_size * 0.6).round();
-        for run in test_buffer.layout_runs() {
-            if let Some(glyph) = run.glyphs.first() {
-                if glyph.w > 0.0 {
-                    measured_width = glyph.w;
-                }
-            }
-        }
-        self.char_width = measured_width;
+        self.char_width =
+            Self::measure_char_width(&mut self.font_system, effective_font_size, self.line_height);
         self.row_caches.clear();
     }
 
@@ -227,12 +201,80 @@ impl Renderer {
         }
     }
 
-    pub fn compute_grid_size(&self) -> (usize, usize) {
-        let avail_w = (self.config.width as f32 - self.padding_left * 2.0).max(10.0);
-        let avail_h = (self.config.height as f32 - self.padding_top * 2.0).max(10.0);
-        let cols = (avail_w / self.char_width).floor() as usize;
-        let rows = (avail_h / self.line_height).floor() as usize;
+    pub fn measure_char_width(
+        font_system: &mut FontSystem,
+        effective_font_size: f32,
+        line_height: f32,
+    ) -> f32 {
+        let metrics = Metrics::new(effective_font_size, line_height);
+        let mut test_buffer = Buffer::new_empty(metrics);
+        test_buffer.set_text(
+            "MMMMMMMMMM",
+            &Attrs::new().family(Family::Monospace),
+            Shaping::Basic,
+            None,
+        );
+        test_buffer.shape_until_scroll(font_system, false);
+
+        let mut measured_width = (effective_font_size * 0.6).round();
+        for run in test_buffer.layout_runs() {
+            if let Some(glyph) = run.glyphs.first() {
+                if glyph.w > 0.0 {
+                    measured_width = glyph.w;
+                }
+            }
+        }
+        measured_width
+    }
+
+    pub fn compute_grid_dimensions(
+        width: u32,
+        height: u32,
+        padding_left: f32,
+        padding_top: f32,
+        char_width: f32,
+        line_height: f32,
+    ) -> (usize, usize) {
+        let avail_w = (width as f32 - padding_left * 2.0).max(10.0);
+        let avail_h = (height as f32 - padding_top * 2.0).max(10.0);
+        let cols = (avail_w / char_width).floor() as usize;
+        let rows = (avail_h / line_height).floor() as usize;
         (cols.max(10), rows.max(4))
+    }
+
+    #[allow(dead_code)]
+    pub fn compute_scaled_grid_size(
+        font_system: &mut FontSystem,
+        phys_width: u32,
+        phys_height: u32,
+        font_size: f32,
+        scale: f32,
+        padding_left: f32,
+        padding_top: f32,
+    ) -> (usize, usize, f32, f32) {
+        let effective_font_size = font_size * scale;
+        let line_height = (effective_font_size * 1.55).round();
+        let char_width = Self::measure_char_width(font_system, effective_font_size, line_height);
+        let (cols, rows) = Self::compute_grid_dimensions(
+            phys_width,
+            phys_height,
+            padding_left,
+            padding_top,
+            char_width,
+            line_height,
+        );
+        (cols, rows, char_width, line_height)
+    }
+
+    pub fn compute_grid_size(&self) -> (usize, usize) {
+        Self::compute_grid_dimensions(
+            self.config.width,
+            self.config.height,
+            self.padding_left,
+            self.padding_top,
+            self.char_width,
+            self.line_height,
+        )
     }
 
     fn to_target_color(&self, rgba: Rgba) -> [f32; 4] {
@@ -272,7 +314,7 @@ impl Renderer {
         let scale = self.window.scale_factor() as f32;
         let effective_font_size = self.font_size * scale;
         let metrics = Metrics::new(effective_font_size, self.line_height);
-        let default_attrs = Attrs::new().family(Family::Name("JetBrainsMono Nerd Font"));
+        let default_attrs = Attrs::new().family(Family::Monospace);
         let default_bg = self.palette.background;
         let mut default_bg_color = self.to_target_color(default_bg);
         default_bg_color[3] = self.opacity;
@@ -371,6 +413,12 @@ impl Renderer {
 
         // Custom Cursor Style Rendering
         if let Some((cx, cy)) = cursor_visual_pos {
+            if cursor.is_visible {
+                self.window.set_ime_cursor_area(
+                    winit::dpi::PhysicalPosition::new(cx, cy),
+                    winit::dpi::PhysicalSize::new(self.char_width, self.line_height),
+                );
+            }
             let cursor_color = self.to_target_color(self.palette.cursor);
             match self.cursor_style.as_str() {
                 "block" => {

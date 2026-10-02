@@ -364,6 +364,13 @@ impl ApplicationHandler<AppEvent> for App {
                         let _ = pty.write(text.as_bytes());
                     }
                 }
+                winit::event::Ime::Preedit(text, _cursor) => {
+                    if !text.is_empty() {
+                        if let Some(ref r) = self.renderer {
+                            r.window.request_redraw();
+                        }
+                    }
+                }
                 _ => {}
             },
             WindowEvent::ModifiersChanged(mods) => {

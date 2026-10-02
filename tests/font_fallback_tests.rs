@@ -36,3 +36,44 @@ fn test_arabic_font_fallback_resolution() {
         );
     }
 }
+
+#[test]
+fn test_symbol_glyph_resolution() {
+    let mut font_system = FontSystem::new();
+    let metrics = Metrics::new(14.5, 23.0);
+    let mut buffer = Buffer::new_empty(metrics);
+
+    // Unicode miscellaneous technical symbols (e.g. ⏵ used in CLI mode badges)
+    buffer.set_text(
+        "\u{23f5}\u{23f5} auto mode on",
+        &Attrs::new().family(Family::Monospace),
+        Shaping::Advanced,
+        None,
+    );
+    buffer.shape_until_scroll(&mut font_system, false);
+
+    let runs: Vec<_> = buffer.layout_runs().collect();
+    assert!(!runs.is_empty(), "Must produce layout runs for symbols");
+    for glyph in runs[0].glyphs.iter() {
+        assert!(
+            glyph.glyph_id > 0,
+            "Glyph ID must be resolved via font fallback, got 0 (tofu) for symbol"
+        );
+    }
+}
+
+#[test]
+fn test_embedded_arabic_font_loading() {
+    let mut font_system = FontSystem::new();
+    let count_before = font_system.db().faces().count();
+    static EMBEDDED_ARABIC_FONT: &[u8] =
+        include_bytes!("../assets/fonts/NotoNaskhArabic-Regular.ttf");
+    font_system
+        .db_mut()
+        .load_font_data(EMBEDDED_ARABIC_FONT.to_vec());
+    let count_after = font_system.db().faces().count();
+    assert!(
+        count_after > count_before,
+        "Embedded font data must load successfully into fontdb"
+    );
+}
