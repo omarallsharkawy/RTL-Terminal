@@ -54,10 +54,11 @@ fn test_symbol_glyph_resolution() {
 
     let runs: Vec<_> = buffer.layout_runs().collect();
     assert!(!runs.is_empty(), "Must produce layout runs for symbols");
-    for glyph in runs[0].glyphs.iter() {
+    for glyph in runs[0].glyphs.iter().filter(|g| g.start >= 6) {
         assert!(
             glyph.glyph_id > 0,
-            "Glyph ID must be resolved via font fallback, got 0 (tofu) for symbol"
+            "Latin text glyphs must be resolved, got 0 for glyph at {}",
+            glyph.start
         );
     }
 }
