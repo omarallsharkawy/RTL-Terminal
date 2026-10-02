@@ -7,6 +7,7 @@ fn test_config_defaults() {
     assert_eq!(config.background_opacity, 0.92);
     assert_eq!(config.cursor_style, "beam");
     assert_eq!(config.font_family, None);
+    assert_eq!(config.scrollback_lines, None);
 }
 
 #[test]
@@ -16,6 +17,7 @@ fn test_config_json_roundtrip() {
         background_opacity: 0.85,
         cursor_style: "block".to_string(),
         font_family: Some("JetBrainsMono Nerd Font".to_string()),
+        scrollback_lines: Some(25000),
     };
 
     let json = serde_json::to_string(&custom).expect("Serialization failed");
@@ -32,6 +34,7 @@ fn test_config_json_roundtrip() {
         deserialized.font_family,
         Some("JetBrainsMono Nerd Font".to_string())
     );
+    assert_eq!(deserialized.scrollback_lines, Some(25000));
 }
 
 #[test]

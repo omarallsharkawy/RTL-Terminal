@@ -83,3 +83,22 @@ fn test_scrollback_interactive_search() {
     term.scroll_to_line(line_idx);
     assert_eq!(term.display_offset(), (-line_idx) as usize);
 }
+
+#[test]
+fn test_arabic_scrollback_search_cell_alignment() {
+    let mut term = Terminal::new(80, 24, |_| {});
+
+    // Arabic text: "مرحبا بالعالم" -> "مرحبا " is 6 chars (cols 0..5), "بالعالم" starts at col 6
+    term.process_bytes("مرحبا بالعالم\r\n".as_bytes());
+
+    let results = term.search("بالعالم");
+    assert_eq!(results.len(), 1, "Must find Arabic word");
+
+    let (line_idx, col, len) = results[0];
+    assert_eq!(line_idx, 0, "Line should be on active screen row 0");
+    assert_eq!(
+        col, 6,
+        "Column index must be cell index 6, not UTF-8 byte index (which would be 11)"
+    );
+    assert_eq!(len, "بالعالم".chars().count());
+}

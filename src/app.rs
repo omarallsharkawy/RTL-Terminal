@@ -49,6 +49,8 @@ pub struct App {
 
 impl App {
     pub fn new(proxy: EventLoopProxy<AppEvent>) -> Self {
+        let config = TwittyConfig::load();
+        let scrollback = config.scrollback_lines.unwrap_or(10000);
         let proxy_clone = proxy.clone();
         let proxy_cb = proxy.clone();
         let proxy_title = proxy.clone();
@@ -56,6 +58,7 @@ impl App {
         let terminal = Arc::new(Mutex::new(Terminal::new_full(
             80,
             24,
+            scrollback,
             move |text| {
                 let _ = proxy_clone.send_event(AppEvent::PtyWriteResponse(text));
             },
@@ -69,8 +72,6 @@ impl App {
                 let _ = proxy_bell.send_event(AppEvent::Bell);
             },
         )));
-
-        let config = TwittyConfig::load();
 
         Self {
             proxy,

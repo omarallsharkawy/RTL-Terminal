@@ -65,7 +65,7 @@ impl Terminal {
     where
         F: Fn(String) + Send + Sync + 'static,
     {
-        Self::new_full(cols, rows, on_pty_write, |_| {}, |_| {}, || {})
+        Self::new_full(cols, rows, 10000, on_pty_write, |_| {}, |_| {}, || {})
     }
 
     #[allow(dead_code)]
@@ -79,12 +79,21 @@ impl Terminal {
         F: Fn(String) + Send + Sync + 'static,
         C: Fn(String) + Send + Sync + 'static,
     {
-        Self::new_full(cols, rows, on_pty_write, on_clipboard_store, |_| {}, || {})
+        Self::new_full(
+            cols,
+            rows,
+            10000,
+            on_pty_write,
+            on_clipboard_store,
+            |_| {},
+            || {},
+        )
     }
 
     pub fn new_full<F, C, T, B>(
         cols: usize,
         rows: usize,
+        scrollback_lines: usize,
         on_pty_write: F,
         on_clipboard_store: C,
         on_title_change: T,
@@ -103,7 +112,11 @@ impl Terminal {
             on_title_change: Arc::new(on_title_change),
             on_bell: Arc::new(on_bell),
         };
-        let term = Term::new(Config::default(), &size, listener);
+        let term_config = Config {
+            scrolling_history: scrollback_lines.max(100),
+            ..Default::default()
+        };
+        let term = Term::new(term_config, &size, listener);
         let parser = Processor::<StdSyncHandler>::new();
         Self {
             term,
@@ -158,7 +171,12 @@ impl Terminal {
         if query.is_empty() {
             return Vec::new();
         }
-        let query_lower = query.to_lowercase();
+        let query_chars: Vec<char> = query.to_lowercase().chars().collect();
+        let query_len = query_chars.len();
+        if query_len == 0 {
+            return Vec::new();
+        }
+
         let topmost = self.term.topmost_line().0;
         let bottommost = self.term.bottommost_line().0;
         let mut matches = Vec::new();
@@ -166,21 +184,25 @@ impl Terminal {
         for line_idx in topmost..=bottommost {
             let line = Line(line_idx);
             let row = &self.term.grid()[line];
-            let mut line_chars = Vec::with_capacity(self.cols);
-            for col in 0..self.cols {
-                let cell = &row[Column(col)];
-                line_chars.push(cell.c);
-            }
-            let line_str: String = line_chars.iter().collect();
-            let line_lower = line_str.to_lowercase();
+            let line_chars: Vec<char> = (0..self.cols)
+                .map(|c| {
+                    row[Column(c)]
+                        .c
+                        .to_lowercase()
+                        .next()
+                        .unwrap_or(row[Column(c)].c)
+                })
+                .collect();
 
-            let mut start_idx = 0;
-            while let Some(found) = line_lower[start_idx..].find(&query_lower) {
-                let col = start_idx + found;
-                matches.push((line_idx, col, query.chars().count()));
-                start_idx = col + 1.max(query_lower.len());
-                if start_idx >= line_lower.len() {
-                    break;
+            if self.cols >= query_len {
+                let mut col = 0;
+                while col <= self.cols - query_len {
+                    if line_chars[col..col + query_len] == query_chars[..] {
+                        matches.push((line_idx, col, query_len));
+                        col += query_len.max(1);
+                    } else {
+                        col += 1;
+                    }
                 }
             }
         }

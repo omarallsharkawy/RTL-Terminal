@@ -9,6 +9,8 @@ pub struct TwittyConfig {
     pub cursor_style: String,
     #[serde(default)]
     pub font_family: Option<String>,
+    #[serde(default)]
+    pub scrollback_lines: Option<usize>,
 }
 
 impl Default for TwittyConfig {
@@ -18,6 +20,7 @@ impl Default for TwittyConfig {
             background_opacity: 0.92,
             cursor_style: "beam".to_string(),
             font_family: None,
+            scrollback_lines: None,
         }
     }
 }
