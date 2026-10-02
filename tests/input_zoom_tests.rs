@@ -276,3 +276,54 @@ fn test_alt_named_keys_prefix() {
     );
     assert_eq!(alt_f1, Some(InputAction::Bytes(b"\x1b\x1bOP".to_vec())));
 }
+
+#[test]
+fn test_kitty_keyboard_protocol_csi_u_encoding() {
+    let mut modifiers = ModifiersState::empty();
+    modifiers.insert(ModifiersState::SHIFT);
+
+    // Shift + Enter in Kitty mode -> CSI 13 ; 2 u
+    let shift_enter = handle_key_raw_mode(
+        Some(KeyCode::Enter),
+        &Key::Named(NamedKey::Enter),
+        None,
+        ElementState::Pressed,
+        modifiers,
+        false,
+        true,
+    );
+    assert_eq!(
+        shift_enter,
+        Some(InputAction::Bytes(b"\x1b[13;2u".to_vec()))
+    );
+
+    // Ctrl + a in Kitty mode -> CSI 97 ; 5 u
+    let mut ctrl_mods = ModifiersState::empty();
+    ctrl_mods.insert(ModifiersState::CONTROL);
+    let ctrl_a = handle_key_raw_mode(
+        Some(KeyCode::KeyA),
+        &Key::Character("a".into()),
+        None,
+        ElementState::Pressed,
+        ctrl_mods,
+        false,
+        true,
+    );
+    assert_eq!(ctrl_a, Some(InputAction::Bytes(b"\x1b[97;5u".to_vec())));
+
+    // Ctrl + Shift + F -> Search (app shortcut precedence)
+    let mut ctrl_shift = ModifiersState::empty();
+    ctrl_shift.insert(ModifiersState::CONTROL);
+    ctrl_shift.insert(ModifiersState::SHIFT);
+    let search_action = handle_key_raw_mode(
+        Some(KeyCode::KeyF),
+        &Key::Character("F".into()),
+        None,
+        ElementState::Pressed,
+        ctrl_shift,
+        false,
+        true,
+    );
+    assert_eq!(search_action, Some(InputAction::Search));
+}
+use twitty::input::handle_key_raw_mode;

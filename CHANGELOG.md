@@ -1,5 +1,33 @@
 # Changelog
 
+## 2.1.0 — 2026-10-02
+
+### Kitty keyboard protocol and interactive search
+
+- Implemented Kitty Keyboard Protocol (CSI u) disambiguated escape sequences (CSI codepoint ; modifiers u) when requested by modern interactive TUIs (e.g. Neovim, Helix, OpenCode) for modified key chords such as Shift+Enter, Ctrl+Enter, and Ctrl+Tab.
+- Added interactive in-terminal scrollback search (Ctrl+Shift+F) featuring real-time query matching, viewport line navigation via Enter / Shift+Enter, match highlighting across visible rows, and an inline status overlay banner.
+- Added Ctrl+End jump-to-bottom sequence and terminal scrollback reset, satisfying bottom-jump prompts in long-output interactive CLI tools.
+- Added Shift+PageUp and Shift+PageDown keyboard viewport scrolling shortcuts.
+
+### HiDPI dynamic scaling and font metrics
+
+- Implemented dynamic monitor scale tracking across Wayland and Windows displays, automatically recalculating cell metrics (char_width, line_height) and re-rasterizing glyphs upon ScaleFactorChanged.
+- Eliminated cursor positioning drift and mouse coordinate offset when moving windows across mixed-DPI multi-monitor setups.
+- Normalized physical grid dimensions to ensure smooth tiling and prevent viewport clipping on narrow layouts.
+
+### Embedded typography and fallback
+
+- Embedded standalone NotoNaskhArabic-Regular.ttf font data directly into the binary with automatic runtime fontdb registration (load_font_data), guaranteeing complete Arabic script rendering across fresh OS installations without requiring system font packages.
+- Activated Shaping::Advanced fallback resolution for non-ASCII technical symbols and icons (e.g. ⏵⏵, ⚡, ❯), preventing tofu glyph replacement while keeping pure ASCII shell output on the fast shaping path.
+- Added font_family configuration option in ~/.config/twitty/config.json allowing user-specified primary fonts with automatic fallback preservation.
+
+### Enhanced selection, clipboard, and cursor tracking
+
+- Enabled seamless click-and-drag text selection and clipboard copying while reviewing scrollback history, decoupling terminal selection from active mouse-mode PTY reporting during scroll.
+- Enabled dynamic selection range expansion while scrolling the mouse wheel, and added Shift+Wheel scrollback override in mouse-tracking TUIs.
+- Restored exact glyph-matching cursor positioning for Arabic bidirectional segments (has_rtl), maintaining linear progression for Latin input fields.
+- Added inline IME preedit rendering with combining mark (Tashkeel) zero-width attachment and wide character span calculation.
+
 ## 2.0.1 — 2026-09-29
 
 ### TUI layout and BiDi isolation

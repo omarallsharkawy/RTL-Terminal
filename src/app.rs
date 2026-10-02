@@ -41,6 +41,10 @@ pub struct App {
     last_click_pos: (usize, usize),
     click_count: usize,
     preedit: Option<(String, Option<(usize, usize)>)>,
+    is_searching: bool,
+    search_query: String,
+    search_matches: Vec<(i32, usize, usize)>,
+    search_match_idx: usize,
 }
 
 impl App {
@@ -85,6 +89,10 @@ impl App {
             last_click_pos: (0, 0),
             click_count: 0,
             preedit: None,
+            is_searching: false,
+            search_query: String::new(),
+            search_matches: Vec::new(),
+            search_match_idx: 0,
         }
     }
 
@@ -759,12 +767,91 @@ impl ApplicationHandler<AppEvent> for App {
                     }
                 }
 
+                // Handle interactive scrollback search inputs
+                if self.is_searching && event.state.is_pressed() {
+                    match event.logical_key {
+                        Key::Named(NamedKey::Escape) => {
+                            self.is_searching = false;
+                            self.search_query.clear();
+                            self.search_matches.clear();
+                            if let Some(ref r) = self.renderer {
+                                r.window.request_redraw();
+                            }
+                            return;
+                        }
+                        Key::Named(NamedKey::Enter) => {
+                            if !self.search_matches.is_empty() {
+                                if self.modifiers.shift_key() {
+                                    self.search_match_idx = if self.search_match_idx == 0 {
+                                        self.search_matches.len() - 1
+                                    } else {
+                                        self.search_match_idx - 1
+                                    };
+                                } else {
+                                    self.search_match_idx =
+                                        (self.search_match_idx + 1) % self.search_matches.len();
+                                }
+                                let (line_idx, _, _) = self.search_matches[self.search_match_idx];
+                                if let Ok(mut term) = self.terminal.lock() {
+                                    term.scroll_to_line(line_idx);
+                                }
+                                if let Some(ref r) = self.renderer {
+                                    r.window.request_redraw();
+                                }
+                            }
+                            return;
+                        }
+                        Key::Named(NamedKey::Backspace) => {
+                            self.search_query.pop();
+                            if let Ok(mut term) = self.terminal.lock() {
+                                self.search_matches = term.search(&self.search_query);
+                                self.search_match_idx = 0;
+                                if let Some(&(line_idx, _, _)) = self.search_matches.first() {
+                                    term.scroll_to_line(line_idx);
+                                }
+                            }
+                            if let Some(ref r) = self.renderer {
+                                r.window.request_redraw();
+                            }
+                            return;
+                        }
+                        _ => {
+                            if !self.modifiers.control_key() {
+                                if let Some(ref txt) = event.text {
+                                    if !txt.is_empty() {
+                                        self.search_query.push_str(txt);
+                                        if let Ok(mut term) = self.terminal.lock() {
+                                            self.search_matches = term.search(&self.search_query);
+                                            self.search_match_idx = 0;
+                                            if let Some(&(line_idx, _, _)) =
+                                                self.search_matches.first()
+                                            {
+                                                term.scroll_to_line(line_idx);
+                                            }
+                                        }
+                                        if let Some(ref r) = self.renderer {
+                                            r.window.request_redraw();
+                                        }
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 let app_cursor = self
                     .terminal
                     .lock()
                     .map(|t| t.is_app_cursor())
                     .unwrap_or(false);
-                if let Some(action) = handle_key(&event, self.modifiers, app_cursor) {
+                let kitty_keyboard = self
+                    .terminal
+                    .lock()
+                    .map(|t| t.mode().intersects(TermMode::KITTY_KEYBOARD_PROTOCOL))
+                    .unwrap_or(false);
+                if let Some(action) = handle_key(&event, self.modifiers, app_cursor, kitty_keyboard)
+                {
                     match action {
                         InputAction::Bytes(bytes) => {
                             if let Some(ref pty) = self.pty {
@@ -882,6 +969,15 @@ impl ApplicationHandler<AppEvent> for App {
                                 r.window.request_redraw();
                             }
                         }
+                        InputAction::Search => {
+                            self.is_searching = true;
+                            self.search_query.clear();
+                            self.search_matches.clear();
+                            self.search_match_idx = 0;
+                            if let Some(ref r) = self.renderer {
+                                r.window.request_redraw();
+                            }
+                        }
                     }
                 }
             }
@@ -917,6 +1013,68 @@ impl ApplicationHandler<AppEvent> for App {
                                     }
                                 }
                                 cursor.col = c_idx;
+                            }
+                        }
+                        if self.is_searching && !lines.is_empty() {
+                            // Highlight visible matches in the viewport
+                            let display_offset = self
+                                .terminal
+                                .lock()
+                                .map(|t| t.display_offset())
+                                .unwrap_or(0);
+                            for (idx, &(m_line, m_col, m_len)) in
+                                self.search_matches.iter().enumerate()
+                            {
+                                let v_row = m_line + display_offset as i32;
+                                if v_row >= 0 && (v_row as usize) < lines.len() {
+                                    let row = v_row as usize;
+                                    let is_current = idx == self.search_match_idx;
+                                    for c in m_col..(m_col + m_len).min(lines[row].cells.len()) {
+                                        lines[row].cells[c].is_selected = true;
+                                        if is_current {
+                                            lines[row].cells[c].fg = AnsiColor::Named(
+                                                alacritty_terminal::vte::ansi::NamedColor::BrightYellow,
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Render search overlay on the bottom line
+                            let last_r = lines.len() - 1;
+                            let match_info = if self.search_matches.is_empty() {
+                                if self.search_query.is_empty() {
+                                    String::new()
+                                } else {
+                                    " [0/0]".to_string()
+                                }
+                            } else {
+                                format!(
+                                    " [{}/{}]",
+                                    self.search_match_idx + 1,
+                                    self.search_matches.len()
+                                )
+                            };
+                            let banner =
+                                format!(" 🔍 Search: {}_{} ", self.search_query, match_info);
+                            let banner_chars: Vec<char> = banner.chars().collect();
+                            for (c_idx, cell) in lines[last_r].cells.iter_mut().enumerate() {
+                                if c_idx < banner_chars.len() {
+                                    cell.c = banner_chars[c_idx];
+                                    cell.fg = AnsiColor::Named(
+                                        alacritty_terminal::vte::ansi::NamedColor::BrightWhite,
+                                    );
+                                    cell.bg = AnsiColor::Named(
+                                        alacritty_terminal::vte::ansi::NamedColor::Blue,
+                                    );
+                                    cell.flags
+                                        .insert(alacritty_terminal::term::cell::Flags::BOLD);
+                                } else {
+                                    cell.c = ' ';
+                                    cell.bg = AnsiColor::Named(
+                                        alacritty_terminal::vte::ansi::NamedColor::Blue,
+                                    );
+                                }
                             }
                         }
                         if let Err(e) = r.render(&lines, &cursor) {

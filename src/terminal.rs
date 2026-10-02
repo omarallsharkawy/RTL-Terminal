@@ -1,6 +1,6 @@
 use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::{Dimensions, Scroll};
-use alacritty_terminal::index::{Column, Point, Side};
+use alacritty_terminal::index::{Column, Line, Point, Side};
 pub use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::cell::Flags as CellFlags;
 use alacritty_terminal::term::test::TermSize;
@@ -141,6 +141,50 @@ impl Terminal {
 
     pub fn scroll_to_bottom(&mut self) {
         self.term.scroll_display(Scroll::Bottom);
+    }
+
+    pub fn scroll_to_line(&mut self, line_idx: i32) {
+        if line_idx < 0 {
+            let target_offset = (-line_idx) as usize;
+            let cur_offset = self.term.grid().display_offset();
+            let delta = target_offset as i32 - cur_offset as i32;
+            self.term.scroll_display(Scroll::Delta(delta));
+        } else {
+            self.scroll_to_bottom();
+        }
+    }
+
+    pub fn search(&self, query: &str) -> Vec<(i32, usize, usize)> {
+        if query.is_empty() {
+            return Vec::new();
+        }
+        let query_lower = query.to_lowercase();
+        let topmost = self.term.topmost_line().0;
+        let bottommost = self.term.bottommost_line().0;
+        let mut matches = Vec::new();
+
+        for line_idx in topmost..=bottommost {
+            let line = Line(line_idx);
+            let row = &self.term.grid()[line];
+            let mut line_chars = Vec::with_capacity(self.cols);
+            for col in 0..self.cols {
+                let cell = &row[Column(col)];
+                line_chars.push(cell.c);
+            }
+            let line_str: String = line_chars.iter().collect();
+            let line_lower = line_str.to_lowercase();
+
+            let mut start_idx = 0;
+            while let Some(found) = line_lower[start_idx..].find(&query_lower) {
+                let col = start_idx + found;
+                matches.push((line_idx, col, query.chars().count()));
+                start_idx = col + 1.max(query_lower.len());
+                if start_idx >= line_lower.len() {
+                    break;
+                }
+            }
+        }
+        matches
     }
 
     pub fn start_selection(&mut self, col: usize, row: usize) {

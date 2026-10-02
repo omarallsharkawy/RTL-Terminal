@@ -55,3 +55,31 @@ fn test_scrollback_display_offset_viewport_mapping() {
     let restored_top: String = lines_restored[0].cells[0..7].iter().map(|c| c.c).collect();
     assert_eq!(restored_top, "Line 03");
 }
+
+#[test]
+fn test_scrollback_interactive_search() {
+    let mut term = Terminal::new(80, 24, |_| {});
+
+    // Generate 50 lines including a unique target string
+    for i in 0..50 {
+        if i == 15 {
+            term.process_bytes(b"Target line: UNIQUE_SEARCH_KEYWORD_FOUND\r\n");
+        } else {
+            let line = format!("Normal line {:03} output\r\n", i);
+            term.process_bytes(line.as_bytes());
+        }
+    }
+
+    // Search for the unique string
+    let results = term.search("UNIQUE_SEARCH_KEYWORD_FOUND");
+    assert_eq!(results.len(), 1, "Should find exactly 1 occurrence");
+
+    let (line_idx, col, len) = results[0];
+    assert!(line_idx < 0, "Line 15 should be in scrollback history");
+    assert!(col >= 12, "Column should be after prefix");
+    assert_eq!(len, "UNIQUE_SEARCH_KEYWORD_FOUND".len());
+
+    // Scroll to the matched line
+    term.scroll_to_line(line_idx);
+    assert_eq!(term.display_offset(), (-line_idx) as usize);
+}

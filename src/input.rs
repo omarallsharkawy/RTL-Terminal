@@ -12,6 +12,7 @@ pub enum InputAction {
     Paste,
     Cut,
     SelectAll,
+    Search,
 }
 
 fn match_ctrl_letter(physical: Option<KeyCode>, logical: &Key) -> Option<char> {
@@ -95,21 +96,24 @@ pub fn handle_key(
     event: &KeyEvent,
     modifiers: ModifiersState,
     app_cursor: bool,
+    kitty_keyboard: bool,
 ) -> Option<InputAction> {
     let physical = match event.physical_key {
         PhysicalKey::Code(c) => Some(c),
         _ => None,
     };
-    handle_key_raw(
+    handle_key_raw_mode(
         physical,
         &event.logical_key,
         event.text.as_deref(),
         event.state,
         modifiers,
         app_cursor,
+        kitty_keyboard,
     )
 }
 
+#[allow(dead_code)]
 pub fn handle_key_raw(
     physical: Option<KeyCode>,
     logical: &Key,
@@ -118,6 +122,18 @@ pub fn handle_key_raw(
     modifiers: ModifiersState,
     app_cursor: bool,
 ) -> Option<InputAction> {
+    handle_key_raw_mode(physical, logical, text, state, modifiers, app_cursor, false)
+}
+
+pub fn handle_key_raw_mode(
+    physical: Option<KeyCode>,
+    logical: &Key,
+    text: Option<&str>,
+    state: ElementState,
+    modifiers: ModifiersState,
+    app_cursor: bool,
+    kitty_keyboard: bool,
+) -> Option<InputAction> {
     if !state.is_pressed() {
         return None;
     }
@@ -125,6 +141,64 @@ pub fn handle_key_raw(
     let mut ctrl = modifiers.control_key();
     let shift = modifiers.shift_key();
     let alt = modifiers.alt_key();
+
+    // Ctrl + Shift + F -> Scrollback Search
+    if ctrl && shift {
+        if let Some(KeyCode::KeyF) = physical {
+            return Some(InputAction::Search);
+        }
+        if let Key::Character(ref s) = logical {
+            if s.eq_ignore_ascii_case("f") || s == "ف" {
+                return Some(InputAction::Search);
+            }
+        }
+    }
+
+    // Kitty Keyboard Protocol (CSI u)
+    let mod_code = 1 + (shift as u8) + (alt as u8 * 2) + (ctrl as u8 * 4);
+    if kitty_keyboard && mod_code > 1 {
+        if ctrl && shift {
+            if let Some(KeyCode::KeyC) = physical {
+                return Some(InputAction::Copy);
+            }
+            if let Some(KeyCode::KeyV) = physical {
+                return Some(InputAction::Paste);
+            }
+            if let Some(KeyCode::KeyA) = physical {
+                return Some(InputAction::SelectAll);
+            }
+        }
+        match logical {
+            Key::Named(NamedKey::Enter) => {
+                return Some(InputAction::Bytes(
+                    format!("\x1b[13;{}u", mod_code).into_bytes(),
+                ));
+            }
+            Key::Named(NamedKey::Tab) => {
+                return Some(InputAction::Bytes(
+                    format!("\x1b[9;{}u", mod_code).into_bytes(),
+                ));
+            }
+            Key::Named(NamedKey::Backspace) => {
+                return Some(InputAction::Bytes(
+                    format!("\x1b[127;{}u", mod_code).into_bytes(),
+                ));
+            }
+            Key::Named(NamedKey::Escape) => {
+                return Some(InputAction::Bytes(
+                    format!("\x1b[27;{}u", mod_code).into_bytes(),
+                ));
+            }
+            _ => {
+                if let Some(letter) = match_ctrl_letter(physical, logical) {
+                    let cp = letter as u32;
+                    return Some(InputAction::Bytes(
+                        format!("\x1b[{};{}u", cp, mod_code).into_bytes(),
+                    ));
+                }
+            }
+        }
+    }
 
     if !ctrl {
         if let Key::Character(ref s) = logical {
