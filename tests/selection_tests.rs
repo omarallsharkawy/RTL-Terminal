@@ -75,3 +75,28 @@ fn test_semantic_word_and_lines_selection() {
     let line_text = term.selection_text().unwrap();
     assert!(line_text.contains("hello opencode_user_test"));
 }
+
+#[test]
+fn test_selection_in_scrollback() {
+    let mut term = Terminal::new(80, 24, |_| {});
+    for i in 0..60 {
+        let line = format!("Line {:03} of output history\r\n", i);
+        term.process_bytes(line.as_bytes());
+    }
+    // Scroll up by 10
+    term.scroll_display(10);
+    assert_eq!(term.display_offset(), 10);
+
+    // Select on row 0 in current viewport (which is Line 026)
+    term.start_selection(0, 0);
+    term.update_selection(8, 0);
+
+    let text = term.selection_text();
+    assert!(text.is_some());
+    let unwrapped = text.unwrap();
+    assert!(
+        unwrapped.contains("Line 027"),
+        "Selected scrolled text should contain 'Line 027', got: {}",
+        unwrapped
+    );
+}

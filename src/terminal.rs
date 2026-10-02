@@ -135,6 +135,14 @@ impl Terminal {
         self.term.scroll_display(Scroll::Delta(delta));
     }
 
+    pub fn display_offset(&self) -> usize {
+        self.term.grid().display_offset()
+    }
+
+    pub fn scroll_to_bottom(&mut self) {
+        self.term.scroll_display(Scroll::Bottom);
+    }
+
     pub fn start_selection(&mut self, col: usize, row: usize) {
         self.start_selection_type(col, row, SelectionType::Simple);
     }

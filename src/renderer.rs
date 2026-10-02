@@ -422,8 +422,39 @@ impl Renderer {
             if cursor.is_visible && cursor.row == r {
                 for seg in &cached.segments {
                     if cursor.col >= seg.seg_start && cursor.col <= seg.seg_end + 15 {
-                        let cx = seg.seg_x + (cursor.col - seg.seg_start) as f32 * self.char_width;
-                        cursor_visual_pos = Some((cx, y));
+                        if seg.has_rtl {
+                            if cursor.col >= seg.seg_end {
+                                let text_width = seg
+                                    .buffer
+                                    .layout_runs()
+                                    .map(|run| run.line_w)
+                                    .fold(0.0, f32::max);
+                                cursor_visual_pos = Some((seg.seg_x + text_width, y));
+                            } else {
+                                let mut byte_target: usize = line.cells[seg.seg_start..cursor.col]
+                                    .iter()
+                                    .map(|c| c.c.len_utf8())
+                                    .sum();
+                                byte_target += "\u{200E}".len();
+                                for run in seg.buffer.layout_runs() {
+                                    for glyph in run.glyphs.iter() {
+                                        if byte_target >= glyph.start && byte_target < glyph.end {
+                                            let gx = if glyph.level.is_rtl() {
+                                                glyph.x + glyph.w
+                                            } else {
+                                                glyph.x
+                                            };
+                                            cursor_visual_pos = Some((seg.seg_x + gx, y));
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            let cx =
+                                seg.seg_x + (cursor.col - seg.seg_start) as f32 * self.char_width;
+                            cursor_visual_pos = Some((cx, y));
+                        }
                         break;
                     }
                 }

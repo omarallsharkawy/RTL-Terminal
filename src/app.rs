@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
-use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
+use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey};
 use winit::window::{WindowAttributes, WindowId};
 
 use crate::config::TwittyConfig;
@@ -11,6 +11,7 @@ use crate::pty::Pty;
 use crate::renderer::Renderer;
 use crate::terminal::{SelectionType, Terminal};
 use alacritty_terminal::term::TermMode;
+use alacritty_terminal::vte::ansi::Color as AnsiColor;
 
 #[derive(Debug)]
 #[allow(clippy::enum_variant_names)]
@@ -39,6 +40,7 @@ pub struct App {
     last_click_time: std::time::Instant,
     last_click_pos: (usize, usize),
     click_count: usize,
+    preedit: Option<(String, Option<(usize, usize)>)>,
 }
 
 impl App {
@@ -82,6 +84,7 @@ impl App {
             last_click_time: std::time::Instant::now(),
             last_click_pos: (0, 0),
             click_count: 0,
+            preedit: None,
         }
     }
 
@@ -109,8 +112,6 @@ impl App {
     fn sync_grid(&mut self) {
         if let Some(ref r) = self.renderer {
             let (cols, rows) = r.compute_grid_size();
-            let cols = cols.max(80);
-            let rows = rows.max(24);
             if let Ok(mut term) = self.terminal.lock() {
                 term.resize(cols, rows);
             }
@@ -279,8 +280,6 @@ impl ApplicationHandler<AppEvent> for App {
         };
 
         let (cols, rows) = renderer.compute_grid_size();
-        let cols = cols.max(80);
-        let rows = rows.max(24);
         if let Ok(mut term) = self.terminal.lock() {
             term.resize(cols, rows);
         }
@@ -345,7 +344,7 @@ impl ApplicationHandler<AppEvent> for App {
                 event_loop.exit();
             }
             WindowEvent::Resized(new_size) => {
-                if new_size.width >= 100 && new_size.height >= 100 {
+                if new_size.width > 0 && new_size.height > 0 {
                     if let Some(ref mut r) = self.renderer {
                         r.resize(new_size.width, new_size.height);
                     }
@@ -361,15 +360,28 @@ impl ApplicationHandler<AppEvent> for App {
             }
             WindowEvent::Ime(ime) => match ime {
                 winit::event::Ime::Commit(text) => {
+                    self.preedit = None;
                     if let Some(ref pty) = self.pty {
                         let _ = pty.write(text.as_bytes());
                     }
+                    if let Some(ref r) = self.renderer {
+                        r.window.request_redraw();
+                    }
                 }
-                winit::event::Ime::Preedit(text, _cursor) => {
-                    if !text.is_empty() {
-                        if let Some(ref r) = self.renderer {
-                            r.window.request_redraw();
-                        }
+                winit::event::Ime::Preedit(text, cursor) => {
+                    self.preedit = if text.is_empty() {
+                        None
+                    } else {
+                        Some((text, cursor))
+                    };
+                    if let Some(ref r) = self.renderer {
+                        r.window.request_redraw();
+                    }
+                }
+                winit::event::Ime::Disabled => {
+                    self.preedit = None;
+                    if let Some(ref r) = self.renderer {
+                        r.window.request_redraw();
                     }
                 }
                 _ => {}
@@ -390,12 +402,19 @@ impl ApplicationHandler<AppEvent> for App {
                         let moved = col != self.mouse_down_col || row != self.mouse_down_row;
                         if moved && !self.is_selecting {
                             self.is_selecting = true;
+                            let display_offset = self
+                                .terminal
+                                .lock()
+                                .map(|t| t.display_offset())
+                                .unwrap_or(0);
                             let mode = self
                                 .terminal
                                 .lock()
                                 .map(|t| t.mode())
                                 .unwrap_or(TermMode::NONE);
-                            if mode.intersects(TermMode::MOUSE_MODE) && !self.modifiers.shift_key()
+                            if mode.intersects(TermMode::MOUSE_MODE)
+                                && !self.modifiers.shift_key()
+                                && display_offset == 0
                             {
                                 let release_seq = format!(
                                     "[<0;{};{}m",
@@ -435,6 +454,11 @@ impl ApplicationHandler<AppEvent> for App {
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
+                let display_offset = self
+                    .terminal
+                    .lock()
+                    .map(|t| t.display_offset())
+                    .unwrap_or(0);
                 let mode = self
                     .terminal
                     .lock()
@@ -442,8 +466,9 @@ impl ApplicationHandler<AppEvent> for App {
                     .unwrap_or(TermMode::NONE);
                 let col = self.mouse_col + 1;
                 let row = self.mouse_row + 1;
-                let in_mouse_mode =
-                    mode.intersects(TermMode::MOUSE_MODE) && !self.modifiers.shift_key();
+                let in_mouse_mode = mode.intersects(TermMode::MOUSE_MODE)
+                    && !self.modifiers.shift_key()
+                    && display_offset == 0;
 
                 match state {
                     ElementState::Pressed => match button {
@@ -686,6 +711,19 @@ impl ApplicationHandler<AppEvent> for App {
                     }
                     _ => {}
                 }
+                if event.state.is_pressed()
+                    && event.logical_key == Key::Named(NamedKey::End)
+                    && self.modifiers.control_key()
+                {
+                    if let Ok(mut term) = self.terminal.lock() {
+                        if term.display_offset() > 0 {
+                            term.scroll_to_bottom();
+                            if let Some(ref r) = self.renderer {
+                                r.window.request_redraw();
+                            }
+                        }
+                    }
+                }
                 let app_cursor = self
                     .terminal
                     .lock()
@@ -817,6 +855,27 @@ impl ApplicationHandler<AppEvent> for App {
                     if let Ok(term) = self.terminal.lock() {
                         let (lines, cursor) = term.snapshot();
                         drop(term);
+                        let mut lines = lines;
+                        let mut cursor = cursor;
+                        if let Some((ref preedit_text, _)) = self.preedit {
+                            if cursor.is_visible && cursor.row < lines.len() {
+                                let row = cursor.row;
+                                let mut c_idx = cursor.col;
+                                for ch in preedit_text.chars() {
+                                    if c_idx < lines[row].cells.len() {
+                                        lines[row].cells[c_idx].c = ch;
+                                        lines[row].cells[c_idx].fg = AnsiColor::Named(
+                                            alacritty_terminal::vte::ansi::NamedColor::Yellow,
+                                        );
+                                        lines[row].cells[c_idx].flags.insert(
+                                            alacritty_terminal::term::cell::Flags::UNDERLINE,
+                                        );
+                                        c_idx += 1;
+                                    }
+                                }
+                                cursor.col = c_idx;
+                            }
+                        }
                         if let Err(e) = r.render(&lines, &cursor) {
                             eprintln!("Render error: {:?}", e);
                         }

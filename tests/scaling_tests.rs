@@ -27,8 +27,8 @@ fn test_high_dpi_scaling_grid_dimensions() {
             phys_height,
             font_size,
             scale,
-            padding_left * scale,
-            padding_top * scale,
+            padding_left,
+            padding_top,
             None,
         );
 
