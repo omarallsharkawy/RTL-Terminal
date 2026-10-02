@@ -248,6 +248,7 @@ fn set_clipboard_text(text: &str) {
             }
         }
 
+        #[cfg(not(target_os = "linux"))]
         if let Ok(mut cb) = arboard::Clipboard::new() {
             let _ = cb.set_text(&text);
         }

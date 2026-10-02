@@ -142,6 +142,17 @@ pub fn handle_key_raw_mode(
     let shift = modifiers.shift_key();
     let alt = modifiers.alt_key();
 
+    if !ctrl {
+        if let Key::Character(ref s) = logical {
+            if let Some(ch) = s.chars().next() {
+                let code = ch as u32;
+                if (1..=26).contains(&code) && code != 9 && code != 10 && code != 13 {
+                    ctrl = true;
+                }
+            }
+        }
+    }
+
     // Ctrl + Shift + F -> Scrollback Search
     if ctrl && shift {
         if let Some(KeyCode::KeyF) = physical {
@@ -154,20 +165,40 @@ pub fn handle_key_raw_mode(
         }
     }
 
+    // Standard clipboard, zoom and edit shortcuts always take precedence
+    if ctrl {
+        if let Some(key_code) = physical {
+            match key_code {
+                KeyCode::Equal | KeyCode::NumpadAdd => return Some(InputAction::ZoomIn),
+                KeyCode::Minus | KeyCode::NumpadSubtract => return Some(InputAction::ZoomOut),
+                KeyCode::Digit0 | KeyCode::Numpad0 => return Some(InputAction::ZoomReset),
+                KeyCode::BracketLeft => return Some(InputAction::Bytes(vec![27])),
+                KeyCode::Backslash => return Some(InputAction::Bytes(vec![28])),
+                KeyCode::BracketRight => return Some(InputAction::Bytes(vec![29])),
+                _ => {}
+            }
+        }
+
+        if let Some(letter) = match_ctrl_letter(physical, logical) {
+            match letter {
+                'c' => {
+                    if shift {
+                        return Some(InputAction::Copy);
+                    } else {
+                        return Some(InputAction::CopyOrInterrupt);
+                    }
+                }
+                'v' => return Some(InputAction::Paste),
+                'x' => return Some(InputAction::Cut),
+                'a' if shift => return Some(InputAction::SelectAll),
+                _ => {}
+            }
+        }
+    }
+
     // Kitty Keyboard Protocol (CSI u)
     let mod_code = 1 + (shift as u8) + (alt as u8 * 2) + (ctrl as u8 * 4);
     if kitty_keyboard && mod_code > 1 {
-        if ctrl && shift {
-            if let Some(KeyCode::KeyC) = physical {
-                return Some(InputAction::Copy);
-            }
-            if let Some(KeyCode::KeyV) = physical {
-                return Some(InputAction::Paste);
-            }
-            if let Some(KeyCode::KeyA) = physical {
-                return Some(InputAction::SelectAll);
-            }
-        }
         match logical {
             Key::Named(NamedKey::Enter) => {
                 return Some(InputAction::Bytes(
@@ -213,30 +244,8 @@ pub fn handle_key_raw_mode(
 
     // 1. Control Key Combinations (works in Arabic & English layout, physical & logical)
     if ctrl {
-        // Zoom shortcuts
-        if let Some(key_code) = physical {
-            match key_code {
-                KeyCode::Equal | KeyCode::NumpadAdd => return Some(InputAction::ZoomIn),
-                KeyCode::Minus | KeyCode::NumpadSubtract => return Some(InputAction::ZoomOut),
-                KeyCode::Digit0 | KeyCode::Numpad0 => return Some(InputAction::ZoomReset),
-                KeyCode::BracketLeft => return Some(InputAction::Bytes(vec![27])),
-                KeyCode::Backslash => return Some(InputAction::Bytes(vec![28])),
-                KeyCode::BracketRight => return Some(InputAction::Bytes(vec![29])),
-                _ => {}
-            }
-        }
-
         if let Some(letter) = match_ctrl_letter(physical, logical) {
             match letter {
-                'c' => {
-                    if shift {
-                        return Some(InputAction::Copy);
-                    } else {
-                        return Some(InputAction::CopyOrInterrupt);
-                    }
-                }
-                'v' => return Some(InputAction::Paste),
-                'x' => return Some(InputAction::Cut),
                 'z' => {
                     if shift {
                         return Some(InputAction::Bytes(vec![25])); // Redo / ^Y
@@ -245,11 +254,7 @@ pub fn handle_key_raw_mode(
                     }
                 }
                 'a' => {
-                    if shift {
-                        return Some(InputAction::SelectAll);
-                    } else {
-                        return Some(InputAction::Bytes(vec![1]));
-                    }
+                    return Some(InputAction::Bytes(vec![1]));
                 }
                 ch if ch.is_ascii_lowercase() => {
                     let code = (ch as u8) - b'a' + 1;

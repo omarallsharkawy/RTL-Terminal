@@ -326,4 +326,42 @@ fn test_kitty_keyboard_protocol_csi_u_encoding() {
     );
     assert_eq!(search_action, Some(InputAction::Search));
 }
+
+#[test]
+fn test_ctrl_c_and_v_in_kitty_mode() {
+    let mut ctrl_mods = ModifiersState::empty();
+    ctrl_mods.insert(ModifiersState::CONTROL);
+
+    // Ctrl+C in Kitty mode MUST still return CopyOrInterrupt
+    let ctrl_c = handle_key_raw_mode(
+        Some(KeyCode::KeyC),
+        &Key::Character("c".into()),
+        None,
+        ElementState::Pressed,
+        ctrl_mods,
+        false,
+        true,
+    );
+    assert_eq!(
+        ctrl_c,
+        Some(InputAction::CopyOrInterrupt),
+        "Ctrl+C in Kitty mode must produce CopyOrInterrupt, not CSI 99;5u"
+    );
+
+    // Ctrl+V in Kitty mode MUST still return Paste
+    let ctrl_v = handle_key_raw_mode(
+        Some(KeyCode::KeyV),
+        &Key::Character("v".into()),
+        None,
+        ElementState::Pressed,
+        ctrl_mods,
+        false,
+        true,
+    );
+    assert_eq!(
+        ctrl_v,
+        Some(InputAction::Paste),
+        "Ctrl+V in Kitty mode must produce Paste, not CSI 118;5u"
+    );
+}
 use twitty::input::handle_key_raw_mode;
