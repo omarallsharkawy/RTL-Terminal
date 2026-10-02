@@ -7,6 +7,8 @@ pub struct TwittyConfig {
     pub font_size: f32,
     pub background_opacity: f32,
     pub cursor_style: String,
+    #[serde(default)]
+    pub font_family: Option<String>,
 }
 
 impl Default for TwittyConfig {
@@ -15,6 +17,7 @@ impl Default for TwittyConfig {
             font_size: 14.5,
             background_opacity: 0.92,
             cursor_style: "beam".to_string(),
+            font_family: None,
         }
     }
 }

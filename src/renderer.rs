@@ -31,6 +31,7 @@ pub struct Renderer {
     pub is_srgb: bool,
     pub opacity: f32,
     pub cursor_style: String,
+    pub font_family: Option<String>,
     pub row_caches: Vec<CachedRow>,
 }
 
@@ -40,6 +41,7 @@ impl Renderer {
         initial_font_size: f32,
         opacity: f32,
         cursor_style: String,
+        font_family: Option<String>,
     ) -> anyhow::Result<Self> {
         let size = window.inner_size();
         let scale = window.scale_factor() as f32;
@@ -149,8 +151,12 @@ impl Renderer {
         let padding_left = 8.0;
         let padding_top = 6.0;
 
-        let char_width =
-            Self::measure_char_width(&mut font_system, effective_font_size, line_height);
+        let char_width = Self::measure_char_width(
+            &mut font_system,
+            effective_font_size,
+            line_height,
+            font_family.as_deref(),
+        );
 
         Ok(Self {
             window,
@@ -173,6 +179,7 @@ impl Renderer {
             is_srgb,
             opacity: opacity.clamp(0.1, 1.0),
             cursor_style,
+            font_family,
             row_caches: Vec::new(),
         })
     }
@@ -183,8 +190,12 @@ impl Renderer {
         let effective_font_size = self.font_size * scale;
         self.line_height = (effective_font_size * 1.55).round();
 
-        self.char_width =
-            Self::measure_char_width(&mut self.font_system, effective_font_size, self.line_height);
+        self.char_width = Self::measure_char_width(
+            &mut self.font_system,
+            effective_font_size,
+            self.line_height,
+            self.font_family.as_deref(),
+        );
         self.row_caches.clear();
     }
 
@@ -205,12 +216,17 @@ impl Renderer {
         font_system: &mut FontSystem,
         effective_font_size: f32,
         line_height: f32,
+        font_family: Option<&str>,
     ) -> f32 {
         let metrics = Metrics::new(effective_font_size, line_height);
         let mut test_buffer = Buffer::new_empty(metrics);
+        let family = match font_family {
+            Some(name) => Family::Name(name),
+            None => Family::Monospace,
+        };
         test_buffer.set_text(
             "MMMMMMMMMM",
-            &Attrs::new().family(Family::Monospace),
+            &Attrs::new().family(family),
             Shaping::Basic,
             None,
         );
@@ -243,6 +259,7 @@ impl Renderer {
     }
 
     #[allow(dead_code)]
+    #[allow(clippy::too_many_arguments)]
     pub fn compute_scaled_grid_size(
         font_system: &mut FontSystem,
         phys_width: u32,
@@ -251,10 +268,12 @@ impl Renderer {
         scale: f32,
         padding_left: f32,
         padding_top: f32,
+        font_family: Option<&str>,
     ) -> (usize, usize, f32, f32) {
         let effective_font_size = font_size * scale;
         let line_height = (effective_font_size * 1.55).round();
-        let char_width = Self::measure_char_width(font_system, effective_font_size, line_height);
+        let char_width =
+            Self::measure_char_width(font_system, effective_font_size, line_height, font_family);
         let (cols, rows) = Self::compute_grid_dimensions(
             phys_width,
             phys_height,
@@ -314,7 +333,11 @@ impl Renderer {
         let scale = self.window.scale_factor() as f32;
         let effective_font_size = self.font_size * scale;
         let metrics = Metrics::new(effective_font_size, self.line_height);
-        let default_attrs = Attrs::new().family(Family::Monospace);
+        let family = match self.font_family.as_deref() {
+            Some(name) => Family::Name(name),
+            None => Family::Monospace,
+        };
+        let default_attrs = Attrs::new().family(family);
         let default_bg = self.palette.background;
         let mut default_bg_color = self.to_target_color(default_bg);
         default_bg_color[3] = self.opacity;

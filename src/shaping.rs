@@ -171,6 +171,7 @@ pub fn shape_row(
             let mut cur_text = String::new();
             let mut cur_attrs: Option<Attrs> = None;
             let mut seg_has_rtl = false;
+            let mut seg_needs_fallback = false;
 
             for cell in line.cells[seg_start..seg_end].iter() {
                 if cell
@@ -178,6 +179,10 @@ pub fn shape_row(
                     .contains(alacritty_terminal::term::cell::Flags::WIDE_CHAR_SPACER)
                 {
                     continue;
+                }
+
+                if !cell.c.is_ascii() || !cell.zerowidth.is_empty() {
+                    seg_needs_fallback = true;
                 }
 
                 let class = bidi_class(cell.c);
@@ -245,7 +250,7 @@ pub fn shape_row(
                     .map(|(s, a)| (s.as_str(), a.clone()))
                     .collect();
 
-                let shaping_mode = if seg_has_rtl {
+                let shaping_mode = if seg_has_rtl || seg_needs_fallback {
                     Shaping::Advanced
                 } else {
                     Shaping::Basic

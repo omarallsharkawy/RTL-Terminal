@@ -268,6 +268,7 @@ impl ApplicationHandler<AppEvent> for App {
             self.config.font_size,
             self.config.background_opacity,
             self.config.cursor_style.clone(),
+            self.config.font_family.clone(),
         )) {
             Ok(r) => r,
             Err(e) => {

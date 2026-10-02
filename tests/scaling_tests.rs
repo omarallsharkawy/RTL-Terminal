@@ -29,6 +29,7 @@ fn test_high_dpi_scaling_grid_dimensions() {
             scale,
             padding_left * scale,
             padding_top * scale,
+            None,
         );
 
         // Terminal must maintain standard minimum viewport density across all scales
