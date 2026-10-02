@@ -656,15 +656,21 @@ impl ApplicationHandler<AppEvent> for App {
                         .unwrap_or(TermMode::NONE);
                     let col = self.mouse_col + 1;
                     let row = self.mouse_row + 1;
+                    let display_offset = self
+                        .terminal
+                        .lock()
+                        .map(|t| t.display_offset())
+                        .unwrap_or(0);
+                    let prefer_scrollback = self.modifiers.shift_key() || display_offset > 0;
 
-                    if mode.intersects(TermMode::MOUSE_MODE) {
+                    if mode.intersects(TermMode::MOUSE_MODE) && !prefer_scrollback {
                         // Send SGR mouse wheel reporting (64 = up, 65 = down)
                         let btn = if delta_y > 0.0 { 64 } else { 65 };
                         let seq = format!("[<{};{};{}M", btn, col, row);
                         if let Some(ref pty) = self.pty {
                             let _ = pty.write(seq.as_bytes());
                         }
-                    } else if mode.contains(TermMode::ALT_SCREEN) {
+                    } else if mode.contains(TermMode::ALT_SCREEN) && !prefer_scrollback {
                         // Alternate screen without mouse mode (vim, less, opencode): send arrow keys
                         let key = if delta_y > 0.0 {
                             b"OAOAOA"
@@ -679,6 +685,9 @@ impl ApplicationHandler<AppEvent> for App {
                         let lines = if delta_y > 0.0 { 3 } else { -3 };
                         if let Ok(mut term) = self.terminal.lock() {
                             term.scroll_display(lines);
+                            if self.is_selecting || self.mouse_down {
+                                term.update_selection(self.mouse_col, self.mouse_row);
+                            }
                         }
                         if let Some(ref r) = self.renderer {
                             r.window.request_redraw();
@@ -724,6 +733,32 @@ impl ApplicationHandler<AppEvent> for App {
                         }
                     }
                 }
+
+                // Shift + PageUp / PageDown for keyboard scrollback
+                if event.state.is_pressed() && self.modifiers.shift_key() {
+                    match event.logical_key {
+                        Key::Named(NamedKey::PageUp) => {
+                            if let Ok(mut term) = self.terminal.lock() {
+                                term.scroll_display(20);
+                                if let Some(ref r) = self.renderer {
+                                    r.window.request_redraw();
+                                }
+                            }
+                            return;
+                        }
+                        Key::Named(NamedKey::PageDown) => {
+                            if let Ok(mut term) = self.terminal.lock() {
+                                term.scroll_display(-20);
+                                if let Some(ref r) = self.renderer {
+                                    r.window.request_redraw();
+                                }
+                            }
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
+
                 let app_cursor = self
                     .terminal
                     .lock()
@@ -862,7 +897,13 @@ impl ApplicationHandler<AppEvent> for App {
                                 let row = cursor.row;
                                 let mut c_idx = cursor.col;
                                 for ch in preedit_text.chars() {
-                                    if c_idx < lines[row].cells.len() {
+                                    if unicode_width::UnicodeWidthChar::width(ch) == Some(0) {
+                                        // Combining mark / Tashkeel: attach to previous cell if exists
+                                        if c_idx > cursor.col && c_idx - 1 < lines[row].cells.len()
+                                        {
+                                            lines[row].cells[c_idx - 1].zerowidth.push(ch);
+                                        }
+                                    } else if c_idx < lines[row].cells.len() {
                                         lines[row].cells[c_idx].c = ch;
                                         lines[row].cells[c_idx].fg = AnsiColor::Named(
                                             alacritty_terminal::vte::ansi::NamedColor::Yellow,
@@ -870,7 +911,9 @@ impl ApplicationHandler<AppEvent> for App {
                                         lines[row].cells[c_idx].flags.insert(
                                             alacritty_terminal::term::cell::Flags::UNDERLINE,
                                         );
-                                        c_idx += 1;
+                                        let w =
+                                            unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+                                        c_idx += w;
                                     }
                                 }
                                 cursor.col = c_idx;

@@ -26,6 +26,7 @@ pub struct Renderer {
     pub char_width: f32,
     pub line_height: f32,
     pub font_size: f32,
+    pub scale: f32,
     pub padding_left: f32,
     pub padding_top: f32,
     pub is_srgb: bool,
@@ -174,6 +175,7 @@ impl Renderer {
             char_width,
             line_height,
             font_size,
+            scale,
             padding_left,
             padding_top,
             is_srgb,
@@ -185,9 +187,9 @@ impl Renderer {
     }
 
     pub fn set_font_size(&mut self, new_size: f32) {
-        let scale = self.window.scale_factor() as f32;
+        self.scale = self.window.scale_factor() as f32;
         self.font_size = new_size.clamp(8.0, 48.0);
-        let effective_font_size = self.font_size * scale;
+        let effective_font_size = self.font_size * self.scale;
         self.line_height = (effective_font_size * 1.55).round();
 
         self.char_width = Self::measure_char_width(
@@ -201,6 +203,12 @@ impl Renderer {
 
     pub fn resize(&mut self, width: u32, height: u32) {
         if width > 0 && height > 0 {
+            let new_scale = self.window.scale_factor() as f32;
+            if (new_scale - self.scale).abs() > f32::EPSILON {
+                self.scale = new_scale;
+                self.set_font_size(self.font_size);
+            }
+
             self.config.width = width;
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
@@ -330,8 +338,7 @@ impl Renderer {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let scale = self.window.scale_factor() as f32;
-        let effective_font_size = self.font_size * scale;
+        let effective_font_size = self.font_size * self.scale;
         let metrics = Metrics::new(effective_font_size, self.line_height);
         let family = match self.font_family.as_deref() {
             Some(name) => Family::Name(name),

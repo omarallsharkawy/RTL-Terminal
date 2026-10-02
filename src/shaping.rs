@@ -12,7 +12,6 @@ pub struct CachedSegment {
     pub seg_end: usize,
     pub seg_x: f32,
     pub buffer: Buffer,
-    #[allow(dead_code)]
     pub has_rtl: bool,
 }
 

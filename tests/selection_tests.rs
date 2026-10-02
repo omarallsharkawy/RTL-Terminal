@@ -99,4 +99,26 @@ fn test_selection_in_scrollback() {
         "Selected scrolled text should contain 'Line 027', got: {}",
         unwrapped
     );
+
+    let (lines, _) = term.snapshot();
+    assert!(
+        lines[0].cells[0].is_selected,
+        "Scrolled cell must be marked is_selected"
+    );
+}
+
+#[test]
+fn test_selection_in_alt_screen() {
+    use alacritty_terminal::term::TermMode;
+    let mut term = Terminal::new(80, 24, |_| {});
+    // Enter alternate screen: \x1b[?1049h
+    term.process_bytes(b"\x1b[?1049hClaude Code TUI text on alt screen\r\n");
+    assert!(term.mode().contains(TermMode::ALT_SCREEN));
+
+    term.start_selection(0, 0);
+    term.update_selection(11, 0);
+
+    let text = term.selection_text();
+    assert!(text.is_some());
+    assert!(text.unwrap().contains("Claude Code"));
 }
