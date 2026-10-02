@@ -297,19 +297,37 @@ fn test_kitty_keyboard_protocol_csi_u_encoding() {
         Some(InputAction::Bytes(b"\x1b[13;2u".to_vec()))
     );
 
-    // Ctrl + a in Kitty mode -> CSI 97 ; 5 u
-    let mut ctrl_mods = ModifiersState::empty();
-    ctrl_mods.insert(ModifiersState::CONTROL);
+    // Ctrl + Shift + u in Kitty mode -> CSI 117 ; 6 u
+    let mut ctrl_shift_mod = ModifiersState::empty();
+    ctrl_shift_mod.insert(ModifiersState::CONTROL);
+    ctrl_shift_mod.insert(ModifiersState::SHIFT);
+    let ctrl_shift_u = handle_key_raw_mode(
+        Some(KeyCode::KeyU),
+        &Key::Character("u".into()),
+        None,
+        ElementState::Pressed,
+        ctrl_shift_mod,
+        false,
+        true,
+    );
+    assert_eq!(
+        ctrl_shift_u,
+        Some(InputAction::Bytes(b"\x1b[117;6u".to_vec()))
+    );
+
+    // Ctrl + a without Shift in Kitty mode -> standard byte 1 (^A)
+    let mut ctrl_only = ModifiersState::empty();
+    ctrl_only.insert(ModifiersState::CONTROL);
     let ctrl_a = handle_key_raw_mode(
         Some(KeyCode::KeyA),
         &Key::Character("a".into()),
         None,
         ElementState::Pressed,
-        ctrl_mods,
+        ctrl_only,
         false,
         true,
     );
-    assert_eq!(ctrl_a, Some(InputAction::Bytes(b"\x1b[97;5u".to_vec())));
+    assert_eq!(ctrl_a, Some(InputAction::Bytes(vec![1])));
 
     // Ctrl + Shift + F -> Search (app shortcut precedence)
     let mut ctrl_shift = ModifiersState::empty();
@@ -363,5 +381,31 @@ fn test_ctrl_c_and_v_in_kitty_mode() {
         Some(InputAction::Paste),
         "Ctrl+V in Kitty mode must produce Paste, not CSI 118;5u"
     );
+
+    // Ctrl+D, Ctrl+E, Ctrl+K in Kitty mode MUST produce standard control characters (4, 5, 11)
+    for (key_code, ch, expected_byte) in [
+        (KeyCode::KeyD, "d", 4u8),
+        (KeyCode::KeyE, "e", 5u8),
+        (KeyCode::KeyK, "k", 11u8),
+        (KeyCode::KeyU, "u", 21u8),
+        (KeyCode::KeyW, "w", 23u8),
+    ] {
+        let action = handle_key_raw_mode(
+            Some(key_code),
+            &Key::Character(ch.into()),
+            None,
+            ElementState::Pressed,
+            ctrl_mods,
+            false,
+            true, // kitty_keyboard = true!
+        );
+        assert_eq!(
+            action,
+            Some(InputAction::Bytes(vec![expected_byte])),
+            "Ctrl+{} in Kitty mode must produce byte {}",
+            ch,
+            expected_byte
+        );
+    }
 }
 use twitty::input::handle_key_raw_mode;

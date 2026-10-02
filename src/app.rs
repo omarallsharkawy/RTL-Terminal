@@ -200,6 +200,8 @@ fn get_clipboard_text() -> Option<String> {
 fn set_clipboard_text(text: &str) {
     let text = text.to_string();
     std::thread::spawn(move || {
+        #[allow(unused_mut)]
+        let mut copied = false;
         #[cfg(target_os = "linux")]
         {
             use std::io::Write;
@@ -212,10 +214,12 @@ fn set_clipboard_text(text: &str) {
                 if let Some(mut stdin) = child.stdin.take() {
                     let _ = stdin.write_all(text.as_bytes());
                 }
-                let _ = child.wait();
+                if child.wait().map(|s| s.success()).unwrap_or(false) {
+                    copied = true;
+                }
             }
 
-            // 1. Copy to standard Wayland clipboard
+            // 2. Copy to standard Wayland clipboard
             if let Ok(mut child) = std::process::Command::new("wl-copy")
                 .stdin(std::process::Stdio::piped())
                 .spawn()
@@ -223,9 +227,11 @@ fn set_clipboard_text(text: &str) {
                 if let Some(mut stdin) = child.stdin.take() {
                     let _ = stdin.write_all(text.as_bytes());
                 }
-                let _ = child.wait();
+                if child.wait().map(|s| s.success()).unwrap_or(false) {
+                    copied = true;
+                }
             }
-            // 2. Also copy to primary selection
+            // 3. Also copy to primary selection
             if let Ok(mut child) = std::process::Command::new("wl-copy")
                 .arg("--primary")
                 .stdin(std::process::Stdio::piped())
@@ -236,21 +242,13 @@ fn set_clipboard_text(text: &str) {
                 }
                 let _ = child.wait();
             }
-            // 3. Fallback for X11
-            if let Ok(mut child) = std::process::Command::new("xclip")
-                .args(["-selection", "clipboard"])
-                .stdin(std::process::Stdio::piped())
-                .spawn()
-            {
-                if let Some(mut stdin) = child.stdin.take() {
-                    let _ = stdin.write_all(text.as_bytes());
-                }
-            }
         }
 
-        #[cfg(not(target_os = "linux"))]
-        if let Ok(mut cb) = arboard::Clipboard::new() {
-            let _ = cb.set_text(&text);
+        // 4. Fallback for non-Linux or systems without native Wayland clipboard tools
+        if !copied {
+            if let Ok(mut cb) = arboard::Clipboard::new() {
+                let _ = cb.set_text(&text);
+            }
         }
     });
 }

@@ -191,6 +191,19 @@ pub fn handle_key_raw_mode(
                 'v' => return Some(InputAction::Paste),
                 'x' => return Some(InputAction::Cut),
                 'a' if shift => return Some(InputAction::SelectAll),
+                'z' => {
+                    if shift {
+                        return Some(InputAction::Bytes(vec![25])); // Redo / ^Y
+                    } else {
+                        return Some(InputAction::Bytes(vec![26])); // Undo / SIGTSTP / ^Z
+                    }
+                }
+                // When Shift is not held, standard Ctrl+Letter (Ctrl+D, Ctrl+E, Ctrl+K, etc.)
+                // must always map to their standard control character codes (1..=26)
+                ch if ch.is_ascii_lowercase() && !shift && !alt => {
+                    let code = (ch as u8) - b'a' + 1;
+                    return Some(InputAction::Bytes(vec![code]));
+                }
                 _ => {}
             }
         }
@@ -227,40 +240,6 @@ pub fn handle_key_raw_mode(
                         format!("\x1b[{};{}u", cp, mod_code).into_bytes(),
                     ));
                 }
-            }
-        }
-    }
-
-    if !ctrl {
-        if let Key::Character(ref s) = logical {
-            if let Some(ch) = s.chars().next() {
-                let code = ch as u32;
-                if (1..=26).contains(&code) && code != 9 && code != 10 && code != 13 {
-                    ctrl = true;
-                }
-            }
-        }
-    }
-
-    // 1. Control Key Combinations (works in Arabic & English layout, physical & logical)
-    if ctrl {
-        if let Some(letter) = match_ctrl_letter(physical, logical) {
-            match letter {
-                'z' => {
-                    if shift {
-                        return Some(InputAction::Bytes(vec![25])); // Redo / ^Y
-                    } else {
-                        return Some(InputAction::Bytes(vec![26])); // Undo / SIGTSTP / ^Z
-                    }
-                }
-                'a' => {
-                    return Some(InputAction::Bytes(vec![1]));
-                }
-                ch if ch.is_ascii_lowercase() => {
-                    let code = (ch as u8) - b'a' + 1;
-                    return Some(InputAction::Bytes(vec![code]));
-                }
-                _ => {}
             }
         }
     }
