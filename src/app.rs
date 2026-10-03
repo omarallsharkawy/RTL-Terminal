@@ -45,6 +45,8 @@ pub struct App {
     search_query: String,
     search_matches: Vec<(i32, usize, usize)>,
     search_match_idx: usize,
+    is_dirty: bool,
+    last_render_time: std::time::Instant,
 }
 
 impl App {
@@ -94,6 +96,8 @@ impl App {
             search_query: String::new(),
             search_matches: Vec::new(),
             search_match_idx: 0,
+            is_dirty: false,
+            last_render_time: std::time::Instant::now(),
         }
     }
 
@@ -304,8 +308,13 @@ impl ApplicationHandler<AppEvent> for App {
                 if let Ok(mut term) = self.terminal.lock() {
                     term.process_bytes(&data);
                 }
-                if let Some(ref r) = self.renderer {
-                    r.window.request_redraw();
+                self.is_dirty = true;
+                let now = std::time::Instant::now();
+                // High-throughput 120 FPS batching threshold (8ms)
+                if now.duration_since(self.last_render_time).as_millis() >= 8 {
+                    if let Some(ref r) = self.renderer {
+                        r.window.request_redraw();
+                    }
                 }
             }
             AppEvent::PtyWriteResponse(text) => {
@@ -982,6 +991,8 @@ impl ApplicationHandler<AppEvent> for App {
                 }
             }
             WindowEvent::RedrawRequested => {
+                self.is_dirty = false;
+                self.last_render_time = std::time::Instant::now();
                 if let Some(ref mut r) = self.renderer {
                     if let Ok(term) = self.terminal.lock() {
                         let (lines, cursor) = term.snapshot();
@@ -1084,6 +1095,14 @@ impl ApplicationHandler<AppEvent> for App {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        if self.is_dirty {
+            if let Some(ref r) = self.renderer {
+                r.window.request_redraw();
+            }
         }
     }
 }

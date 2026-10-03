@@ -76,3 +76,23 @@ fn test_palette_resolution() {
     let color_232 = palette.resolve(AnsiColor::Indexed(232), false);
     assert_eq!(color_232, Rgba::from_rgb8(8, 8, 8));
 }
+
+#[test]
+fn test_ansi_muted_and_black_contrast() {
+    let palette = Palette::default();
+
+    // ANSI 0 (Black) must be clearly distinct from the background color
+    let ansi_0 = palette.resolve(AnsiColor::Named(NamedColor::Black), false);
+    assert_ne!(
+        ansi_0, palette.background,
+        "ANSI 0 must be distinct from terminal background"
+    );
+
+    // ANSI 8 (Bright Black / Muted Gray) used for CLI secondary info must have crisp luminance
+    let ansi_8 = palette.resolve(AnsiColor::Named(NamedColor::BrightBlack), false);
+    assert!(
+        ansi_8.r > 0.4 && ansi_8.g > 0.4 && ansi_8.b > 0.5,
+        "ANSI 8 must have high visibility for CLI muted labels, got: {:?}",
+        ansi_8
+    );
+}

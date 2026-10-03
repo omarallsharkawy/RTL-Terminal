@@ -57,13 +57,13 @@ pub struct Palette {
 
 impl Default for Palette {
     fn default() -> Self {
-        // Deep dark terminal palette (Tokyo Night / OpenCode compatible)
+        // Deep dark terminal palette (Tokyo Night Enhanced for crisp CLI contrast)
         Self {
             background: Rgba::from_rgb8(21, 22, 30), // #15161e (crisp dark background)
             foreground: Rgba::from_rgb8(192, 202, 245), // #c0caf5
             cursor: Rgba::from_rgb8(245, 224, 220),  // #f5e0dc
             ansi: [
-                Rgba::from_rgb8(21, 22, 30),    // 0: Black
+                Rgba::from_rgb8(36, 40, 59), // 0: Black (#24283b, distinct from background)
                 Rgba::from_rgb8(247, 118, 142), // 1: Red
                 Rgba::from_rgb8(158, 206, 106), // 2: Green
                 Rgba::from_rgb8(224, 175, 104), // 3: Yellow
@@ -71,14 +71,14 @@ impl Default for Palette {
                 Rgba::from_rgb8(187, 154, 247), // 5: Magenta
                 Rgba::from_rgb8(125, 207, 255), // 6: Cyan
                 Rgba::from_rgb8(169, 177, 214), // 7: White
-                Rgba::from_rgb8(65, 72, 104),   // 8: Bright Black (gutter/borders)
-                Rgba::from_rgb8(247, 118, 142), // 9: Bright Red
-                Rgba::from_rgb8(158, 206, 106), // 10: Bright Green
-                Rgba::from_rgb8(224, 175, 104), // 11: Bright Yellow
-                Rgba::from_rgb8(122, 162, 247), // 12: Bright Blue
+                Rgba::from_rgb8(120, 124, 153), // 8: Bright Black / Muted Gray (#787c99, clear contrast)
+                Rgba::from_rgb8(255, 122, 147), // 9: Bright Red
+                Rgba::from_rgb8(185, 242, 124), // 10: Bright Green
+                Rgba::from_rgb8(255, 158, 100), // 11: Bright Yellow
+                Rgba::from_rgb8(125, 166, 255), // 12: Bright Blue
                 Rgba::from_rgb8(187, 154, 247), // 13: Bright Magenta
-                Rgba::from_rgb8(125, 207, 255), // 14: Bright Cyan
-                Rgba::from_rgb8(192, 202, 245), // 15: Bright White
+                Rgba::from_rgb8(13, 185, 215),  // 14: Bright Cyan
+                Rgba::from_rgb8(200, 210, 250), // 15: Bright White
             ],
         }
     }

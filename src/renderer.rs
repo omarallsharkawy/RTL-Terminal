@@ -1,6 +1,7 @@
 use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping};
 use glyphon::{
-    Cache, Resolution, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
+    Cache, ColorMode, Resolution, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer,
+    Viewport,
 };
 use std::sync::Arc;
 use winit::window::Window;
@@ -139,7 +140,13 @@ impl Renderer {
         let mut viewport = Viewport::new(&device, &cache);
         viewport.update(&queue, Resolution { width, height });
 
-        let mut text_atlas = TextAtlas::new(&device, &queue, &cache, format);
+        let color_mode = if is_srgb {
+            ColorMode::Accurate
+        } else {
+            ColorMode::Web
+        };
+        let mut text_atlas =
+            TextAtlas::with_color_mode(&device, &queue, &cache, format, color_mode);
         let text_renderer = TextRenderer::new(
             &mut text_atlas,
             &device,

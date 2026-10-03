@@ -189,11 +189,19 @@ pub fn shape_row(
                     seg_has_rtl = true;
                 }
 
-                let fg = if cell.is_selected {
+                let mut fg = if cell.is_selected {
                     Rgba::from_rgb8(245, 245, 255)
                 } else {
                     palette.resolve(cell.fg, false)
                 };
+                if cell
+                    .flags
+                    .contains(alacritty_terminal::term::cell::Flags::DIM)
+                {
+                    fg.r *= 0.7;
+                    fg.g *= 0.7;
+                    fg.b *= 0.7;
+                }
                 let mut attrs = default_attrs.clone().color(fg.to_glyphon());
                 if cell
                     .flags
