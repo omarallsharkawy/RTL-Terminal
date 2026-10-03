@@ -1,4 +1,4 @@
-use twitty::input::{handle_key_raw, InputAction};
+use twitty::input::{handle_key_raw, handle_key_raw_mode, InputAction};
 use winit::event::ElementState;
 use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey};
 
@@ -407,5 +407,90 @@ fn test_ctrl_c_and_v_in_kitty_mode() {
             expected_byte
         );
     }
+
+    // Normal mode (kitty_keyboard = false): Ctrl+Shift+Letter must still produce standard control bytes
+    let mut ctrl_shift = ModifiersState::empty();
+    ctrl_shift.insert(ModifiersState::CONTROL);
+    ctrl_shift.insert(ModifiersState::SHIFT);
+
+    let ctrl_shift_p = handle_key_raw_mode(
+        Some(KeyCode::KeyP),
+        &Key::Character("P".into()),
+        None,
+        ElementState::Pressed,
+        ctrl_shift,
+        false,
+        false,
+    );
+    assert_eq!(
+        ctrl_shift_p,
+        Some(InputAction::Bytes(vec![16])), //  for P
+        "Ctrl+Shift+P in normal mode must produce byte 16"
+    );
+
+    let ctrl_shift_d = handle_key_raw_mode(
+        Some(KeyCode::KeyD),
+        &Key::Character("D".into()),
+        None,
+        ElementState::Pressed,
+        ctrl_shift,
+        false,
+        false,
+    );
+    assert_eq!(
+        ctrl_shift_d,
+        Some(InputAction::Bytes(vec![4])), //  for D
+        "Ctrl+Shift+D in normal mode must produce byte 4"
+    );
+
+    // Normal mode: Ctrl+Alt+D must produce ESC + byte 4
+    let mut ctrl_alt = ModifiersState::empty();
+    ctrl_alt.insert(ModifiersState::CONTROL);
+    ctrl_alt.insert(ModifiersState::ALT);
+    let ctrl_alt_d = handle_key_raw_mode(
+        Some(KeyCode::KeyD),
+        &Key::Character("d".into()),
+        None,
+        ElementState::Pressed,
+        ctrl_alt,
+        false,
+        false,
+    );
+    assert_eq!(
+        ctrl_alt_d,
+        Some(InputAction::Bytes(vec![0x1b, 4])),
+        "Ctrl+Alt+D in normal mode must produce ESC + byte 4"
+    );
+
+    // Ctrl+Space in normal mode must produce NUL ( )
+    let ctrl_space = handle_key_raw_mode(
+        Some(KeyCode::Space),
+        &Key::Named(NamedKey::Space),
+        None,
+        ElementState::Pressed,
+        ctrl_mods,
+        false,
+        false,
+    );
+    assert_eq!(
+        ctrl_space,
+        Some(InputAction::Bytes(vec![0])),
+        "Ctrl+Space in normal mode must produce NUL (0)"
+    );
+
+    // Ctrl+Space in Kitty mode must produce CSI 32 ; 5 u
+    let ctrl_space_kitty = handle_key_raw_mode(
+        Some(KeyCode::Space),
+        &Key::Named(NamedKey::Space),
+        None,
+        ElementState::Pressed,
+        ctrl_mods,
+        false,
+        true,
+    );
+    assert_eq!(
+        ctrl_space_kitty,
+        Some(InputAction::Bytes(b"\x1b[32;5u".to_vec())),
+        "Ctrl+Space in Kitty mode must produce CSI 32;5u"
+    );
 }
-use twitty::input::handle_key_raw_mode;

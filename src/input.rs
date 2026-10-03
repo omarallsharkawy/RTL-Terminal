@@ -153,6 +153,8 @@ pub fn handle_key_raw_mode(
         }
     }
 
+    let mod_code = 1 + (shift as u8) + (alt as u8 * 2) + (ctrl as u8 * 4);
+
     // Ctrl + Shift + F -> Scrollback Search
     if ctrl && shift {
         if let Some(KeyCode::KeyF) = physical {
@@ -179,6 +181,22 @@ pub fn handle_key_raw_mode(
             }
         }
 
+        // Ctrl + Space -> NUL (0x00) or Kitty CSI u
+        let is_space = match logical {
+            Key::Named(NamedKey::Space) => true,
+            Key::Character(ref s) if s == " " => true,
+            _ => physical == Some(KeyCode::Space),
+        };
+        if is_space {
+            if kitty_keyboard && mod_code > 1 {
+                return Some(InputAction::Bytes(
+                    format!("\x1b[32;{}u", mod_code).into_bytes(),
+                ));
+            } else {
+                return Some(InputAction::Bytes(vec![0]));
+            }
+        }
+
         if let Some(letter) = match_ctrl_letter(physical, logical) {
             match letter {
                 'c' => {
@@ -198,11 +216,19 @@ pub fn handle_key_raw_mode(
                         return Some(InputAction::Bytes(vec![26])); // Undo / SIGTSTP / ^Z
                     }
                 }
-                // When Shift is not held, standard Ctrl+Letter (Ctrl+D, Ctrl+E, Ctrl+K, etc.)
-                // must always map to their standard control character codes (1..=26)
-                ch if ch.is_ascii_lowercase() && !shift && !alt => {
+                ch if ch.is_ascii_lowercase() => {
                     let code = (ch as u8) - b'a' + 1;
-                    return Some(InputAction::Bytes(vec![code]));
+                    if !kitty_keyboard {
+                        // Standard VT/ANSI terminal mode:
+                        // Shift is ignored for Ctrl+letter, Alt adds ESC prefix
+                        let bytes = if alt { vec![0x1b, code] } else { vec![code] };
+                        return Some(InputAction::Bytes(bytes));
+                    } else if !shift && !alt {
+                        // In Kitty mode without Shift/Alt: bare Ctrl+letter sends standard control code (1..=26)
+                        return Some(InputAction::Bytes(vec![code]));
+                    }
+                    // In Kitty mode with Shift or Alt (e.g. Ctrl+Shift+P, Ctrl+Alt+D):
+                    // falls through to Kitty CSI u encoding below
                 }
                 _ => {}
             }
@@ -210,7 +236,6 @@ pub fn handle_key_raw_mode(
     }
 
     // Kitty Keyboard Protocol (CSI u)
-    let mod_code = 1 + (shift as u8) + (alt as u8 * 2) + (ctrl as u8 * 4);
     if kitty_keyboard && mod_code > 1 {
         match logical {
             Key::Named(NamedKey::Enter) => {
