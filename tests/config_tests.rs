@@ -4,7 +4,7 @@ use twitty::config::TwittyConfig;
 fn test_config_defaults() {
     let config = TwittyConfig::default();
     assert_eq!(config.font_size, 14.5);
-    assert_eq!(config.background_opacity, 0.92);
+    assert_eq!(config.background_opacity, 0.82);
     assert_eq!(config.cursor_style, "beam");
     assert_eq!(config.font_family, None);
     assert_eq!(config.scrollback_lines, None);

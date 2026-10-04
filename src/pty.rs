@@ -74,6 +74,74 @@ impl Pty {
         })
     }
 
+    pub fn spawn_command<F, E>(
+        cols: u16,
+        rows: u16,
+        command: &str,
+        args: &[String],
+        mut on_data: F,
+        mut on_exit: E,
+    ) -> Result<Self>
+    where
+        F: FnMut(Vec<u8>) + Send + 'static,
+        E: FnMut() + Send + 'static,
+    {
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .context("Failed to open PTY pair")?;
+
+        let mut cmd = CommandBuilder::new(command);
+        for arg in args {
+            cmd.arg(arg);
+        }
+        cmd.env("TERM", "xterm-256color");
+        cmd.env("COLORTERM", "truecolor");
+        cmd.env("TERM_PROGRAM", "Twitty");
+        cmd.env("LANG", "en_US.UTF-8");
+
+        let mut child = pair
+            .slave
+            .spawn_command(cmd)
+            .context("Failed to spawn command in PTY")?;
+        drop(pair.slave);
+
+        let mut reader = pair
+            .master
+            .try_clone_reader()
+            .context("Failed to clone PTY reader")?;
+        let writer = Arc::new(Mutex::new(
+            pair.master
+                .take_writer()
+                .context("Failed to take PTY writer")?,
+        ));
+
+        thread::spawn(move || {
+            let mut buf = [0u8; 8192];
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        on_data(buf[..n].to_vec());
+                    }
+                    Err(_) => break,
+                }
+            }
+            let _ = child.wait();
+            on_exit();
+        });
+
+        Ok(Self {
+            master: pair.master,
+            writer,
+        })
+    }
+
     pub fn write(&self, data: &[u8]) -> Result<()> {
         if let Ok(mut writer) = self.writer.lock() {
             writer.write_all(data)?;

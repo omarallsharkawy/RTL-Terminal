@@ -353,22 +353,7 @@ impl Renderer {
         };
         let default_attrs = Attrs::new().family(family);
         let default_bg = self.palette.background;
-        let mut default_bg_color = self.to_target_color(default_bg);
-        default_bg_color[3] = self.opacity;
-
-        let is_premultiplied = self.config.alpha_mode == wgpu::CompositeAlphaMode::PreMultiplied;
-        if is_premultiplied {
-            default_bg_color[0] *= self.opacity;
-            default_bg_color[1] *= self.opacity;
-            default_bg_color[2] *= self.opacity;
-        }
-
         let mut background_quads = Vec::new();
-        let win_w = self.config.width as f32;
-        let win_h = self.config.height as f32;
-
-        // 1. Full window background with opacity
-        background_quads.push((0.0, 0.0, win_w, win_h, default_bg_color));
 
         if self.row_caches.len() < lines.len() {
             self.row_caches.resize(
@@ -564,20 +549,20 @@ impl Renderer {
             });
 
         {
-            let clear_r = if self.is_srgb {
-                default_bg_color[0] as f64
+            let is_premultiplied =
+                self.config.alpha_mode == wgpu::CompositeAlphaMode::PreMultiplied;
+            let (clear_r, clear_g, clear_b) = if is_premultiplied {
+                (
+                    default_bg.r as f64 * self.opacity as f64,
+                    default_bg.g as f64 * self.opacity as f64,
+                    default_bg.b as f64 * self.opacity as f64,
+                )
             } else {
-                default_bg.r as f64
-            };
-            let clear_g = if self.is_srgb {
-                default_bg_color[1] as f64
-            } else {
-                default_bg.g as f64
-            };
-            let clear_b = if self.is_srgb {
-                default_bg_color[2] as f64
-            } else {
-                default_bg.b as f64
+                (
+                    default_bg.r as f64,
+                    default_bg.g as f64,
+                    default_bg.b as f64,
+                )
             };
             let clear_a = self.opacity as f64;
 

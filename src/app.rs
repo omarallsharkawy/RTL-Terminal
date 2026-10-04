@@ -47,10 +47,14 @@ pub struct App {
     search_match_idx: usize,
     is_dirty: bool,
     last_render_time: std::time::Instant,
+    custom_command: Option<(String, Vec<String>)>,
 }
 
 impl App {
-    pub fn new(proxy: EventLoopProxy<AppEvent>) -> Self {
+    pub fn new(
+        proxy: EventLoopProxy<AppEvent>,
+        custom_command: Option<(String, Vec<String>)>,
+    ) -> Self {
         let config = TwittyConfig::load();
         let scrollback = config.scrollback_lines.unwrap_or(10000);
         let proxy_clone = proxy.clone();
@@ -98,26 +102,48 @@ impl App {
             search_match_idx: 0,
             is_dirty: false,
             last_render_time: std::time::Instant::now(),
+            custom_command,
         }
     }
 
     fn spawn_pty(&self, cols: u16, rows: u16) -> Option<Pty> {
         let proxy = self.proxy.clone();
         let proxy_exit = self.proxy.clone();
-        match Pty::spawn(
-            cols,
-            rows,
-            move |data| {
-                let _ = proxy.send_event(AppEvent::PtyData(data));
-            },
-            move || {
-                let _ = proxy_exit.send_event(AppEvent::PtyExit);
-            },
-        ) {
-            Ok(p) => Some(p),
-            Err(e) => {
-                eprintln!("Failed to spawn PTY: {:?}", e);
-                None
+        if let Some((ref cmd, ref args)) = self.custom_command {
+            match Pty::spawn_command(
+                cols,
+                rows,
+                cmd,
+                args,
+                move |data| {
+                    let _ = proxy.send_event(AppEvent::PtyData(data));
+                },
+                move || {
+                    let _ = proxy_exit.send_event(AppEvent::PtyExit);
+                },
+            ) {
+                Ok(p) => Some(p),
+                Err(e) => {
+                    eprintln!("Failed to spawn custom command in PTY: {:?}", e);
+                    None
+                }
+            }
+        } else {
+            match Pty::spawn(
+                cols,
+                rows,
+                move |data| {
+                    let _ = proxy.send_event(AppEvent::PtyData(data));
+                },
+                move || {
+                    let _ = proxy_exit.send_event(AppEvent::PtyExit);
+                },
+            ) {
+                Ok(p) => Some(p),
+                Err(e) => {
+                    eprintln!("Failed to spawn PTY: {:?}", e);
+                    None
+                }
             }
         }
     }
@@ -263,6 +289,16 @@ impl ApplicationHandler<AppEvent> for App {
             return;
         }
 
+        #[cfg(target_os = "linux")]
+        use winit::platform::wayland::WindowAttributesExtWayland;
+
+        #[cfg(target_os = "linux")]
+        let window_attrs = WindowAttributes::default()
+            .with_title("Twitty · RTL Terminal")
+            .with_name("twitty", "twitty")
+            .with_inner_size(winit::dpi::LogicalSize::new(960.0, 580.0));
+
+        #[cfg(not(target_os = "linux"))]
         let window_attrs = WindowAttributes::default()
             .with_title("Twitty · RTL Terminal")
             .with_inner_size(winit::dpi::LogicalSize::new(960.0, 580.0));
@@ -338,6 +374,9 @@ impl ApplicationHandler<AppEvent> for App {
                 }
             }
             AppEvent::PtyExit => {
+                if self.custom_command.is_some() {
+                    std::process::exit(0);
+                }
                 let (cols, rows) = match self.renderer {
                     Some(ref r) => r.compute_grid_size(),
                     None => (80, 24),

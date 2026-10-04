@@ -17,7 +17,7 @@ impl Default for TwittyConfig {
     fn default() -> Self {
         Self {
             font_size: 14.5,
-            background_opacity: 0.92,
+            background_opacity: 0.82,
             cursor_style: "beam".to_string(),
             font_family: None,
             scrollback_lines: None,
