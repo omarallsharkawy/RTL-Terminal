@@ -16,19 +16,9 @@ use app::App;
 use winit::event_loop::EventLoop;
 
 fn parse_args() -> Option<(String, Vec<String>)> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() {
         return None;
-    }
-
-    if args[0] == "-e" {
-        if args.len() > 1 {
-            let cmd = args[1].clone();
-            let cmd_args = args[2..].to_vec();
-            return Some((cmd, cmd_args));
-        } else {
-            return None;
-        }
     }
 
     if args[0] == "--version" || args[0] == "-v" {
@@ -47,6 +37,15 @@ fn parse_args() -> Option<(String, Vec<String>)> {
         println!("  -v, --version       Print version");
         println!("  -h, --help          Print help");
         std::process::exit(0);
+    }
+
+    // Strip any leading "-e" or "--" flags passed by wrappers or desktop entries
+    while !args.is_empty() && (args[0] == "-e" || args[0] == "--") {
+        args.remove(0);
+    }
+
+    if args.is_empty() {
+        return None;
     }
 
     let cmd = args[0].clone();
