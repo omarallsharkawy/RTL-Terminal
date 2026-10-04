@@ -296,11 +296,15 @@ impl ApplicationHandler<AppEvent> for App {
         let window_attrs = WindowAttributes::default()
             .with_title("Twitty · RTL Terminal")
             .with_name("twitty", "twitty")
+            .with_transparent(true)
+            .with_blur(true)
             .with_inner_size(winit::dpi::LogicalSize::new(960.0, 580.0));
 
         #[cfg(not(target_os = "linux"))]
         let window_attrs = WindowAttributes::default()
             .with_title("Twitty · RTL Terminal")
+            .with_transparent(true)
+            .with_blur(true)
             .with_inner_size(winit::dpi::LogicalSize::new(960.0, 580.0));
 
         let window = match event_loop.create_window(window_attrs) {
