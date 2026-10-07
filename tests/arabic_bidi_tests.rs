@@ -96,3 +96,51 @@ fn test_prompt_with_arabic_does_not_flip() {
         "Prompt chevron must be to the left of Arabic user input, never flipped!"
     );
 }
+
+#[test]
+fn test_mixed_arabic_with_alphanumeric_hashes() {
+    let mut term = Terminal::new(120, 24, |_| {});
+    let text = "الكوميتين اتحسنوا جداً — 7abaf40 نضيف تماماً. بس 43f9bb8 وهو بيصلّح Ctrl+D/E/K\r\n";
+    term.process_bytes(text.as_bytes());
+    let (lines, cursor) = term.snapshot();
+
+    let mut font_system = FontSystem::new();
+    let metrics = Metrics::new(14.5, 23.0);
+    let default_attrs = Attrs::new().family(Family::Monospace);
+    let palette = twitty::color::Palette::default();
+    let default_bg = twitty::color::Rgba::from_rgb8(21, 22, 30);
+
+    let cached = twitty::shaping::shape_row(
+        &lines[0],
+        0,
+        &cursor,
+        9.0,
+        23.0,
+        12.0,
+        metrics,
+        &default_attrs,
+        &palette,
+        &mut font_system,
+        default_bg,
+    );
+
+    assert!(!cached.segments.is_empty());
+    let seg = &cached.segments[0];
+    for run in seg.buffer.layout_runs() {
+        let mut glyphs: Vec<_> = run.glyphs.iter().collect();
+        glyphs.sort_by(|a, b| a.x.partial_cmp(&b.x).unwrap());
+        let g_7 = glyphs
+            .iter()
+            .find(|g| g.start > 0 && &run.text[g.start..g.end] == "7")
+            .unwrap();
+        let g_a = glyphs
+            .iter()
+            .find(|g| g.start > 0 && &run.text[g.start..g.end] == "a")
+            .unwrap();
+        assert!(
+            (g_7.x - g_a.x).abs() <= 15.0,
+            "Digit '7' and letter 'a' in hash must stay together visually, diff was {}",
+            (g_7.x - g_a.x).abs()
+        );
+    }
+}

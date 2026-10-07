@@ -489,6 +489,29 @@ impl Renderer {
                                     .map(|c| c.c.len_utf8())
                                     .sum();
                                 byte_target += "\u{200E}".len();
+
+                                let mut seen_rtl = false;
+                                let mut prev_char = ' ';
+                                for cell in line.cells[seg.seg_start..cursor.col].iter() {
+                                    let cl = unicode_bidi::bidi_class(cell.c);
+                                    if cl == unicode_bidi::BidiClass::R
+                                        || cl == unicode_bidi::BidiClass::AL
+                                    {
+                                        seen_rtl = true;
+                                    }
+                                    if seen_rtl
+                                        && cell.c.is_ascii_digit()
+                                        && (prev_char == ' '
+                                            || prev_char == '—'
+                                            || prev_char == '-'
+                                            || prev_char == ':'
+                                            || prev_char == '.')
+                                    {
+                                        byte_target += "\u{200E}".len();
+                                    }
+                                    prev_char = cell.c;
+                                }
+
                                 for run in seg.buffer.layout_runs() {
                                     for glyph in run.glyphs.iter() {
                                         if byte_target >= glyph.start && byte_target < glyph.end {

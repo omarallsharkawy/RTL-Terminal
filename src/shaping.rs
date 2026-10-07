@@ -228,6 +228,8 @@ pub fn shape_row(
             let mut cur_attrs: Option<Attrs> = None;
             let mut seg_has_rtl = false;
             let mut seg_needs_fallback = false;
+            let mut seen_rtl = false;
+            let mut prev_char = ' ';
 
             for cell in line.cells[seg_start..seg_end].iter() {
                 if cell
@@ -244,12 +246,22 @@ pub fn shape_row(
                 let class = bidi_class(cell.c);
                 if class == BidiClass::R || class == BidiClass::AL {
                     seg_has_rtl = true;
+                    seen_rtl = true;
                 }
 
                 let is_hidden = cell
                     .flags
                     .contains(alacritty_terminal::term::cell::Flags::HIDDEN);
                 let effective_char = if is_hidden { ' ' } else { cell.c };
+
+                let needs_lrm = seen_rtl
+                    && effective_char.is_ascii_digit()
+                    && (prev_char == ' '
+                        || prev_char == '—'
+                        || prev_char == '-'
+                        || prev_char == ':'
+                        || prev_char == '.');
+                prev_char = cell.c;
 
                 let (eff_fg, _) = if cell
                     .flags
@@ -293,6 +305,9 @@ pub fn shape_row(
                     .unwrap_or(false);
 
                 if attrs_match {
+                    if needs_lrm {
+                        cur_text.push('‎');
+                    }
                     cur_text.push(effective_char);
                     if !is_hidden {
                         for &z in &cell.zerowidth {
@@ -304,6 +319,9 @@ pub fn shape_row(
                         if let Some(prev) = cur_attrs.take() {
                             spans_data.push((std::mem::take(&mut cur_text), prev));
                         }
+                    }
+                    if needs_lrm {
+                        cur_text.push('‎');
                     }
                     cur_text.push(effective_char);
                     if !is_hidden {
