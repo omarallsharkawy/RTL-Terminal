@@ -322,6 +322,17 @@ impl Renderer {
         )
     }
 
+    pub fn col_from_position(&self, x: f32, row: usize) -> usize {
+        let (max_cols, _) = self.compute_grid_size();
+        if let Some(cached) = self.row_caches.get(row) {
+            cached.cell_from_visual_x(x, self.char_width, self.padding_left, max_cols)
+        } else {
+            ((x - self.padding_left) / self.char_width)
+                .max(0.0)
+                .min(max_cols.saturating_sub(1) as f32) as usize
+        }
+    }
+
     fn to_target_color(&self, rgba: Rgba) -> [f32; 4] {
         if self.is_srgb {
             rgba.to_linear()
@@ -421,14 +432,8 @@ impl Renderer {
             let cached = &self.row_caches[r];
             for &(c, bg_color) in &cached.bg_cells {
                 let bg = self.palette.resolve(bg_color, true);
-                let x = self.padding_left + c as f32 * self.char_width;
-                background_quads.push((
-                    x,
-                    y,
-                    self.char_width,
-                    self.line_height,
-                    self.to_target_color(bg),
-                ));
+                let (x, w) = cached.visual_x_for_cell(c, self.char_width, self.padding_left);
+                background_quads.push((x, y, w, self.line_height, self.to_target_color(bg)));
             }
             for &(c, ch, fg_color) in &cached.geom_cells {
                 let fg = self.palette.resolve(fg_color, false);
@@ -445,30 +450,24 @@ impl Renderer {
             }
 
             for &(c, fg, is_double) in &cached.underline_cells {
-                let x = self.padding_left + c as f32 * self.char_width;
+                let (x, w) = cached.visual_x_for_cell(c, self.char_width, self.padding_left);
                 let u_color = self.to_target_color(fg);
                 let u_y = y + self.line_height - 2.0;
-                background_quads.push((x, u_y, self.char_width, 1.0 * self.scale, u_color));
+                background_quads.push((x, u_y, w, 1.0 * self.scale, u_color));
                 if is_double {
                     background_quads.push((
                         x,
                         u_y - 2.0 * self.scale,
-                        self.char_width,
+                        w,
                         1.0 * self.scale,
                         u_color,
                     ));
                 }
             }
             for &(c, fg) in &cached.strikeout_cells {
-                let x = self.padding_left + c as f32 * self.char_width;
+                let (x, w) = cached.visual_x_for_cell(c, self.char_width, self.padding_left);
                 let s_y = y + (self.line_height * 0.5).round();
-                background_quads.push((
-                    x,
-                    s_y,
-                    self.char_width,
-                    1.0 * self.scale,
-                    self.to_target_color(fg),
-                ));
+                background_quads.push((x, s_y, w, 1.0 * self.scale, self.to_target_color(fg)));
             }
 
             // Cursor Calculation

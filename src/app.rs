@@ -719,15 +719,12 @@ impl ApplicationHandler<AppEvent> for App {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 if let Some(ref r) = self.renderer {
-                    let (grid_cols, grid_rows) = r.compute_grid_size();
-                    let col = ((position.x - (r.padding_left as f64)) / r.char_width as f64)
-                        .max(0.0)
-                        .min(grid_cols.saturating_sub(1) as f64)
-                        as usize;
+                    let (_, grid_rows) = r.compute_grid_size();
                     let row = ((position.y - (r.padding_top as f64)) / r.line_height as f64)
                         .max(0.0)
                         .min(grid_rows.saturating_sub(1) as f64)
                         as usize;
+                    let col = r.col_from_position(position.x as f32, row);
                     self.mouse_col = col;
                     self.mouse_row = row;
 

@@ -13,6 +13,7 @@ pub struct CachedSegment {
     pub seg_x: f32,
     pub buffer: Buffer,
     pub has_rtl: bool,
+    pub cell_visual_x: Vec<(f32, f32)>,
 }
 
 #[derive(Clone)]
@@ -23,6 +24,39 @@ pub struct CachedRow {
     pub bg_cells: Vec<(usize, AnsiColor)>,
     pub underline_cells: Vec<(usize, Rgba, bool)>,
     pub strikeout_cells: Vec<(usize, Rgba)>,
+}
+
+impl CachedRow {
+    pub fn visual_x_for_cell(&self, col: usize, char_width: f32, padding_left: f32) -> (f32, f32) {
+        for seg in &self.segments {
+            if col >= seg.seg_start && col < seg.seg_end {
+                let idx = col - seg.seg_start;
+                if let Some(&(x, w)) = seg.cell_visual_x.get(idx) {
+                    return (x, w);
+                }
+            }
+        }
+        (padding_left + col as f32 * char_width, char_width)
+    }
+
+    pub fn cell_from_visual_x(
+        &self,
+        x: f32,
+        char_width: f32,
+        padding_left: f32,
+        max_cols: usize,
+    ) -> usize {
+        for seg in &self.segments {
+            for (idx, &(cx, cw)) in seg.cell_visual_x.iter().enumerate() {
+                if x >= cx && x <= cx + cw {
+                    return seg.seg_start + idx;
+                }
+            }
+        }
+        ((x - padding_left) / char_width)
+            .max(0.0)
+            .min(max_cols.saturating_sub(1) as f32) as usize
+    }
 }
 
 pub fn hash_color<H: std::hash::Hasher>(color: &AnsiColor, hasher: &mut H) {
@@ -360,12 +394,52 @@ pub fn shape_row(
                 buf.set_rich_text(span_refs, default_attrs, shaping_mode, None);
                 buf.shape_until_scroll(font_system, false);
 
+                let num_cells = seg_end - seg_start;
+                let mut cell_visual_x = Vec::with_capacity(num_cells);
+                if seg_has_rtl {
+                    let mut byte_offsets = Vec::with_capacity(num_cells + 1);
+                    let mut cur_b = "\u{200E}".len();
+                    byte_offsets.push(cur_b);
+                    for cell in line.cells[seg_start..seg_end].iter() {
+                        cur_b += cell.c.len_utf8();
+                        for &z in &cell.zerowidth {
+                            cur_b += z.len_utf8();
+                        }
+                        byte_offsets.push(cur_b);
+                    }
+                    let runs: Vec<_> = buf.layout_runs().collect();
+                    for i in 0..num_cells {
+                        let b_start = byte_offsets[i];
+                        let b_end = byte_offsets[i + 1];
+                        let mut min_x = f32::INFINITY;
+                        let mut max_x = f32::NEG_INFINITY;
+                        for run in &runs {
+                            for g in run.glyphs.iter() {
+                                if g.start < b_end && g.end > b_start {
+                                    min_x = min_x.min(g.x);
+                                    max_x = max_x.max(g.x + g.w);
+                                }
+                            }
+                        }
+                        if min_x.is_infinite() {
+                            cell_visual_x.push((seg_x + i as f32 * char_width, char_width));
+                        } else {
+                            cell_visual_x.push((seg_x + min_x, (max_x - min_x).max(char_width)));
+                        }
+                    }
+                } else {
+                    for i in 0..num_cells {
+                        cell_visual_x.push((seg_x + i as f32 * char_width, char_width));
+                    }
+                }
+
                 segments.push(CachedSegment {
                     seg_start,
                     seg_end,
                     seg_x,
                     buffer: buf,
                     has_rtl: seg_has_rtl,
+                    cell_visual_x,
                 });
             }
         }
