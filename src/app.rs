@@ -346,7 +346,13 @@ impl App {
                         }
                     }
                 }
+                if let Ok(mut term) = self.terminal.lock() {
+                    term.clear_selection();
+                }
                 self.is_selecting = false;
+                if let Some(ref r) = self.renderer {
+                    r.window.request_redraw();
+                }
             }
             MouseCommand::ScrollLocal {
                 delta,

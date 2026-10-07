@@ -122,3 +122,21 @@ fn test_selection_in_alt_screen() {
     assert!(text.is_some());
     assert!(text.unwrap().contains("Claude Code"));
 }
+
+#[test]
+fn test_selection_cleared_after_copy() {
+    let mut term = Terminal::new(80, 24, |_| {});
+    term.process_bytes(b"Text to copy and clear\r\n");
+
+    term.start_selection(0, 0);
+    term.update_selection(10, 0);
+
+    let text = term.selection_text();
+    assert!(text.is_some());
+
+    // After copying, clearing selection removes highlight
+    term.clear_selection();
+    let (lines, _) = term.snapshot();
+    assert!(!lines[0].cells[0].is_selected);
+    assert!(!lines[0].cells[5].is_selected);
+}
