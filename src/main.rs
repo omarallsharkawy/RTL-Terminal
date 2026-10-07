@@ -6,6 +6,7 @@ mod app;
 mod color;
 mod config;
 mod input;
+mod mouse;
 mod pty;
 mod quad;
 mod renderer;

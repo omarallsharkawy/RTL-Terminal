@@ -7,6 +7,7 @@ use winit::window::{WindowAttributes, WindowId};
 
 use crate::config::TwittyConfig;
 use crate::input::{handle_key, InputAction};
+use crate::mouse::{MouseCommand, MouseRouter};
 use crate::pty::Pty;
 use crate::renderer::Renderer;
 use crate::terminal::{SelectionType, Terminal};
@@ -49,6 +50,7 @@ pub struct App {
     last_render_time: std::time::Instant,
     custom_command: Option<(String, Vec<String>)>,
     initial_font_size: f32,
+    mouse_router: MouseRouter,
 }
 
 impl App {
@@ -110,6 +112,7 @@ impl App {
             last_render_time: std::time::Instant::now(),
             initial_font_size,
             custom_command,
+            mouse_router: MouseRouter::new(),
         }
     }
 
@@ -179,6 +182,187 @@ impl App {
             r.set_font_size(clamped);
         }
         self.sync_grid();
+    }
+
+    fn execute_mouse_command(&mut self, cmd: MouseCommand, mode: TermMode) {
+        match cmd {
+            MouseCommand::None => {}
+            MouseCommand::ClearSelection => {
+                if let Ok(mut term) = self.terminal.lock() {
+                    term.clear_selection();
+                }
+                if let Some(ref r) = self.renderer {
+                    r.window.request_redraw();
+                }
+            }
+            MouseCommand::ReportPress { btn, col, row } => {
+                let mut mod_flags = 0u8;
+                if self.modifiers.shift_key() {
+                    mod_flags |= 4;
+                }
+                if self.modifiers.alt_key() {
+                    mod_flags |= 8;
+                }
+                if self.modifiers.control_key() {
+                    mod_flags |= 16;
+                }
+                let bytes =
+                    crate::input::format_mouse_seq(mode, btn | mod_flags, col + 1, row + 1, false);
+                if let Some(ref pty) = self.pty {
+                    let _ = pty.write(&bytes);
+                }
+            }
+            MouseCommand::ReportRelease { btn, col, row } => {
+                let mut mod_flags = 0u8;
+                if self.modifiers.shift_key() {
+                    mod_flags |= 4;
+                }
+                if self.modifiers.alt_key() {
+                    mod_flags |= 8;
+                }
+                if self.modifiers.control_key() {
+                    mod_flags |= 16;
+                }
+                let bytes =
+                    crate::input::format_mouse_seq(mode, btn | mod_flags, col + 1, row + 1, true);
+                if let Some(ref pty) = self.pty {
+                    let _ = pty.write(&bytes);
+                }
+            }
+            MouseCommand::ReportDrag { btn, col, row } => {
+                let mut mod_flags = 0u8;
+                if self.modifiers.shift_key() {
+                    mod_flags |= 4;
+                }
+                if self.modifiers.alt_key() {
+                    mod_flags |= 8;
+                }
+                if self.modifiers.control_key() {
+                    mod_flags |= 16;
+                }
+                let bytes = crate::input::format_mouse_seq(
+                    mode,
+                    (32 | btn) | mod_flags,
+                    col + 1,
+                    row + 1,
+                    false,
+                );
+                if let Some(ref pty) = self.pty {
+                    let _ = pty.write(&bytes);
+                }
+            }
+            MouseCommand::ReportMotion { col, row } => {
+                let mut mod_flags = 0u8;
+                if self.modifiers.shift_key() {
+                    mod_flags |= 4;
+                }
+                if self.modifiers.alt_key() {
+                    mod_flags |= 8;
+                }
+                if self.modifiers.control_key() {
+                    mod_flags |= 16;
+                }
+                let bytes =
+                    crate::input::format_mouse_seq(mode, 35 | mod_flags, col + 1, row + 1, false);
+                if let Some(ref pty) = self.pty {
+                    let _ = pty.write(&bytes);
+                }
+            }
+            MouseCommand::ReportWheel { up, col, row } => {
+                let mut mod_flags = 0u8;
+                if self.modifiers.shift_key() {
+                    mod_flags |= 4;
+                }
+                if self.modifiers.alt_key() {
+                    mod_flags |= 8;
+                }
+                if self.modifiers.control_key() {
+                    mod_flags |= 16;
+                }
+                let btn = if up { 64 } else { 65 };
+                let bytes =
+                    crate::input::format_mouse_seq(mode, btn | mod_flags, col + 1, row + 1, false);
+                if let Some(ref pty) = self.pty {
+                    let _ = pty.write(&bytes);
+                }
+            }
+            MouseCommand::AltScroll { up } => {
+                let app_cursor = self
+                    .terminal
+                    .lock()
+                    .map(|t| t.is_app_cursor())
+                    .unwrap_or(false);
+                let key: &[u8] = if up {
+                    if app_cursor {
+                        b"OAOAOA"
+                    } else {
+                        b"[A[A[A"
+                    }
+                } else {
+                    if app_cursor {
+                        b"OBOBOB"
+                    } else {
+                        b"[B[B[B"
+                    }
+                };
+                if let Some(ref pty) = self.pty {
+                    let _ = pty.write(key);
+                }
+            }
+            MouseCommand::StartSelection {
+                col,
+                row,
+                semantic,
+                lines,
+            } => {
+                self.is_selecting = true;
+                if let Ok(mut term) = self.terminal.lock() {
+                    if semantic {
+                        term.start_selection_type(col, row, SelectionType::Semantic);
+                    } else if lines {
+                        term.start_selection_type(col, row, SelectionType::Lines);
+                    } else {
+                        term.start_selection(col, row);
+                    }
+                }
+                if let Some(ref r) = self.renderer {
+                    r.window.request_redraw();
+                }
+            }
+            MouseCommand::ExtendSelection { col, row } => {
+                self.is_selecting = true;
+                if let Ok(mut term) = self.terminal.lock() {
+                    term.update_selection(col, row);
+                }
+                if let Some(ref r) = self.renderer {
+                    r.window.request_redraw();
+                }
+            }
+            MouseCommand::CopySelection => {
+                if let Ok(term) = self.terminal.lock() {
+                    if let Some(text) = term.selection_text() {
+                        if !text.is_empty() {
+                            set_clipboard_text(&text);
+                        }
+                    }
+                }
+                self.is_selecting = false;
+            }
+            MouseCommand::ScrollLocal {
+                delta,
+                extend_selection,
+            } => {
+                if let Ok(mut term) = self.terminal.lock() {
+                    term.scroll_display(delta);
+                    if extend_selection {
+                        term.update_selection(self.mouse_col, self.mouse_row);
+                    }
+                }
+                if let Some(ref r) = self.renderer {
+                    r.window.request_redraw();
+                }
+            }
+        }
     }
 }
 
@@ -444,6 +628,12 @@ impl ApplicationHandler<AppEvent> for App {
                         let _ = pty.write(seq);
                     }
                 }
+                if !is_focused {
+                    if let Some(cmd) = self.mouse_router.on_focus_lost() {
+                        self.execute_mouse_command(cmd, mode);
+                    }
+                    self.mouse_down = false;
+                }
                 if let Some(ref r) = self.renderer {
                     r.window.request_redraw();
                 }
@@ -508,60 +698,25 @@ impl ApplicationHandler<AppEvent> for App {
                     self.mouse_col = col;
                     self.mouse_row = row;
 
-                    if self.mouse_down {
-                        let moved = col != self.mouse_down_col || row != self.mouse_down_row;
-                        if moved && !self.is_selecting {
-                            self.is_selecting = true;
-                            let display_offset = self
-                                .terminal
-                                .lock()
-                                .map(|t| t.display_offset())
-                                .unwrap_or(0);
-                            let mode = self
-                                .terminal
-                                .lock()
-                                .map(|t| t.mode())
-                                .unwrap_or(TermMode::NONE);
-                            if mode.intersects(TermMode::MOUSE_MODE)
-                                && !self.modifiers.shift_key()
-                                && display_offset == 0
-                            {
-                                let release_seq = format!(
-                                    "[<0;{};{}m",
-                                    self.mouse_down_col + 1,
-                                    self.mouse_down_row + 1
-                                );
-                                if let Some(ref pty) = self.pty {
-                                    let _ = pty.write(release_seq.as_bytes());
-                                }
-                            }
-                            if let Ok(mut term) = self.terminal.lock() {
-                                term.start_selection(self.mouse_down_col, self.mouse_down_row);
-                            }
-                        }
-                    }
-
-                    if self.is_selecting {
-                        if let Ok(mut term) = self.terminal.lock() {
-                            term.update_selection(col, row);
-                        }
-                        if let Some(ref r) = self.renderer {
-                            r.window.request_redraw();
-                        }
-                    } else {
-                        let mode = self
-                            .terminal
-                            .lock()
-                            .map(|t| t.mode())
-                            .unwrap_or(TermMode::NONE);
-                        if mode.contains(TermMode::MOUSE_MOTION) {
-                            let seq =
-                                crate::input::format_mouse_seq(mode, 35, col + 1, row + 1, false);
-                            if let Some(ref pty) = self.pty {
-                                let _ = pty.write(&seq);
-                            }
-                        }
-                    }
+                    let display_offset = self
+                        .terminal
+                        .lock()
+                        .map(|t| t.display_offset())
+                        .unwrap_or(0);
+                    let mode = self
+                        .terminal
+                        .lock()
+                        .map(|t| t.mode())
+                        .unwrap_or(TermMode::NONE);
+                    let cmd = self.mouse_router.on_move(
+                        col,
+                        row,
+                        self.mouse_down,
+                        self.modifiers.shift_key(),
+                        mode,
+                        display_offset,
+                    );
+                    self.execute_mouse_command(cmd, mode);
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
@@ -575,189 +730,145 @@ impl ApplicationHandler<AppEvent> for App {
                     .lock()
                     .map(|t| t.mode())
                     .unwrap_or(TermMode::NONE);
-                let col = self.mouse_col + 1;
-                let row = self.mouse_row + 1;
-                let in_mouse_mode = mode.intersects(TermMode::MOUSE_MODE)
-                    && !self.modifiers.shift_key()
-                    && display_offset == 0;
+                let col = self.mouse_col;
+                let row = self.mouse_row;
+                let shift = self.modifiers.shift_key();
 
                 match state {
-                    ElementState::Pressed => match button {
-                        MouseButton::Left => {
-                            self.mouse_down = true;
-                            self.mouse_down_col = self.mouse_col;
-                            self.mouse_down_row = self.mouse_row;
+                    ElementState::Pressed => {
+                        self.mouse_down = true;
+                        self.mouse_down_col = self.mouse_col;
+                        self.mouse_down_row = self.mouse_row;
 
-                            let now = std::time::Instant::now();
-                            let is_multi_click =
-                                now.duration_since(self.last_click_time).as_millis() < 400
-                                    && self.last_click_pos == (self.mouse_col, self.mouse_row);
+                        let now = std::time::Instant::now();
+                        let is_multi_click = now.duration_since(self.last_click_time).as_millis()
+                            < 400
+                            && self.last_click_pos == (self.mouse_col, self.mouse_row);
 
-                            if is_multi_click {
-                                self.click_count += 1;
-                            } else {
-                                self.click_count = 1;
-                            }
-                            self.last_click_time = now;
-                            self.last_click_pos = (self.mouse_col, self.mouse_row);
+                        if is_multi_click {
+                            self.click_count += 1;
+                        } else {
+                            self.click_count = 1;
+                        }
+                        self.last_click_time = now;
+                        self.last_click_pos = (self.mouse_col, self.mouse_row);
 
-                            if self.click_count == 2 {
-                                self.is_selecting = true;
-                                if let Ok(mut term) = self.terminal.lock() {
-                                    term.start_selection_type(
-                                        self.mouse_col,
-                                        self.mouse_row,
-                                        SelectionType::Semantic,
-                                    );
-                                }
-                                if let Some(ref r) = self.renderer {
-                                    r.window.request_redraw();
-                                }
-                            } else if self.click_count >= 3 {
-                                self.is_selecting = true;
-                                if let Ok(mut term) = self.terminal.lock() {
-                                    term.start_selection_type(
-                                        self.mouse_col,
-                                        self.mouse_row,
-                                        SelectionType::Lines,
-                                    );
-                                }
-                                if let Some(ref r) = self.renderer {
-                                    r.window.request_redraw();
-                                }
-                            } else if in_mouse_mode {
-                                let seq = crate::input::format_mouse_seq(
-                                    mode,
-                                    if self.modifiers.shift_key() { 4 } else { 0 }
-                                        | if self.modifiers.alt_key() { 8 } else { 0 }
-                                        | if self.modifiers.control_key() { 16 } else { 0 },
+                        match button {
+                            MouseButton::Left => {
+                                let (cmd1, cmd2) = self.mouse_router.on_press(
+                                    button,
                                     col,
                                     row,
-                                    false,
+                                    self.click_count,
+                                    shift,
+                                    mode,
+                                    display_offset,
                                 );
-                                if let Some(ref pty) = self.pty {
-                                    let _ = pty.write(&seq);
-                                }
-                            } else {
-                                self.is_selecting = true;
-                                if let Ok(mut term) = self.terminal.lock() {
-                                    term.start_selection(self.mouse_col, self.mouse_row);
-                                }
-                                if let Some(ref r) = self.renderer {
-                                    r.window.request_redraw();
+                                self.execute_mouse_command(cmd1, mode);
+                                if let Some(cmd) = cmd2 {
+                                    self.execute_mouse_command(cmd, mode);
                                 }
                             }
-                        }
-                        MouseButton::Middle => {
-                            if let Some(text) = get_primary_text() {
-                                if let Some(ref pty) = self.pty {
-                                    let bracketed = self
-                                        .terminal
-                                        .lock()
-                                        .map(|t| t.mode().contains(TermMode::BRACKETED_PASTE))
-                                        .unwrap_or(false);
-                                    paste_text(pty, &text, bracketed);
+                            MouseButton::Middle => {
+                                if MouseRouter::is_mouse_reporting_active(
+                                    mode,
+                                    shift,
+                                    display_offset,
+                                ) {
+                                    let (cmd1, cmd2) = self.mouse_router.on_press(
+                                        button,
+                                        col,
+                                        row,
+                                        self.click_count,
+                                        shift,
+                                        mode,
+                                        display_offset,
+                                    );
+                                    self.execute_mouse_command(cmd1, mode);
+                                    if let Some(cmd) = cmd2 {
+                                        self.execute_mouse_command(cmd, mode);
+                                    }
+                                } else if let Some(text) = get_primary_text() {
+                                    if let Some(ref pty) = self.pty {
+                                        let bracketed = self
+                                            .terminal
+                                            .lock()
+                                            .map(|t| t.mode().contains(TermMode::BRACKETED_PASTE))
+                                            .unwrap_or(false);
+                                        paste_text(pty, &text, bracketed);
+                                    }
                                 }
                             }
-                        }
-                        MouseButton::Right => {
-                            let copied = if let Ok(term) = self.terminal.lock() {
-                                if let Some(text) = term.selection_text() {
-                                    if !text.is_empty() {
-                                        set_clipboard_text(&text);
-                                        true
+                            MouseButton::Right => {
+                                let copied = if let Ok(term) = self.terminal.lock() {
+                                    if let Some(text) = term.selection_text() {
+                                        if !text.is_empty() {
+                                            set_clipboard_text(&text);
+                                            true
+                                        } else {
+                                            false
+                                        }
                                     } else {
                                         false
                                     }
                                 } else {
                                     false
-                                }
-                            } else {
-                                false
-                            };
+                                };
 
-                            if copied {
-                                if let Ok(mut term) = self.terminal.lock() {
-                                    term.clear_selection();
+                                if copied {
+                                    if let Ok(mut term) = self.terminal.lock() {
+                                        term.clear_selection();
+                                    }
+                                    if let Some(ref r) = self.renderer {
+                                        r.window.request_redraw();
+                                    }
+                                    return;
                                 }
-                                if let Some(ref r) = self.renderer {
-                                    r.window.request_redraw();
-                                }
-                                return;
-                            }
 
-                            if in_mouse_mode {
-                                let seq = crate::input::format_mouse_seq(
+                                if MouseRouter::is_mouse_reporting_active(
                                     mode,
-                                    2 | if self.modifiers.shift_key() { 4 } else { 0 }
-                                        | if self.modifiers.alt_key() { 8 } else { 0 }
-                                        | if self.modifiers.control_key() { 16 } else { 0 },
-                                    col,
-                                    row,
-                                    false,
-                                );
-                                if let Some(ref pty) = self.pty {
-                                    let _ = pty.write(&seq);
-                                }
-                            } else if let Some(text) = get_clipboard_text() {
-                                if let Some(ref pty) = self.pty {
-                                    let bracketed = self
-                                        .terminal
-                                        .lock()
-                                        .map(|t| t.mode().contains(TermMode::BRACKETED_PASTE))
-                                        .unwrap_or(false);
-                                    paste_text(pty, &text, bracketed);
-                                }
-                            }
-                        }
-                        _ => {}
-                    },
-                    ElementState::Released => match button {
-                        MouseButton::Left => {
-                            self.mouse_down = false;
-
-                            if self.is_selecting {
-                                if let Ok(term) = self.terminal.lock() {
-                                    if let Some(text) = term.selection_text() {
-                                        if !text.is_empty() {
-                                            set_clipboard_text(&text);
-                                        }
+                                    shift,
+                                    display_offset,
+                                ) {
+                                    let (cmd1, cmd2) = self.mouse_router.on_press(
+                                        button,
+                                        col,
+                                        row,
+                                        self.click_count,
+                                        shift,
+                                        mode,
+                                        display_offset,
+                                    );
+                                    self.execute_mouse_command(cmd1, mode);
+                                    if let Some(cmd) = cmd2 {
+                                        self.execute_mouse_command(cmd, mode);
+                                    }
+                                } else if let Some(text) = get_clipboard_text() {
+                                    if let Some(ref pty) = self.pty {
+                                        let bracketed = self
+                                            .terminal
+                                            .lock()
+                                            .map(|t| t.mode().contains(TermMode::BRACKETED_PASTE))
+                                            .unwrap_or(false);
+                                        paste_text(pty, &text, bracketed);
                                     }
                                 }
-                                self.is_selecting = false;
-                            } else if in_mouse_mode {
-                                let seq = crate::input::format_mouse_seq(
-                                    mode,
-                                    if self.modifiers.shift_key() { 4 } else { 0 }
-                                        | if self.modifiers.alt_key() { 8 } else { 0 }
-                                        | if self.modifiers.control_key() { 16 } else { 0 },
-                                    col,
-                                    row,
-                                    true,
-                                );
-                                if let Some(ref pty) = self.pty {
-                                    let _ = pty.write(&seq);
-                                }
                             }
+                            _ => {}
                         }
-                        MouseButton::Right => {
-                            if mode.intersects(TermMode::MOUSE_MODE) {
-                                let seq = crate::input::format_mouse_seq(
-                                    mode,
-                                    2 | if self.modifiers.shift_key() { 4 } else { 0 }
-                                        | if self.modifiers.alt_key() { 8 } else { 0 }
-                                        | if self.modifiers.control_key() { 16 } else { 0 },
-                                    col,
-                                    row,
-                                    true,
-                                );
-                                if let Some(ref pty) = self.pty {
-                                    let _ = pty.write(&seq);
-                                }
-                            }
-                        }
-                        _ => {}
-                    },
+                    }
+                    ElementState::Released => {
+                        self.mouse_down = false;
+                        let cmd = self.mouse_router.on_release(
+                            button,
+                            col,
+                            row,
+                            shift,
+                            mode,
+                            display_offset,
+                        );
+                        self.execute_mouse_command(cmd, mode);
+                    }
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
@@ -781,68 +892,20 @@ impl ApplicationHandler<AppEvent> for App {
                         .lock()
                         .map(|t| t.mode())
                         .unwrap_or(TermMode::NONE);
-                    let col = self.mouse_col + 1;
-                    let row = self.mouse_row + 1;
                     let display_offset = self
                         .terminal
                         .lock()
                         .map(|t| t.display_offset())
                         .unwrap_or(0);
-                    let prefer_scrollback = self.modifiers.shift_key() || display_offset > 0;
-
-                    if mode.intersects(TermMode::MOUSE_MODE) && !prefer_scrollback {
-                        // Send SGR mouse wheel reporting (64 = up, 65 = down)
-                        let btn = if delta_y > 0.0 { 64 } else { 65 };
-                        let seq = crate::input::format_mouse_seq(
-                            mode,
-                            btn | if self.modifiers.shift_key() { 4 } else { 0 }
-                                | if self.modifiers.alt_key() { 8 } else { 0 }
-                                | if self.modifiers.control_key() { 16 } else { 0 },
-                            col,
-                            row,
-                            false,
-                        );
-                        if let Some(ref pty) = self.pty {
-                            let _ = pty.write(&seq);
-                        }
-                    } else if mode.contains(TermMode::ALT_SCREEN)
-                        && mode.contains(TermMode::ALTERNATE_SCROLL)
-                        && !prefer_scrollback
-                    {
-                        let app_cursor = self
-                            .terminal
-                            .lock()
-                            .map(|t| t.is_app_cursor())
-                            .unwrap_or(false);
-                        let key: &[u8] = if delta_y > 0.0 {
-                            if app_cursor {
-                                b"\x1bOA\x1bOA\x1bOA"
-                            } else {
-                                b"\x1b[A\x1b[A\x1b[A"
-                            }
-                        } else {
-                            if app_cursor {
-                                b"\x1bOB\x1bOB\x1bOB"
-                            } else {
-                                b"\x1b[B\x1b[B\x1b[B"
-                            }
-                        };
-                        if let Some(ref pty) = self.pty {
-                            let _ = pty.write(key);
-                        }
-                    } else {
-                        // Terminal scrollback
-                        let lines = if delta_y > 0.0 { 3 } else { -3 };
-                        if let Ok(mut term) = self.terminal.lock() {
-                            term.scroll_display(lines);
-                            if self.is_selecting || self.mouse_down {
-                                term.update_selection(self.mouse_col, self.mouse_row);
-                            }
-                        }
-                        if let Some(ref r) = self.renderer {
-                            r.window.request_redraw();
-                        }
-                    }
+                    let cmd = self.mouse_router.on_wheel(
+                        delta_y,
+                        self.mouse_col,
+                        self.mouse_row,
+                        self.modifiers.shift_key(),
+                        mode,
+                        display_offset,
+                    );
+                    self.execute_mouse_command(cmd, mode);
                 }
             }
             WindowEvent::KeyboardInput { event, .. } => {
