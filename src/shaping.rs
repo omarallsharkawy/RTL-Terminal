@@ -21,6 +21,8 @@ pub struct CachedRow {
     pub segments: Vec<CachedSegment>,
     pub geom_cells: Vec<(usize, char, AnsiColor)>,
     pub bg_cells: Vec<(usize, AnsiColor)>,
+    pub underline_cells: Vec<(usize, Rgba, bool)>,
+    pub strikeout_cells: Vec<(usize, Rgba)>,
 }
 
 pub fn hash_color<H: std::hash::Hasher>(color: &AnsiColor, hasher: &mut H) {
@@ -43,6 +45,7 @@ pub fn hash_color<H: std::hash::Hasher>(color: &AnsiColor, hasher: &mut H) {
     }
 }
 
+#[allow(dead_code)]
 pub fn hash_cells(cells: &[CellData]) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -57,6 +60,26 @@ pub fn hash_cells(cells: &[CellData]) -> u64 {
     hasher.finish()
 }
 
+pub fn hash_row_with_cursor(cells: &[CellData], r: usize, cursor: &CursorState) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for cell in cells {
+        cell.c.hash(&mut hasher);
+        cell.zerowidth.hash(&mut hasher);
+        hash_color(&cell.fg, &mut hasher);
+        hash_color(&cell.bg, &mut hasher);
+        cell.flags.bits().hash(&mut hasher);
+        cell.is_selected.hash(&mut hasher);
+    }
+    if cursor.is_visible && cursor.row == r {
+        true.hash(&mut hasher);
+        cursor.col.hash(&mut hasher);
+        (cursor.shape as u8).hash(&mut hasher);
+    } else {
+        false.hash(&mut hasher);
+    }
+    hasher.finish()
+}
 #[allow(clippy::too_many_arguments)]
 pub fn shape_row(
     line: &LineData,
@@ -72,13 +95,24 @@ pub fn shape_row(
     default_bg: Rgba,
 ) -> CachedRow {
     let cols = line.cells.len();
-    let current_hash = hash_cells(&line.cells);
+    let current_hash = hash_row_with_cursor(&line.cells, r, cursor);
 
     let mut geom_cells = Vec::new();
     let mut bg_cells = Vec::new();
+    let mut underline_cells = Vec::new();
+    let mut strikeout_cells = Vec::new();
     let mut geom_rendered = vec![false; cols];
 
     for (c, cell) in line.cells.iter().enumerate() {
+        let (eff_fg, eff_bg) = if cell
+            .flags
+            .contains(alacritty_terminal::term::cell::Flags::INVERSE)
+        {
+            (cell.bg, cell.fg)
+        } else {
+            (cell.fg, cell.bg)
+        };
+
         if cell.is_selected {
             bg_cells.push((
                 c,
@@ -89,11 +123,34 @@ pub fn shape_row(
                 }),
             ));
         } else {
-            let bg = palette.resolve(cell.bg, true);
+            let bg = palette.resolve(eff_bg, true);
             if bg != default_bg {
-                bg_cells.push((c, cell.bg));
+                bg_cells.push((c, eff_bg));
             }
         }
+
+        let is_underline = cell.flags.intersects(
+            alacritty_terminal::term::cell::Flags::UNDERLINE
+                | alacritty_terminal::term::cell::Flags::DOUBLE_UNDERLINE
+                | alacritty_terminal::term::cell::Flags::UNDERCURL
+                | alacritty_terminal::term::cell::Flags::DOTTED_UNDERLINE
+                | alacritty_terminal::term::cell::Flags::DASHED_UNDERLINE,
+        );
+        if is_underline {
+            let fg = palette.resolve(eff_fg, false);
+            let is_double = cell
+                .flags
+                .contains(alacritty_terminal::term::cell::Flags::DOUBLE_UNDERLINE);
+            underline_cells.push((c, fg, is_double));
+        }
+        if cell
+            .flags
+            .contains(alacritty_terminal::term::cell::Flags::STRIKEOUT)
+        {
+            let fg = palette.resolve(eff_fg, false);
+            strikeout_cells.push((c, fg));
+        }
+
         let mut test_quads = Vec::new();
         let rendered = try_render_box_or_block(
             cell.c,
@@ -106,7 +163,7 @@ pub fn shape_row(
         );
         if rendered {
             geom_rendered[c] = true;
-            geom_cells.push((c, cell.c, cell.fg));
+            geom_cells.push((c, cell.c, eff_fg));
         }
     }
 
@@ -189,10 +246,24 @@ pub fn shape_row(
                     seg_has_rtl = true;
                 }
 
+                let is_hidden = cell
+                    .flags
+                    .contains(alacritty_terminal::term::cell::Flags::HIDDEN);
+                let effective_char = if is_hidden { ' ' } else { cell.c };
+
+                let (eff_fg, _) = if cell
+                    .flags
+                    .contains(alacritty_terminal::term::cell::Flags::INVERSE)
+                {
+                    (cell.bg, cell.fg)
+                } else {
+                    (cell.fg, cell.bg)
+                };
+
                 let mut fg = if cell.is_selected {
                     Rgba::from_rgb8(245, 245, 255)
                 } else {
-                    palette.resolve(cell.fg, false)
+                    palette.resolve(eff_fg, false)
                 };
                 if cell
                     .flags
@@ -222,9 +293,11 @@ pub fn shape_row(
                     .unwrap_or(false);
 
                 if attrs_match {
-                    cur_text.push(cell.c);
-                    for &z in &cell.zerowidth {
-                        cur_text.push(z);
+                    cur_text.push(effective_char);
+                    if !is_hidden {
+                        for &z in &cell.zerowidth {
+                            cur_text.push(z);
+                        }
                     }
                 } else {
                     if !cur_text.is_empty() {
@@ -232,9 +305,11 @@ pub fn shape_row(
                             spans_data.push((std::mem::take(&mut cur_text), prev));
                         }
                     }
-                    cur_text.push(cell.c);
-                    for &z in &cell.zerowidth {
-                        cur_text.push(z);
+                    cur_text.push(effective_char);
+                    if !is_hidden {
+                        for &z in &cell.zerowidth {
+                            cur_text.push(z);
+                        }
                     }
                     cur_attrs = Some(attrs);
                 }
@@ -284,5 +359,7 @@ pub fn shape_row(
         segments,
         geom_cells,
         bg_cells,
+        underline_cells,
+        strikeout_cells,
     }
 }

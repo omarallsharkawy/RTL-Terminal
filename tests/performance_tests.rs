@@ -1,7 +1,7 @@
 use cosmic_text::{Attrs, Family, FontSystem, Metrics};
 use std::time::Instant;
 use twitty::color::{Palette, Rgba};
-use twitty::shaping::{hash_cells, shape_row};
+use twitty::shaping::{hash_row_with_cursor, shape_row};
 use twitty::terminal::Terminal;
 
 #[test]
@@ -87,7 +87,7 @@ fn test_differential_cache_hit_latency() {
 
     // 2. Cache hit validation: compute hash of unchanged row
     let start_hit = Instant::now();
-    let hash = hash_cells(&lines[0].cells);
+    let hash = hash_row_with_cursor(&lines[0].cells, 0, &cursor);
     let is_hit = hash == cached.hash;
     let hit_duration = start_hit.elapsed();
 

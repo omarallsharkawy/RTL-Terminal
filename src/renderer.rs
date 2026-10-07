@@ -8,8 +8,15 @@ use winit::window::Window;
 
 use crate::color::{Palette, Rgba};
 use crate::quad::{try_render_box_or_block, QuadRenderer};
-use crate::shaping::{hash_cells, shape_row, CachedRow};
+use crate::shaping::{hash_row_with_cursor, shape_row, CachedRow};
 use crate::terminal::{CursorState, LineData};
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum RenderStatus {
+    Presented,
+    Retry,
+    Skipped,
+}
 
 pub struct Renderer {
     pub window: Arc<Window>,
@@ -83,16 +90,20 @@ impl Renderer {
             .unwrap_or(surface_caps.formats[0]);
         let is_srgb = format.is_srgb();
 
-        let present_mode = if surface_caps
-            .present_modes
-            .contains(&wgpu::PresentMode::Mailbox)
+        let allow_mailbox = std::env::var("TWITTY_PRESENT_MODE")
+            .map(|v| v == "mailbox")
+            .unwrap_or(false);
+        let present_mode = if allow_mailbox
+            && surface_caps
+                .present_modes
+                .contains(&wgpu::PresentMode::Mailbox)
         {
             wgpu::PresentMode::Mailbox
         } else if surface_caps
             .present_modes
-            .contains(&wgpu::PresentMode::Immediate)
+            .contains(&wgpu::PresentMode::Fifo)
         {
-            wgpu::PresentMode::Immediate
+            wgpu::PresentMode::Fifo
         } else {
             wgpu::PresentMode::AutoVsync
         };
@@ -119,7 +130,7 @@ impl Renderer {
             present_mode,
             alpha_mode,
             view_formats: vec![],
-            desired_maximum_frame_latency: 1,
+            desired_maximum_frame_latency: 2,
             color_space: Default::default(),
         };
         surface.configure(&device, &config);
@@ -319,7 +330,11 @@ impl Renderer {
         }
     }
 
-    pub fn render(&mut self, lines: &[LineData], cursor: &CursorState) -> anyhow::Result<()> {
+    pub fn render(
+        &mut self,
+        lines: &[LineData],
+        cursor: &CursorState,
+    ) -> anyhow::Result<RenderStatus> {
         let cur_size = self.window.inner_size();
         if cur_size.width > 0
             && cur_size.height > 0
@@ -336,10 +351,20 @@ impl Renderer {
                 match self.surface.get_current_texture() {
                     wgpu::CurrentSurfaceTexture::Success(t)
                     | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
-                    _ => return Ok(()),
+                    _ => return Ok(RenderStatus::Retry),
                 }
             }
-            _ => return Ok(()),
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                return Ok(RenderStatus::Retry);
+            }
+            wgpu::CurrentSurfaceTexture::Lost => {
+                self.surface.configure(&self.device, &self.config);
+                return Ok(RenderStatus::Retry);
+            }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                eprintln!("wgpu surface validation error");
+                return Ok(RenderStatus::Skipped);
+            }
         };
         let view = surface_texture
             .texture
@@ -363,6 +388,8 @@ impl Renderer {
                     segments: Vec::new(),
                     geom_cells: Vec::new(),
                     bg_cells: Vec::new(),
+                    underline_cells: Vec::new(),
+                    strikeout_cells: Vec::new(),
                 },
             );
         }
@@ -372,7 +399,7 @@ impl Renderer {
         // Update dirty rows and collect quads
         for (r, line) in lines.iter().enumerate() {
             let y = self.padding_top + r as f32 * self.line_height;
-            let current_hash = hash_cells(&line.cells);
+            let current_hash = hash_row_with_cursor(&line.cells, r, cursor);
 
             if self.row_caches[r].hash != current_hash {
                 self.row_caches[r] = shape_row(
@@ -415,6 +442,33 @@ impl Renderer {
                     self.to_target_color(fg),
                     &mut background_quads,
                 );
+            }
+
+            for &(c, fg, is_double) in &cached.underline_cells {
+                let x = self.padding_left + c as f32 * self.char_width;
+                let u_color = self.to_target_color(fg);
+                let u_y = y + self.line_height - 2.0;
+                background_quads.push((x, u_y, self.char_width, 1.0 * self.scale, u_color));
+                if is_double {
+                    background_quads.push((
+                        x,
+                        u_y - 2.0 * self.scale,
+                        self.char_width,
+                        1.0 * self.scale,
+                        u_color,
+                    ));
+                }
+            }
+            for &(c, fg) in &cached.strikeout_cells {
+                let x = self.padding_left + c as f32 * self.char_width;
+                let s_y = y + (self.line_height * 0.5).round();
+                background_quads.push((
+                    x,
+                    s_y,
+                    self.char_width,
+                    1.0 * self.scale,
+                    self.to_target_color(fg),
+                ));
             }
 
             // Cursor Calculation
@@ -473,12 +527,47 @@ impl Renderer {
                 );
             }
             let cursor_color = self.to_target_color(self.palette.cursor);
-            match self.cursor_style.as_str() {
+            let effective_shape = match cursor.shape {
+                alacritty_terminal::vte::ansi::CursorShape::Block => "block",
+                alacritty_terminal::vte::ansi::CursorShape::Underline => "underline",
+                alacritty_terminal::vte::ansi::CursorShape::Beam => "beam",
+                alacritty_terminal::vte::ansi::CursorShape::HollowBlock => "hollow",
+                alacritty_terminal::vte::ansi::CursorShape::Hidden => "hidden",
+            };
+            let shape_str = if effective_shape == "block" && self.cursor_style != "block" {
+                // If terminal mode is at default block, check if user preferred a custom style
+                self.cursor_style.as_str()
+            } else {
+                effective_shape
+            };
+
+            match shape_str {
+                "hidden" => {}
                 "block" => {
                     background_quads.push((
                         cx,
                         cy,
                         self.char_width,
+                        self.line_height,
+                        cursor_color,
+                    ));
+                }
+                "hollow" => {
+                    // 4 border quads for hollow box
+                    let border = 1.0 * self.scale;
+                    background_quads.push((cx, cy, self.char_width, border, cursor_color));
+                    background_quads.push((
+                        cx,
+                        cy + self.line_height - border,
+                        self.char_width,
+                        border,
+                        cursor_color,
+                    ));
+                    background_quads.push((cx, cy, border, self.line_height, cursor_color));
+                    background_quads.push((
+                        cx + self.char_width - border,
+                        cy,
+                        border,
                         self.line_height,
                         cursor_color,
                     ));
@@ -599,6 +688,6 @@ impl Renderer {
 
         self.text_atlas.trim();
 
-        Ok(())
+        Ok(RenderStatus::Presented)
     }
 }

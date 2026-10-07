@@ -2,14 +2,13 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
 pub struct TwittyConfig {
     pub font_size: f32,
     pub background_opacity: f32,
     pub cursor_style: String,
-    #[serde(default)]
     pub font_family: Option<String>,
-    #[serde(default)]
     pub scrollback_lines: Option<usize>,
 }
 
@@ -63,14 +62,35 @@ impl TwittyConfig {
     pub fn load() -> Self {
         if let Some(path) = Self::config_path() {
             if let Ok(content) = fs::read_to_string(&path) {
-                if let Ok(config) = serde_json::from_str::<Self>(&content) {
-                    return config;
+                match serde_json::from_str::<Self>(&content) {
+                    Ok(config) => return config,
+                    Err(e) => eprintln!("Warning: Failed to parse config at {:?}: {}", path, e),
                 }
             }
         }
         Self::default()
     }
 
+    pub fn update_font_size(new_size: f32) {
+        if let Some(path) = Self::config_path() {
+            if let Some(parent) = path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            let mut val: serde_json::Value = if let Ok(content) = fs::read_to_string(&path) {
+                serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
+            } else {
+                serde_json::json!({})
+            };
+            if let Some(obj) = val.as_object_mut() {
+                obj.insert("font_size".to_string(), serde_json::json!(new_size));
+            }
+            if let Ok(json) = serde_json::to_string_pretty(&val) {
+                let _ = fs::write(&path, json);
+            }
+        }
+    }
+
+    #[allow(dead_code)]
     pub fn save(&self) {
         if let Some(path) = Self::config_path() {
             if let Some(parent) = path.parent() {

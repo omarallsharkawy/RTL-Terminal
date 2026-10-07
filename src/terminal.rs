@@ -1,19 +1,30 @@
-use alacritty_terminal::event::{Event, EventListener};
+use crate::color::Palette;
+use alacritty_terminal::event::{Event, EventListener, WindowSize};
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Line, Point, Side};
 pub use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::cell::Flags as CellFlags;
 use alacritty_terminal::term::test::TermSize;
 use alacritty_terminal::term::{viewport_to_point, Config, Term, TermMode};
-use alacritty_terminal::vte::ansi::{Color as AnsiColor, Processor, StdSyncHandler};
+use alacritty_terminal::vte::ansi::{Color as AnsiColor, CursorShape, Processor, StdSyncHandler};
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
 use unicode_bidi::{bidi_class, BidiClass};
+
+pub type ClipboardFormatter = Arc<dyn Fn(&str) -> String + Sync + Send + 'static>;
+pub type ClipboardLoader = Arc<dyn Fn(ClipboardFormatter) + Send + Sync>;
 
 struct ForwardListener {
     on_pty_write: Arc<dyn Fn(String) + Send + Sync>,
     on_clipboard_store: Arc<dyn Fn(String) + Send + Sync>,
+    on_clipboard_load: ClipboardLoader,
     on_title_change: Arc<dyn Fn(String) + Send + Sync>,
     on_bell: Arc<dyn Fn() + Send + Sync>,
+    palette: Arc<Palette>,
+    cell_width: Arc<AtomicU16>,
+    cell_height: Arc<AtomicU16>,
+    num_cols: Arc<AtomicU16>,
+    num_lines: Arc<AtomicU16>,
 }
 
 impl EventListener for ForwardListener {
@@ -21,6 +32,22 @@ impl EventListener for ForwardListener {
         match event {
             Event::PtyWrite(text) => (self.on_pty_write)(text),
             Event::ClipboardStore(_, text) => (self.on_clipboard_store)(text),
+            Event::ClipboardLoad(_, formatter) => (self.on_clipboard_load)(formatter),
+            Event::ColorRequest(index, formatter) => {
+                let rgb = self.palette.resolve_rgb(index);
+                let response = formatter(rgb);
+                (self.on_pty_write)(response);
+            }
+            Event::TextAreaSizeRequest(formatter) => {
+                let size = WindowSize {
+                    num_lines: self.num_lines.load(Ordering::Relaxed),
+                    num_cols: self.num_cols.load(Ordering::Relaxed),
+                    cell_width: self.cell_width.load(Ordering::Relaxed),
+                    cell_height: self.cell_height.load(Ordering::Relaxed),
+                };
+                let response = formatter(size);
+                (self.on_pty_write)(response);
+            }
             Event::Title(title) => (self.on_title_change)(title),
             Event::ResetTitle => (self.on_title_change)("Twitty · RTL Terminal".to_string()),
             Event::Bell => (self.on_bell)(),
@@ -50,6 +77,7 @@ pub struct CursorState {
     pub col: usize,
     pub row: usize,
     pub is_visible: bool,
+    pub shape: CursorShape,
 }
 
 pub struct Terminal {
@@ -57,6 +85,10 @@ pub struct Terminal {
     parser: Processor<StdSyncHandler>,
     cols: usize,
     rows: usize,
+    cell_width: Arc<AtomicU16>,
+    cell_height: Arc<AtomicU16>,
+    num_cols: Arc<AtomicU16>,
+    num_lines: Arc<AtomicU16>,
 }
 
 impl Terminal {
@@ -65,7 +97,16 @@ impl Terminal {
     where
         F: Fn(String) + Send + Sync + 'static,
     {
-        Self::new_full(cols, rows, 10000, on_pty_write, |_| {}, |_| {}, || {})
+        Self::new_full(
+            cols,
+            rows,
+            10000,
+            on_pty_write,
+            |_| {},
+            |_| {},
+            |_| {},
+            || {},
+        )
     }
 
     #[allow(dead_code)]
@@ -86,34 +127,50 @@ impl Terminal {
             on_pty_write,
             on_clipboard_store,
             |_| {},
+            |_| {},
             || {},
         )
     }
 
-    pub fn new_full<F, C, T, B>(
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_full<F, C, L, T, B>(
         cols: usize,
         rows: usize,
         scrollback_lines: usize,
         on_pty_write: F,
         on_clipboard_store: C,
+        on_clipboard_load: L,
         on_title_change: T,
         on_bell: B,
     ) -> Self
     where
         F: Fn(String) + Send + Sync + 'static,
         C: Fn(String) + Send + Sync + 'static,
+        L: Fn(ClipboardFormatter) + Send + Sync + 'static,
         T: Fn(String) + Send + Sync + 'static,
         B: Fn() + Send + Sync + 'static,
     {
         let size = TermSize::new(cols, rows);
+        let cell_width = Arc::new(AtomicU16::new(10));
+        let cell_height = Arc::new(AtomicU16::new(20));
+        let num_cols = Arc::new(AtomicU16::new(cols as u16));
+        let num_lines = Arc::new(AtomicU16::new(rows as u16));
+        let palette = Arc::new(Palette::default());
         let listener = ForwardListener {
             on_pty_write: Arc::new(on_pty_write),
             on_clipboard_store: Arc::new(on_clipboard_store),
+            on_clipboard_load: Arc::new(on_clipboard_load),
             on_title_change: Arc::new(on_title_change),
             on_bell: Arc::new(on_bell),
+            palette,
+            cell_width: cell_width.clone(),
+            cell_height: cell_height.clone(),
+            num_cols: num_cols.clone(),
+            num_lines: num_lines.clone(),
         };
         let term_config = Config {
             scrolling_history: scrollback_lines.max(100),
+            osc52: alacritty_terminal::term::Osc52::CopyPaste,
             ..Default::default()
         };
         let term = Term::new(term_config, &size, listener);
@@ -123,6 +180,10 @@ impl Terminal {
             parser,
             cols,
             rows,
+            cell_width,
+            cell_height,
+            num_cols,
+            num_lines,
         }
     }
 
@@ -133,7 +194,24 @@ impl Terminal {
     pub fn resize(&mut self, cols: usize, rows: usize) {
         self.cols = cols;
         self.rows = rows;
+        self.num_cols.store(cols as u16, Ordering::Relaxed);
+        self.num_lines.store(rows as u16, Ordering::Relaxed);
         self.term.resize(TermSize::new(cols, rows));
+    }
+
+    pub fn update_cell_size(&self, cell_width: f32, cell_height: f32) {
+        self.cell_width
+            .store(cell_width.round() as u16, Ordering::Relaxed);
+        self.cell_height
+            .store(cell_height.round() as u16, Ordering::Relaxed);
+    }
+
+    pub fn sync_timeout(&self) -> Option<std::time::Instant> {
+        self.parser.sync_timeout().sync_timeout()
+    }
+
+    pub fn stop_sync(&mut self) {
+        self.parser.stop_sync(&mut self.term);
     }
 
     pub fn is_app_cursor(&self) -> bool {
@@ -313,6 +391,7 @@ impl Terminal {
             col: cursor_col.min(self.cols.saturating_sub(1)),
             is_visible: is_cursor_in_viewport
                 && content.cursor.shape != alacritty_terminal::vte::ansi::CursorShape::Hidden,
+            shape: content.cursor.shape,
         };
 
         (lines, cursor)

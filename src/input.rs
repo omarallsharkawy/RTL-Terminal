@@ -528,3 +528,21 @@ pub fn handle_key_raw_mode(
 
     None
 }
+pub fn format_mouse_seq(
+    mode: alacritty_terminal::term::TermMode,
+    btn: u8,
+    col: usize,
+    row: usize,
+    is_release: bool,
+) -> Vec<u8> {
+    if mode.contains(alacritty_terminal::term::TermMode::SGR_MOUSE) {
+        let suffix = if is_release { 'm' } else { 'M' };
+        format!("[<{btn};{col};{row}{suffix}").into_bytes()
+    } else {
+        let b = if is_release { 3 } else { btn };
+        let b_char = 32u8.saturating_add(b);
+        let c_char = 32u8.saturating_add((col as u8).min(223));
+        let r_char = 32u8.saturating_add((row as u8).min(223));
+        vec![0x1b, b'[', b'M', b_char, c_char, r_char]
+    }
+}

@@ -1,4 +1,4 @@
-use alacritty_terminal::vte::ansi::{Color as AnsiColor, NamedColor};
+use alacritty_terminal::vte::ansi::{Color as AnsiColor, NamedColor, Rgb};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Rgba {
@@ -21,6 +21,14 @@ impl Rgba {
             b: b as f32 / 255.0,
             a: 1.0,
         }
+    }
+
+    pub fn to_rgb8(self) -> (u8, u8, u8) {
+        (
+            (self.r * 255.0).round().clamp(0.0, 255.0) as u8,
+            (self.g * 255.0).round().clamp(0.0, 255.0) as u8,
+            (self.b * 255.0).round().clamp(0.0, 255.0) as u8,
+        )
     }
 
     pub fn to_linear(self) -> [f32; 4] {
@@ -85,6 +93,19 @@ impl Default for Palette {
 }
 
 impl Palette {
+    pub fn resolve_rgb(&self, index: usize) -> Rgb {
+        let rgba = match index {
+            256 => self.foreground,
+            257 => self.background,
+            258 => self.cursor,
+            idx if idx < 16 => self.ansi[idx],
+            idx if idx < 256 => self.resolve(AnsiColor::Indexed(idx as u8), false),
+            _ => self.foreground,
+        };
+        let (r, g, b) = rgba.to_rgb8();
+        Rgb { r, g, b }
+    }
+
     pub fn resolve(&self, color: AnsiColor, is_bg: bool) -> Rgba {
         match color {
             AnsiColor::Named(named) => match named {

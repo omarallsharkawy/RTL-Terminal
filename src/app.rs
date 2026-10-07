@@ -13,12 +13,12 @@ use crate::terminal::{SelectionType, Terminal};
 use alacritty_terminal::term::TermMode;
 use alacritty_terminal::vte::ansi::Color as AnsiColor;
 
-#[derive(Debug)]
 #[allow(clippy::enum_variant_names)]
 pub enum AppEvent {
     PtyData(Vec<u8>),
     PtyWriteResponse(String),
     ClipboardStore(String),
+    ClipboardLoad(Arc<dyn Fn(&str) -> String + Sync + Send + 'static>),
     Title(String),
     Bell,
     PtyExit,
@@ -48,6 +48,7 @@ pub struct App {
     is_dirty: bool,
     last_render_time: std::time::Instant,
     custom_command: Option<(String, Vec<String>)>,
+    initial_font_size: f32,
 }
 
 impl App {
@@ -56,9 +57,11 @@ impl App {
         custom_command: Option<(String, Vec<String>)>,
     ) -> Self {
         let config = TwittyConfig::load();
+        let initial_font_size = config.font_size;
         let scrollback = config.scrollback_lines.unwrap_or(10000);
         let proxy_clone = proxy.clone();
         let proxy_cb = proxy.clone();
+        let proxy_cb_load = proxy.clone();
         let proxy_title = proxy.clone();
         let proxy_bell = proxy.clone();
         let terminal = Arc::new(Mutex::new(Terminal::new_full(
@@ -70,6 +73,9 @@ impl App {
             },
             move |text| {
                 let _ = proxy_cb.send_event(AppEvent::ClipboardStore(text));
+            },
+            move |formatter| {
+                let _ = proxy_cb_load.send_event(AppEvent::ClipboardLoad(formatter));
             },
             move |title| {
                 let _ = proxy_title.send_event(AppEvent::Title(title));
@@ -102,6 +108,7 @@ impl App {
             search_match_idx: 0,
             is_dirty: false,
             last_render_time: std::time::Instant::now(),
+            initial_font_size,
             custom_command,
         }
     }
@@ -153,6 +160,7 @@ impl App {
             let (cols, rows) = r.compute_grid_size();
             if let Ok(mut term) = self.terminal.lock() {
                 term.resize(cols, rows);
+                term.update_cell_size(r.char_width, r.line_height);
             }
             if let Some(ref pty) = self.pty {
                 let _ = pty.resize(cols as u16, rows as u16);
@@ -166,7 +174,7 @@ impl App {
     fn update_font_size(&mut self, new_size: f32) {
         let clamped = new_size.clamp(8.0, 48.0);
         self.config.font_size = clamped;
-        self.config.save();
+        TwittyConfig::update_font_size(clamped);
         if let Some(ref mut r) = self.renderer {
             r.set_font_size(clamped);
         }
@@ -175,30 +183,9 @@ impl App {
 }
 
 fn get_clipboard_text() -> Option<String> {
-    if let Ok(mut cb) = arboard::Clipboard::new() {
-        if let Ok(text) = cb.get_text() {
-            if !text.is_empty() {
-                return Some(text);
-            }
-        }
-    }
     #[cfg(target_os = "linux")]
     {
-        // 1. Try Omarchy / DMS desktop clipboard
-        if let Ok(output) = std::process::Command::new("dms")
-            .args(["clipboard", "paste"])
-            .output()
-        {
-            if output.status.success() {
-                if let Ok(text) = String::from_utf8(output.stdout) {
-                    if !text.is_empty() {
-                        return Some(text);
-                    }
-                }
-            }
-        }
-
-        // 2. Try wl-paste
+        // 1. Try native Wayland clipboard
         if let Ok(output) = std::process::Command::new("wl-paste")
             .arg("--no-newline")
             .output()
@@ -211,8 +198,19 @@ fn get_clipboard_text() -> Option<String> {
                 }
             }
         }
-        if let Ok(output) = std::process::Command::new("xclip")
-            .args(["-selection", "clipboard", "-o"])
+    }
+    if let Ok(mut cb) = arboard::Clipboard::new() {
+        if let Ok(text) = cb.get_text() {
+            if !text.is_empty() {
+                return Some(text);
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // 2. Try Omarchy / DMS desktop clipboard
+        if let Ok(output) = std::process::Command::new("dms")
+            .args(["clipboard", "paste"])
             .output()
         {
             if output.status.success() {
@@ -225,6 +223,39 @@ fn get_clipboard_text() -> Option<String> {
         }
     }
     None
+}
+
+fn get_primary_text() -> Option<String> {
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(output) = std::process::Command::new("wl-paste")
+            .args(["--primary", "--no-newline"])
+            .output()
+        {
+            if output.status.success() {
+                if let Ok(text) = String::from_utf8(output.stdout) {
+                    if !text.is_empty() {
+                        return Some(text);
+                    }
+                }
+            }
+        }
+    }
+    get_clipboard_text()
+}
+
+fn paste_text(pty: &Pty, text: &str, bracketed: bool) {
+    if bracketed {
+        let sanitized = text.replace("\x1b[201~", "");
+        let mut payload = Vec::with_capacity(sanitized.len() + 16);
+        payload.extend_from_slice(b"\x1b[200~");
+        payload.extend_from_slice(sanitized.as_bytes());
+        payload.extend_from_slice(b"\x1b[201~");
+        let _ = pty.write(&payload);
+    } else {
+        let converted = text.replace('\n', "\r");
+        let _ = pty.write(converted.as_bytes());
+    }
 }
 
 fn set_clipboard_text(text: &str) {
@@ -365,6 +396,14 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::ClipboardStore(text) => {
                 set_clipboard_text(&text);
             }
+            AppEvent::ClipboardLoad(formatter) => {
+                let proxy = self.proxy.clone();
+                std::thread::spawn(move || {
+                    let content = get_clipboard_text().unwrap_or_default();
+                    let response = formatter(&content);
+                    let _ = proxy.send_event(AppEvent::PtyWriteResponse(response));
+                });
+            }
             AppEvent::Title(title) => {
                 if let Some(ref r) = self.renderer {
                     r.window.set_title(&title);
@@ -378,17 +417,7 @@ impl ApplicationHandler<AppEvent> for App {
                 }
             }
             AppEvent::PtyExit => {
-                if self.custom_command.is_some() {
-                    std::process::exit(0);
-                }
-                let (cols, rows) = match self.renderer {
-                    Some(ref r) => r.compute_grid_size(),
-                    None => (80, 24),
-                };
-                self.pty = self.spawn_pty(cols as u16, rows as u16);
-                if let Some(ref r) = self.renderer {
-                    r.window.request_redraw();
-                }
+                std::process::exit(0);
             }
         }
     }
@@ -402,6 +431,22 @@ impl ApplicationHandler<AppEvent> for App {
         match event {
             WindowEvent::CloseRequested => {
                 event_loop.exit();
+            }
+            WindowEvent::Focused(is_focused) => {
+                let mode = self
+                    .terminal
+                    .lock()
+                    .map(|t| t.mode())
+                    .unwrap_or(TermMode::NONE);
+                if mode.contains(TermMode::FOCUS_IN_OUT) {
+                    let seq: &[u8] = if is_focused { b"\x1b[I" } else { b"\x1b[O" };
+                    if let Some(ref pty) = self.pty {
+                        let _ = pty.write(seq);
+                    }
+                }
+                if let Some(ref r) = self.renderer {
+                    r.window.request_redraw();
+                }
             }
             WindowEvent::Resized(new_size) => {
                 if new_size.width > 0 && new_size.height > 0 {
@@ -451,10 +496,15 @@ impl ApplicationHandler<AppEvent> for App {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 if let Some(ref r) = self.renderer {
+                    let (grid_cols, grid_rows) = r.compute_grid_size();
                     let col = ((position.x - (r.padding_left as f64)) / r.char_width as f64)
-                        .max(0.0) as usize;
+                        .max(0.0)
+                        .min(grid_cols.saturating_sub(1) as f64)
+                        as usize;
                     let row = ((position.y - (r.padding_top as f64)) / r.line_height as f64)
-                        .max(0.0) as usize;
+                        .max(0.0)
+                        .min(grid_rows.saturating_sub(1) as f64)
+                        as usize;
                     self.mouse_col = col;
                     self.mouse_row = row;
 
@@ -505,9 +555,10 @@ impl ApplicationHandler<AppEvent> for App {
                             .map(|t| t.mode())
                             .unwrap_or(TermMode::NONE);
                         if mode.contains(TermMode::MOUSE_MOTION) {
-                            let seq = format!("[<35;{};{}M", col + 1, row + 1);
+                            let seq =
+                                crate::input::format_mouse_seq(mode, 35, col + 1, row + 1, false);
                             if let Some(ref pty) = self.pty {
-                                let _ = pty.write(seq.as_bytes());
+                                let _ = pty.write(&seq);
                             }
                         }
                     }
@@ -575,9 +626,17 @@ impl ApplicationHandler<AppEvent> for App {
                                     r.window.request_redraw();
                                 }
                             } else if in_mouse_mode {
-                                let seq = format!("[<0;{};{}M", col, row);
+                                let seq = crate::input::format_mouse_seq(
+                                    mode,
+                                    if self.modifiers.shift_key() { 4 } else { 0 }
+                                        | if self.modifiers.alt_key() { 8 } else { 0 }
+                                        | if self.modifiers.control_key() { 16 } else { 0 },
+                                    col,
+                                    row,
+                                    false,
+                                );
                                 if let Some(ref pty) = self.pty {
-                                    let _ = pty.write(seq.as_bytes());
+                                    let _ = pty.write(&seq);
                                 }
                             } else {
                                 self.is_selecting = true;
@@ -590,22 +649,14 @@ impl ApplicationHandler<AppEvent> for App {
                             }
                         }
                         MouseButton::Middle => {
-                            if let Some(text) = get_clipboard_text() {
+                            if let Some(text) = get_primary_text() {
                                 if let Some(ref pty) = self.pty {
                                     let bracketed = self
                                         .terminal
                                         .lock()
                                         .map(|t| t.mode().contains(TermMode::BRACKETED_PASTE))
                                         .unwrap_or(false);
-                                    if bracketed {
-                                        let mut payload = Vec::with_capacity(text.len() + 12);
-                                        payload.extend_from_slice(b"[200~");
-                                        payload.extend_from_slice(text.as_bytes());
-                                        payload.extend_from_slice(b"[201~");
-                                        let _ = pty.write(&payload);
-                                    } else {
-                                        let _ = pty.write(text.as_bytes());
-                                    }
+                                    paste_text(pty, &text, bracketed);
                                 }
                             }
                         }
@@ -636,9 +687,17 @@ impl ApplicationHandler<AppEvent> for App {
                             }
 
                             if in_mouse_mode {
-                                let seq = format!("[<2;{};{}M", col, row);
+                                let seq = crate::input::format_mouse_seq(
+                                    mode,
+                                    2 | if self.modifiers.shift_key() { 4 } else { 0 }
+                                        | if self.modifiers.alt_key() { 8 } else { 0 }
+                                        | if self.modifiers.control_key() { 16 } else { 0 },
+                                    col,
+                                    row,
+                                    false,
+                                );
                                 if let Some(ref pty) = self.pty {
-                                    let _ = pty.write(seq.as_bytes());
+                                    let _ = pty.write(&seq);
                                 }
                             } else if let Some(text) = get_clipboard_text() {
                                 if let Some(ref pty) = self.pty {
@@ -647,15 +706,7 @@ impl ApplicationHandler<AppEvent> for App {
                                         .lock()
                                         .map(|t| t.mode().contains(TermMode::BRACKETED_PASTE))
                                         .unwrap_or(false);
-                                    if bracketed {
-                                        let mut payload = Vec::with_capacity(text.len() + 12);
-                                        payload.extend_from_slice(b"[200~");
-                                        payload.extend_from_slice(text.as_bytes());
-                                        payload.extend_from_slice(b"[201~");
-                                        let _ = pty.write(&payload);
-                                    } else {
-                                        let _ = pty.write(text.as_bytes());
-                                    }
+                                    paste_text(pty, &text, bracketed);
                                 }
                             }
                         }
@@ -675,17 +726,33 @@ impl ApplicationHandler<AppEvent> for App {
                                 }
                                 self.is_selecting = false;
                             } else if in_mouse_mode {
-                                let seq = format!("[<0;{};{}m", col, row);
+                                let seq = crate::input::format_mouse_seq(
+                                    mode,
+                                    if self.modifiers.shift_key() { 4 } else { 0 }
+                                        | if self.modifiers.alt_key() { 8 } else { 0 }
+                                        | if self.modifiers.control_key() { 16 } else { 0 },
+                                    col,
+                                    row,
+                                    true,
+                                );
                                 if let Some(ref pty) = self.pty {
-                                    let _ = pty.write(seq.as_bytes());
+                                    let _ = pty.write(&seq);
                                 }
                             }
                         }
                         MouseButton::Right => {
                             if mode.intersects(TermMode::MOUSE_MODE) {
-                                let seq = format!("[<2;{};{}m", col, row);
+                                let seq = crate::input::format_mouse_seq(
+                                    mode,
+                                    2 | if self.modifiers.shift_key() { 4 } else { 0 }
+                                        | if self.modifiers.alt_key() { 8 } else { 0 }
+                                        | if self.modifiers.control_key() { 16 } else { 0 },
+                                    col,
+                                    row,
+                                    true,
+                                );
                                 if let Some(ref pty) = self.pty {
-                                    let _ = pty.write(seq.as_bytes());
+                                    let _ = pty.write(&seq);
                                 }
                             }
                         }
@@ -726,16 +793,39 @@ impl ApplicationHandler<AppEvent> for App {
                     if mode.intersects(TermMode::MOUSE_MODE) && !prefer_scrollback {
                         // Send SGR mouse wheel reporting (64 = up, 65 = down)
                         let btn = if delta_y > 0.0 { 64 } else { 65 };
-                        let seq = format!("[<{};{};{}M", btn, col, row);
+                        let seq = crate::input::format_mouse_seq(
+                            mode,
+                            btn | if self.modifiers.shift_key() { 4 } else { 0 }
+                                | if self.modifiers.alt_key() { 8 } else { 0 }
+                                | if self.modifiers.control_key() { 16 } else { 0 },
+                            col,
+                            row,
+                            false,
+                        );
                         if let Some(ref pty) = self.pty {
-                            let _ = pty.write(seq.as_bytes());
+                            let _ = pty.write(&seq);
                         }
-                    } else if mode.contains(TermMode::ALT_SCREEN) && !prefer_scrollback {
-                        // Alternate screen without mouse mode (vim, less, opencode): send arrow keys
-                        let key = if delta_y > 0.0 {
-                            b"OAOAOA"
+                    } else if mode.contains(TermMode::ALT_SCREEN)
+                        && mode.contains(TermMode::ALTERNATE_SCROLL)
+                        && !prefer_scrollback
+                    {
+                        let app_cursor = self
+                            .terminal
+                            .lock()
+                            .map(|t| t.is_app_cursor())
+                            .unwrap_or(false);
+                        let key: &[u8] = if delta_y > 0.0 {
+                            if app_cursor {
+                                b"\x1bOA\x1bOA\x1bOA"
+                            } else {
+                                b"\x1b[A\x1b[A\x1b[A"
+                            }
                         } else {
-                            b"OBOBOB"
+                            if app_cursor {
+                                b"\x1bOB\x1bOB\x1bOB"
+                            } else {
+                                b"\x1b[B\x1b[B\x1b[B"
+                            }
                         };
                         if let Some(ref pty) = self.pty {
                             let _ = pty.write(key);
@@ -919,7 +1009,7 @@ impl ApplicationHandler<AppEvent> for App {
                             self.update_font_size(cur - 1.0);
                         }
                         InputAction::ZoomReset => {
-                            self.update_font_size(14.5);
+                            self.update_font_size(self.initial_font_size);
                         }
                         InputAction::Paste => {
                             if let Some(text) = get_clipboard_text() {
@@ -929,15 +1019,7 @@ impl ApplicationHandler<AppEvent> for App {
                                         .lock()
                                         .map(|t| t.mode().contains(TermMode::BRACKETED_PASTE))
                                         .unwrap_or(false);
-                                    if bracketed {
-                                        let mut payload = Vec::with_capacity(text.len() + 12);
-                                        payload.extend_from_slice(b"[200~");
-                                        payload.extend_from_slice(text.as_bytes());
-                                        payload.extend_from_slice(b"[201~");
-                                        let _ = pty.write(&payload);
-                                    } else {
-                                        let _ = pty.write(text.as_bytes());
-                                    }
+                                    paste_text(pty, &text, bracketed);
                                 }
                             }
                         }
@@ -1034,8 +1116,6 @@ impl ApplicationHandler<AppEvent> for App {
                 }
             }
             WindowEvent::RedrawRequested => {
-                self.is_dirty = false;
-                self.last_render_time = std::time::Instant::now();
                 if let Some(ref mut r) = self.renderer {
                     if let Ok(term) = self.terminal.lock() {
                         let (lines, cursor) = term.snapshot();
@@ -1131,8 +1211,19 @@ impl ApplicationHandler<AppEvent> for App {
                                 }
                             }
                         }
-                        if let Err(e) = r.render(&lines, &cursor) {
-                            eprintln!("Render error: {:?}", e);
+                        match r.render(&lines, &cursor) {
+                            Ok(crate::renderer::RenderStatus::Presented) => {
+                                self.is_dirty = false;
+                                self.last_render_time = std::time::Instant::now();
+                            }
+                            Ok(crate::renderer::RenderStatus::Retry) => {
+                                self.is_dirty = true;
+                                r.window.request_redraw();
+                            }
+                            Ok(crate::renderer::RenderStatus::Skipped) => {}
+                            Err(e) => {
+                                eprintln!("Render error: {:?}", e);
+                            }
                         }
                     }
                 }
@@ -1142,6 +1233,14 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Ok(mut term) = self.terminal.lock() {
+            if let Some(timeout) = term.sync_timeout() {
+                if std::time::Instant::now() >= timeout {
+                    term.stop_sync();
+                    self.is_dirty = true;
+                }
+            }
+        }
         if self.is_dirty {
             if let Some(ref r) = self.renderer {
                 r.window.request_redraw();
