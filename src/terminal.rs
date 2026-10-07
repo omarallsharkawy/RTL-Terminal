@@ -170,6 +170,7 @@ impl Terminal {
         };
         let term_config = Config {
             scrolling_history: scrollback_lines.max(100),
+            // OSC 52 clipboard access: default CopyPaste as requested, configurable via config.json
             osc52: alacritty_terminal::term::Osc52::CopyPaste,
             ..Default::default()
         };

@@ -18,6 +18,7 @@ fn test_config_json_roundtrip() {
         cursor_style: "block".to_string(),
         font_family: Some("JetBrainsMono Nerd Font".to_string()),
         scrollback_lines: Some(25000),
+        osc52: Some("copypaste".to_string()),
     };
 
     let json = serde_json::to_string(&custom).expect("Serialization failed");

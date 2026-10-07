@@ -10,6 +10,7 @@ pub struct TwittyConfig {
     pub cursor_style: String,
     pub font_family: Option<String>,
     pub scrollback_lines: Option<usize>,
+    pub osc52: Option<String>,
 }
 
 impl Default for TwittyConfig {
@@ -20,6 +21,7 @@ impl Default for TwittyConfig {
             cursor_style: "beam".to_string(),
             font_family: None,
             scrollback_lines: None,
+            osc52: None,
         }
     }
 }

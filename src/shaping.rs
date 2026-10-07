@@ -179,6 +179,8 @@ pub fn shape_row(
 
         let seg_start = col_idx;
         let mut seg_end = col_idx;
+        let first_class = bidi_class(line.cells[seg_start].c);
+        let seg_is_rtl = first_class == BidiClass::R || first_class == BidiClass::AL;
 
         while seg_end < cols && !geom_rendered[seg_end] {
             if line.cells[seg_end].bg != line.cells[seg_start].bg {
@@ -206,6 +208,23 @@ pub fn shape_row(
                 if space_run >= 3 && !is_active_input_space {
                     break;
                 }
+
+                // If direction changes after spaces, split into new segment
+                if peek < cols {
+                    let next_class = bidi_class(line.cells[peek].c);
+                    let next_is_rtl = next_class == BidiClass::R || next_class == BidiClass::AL;
+                    if next_is_rtl != seg_is_rtl {
+                        break;
+                    }
+                }
+            } else {
+                let c = line.cells[seg_end].c;
+                let cls = bidi_class(c);
+                let is_rtl = cls == BidiClass::R || cls == BidiClass::AL;
+                let is_ltr_strong = cls == BidiClass::L || c.is_ascii_alphanumeric();
+                if (seg_is_rtl && is_ltr_strong) || (!seg_is_rtl && is_rtl) {
+                    break;
+                }
             }
             seg_end += 1;
         }
@@ -228,8 +247,6 @@ pub fn shape_row(
             let mut cur_attrs: Option<Attrs> = None;
             let mut seg_has_rtl = false;
             let mut seg_needs_fallback = false;
-            let mut seen_rtl = false;
-            let mut prev_char = ' ';
 
             for cell in line.cells[seg_start..seg_end].iter() {
                 if cell
@@ -246,22 +263,12 @@ pub fn shape_row(
                 let class = bidi_class(cell.c);
                 if class == BidiClass::R || class == BidiClass::AL {
                     seg_has_rtl = true;
-                    seen_rtl = true;
                 }
 
                 let is_hidden = cell
                     .flags
                     .contains(alacritty_terminal::term::cell::Flags::HIDDEN);
                 let effective_char = if is_hidden { ' ' } else { cell.c };
-
-                let needs_lrm = seen_rtl
-                    && effective_char.is_ascii_digit()
-                    && (prev_char == ' '
-                        || prev_char == '—'
-                        || prev_char == '-'
-                        || prev_char == ':'
-                        || prev_char == '.');
-                prev_char = cell.c;
 
                 let (eff_fg, _) = if cell
                     .flags
@@ -305,9 +312,6 @@ pub fn shape_row(
                     .unwrap_or(false);
 
                 if attrs_match {
-                    if needs_lrm {
-                        cur_text.push('‎');
-                    }
                     cur_text.push(effective_char);
                     if !is_hidden {
                         for &z in &cell.zerowidth {
@@ -319,9 +323,6 @@ pub fn shape_row(
                         if let Some(prev) = cur_attrs.take() {
                             spans_data.push((std::mem::take(&mut cur_text), prev));
                         }
-                    }
-                    if needs_lrm {
-                        cur_text.push('‎');
                     }
                     cur_text.push(effective_char);
                     if !is_hidden {

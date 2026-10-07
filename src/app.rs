@@ -20,6 +20,7 @@ pub enum AppEvent {
     PtyWriteResponse(String),
     ClipboardStore(String),
     ClipboardLoad(Arc<dyn Fn(&str) -> String + Sync + Send + 'static>),
+    ClipboardPasteRequest(bool),
     Title(String),
     Bell,
     PtyExit,
@@ -434,6 +435,7 @@ fn get_primary_text() -> Option<String> {
     get_clipboard_text()
 }
 
+#[allow(dead_code)]
 fn paste_text(pty: &Pty, text: &str, bracketed: bool) {
     if bracketed {
         let sanitized = text.replace("\x1b[201~", "");
@@ -592,6 +594,31 @@ impl ApplicationHandler<AppEvent> for App {
                     let content = get_clipboard_text().unwrap_or_default();
                     let response = formatter(&content);
                     let _ = proxy.send_event(AppEvent::PtyWriteResponse(response));
+                });
+            }
+            AppEvent::ClipboardPasteRequest(is_primary) => {
+                let proxy = self.proxy.clone();
+                let bracketed = self
+                    .terminal
+                    .lock()
+                    .map(|t| t.mode().contains(TermMode::BRACKETED_PASTE))
+                    .unwrap_or(false);
+                std::thread::spawn(move || {
+                    let content = if is_primary {
+                        get_primary_text()
+                    } else {
+                        get_clipboard_text()
+                    };
+                    if let Some(text) = content {
+                        if bracketed {
+                            let sanitized = text.replace("\x1b[201~", "");
+                            let payload = format!("\x1b[200~{}\x1b[201~", sanitized);
+                            let _ = proxy.send_event(AppEvent::PtyWriteResponse(payload));
+                        } else {
+                            let converted = text.replace('\n', "\r");
+                            let _ = proxy.send_event(AppEvent::PtyWriteResponse(converted));
+                        }
+                    }
                 });
             }
             AppEvent::Title(title) => {
@@ -794,15 +821,10 @@ impl ApplicationHandler<AppEvent> for App {
                                     if let Some(cmd) = cmd2 {
                                         self.execute_mouse_command(cmd, mode);
                                     }
-                                } else if let Some(text) = get_primary_text() {
-                                    if let Some(ref pty) = self.pty {
-                                        let bracketed = self
-                                            .terminal
-                                            .lock()
-                                            .map(|t| t.mode().contains(TermMode::BRACKETED_PASTE))
-                                            .unwrap_or(false);
-                                        paste_text(pty, &text, bracketed);
-                                    }
+                                } else {
+                                    let _ = self
+                                        .proxy
+                                        .send_event(AppEvent::ClipboardPasteRequest(true));
                                 }
                             }
                             MouseButton::Right => {
@@ -849,15 +871,10 @@ impl ApplicationHandler<AppEvent> for App {
                                     if let Some(cmd) = cmd2 {
                                         self.execute_mouse_command(cmd, mode);
                                     }
-                                } else if let Some(text) = get_clipboard_text() {
-                                    if let Some(ref pty) = self.pty {
-                                        let bracketed = self
-                                            .terminal
-                                            .lock()
-                                            .map(|t| t.mode().contains(TermMode::BRACKETED_PASTE))
-                                            .unwrap_or(false);
-                                        paste_text(pty, &text, bracketed);
-                                    }
+                                } else {
+                                    let _ = self
+                                        .proxy
+                                        .send_event(AppEvent::ClipboardPasteRequest(false));
                                 }
                             }
                             _ => {}
@@ -1081,16 +1098,9 @@ impl ApplicationHandler<AppEvent> for App {
                             self.update_font_size(self.initial_font_size);
                         }
                         InputAction::Paste => {
-                            if let Some(text) = get_clipboard_text() {
-                                if let Some(ref pty) = self.pty {
-                                    let bracketed = self
-                                        .terminal
-                                        .lock()
-                                        .map(|t| t.mode().contains(TermMode::BRACKETED_PASTE))
-                                        .unwrap_or(false);
-                                    paste_text(pty, &text, bracketed);
-                                }
-                            }
+                            let _ = self
+                                .proxy
+                                .send_event(AppEvent::ClipboardPasteRequest(false));
                         }
                         InputAction::Copy => {
                             if let Ok(term) = self.terminal.lock() {

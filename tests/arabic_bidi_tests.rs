@@ -124,8 +124,17 @@ fn test_mixed_arabic_with_alphanumeric_hashes() {
         default_bg,
     );
 
-    assert!(!cached.segments.is_empty());
-    let seg = &cached.segments[0];
+    let seg = cached
+        .segments
+        .iter()
+        .find(|s| {
+            let slice: String = lines[0].cells[s.seg_start..s.seg_end]
+                .iter()
+                .map(|c| c.c)
+                .collect();
+            slice.contains("7abaf40")
+        })
+        .expect("Must find segment containing 7abaf40");
     for run in seg.buffer.layout_runs() {
         let mut glyphs: Vec<_> = run.glyphs.iter().collect();
         glyphs.sort_by(|a, b| a.x.partial_cmp(&b.x).unwrap());
