@@ -10,6 +10,8 @@ pub struct TwittyConfig {
     pub background_opacity: f32,
     /// "block", "beam"/"bar" or "underline": the cursor shape when the app does not ask for one.
     pub cursor_style: String,
+    /// Font family for the terminal grid, e.g. "JetBrains Mono". Unset or not installed: monospace.
+    pub font_family: Option<String>,
     /// Keys this version does not know about are kept so saving never drops them.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
@@ -21,6 +23,7 @@ impl Default for TwittyConfig {
             font_size: 14.5,
             background_opacity: 0.78,
             cursor_style: "block".into(),
+            font_family: None,
             extra: serde_json::Map::new(),
         }
     }
