@@ -1256,7 +1256,7 @@ impl Renderer {
             let color = if tab.active {
                 self.palette.foreground
             } else {
-                mix(self.palette.foreground, self.palette.background, 0.45)
+                mix(self.palette.foreground, self.palette.background, 0.2)
             };
             tab_texts.push((buffer, *rect, color.to_glyphon()));
         }

@@ -2,7 +2,7 @@ use alacritty_terminal::term::TermMode;
 use twitty::input::{handle_key_mode_raw, InputAction};
 use twitty::layout::FocusDir;
 use winit::event::ElementState;
-use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey};
+use winit::keyboard::{Key, KeyCode, ModifiersState};
 
 const D: TermMode = TermMode::DISAMBIGUATE_ESC_CODES;
 const EV: TermMode = TermMode::REPORT_EVENT_TYPES;
@@ -12,9 +12,10 @@ const CTRL_SHIFT: ModifiersState = ModifiersState::CONTROL.union(ModifiersState:
 const ALT_SHIFT: ModifiersState = ModifiersState::ALT.union(ModifiersState::SHIFT);
 
 fn press(physical: KeyCode, m: ModifiersState, mode: TermMode) -> Option<InputAction> {
+    // No logical key: the shortcut must be found from the physical key alone.
     handle_key_mode_raw(
         Some(physical),
-        &Key::Named(NamedKey::Tab),
+        &Key::Dead(None),
         None,
         None,
         ElementState::Pressed,
@@ -94,6 +95,41 @@ fn other_modifier_combinations_are_not_pane_shortcuts() {
         assert_ne!(
             k(KeyCode::ArrowLeft, ModifiersState::empty()),
             Some(InputAction::Focus(FocusDir::Left))
+        );
+    }
+}
+
+fn press_logical(
+    physical: KeyCode,
+    logical: Key,
+    m: ModifiersState,
+    mode: TermMode,
+) -> Option<InputAction> {
+    handle_key_mode_raw(
+        Some(physical),
+        &logical,
+        None,
+        None,
+        ElementState::Pressed,
+        false,
+        m,
+        mode,
+    )
+}
+
+#[test]
+fn shortcuts_follow_the_typed_latin_key_then_the_physical_key() {
+    let cs = ModifiersState::CONTROL | ModifiersState::SHIFT;
+    for mode in modes() {
+        // Virtual keyboards (wtype) report arbitrary physical codes: the typed letter wins.
+        assert_eq!(
+            press_logical(KeyCode::KeyQ, Key::Character("E".into()), cs, mode),
+            Some(InputAction::SplitRight)
+        );
+        // Arabic layout: the typed letter is Arabic, so the physical key decides.
+        assert_eq!(
+            press_logical(KeyCode::KeyT, Key::Character("ف".into()), cs, mode),
+            Some(InputAction::NewTab)
         );
     }
 }

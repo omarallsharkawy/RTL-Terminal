@@ -50,6 +50,60 @@ pub fn handle_key(
 }
 
 /// Shortcuts handled by Twitty itself, independent of the terminal's keyboard mode.
+/// The key a shortcut refers to: the Latin letter or named key that was typed when there is
+/// one (so shortcuts follow the key labels on AZERTY and work with virtual keyboards such as
+/// `wtype`), otherwise the physical key (non-Latin layouts like Arabic).
+fn shortcut_key(physical: Option<KeyCode>, logical: &Key) -> Option<KeyCode> {
+    let from_logical = match logical {
+        Key::Character(s) => {
+            let mut chars = s.chars();
+            match (chars.next().map(|c| c.to_ascii_lowercase()), chars.next()) {
+                (Some(c @ 'a'..='z'), None) => {
+                    const LETTERS: [KeyCode; 26] = [
+                        KeyCode::KeyA,
+                        KeyCode::KeyB,
+                        KeyCode::KeyC,
+                        KeyCode::KeyD,
+                        KeyCode::KeyE,
+                        KeyCode::KeyF,
+                        KeyCode::KeyG,
+                        KeyCode::KeyH,
+                        KeyCode::KeyI,
+                        KeyCode::KeyJ,
+                        KeyCode::KeyK,
+                        KeyCode::KeyL,
+                        KeyCode::KeyM,
+                        KeyCode::KeyN,
+                        KeyCode::KeyO,
+                        KeyCode::KeyP,
+                        KeyCode::KeyQ,
+                        KeyCode::KeyR,
+                        KeyCode::KeyS,
+                        KeyCode::KeyT,
+                        KeyCode::KeyU,
+                        KeyCode::KeyV,
+                        KeyCode::KeyW,
+                        KeyCode::KeyX,
+                        KeyCode::KeyY,
+                        KeyCode::KeyZ,
+                    ];
+                    Some(LETTERS[(c as u8 - b'a') as usize])
+                }
+                _ => None,
+            }
+        }
+        Key::Named(NamedKey::Tab) => Some(KeyCode::Tab),
+        Key::Named(NamedKey::PageUp) => Some(KeyCode::PageUp),
+        Key::Named(NamedKey::PageDown) => Some(KeyCode::PageDown),
+        Key::Named(NamedKey::ArrowLeft) => Some(KeyCode::ArrowLeft),
+        Key::Named(NamedKey::ArrowRight) => Some(KeyCode::ArrowRight),
+        Key::Named(NamedKey::ArrowUp) => Some(KeyCode::ArrowUp),
+        Key::Named(NamedKey::ArrowDown) => Some(KeyCode::ArrowDown),
+        _ => None,
+    };
+    from_logical.or(physical)
+}
+
 fn app_shortcut(key_code: KeyCode, modifiers: ModifiersState) -> Option<InputAction> {
     let (ctrl, shift, alt) = (
         modifiers.control_key(),
@@ -210,10 +264,10 @@ pub fn handle_key_raw(
     }
 
     // 1. App shortcuts and Ctrl combos by physical key (layout-independent).
+    if let Some(action) = shortcut_key(physical, logical).and_then(|k| app_shortcut(k, modifiers)) {
+        return Some(action);
+    }
     if let Some(key_code) = physical {
-        if let Some(action) = app_shortcut(key_code, modifiers) {
-            return Some(action);
-        }
         if ctrl {
             if let Some(byte) = ctrl_byte(key_code) {
                 return Some(InputAction::Bytes(with_alt(alt, vec![byte])));
@@ -601,7 +655,9 @@ pub fn handle_key_mode_raw(
     }
 
     if state.is_pressed() {
-        if let Some(action) = physical.and_then(|c| app_shortcut(c, modifiers)) {
+        if let Some(action) =
+            shortcut_key(physical, logical).and_then(|c| app_shortcut(c, modifiers))
+        {
             return Some(action);
         }
         // AltGr arrives as Ctrl+Alt on Windows: plain symbols pass through untouched.
