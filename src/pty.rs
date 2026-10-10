@@ -1,6 +1,6 @@
 use std::env;
 use std::io::{Read, Write};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{channel, Sender};
 use std::thread;
 
 use anyhow::{Context, Result};
@@ -8,7 +8,8 @@ use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 
 pub struct Pty {
     master: Box<dyn MasterPty + Send>,
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    /// Writes go through a dedicated thread so a large paste never blocks the UI.
+    writer: Sender<Vec<u8>>,
 }
 
 impl Pty {
@@ -35,7 +36,9 @@ impl Pty {
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "Twitty");
-        cmd.env("LANG", "en_US.UTF-8");
+        if env::var_os("LANG").is_none() && env::var_os("LC_ALL").is_none() {
+            cmd.env("LANG", "en_US.UTF-8");
+        }
 
         let mut child = pair
             .slave
@@ -47,11 +50,22 @@ impl Pty {
             .master
             .try_clone_reader()
             .context("Failed to clone PTY reader")?;
-        let writer = Arc::new(Mutex::new(
-            pair.master
-                .take_writer()
-                .context("Failed to take PTY writer")?,
-        ));
+        let mut pty_writer = pair
+            .master
+            .take_writer()
+            .context("Failed to take PTY writer")?;
+        let (writer, write_rx) = channel::<Vec<u8>>();
+        thread::spawn(move || {
+            for data in write_rx {
+                if pty_writer
+                    .write_all(&data)
+                    .and_then(|_| pty_writer.flush())
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
 
         thread::spawn(move || {
             let mut buf = [0u8; 8192];
@@ -75,11 +89,9 @@ impl Pty {
     }
 
     pub fn write(&self, data: &[u8]) -> Result<()> {
-        if let Ok(mut writer) = self.writer.lock() {
-            writer.write_all(data)?;
-            writer.flush()?;
-        }
-        Ok(())
+        self.writer
+            .send(data.to_vec())
+            .map_err(|_| anyhow::anyhow!("PTY writer closed"))
     }
 
     pub fn resize(&self, cols: u16, rows: u16) -> Result<()> {
@@ -97,19 +109,26 @@ impl Pty {
 
 fn default_shell() -> (String, Vec<String>) {
     if let Ok(shell) = env::var("TWITTY_SHELL") {
-        if !shell.trim().is_empty() {
-            return (shell, vec![]);
+        let mut parts = shell.split_whitespace().map(str::to_string);
+        if let Some(program) = parts.next() {
+            return (program, parts.collect());
         }
     }
 
     #[cfg(windows)]
     {
+        // Prefer PowerShell 7, then Windows PowerShell; cmd.exe is only the last resort.
+        for candidate in ["pwsh.exe", "powershell.exe"] {
+            if find_in_path(candidate).is_some() {
+                return (candidate.to_string(), vec!["-NoLogo".to_string()]);
+            }
+        }
         if let Ok(comspec) = env::var("COMSPEC") {
             if !comspec.trim().is_empty() {
                 return (comspec, vec![]);
             }
         }
-        ("powershell.exe".to_string(), vec!["-NoLogo".to_string()])
+        ("cmd.exe".to_string(), vec![])
     }
 
     #[cfg(not(windows))]
@@ -121,4 +140,11 @@ fn default_shell() -> (String, Vec<String>) {
         }
         ("/bin/bash".to_string(), vec![])
     }
+}
+
+#[cfg(windows)]
+fn find_in_path(program: &str) -> Option<std::path::PathBuf> {
+    env::split_paths(&env::var_os("PATH")?)
+        .map(|dir| dir.join(program))
+        .find(|path| path.is_file())
 }

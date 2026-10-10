@@ -1,6 +1,6 @@
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TwittyConfig {
@@ -14,10 +14,17 @@ impl Default for TwittyConfig {
 }
 
 impl TwittyConfig {
+    /// `%APPDATA%\twitty\config.json` on Windows, `$XDG_CONFIG_HOME/twitty/config.json`
+    /// (default `~/.config`) elsewhere.
     fn config_path() -> Option<PathBuf> {
-        let home = std::env::var("HOME").ok()?;
-        let mut path = PathBuf::from(home);
-        path.push(".config");
+        let non_empty = |key: &str| std::env::var_os(key).filter(|v| !v.is_empty());
+        let mut path = if cfg!(windows) {
+            PathBuf::from(non_empty("APPDATA")?)
+        } else if let Some(xdg) = non_empty("XDG_CONFIG_HOME") {
+            PathBuf::from(xdg)
+        } else {
+            PathBuf::from(non_empty("HOME")?).join(".config")
+        };
         path.push("twitty");
         path.push("config.json");
         Some(path)

@@ -1,5 +1,3 @@
-use wgpu::util::DeviceExt;
-
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct QuadVertex {
@@ -19,6 +17,7 @@ pub struct QuadRenderer {
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     vertex_buffer: Option<wgpu::Buffer>,
+    vertex_capacity: usize,
     vertex_count: usize,
 }
 
@@ -72,20 +71,19 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             mapped_at_creation: false,
         });
 
-        let bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("quad bind group layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-            });
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("quad bind group layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("quad bind group"),
@@ -96,12 +94,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             }],
         });
 
-        let pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("quad pipeline layout"),
-                bind_group_layouts: &[Some(&bind_group_layout)],
-                immediate_size: 0,
-            });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("quad pipeline layout"),
+            bind_group_layouts: &[Some(&bind_group_layout)],
+            immediate_size: 0,
+        });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("quad render pipeline"),
@@ -157,6 +154,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             uniform_buffer,
             bind_group,
             vertex_buffer: None,
+            vertex_capacity: 0,
             vertex_count: 0,
         }
     }
@@ -169,7 +167,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniform));
     }
 
-    pub fn set_rects(&mut self, device: &wgpu::Device, quads: &[(f32, f32, f32, f32, [f32; 4])]) {
+    pub fn set_rects(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        quads: &[(f32, f32, f32, f32, [f32; 4])],
+    ) {
         if quads.is_empty() {
             self.vertex_count = 0;
             return;
@@ -179,22 +182,48 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         for &(x, y, w, h, color) in quads {
             let x2 = x + w;
             let y2 = y + h;
-            vertices.push(QuadVertex { position: [x, y], color });
-            vertices.push(QuadVertex { position: [x2, y], color });
-            vertices.push(QuadVertex { position: [x, y2], color });
+            vertices.push(QuadVertex {
+                position: [x, y],
+                color,
+            });
+            vertices.push(QuadVertex {
+                position: [x2, y],
+                color,
+            });
+            vertices.push(QuadVertex {
+                position: [x, y2],
+                color,
+            });
 
-            vertices.push(QuadVertex { position: [x2, y], color });
-            vertices.push(QuadVertex { position: [x2, y2], color });
-            vertices.push(QuadVertex { position: [x, y2], color });
+            vertices.push(QuadVertex {
+                position: [x2, y],
+                color,
+            });
+            vertices.push(QuadVertex {
+                position: [x2, y2],
+                color,
+            });
+            vertices.push(QuadVertex {
+                position: [x, y2],
+                color,
+            });
         }
 
         self.vertex_count = vertices.len();
-        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("quad vertex buffer"),
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        self.vertex_buffer = Some(buffer);
+        // Reuse the GPU buffer across frames; grow it geometrically only when needed.
+        if self.vertex_buffer.is_none() || self.vertex_capacity < vertices.len() {
+            let capacity = vertices.len().next_power_of_two().max(1024);
+            self.vertex_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("quad vertex buffer"),
+                size: (capacity * std::mem::size_of::<QuadVertex>()) as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+            self.vertex_capacity = capacity;
+        }
+        if let Some(ref buffer) = self.vertex_buffer {
+            queue.write_buffer(buffer, 0, bytemuck::cast_slice(&vertices));
+        }
     }
 
     pub fn render<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>) {
@@ -202,7 +231,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             if self.vertex_count > 0 {
                 render_pass.set_pipeline(&self.pipeline);
                 render_pass.set_bind_group(0, &self.bind_group, &[]);
-                render_pass.set_vertex_buffer(0, buffer.slice(..));
+                render_pass.set_vertex_buffer(
+                    0,
+                    buffer.slice(..(self.vertex_count * std::mem::size_of::<QuadVertex>()) as u64),
+                );
                 render_pass.draw(0..self.vertex_count as u32, 0..1);
             }
         }

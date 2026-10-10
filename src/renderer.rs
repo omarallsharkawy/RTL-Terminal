@@ -1,8 +1,10 @@
-use std::sync::Arc;
+use alacritty_terminal::term::cell::Flags as CellFlags;
+use alacritty_terminal::vte::ansi::CursorShape;
 use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping};
 use glyphon::{
     Cache, Resolution, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
 };
+use std::sync::Arc;
 use unicode_bidi::{bidi_class, BidiClass};
 use winit::window::Window;
 
@@ -10,21 +12,41 @@ use crate::color::{Palette, Rgba};
 use crate::quad::{try_render_box_or_block, QuadRenderer};
 use crate::terminal::{CellData, CursorState, LineData};
 
+/// Line height as a multiple of the font size (tall enough for Arabic harakat).
+const LINE_HEIGHT_FACTOR: f32 = 1.55;
+/// Logical (DPI-independent) window padding.
+const PADDING_LEFT: f32 = 8.0;
+const PADDING_TOP: f32 = 6.0;
+/// Left-to-right mark prepended to RTL segments so prompts never flip direction.
+const LRM: &str = "\u{200E}";
+
+type Quad = (f32, f32, f32, f32, [f32; 4]);
+
 #[derive(Clone)]
 pub struct CachedSegment {
     pub seg_start: usize,
     pub seg_end: usize,
+    /// X offset relative to the left padding.
     pub seg_x: f32,
     pub buffer: Buffer,
     pub has_rtl: bool,
+    /// Byte offset (into the shaped text) where each cell of the segment starts.
+    pub cell_bytes: Vec<usize>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct CachedRow {
     pub hash: u64,
     pub segments: Vec<CachedSegment>,
-    pub geom_cells: Vec<(usize, char, alacritty_terminal::vte::ansi::Color)>,
-    pub bg_cells: Vec<(usize, alacritty_terminal::vte::ansi::Color)>,
+    /// Backgrounds, box drawing and text decorations, relative to the row origin.
+    pub quads: Vec<Quad>,
+}
+
+/// Cursor details that change how a row is drawn (the glyph under a block cursor is recolored).
+#[derive(Clone, Copy, PartialEq, Hash)]
+struct RowCursor {
+    col: usize,
+    block: bool,
 }
 
 pub struct Renderer {
@@ -40,45 +62,88 @@ pub struct Renderer {
     pub text_renderer: TextRenderer,
     pub viewport: Viewport,
     pub palette: Palette,
+    /// Font size in logical points (what the user zooms and what is saved).
+    pub font_size: f32,
+    /// Window scale factor (1.0 = 96 DPI).
+    pub scale: f32,
+    /// Cell metrics in physical pixels.
     pub char_width: f32,
     pub line_height: f32,
-    pub font_size: f32,
     pub padding_left: f32,
     pub padding_top: f32,
     pub is_srgb: bool,
+    pub focused: bool,
     pub row_caches: Vec<CachedRow>,
 }
 
-fn hash_color<H: std::hash::Hasher>(color: &alacritty_terminal::vte::ansi::Color, hasher: &mut H) {
-    use std::hash::Hash;
-    match color {
-        alacritty_terminal::vte::ansi::Color::Named(n) => {
-            0u8.hash(hasher);
-            (*n as u8).hash(hasher);
-        }
-        alacritty_terminal::vte::ansi::Color::Spec(rgb) => {
-            1u8.hash(hasher);
-            rgb.r.hash(hasher);
-            rgb.g.hash(hasher);
-            rgb.b.hash(hasher);
-        }
-        alacritty_terminal::vte::ansi::Color::Indexed(idx) => {
-            2u8.hash(hasher);
-            idx.hash(hasher);
-        }
-    }
-}
-
-fn hash_cells(cells: &[CellData]) -> u64 {
+fn hash_row(cells: &[CellData], cursor: Option<RowCursor>) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     for cell in cells {
         cell.c.hash(&mut hasher);
+        cell.zerowidth.hash(&mut hasher);
         hash_color(&cell.fg, &mut hasher);
         hash_color(&cell.bg, &mut hasher);
         cell.flags.bits().hash(&mut hasher);
     }
+    cursor.hash(&mut hasher);
     hasher.finish()
+}
+
+fn hash_color<H: std::hash::Hasher>(color: &alacritty_terminal::vte::ansi::Color, hasher: &mut H) {
+    use alacritty_terminal::vte::ansi::Color;
+    use std::hash::Hash;
+    match color {
+        Color::Named(n) => (0u8, *n as u8).hash(hasher),
+        Color::Spec(rgb) => (1u8, rgb.r, rgb.g, rgb.b).hash(hasher),
+        Color::Indexed(idx) => (2u8, *idx).hash(hasher),
+    }
+}
+
+fn is_rtl_char(c: char) -> bool {
+    matches!(bidi_class(c), BidiClass::R | BidiClass::AL)
+}
+
+fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {
+    Rgba {
+        r: a.r + (b.r - a.r) * t,
+        g: a.g + (b.g - a.g) * t,
+        b: a.b + (b.b - a.b) * t,
+        a: a.a,
+    }
+}
+
+/// Resolve a cell's effective (foreground, background) honoring INVERSE, DIM and HIDDEN.
+pub fn cell_colors(palette: &Palette, cell: &CellData) -> (Rgba, Rgba) {
+    let mut fg = palette.resolve(cell.fg, false);
+    let mut bg = palette.resolve(cell.bg, true);
+    if cell.flags.contains(CellFlags::INVERSE) {
+        std::mem::swap(&mut fg, &mut bg);
+    }
+    if cell.flags.contains(CellFlags::DIM) {
+        fg = mix(fg, bg, 0.34);
+    }
+    if cell.flags.contains(CellFlags::HIDDEN) {
+        fg = bg;
+    }
+    (fg, bg)
+}
+
+/// Measure the advance of one monospace cell at the given pixel size.
+fn measure_char_width(font_system: &mut FontSystem, font_px: f32, line_height: f32) -> f32 {
+    let mut buffer = Buffer::new_empty(Metrics::new(font_px, line_height));
+    buffer.set_text(
+        "MMMMMMMMMM",
+        &Attrs::new().family(Family::Monospace),
+        Shaping::Basic,
+        None,
+    );
+    buffer.shape_until_scroll(font_system, false);
+    buffer
+        .layout_runs()
+        .filter_map(|run| run.glyphs.first().map(|g| g.w))
+        .find(|w| *w > 0.0)
+        .unwrap_or((font_px * 0.6).round())
 }
 
 impl Renderer {
@@ -89,21 +154,30 @@ impl Renderer {
 
         let instance = wgpu::Instance::default();
         let surface = instance.create_surface(window.clone())?;
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                compatible_surface: Some(&surface),
-                force_fallback_adapter: false,
-                apply_limit_buckets: false,
-            })
-            .await
-            .expect("Failed to find suitable GPU adapter");
+        let mut adapter = None;
+        // Prefer a real GPU; fall back to a software adapter (e.g. WARP on Windows VMs / RDP).
+        for force_fallback_adapter in [false, true] {
+            if let Ok(a) = instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::HighPerformance,
+                    compatible_surface: Some(&surface),
+                    force_fallback_adapter,
+                    apply_limit_buckets: false,
+                })
+                .await
+            {
+                adapter = Some(a);
+                break;
+            }
+        }
+        let adapter = adapter.ok_or_else(|| anyhow::anyhow!("No compatible GPU adapter found"))?;
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("twitty device"),
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
+                required_limits: wgpu::Limits::downlevel_defaults()
+                    .using_resolution(adapter.limits()),
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 trace: wgpu::Trace::Off,
                 memory_hints: Default::default(),
@@ -119,9 +193,15 @@ impl Renderer {
             .unwrap_or(surface_caps.formats[0]);
         let is_srgb = format.is_srgb();
 
-        let present_mode = if surface_caps.present_modes.contains(&wgpu::PresentMode::Mailbox) {
+        let present_mode = if surface_caps
+            .present_modes
+            .contains(&wgpu::PresentMode::Mailbox)
+        {
             wgpu::PresentMode::Mailbox
-        } else if surface_caps.present_modes.contains(&wgpu::PresentMode::Immediate) {
+        } else if surface_caps
+            .present_modes
+            .contains(&wgpu::PresentMode::Immediate)
+        {
             wgpu::PresentMode::Immediate
         } else {
             wgpu::PresentMode::AutoVsync
@@ -141,8 +221,9 @@ impl Renderer {
         surface.configure(&device, &config);
 
         let quad_renderer = QuadRenderer::new(&device, format);
+        quad_renderer.update_screen_size(&queue, width as f32, height as f32);
 
-        let mut font_system = FontSystem::new();
+        let font_system = FontSystem::new();
         let swash_cache = SwashCache::new();
         let cache = Cache::new(&device);
         let mut viewport = Viewport::new(&device, &cache);
@@ -156,32 +237,8 @@ impl Renderer {
             None,
         );
 
-        let font_size = initial_font_size.clamp(8.0, 48.0);
-        let line_height = (font_size * 1.55).round();
-        let padding_left = 8.0;
-        let padding_top = 6.0;
-
-        let metrics = Metrics::new(font_size, line_height);
-        let mut test_buffer = Buffer::new_empty(metrics);
-        test_buffer.set_text(
-            "MMMMMMMMMM",
-            &Attrs::new().family(Family::Monospace),
-            Shaping::Basic,
-            None,
-        );
-        test_buffer.shape_until_scroll(&mut font_system, false);
-
-        let mut measured_width = 8.8;
-        for run in test_buffer.layout_runs() {
-            if let Some(glyph) = run.glyphs.first() {
-                if glyph.w > 0.0 {
-                    measured_width = glyph.w;
-                }
-            }
-        }
-        let char_width = measured_width;
-
-        Ok(Self {
+        let scale = window.scale_factor() as f32;
+        let mut renderer = Self {
             window,
             surface,
             device,
@@ -194,40 +251,47 @@ impl Renderer {
             text_renderer,
             viewport,
             palette: Palette::default(),
-            char_width,
-            line_height,
-            font_size,
-            padding_left,
-            padding_top,
+            font_size: initial_font_size,
+            scale,
+            char_width: 0.0,
+            line_height: 0.0,
+            padding_left: 0.0,
+            padding_top: 0.0,
             is_srgb,
+            focused: true,
             row_caches: Vec::new(),
-        })
+        };
+        renderer.update_metrics();
+        Ok(renderer)
+    }
+
+    fn font_px(&self) -> f32 {
+        self.font_size * self.scale
+    }
+
+    /// Recompute cell metrics from the font size and scale factor.
+    fn update_metrics(&mut self) {
+        self.font_size = self.font_size.clamp(8.0, 48.0);
+        let font_px = self.font_px();
+        self.line_height = (font_px * LINE_HEIGHT_FACTOR).round();
+        self.char_width = measure_char_width(&mut self.font_system, font_px, self.line_height);
+        self.padding_left = (PADDING_LEFT * self.scale).round();
+        self.padding_top = (PADDING_TOP * self.scale).round();
+        self.row_caches.clear();
     }
 
     pub fn set_font_size(&mut self, new_size: f32) {
-        self.font_size = new_size.clamp(8.0, 48.0);
-        self.line_height = (self.font_size * 1.55).round();
+        self.font_size = new_size;
+        self.update_metrics();
+    }
 
-        let metrics = Metrics::new(self.font_size, self.line_height);
-        let mut test_buffer = Buffer::new_empty(metrics);
-        test_buffer.set_text(
-            "MMMMMMMMMM",
-            &Attrs::new().family(Family::Monospace),
-            Shaping::Basic,
-            None,
-        );
-        test_buffer.shape_until_scroll(&mut self.font_system, false);
+    pub fn set_scale_factor(&mut self, scale: f32) {
+        self.scale = scale.max(0.25);
+        self.update_metrics();
+    }
 
-        let mut measured_width = (self.font_size * 0.6).round();
-        for run in test_buffer.layout_runs() {
-            if let Some(glyph) = run.glyphs.first() {
-                if glyph.w > 0.0 {
-                    measured_width = glyph.w;
-                }
-            }
-        }
-        self.char_width = measured_width;
-        self.row_caches.clear();
+    pub fn set_focused(&mut self, focused: bool) {
+        self.focused = focused;
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -251,6 +315,14 @@ impl Renderer {
         (cols.max(10), rows.max(4))
     }
 
+    /// Map a physical pixel position to a (col, row) cell, clamped to the grid.
+    pub fn pixel_to_cell(&self, x: f64, y: f64) -> (usize, usize) {
+        let (cols, rows) = self.compute_grid_size();
+        let col = ((x - self.padding_left as f64) / self.char_width as f64).max(0.0) as usize;
+        let row = ((y - self.padding_top as f64) / self.line_height as f64).max(0.0) as usize;
+        (col.min(cols - 1), row.min(rows - 1))
+    }
+
     fn to_target_color(&self, rgba: Rgba) -> [f32; 4] {
         if self.is_srgb {
             rgba.to_linear()
@@ -259,273 +331,338 @@ impl Renderer {
         }
     }
 
+    fn shape_buffer(&mut self, spans: &[(String, Attrs<'static>)], shaping: Shaping) -> Buffer {
+        let metrics = Metrics::new(self.font_px(), self.line_height);
+        let default_attrs = Attrs::new().family(Family::Monospace);
+        let mut buf = Buffer::new_empty(metrics);
+        buf.set_rich_text(
+            spans.iter().map(|(s, a)| (s.as_str(), a.clone())),
+            &default_attrs,
+            shaping,
+            None,
+        );
+        buf.shape_until_scroll(&mut self.font_system, false);
+        buf
+    }
+
+    /// Shape cells `[start, end)` into one buffer. Returns the buffer plus each cell's byte offset.
+    fn shape_cells(
+        &mut self,
+        cells: &[CellData],
+        start: usize,
+        end: usize,
+        has_rtl: bool,
+        cursor: Option<RowCursor>,
+    ) -> (Buffer, Vec<usize>) {
+        let mut spans: Vec<(String, Attrs<'static>)> = Vec::new();
+        let mut cell_bytes = Vec::with_capacity(end - start);
+        let mut byte = 0;
+        let mut complex = has_rtl;
+        if has_rtl {
+            spans.push((LRM.to_string(), Attrs::new().family(Family::Monospace)));
+            byte += LRM.len();
+        }
+
+        for (col, cell) in cells.iter().enumerate().take(end).skip(start) {
+            cell_bytes.push(byte);
+            byte += cell.text_len();
+            if cell.is_spacer() {
+                continue;
+            }
+            complex |= !cell.c.is_ascii() || !cell.zerowidth.is_empty();
+
+            let (mut fg, bg) = cell_colors(&self.palette, cell);
+            if cursor.is_some_and(|c| c.block && c.col == col) {
+                // Text under a block cursor takes the cell's background so it stays legible.
+                fg = bg;
+            }
+            let mut attrs = Attrs::new()
+                .family(Family::Monospace)
+                .color(fg.to_glyphon());
+            if cell.flags.contains(CellFlags::BOLD) {
+                attrs = attrs.weight(cosmic_text::Weight::BOLD);
+            }
+            if cell.flags.contains(CellFlags::ITALIC) {
+                attrs = attrs.style(cosmic_text::Style::Italic);
+            }
+
+            match spans.last_mut() {
+                Some((text, a))
+                    if a.color_opt == attrs.color_opt
+                        && a.weight == attrs.weight
+                        && a.style == attrs.style =>
+                {
+                    cell.push_text(text)
+                }
+                _ => {
+                    let mut text = String::new();
+                    cell.push_text(&mut text);
+                    spans.push((text, attrs));
+                }
+            }
+        }
+
+        let shaping = if complex {
+            Shaping::Advanced
+        } else {
+            Shaping::Basic
+        };
+        (self.shape_buffer(&spans, shaping), cell_bytes)
+    }
+
+    /// True when every glyph of an LTR buffer starts exactly at its cell's grid column.
+    fn is_grid_aligned(&self, buffer: &Buffer, cell_bytes: &[usize]) -> bool {
+        buffer.layout_runs().all(|run| {
+            run.glyphs.iter().all(|glyph| {
+                let cell = cell_bytes
+                    .partition_point(|&b| b <= glyph.start)
+                    .saturating_sub(1);
+                (glyph.x - cell as f32 * self.char_width).abs() < 0.5
+            })
+        })
+    }
+
+    fn build_row(&mut self, line: &LineData, cursor: Option<RowCursor>) -> Vec<CachedSegment> {
+        let cells = &line.cells;
+        let cols = cells.len();
+        let geom: Vec<bool> = cells
+            .iter()
+            .map(|cell| {
+                let mut scratch = Vec::new();
+                try_render_box_or_block(cell.c, 0.0, 0.0, 1.0, 1.0, [0.0; 4], &mut scratch)
+            })
+            .collect();
+
+        let mut segments = Vec::new();
+        let mut col = 0;
+        while col < cols {
+            while col < cols && (geom[col] || cells[col].is_blank()) {
+                col += 1;
+            }
+            if col >= cols {
+                break;
+            }
+
+            // Grow the segment, keeping short space runs so bidi context spans whole phrases.
+            let start = col;
+            let mut end = col;
+            while end < cols && !geom[end] {
+                if cells[end].is_blank() {
+                    let mut peek = end;
+                    while peek < cols && cells[peek].is_blank() {
+                        peek += 1;
+                    }
+                    if peek - end >= 8 || peek == cols || geom[peek] {
+                        break;
+                    }
+                }
+                end += 1;
+            }
+            while end > start && cells[end - 1].is_blank() {
+                end -= 1;
+            }
+            col = end;
+
+            let has_rtl = cells[start..end].iter().any(|c| is_rtl_char(c.c));
+            let (buffer, cell_bytes) = self.shape_cells(cells, start, end, has_rtl, cursor);
+
+            if has_rtl || self.is_grid_aligned(&buffer, &cell_bytes) {
+                segments.push(CachedSegment {
+                    seg_start: start,
+                    seg_end: end,
+                    seg_x: start as f32 * self.char_width,
+                    buffer,
+                    has_rtl,
+                    cell_bytes,
+                });
+                continue;
+            }
+
+            // A fallback glyph (icon, emoji, CJK…) has a different advance: lock every cell to the grid.
+            for c in start..end {
+                if cells[c].is_blank() || cells[c].is_spacer() {
+                    continue;
+                }
+                let (buffer, cell_bytes) = self.shape_cells(cells, c, c + 1, false, cursor);
+                segments.push(CachedSegment {
+                    seg_start: c,
+                    seg_end: c + 1,
+                    seg_x: c as f32 * self.char_width,
+                    buffer,
+                    has_rtl: false,
+                    cell_bytes,
+                });
+            }
+        }
+        segments
+    }
+
+    /// Cell backgrounds, box/block geometry and underline/strikeout, relative to the row origin.
+    fn build_row_quads(&self, line: &LineData) -> Vec<Quad> {
+        let cw = self.char_width;
+        let lh = self.line_height;
+        let font_px = self.font_px();
+        let thickness = (font_px / 14.0).round().max(1.0);
+        let underline_y = ((lh + font_px) * 0.5).round().min(lh - thickness);
+        let strike_y = (lh * 0.5).round();
+
+        let mut quads = Vec::new();
+        for (c, cell) in line.cells.iter().enumerate() {
+            let (fg, bg) = cell_colors(&self.palette, cell);
+            let x = c as f32 * cw;
+            if bg != self.palette.background {
+                quads.push((x, 0.0, cw, lh, self.to_target_color(bg)));
+            }
+            let fg_color = self.to_target_color(fg);
+            if !cell.flags.contains(CellFlags::HIDDEN) {
+                try_render_box_or_block(cell.c, x, 0.0, cw, lh, fg_color, &mut quads);
+            }
+            if cell.flags.contains(CellFlags::DOUBLE_UNDERLINE) {
+                quads.push((x, underline_y - thickness * 2.0, cw, thickness, fg_color));
+                quads.push((x, underline_y, cw, thickness, fg_color));
+            } else if cell.flags.intersects(CellFlags::ALL_UNDERLINES) {
+                quads.push((x, underline_y, cw, thickness, fg_color));
+            }
+            if cell.flags.contains(CellFlags::STRIKEOUT) {
+                quads.push((x, strike_y, cw, thickness, fg_color));
+            }
+        }
+        quads
+    }
+
+    /// X position (relative to the left padding) where the cursor should be drawn.
+    fn cursor_x(&self, row: &CachedRow, line: &LineData, col: usize) -> f32 {
+        let grid_x = col as f32 * self.char_width;
+        for (i, seg) in row.segments.iter().enumerate() {
+            if !seg.has_rtl {
+                continue;
+            }
+            if col >= seg.seg_start && col < seg.seg_end {
+                // Inside RTL text: sit on the glyph that holds this logical cell.
+                let target = seg.cell_bytes[col - seg.seg_start];
+                for run in seg.buffer.layout_runs() {
+                    if let Some(g) = run
+                        .glyphs
+                        .iter()
+                        .find(|g| target >= g.start && target < g.end)
+                    {
+                        return seg.seg_x + g.x;
+                    }
+                }
+                return grid_x;
+            }
+            let next_start = row.segments.get(i + 1).map_or(usize::MAX, |s| s.seg_start);
+            if col >= seg.seg_end && col < next_start {
+                // After RTL text (including the user's trailing spaces): anchor to its visual end.
+                let text_w = seg
+                    .buffer
+                    .layout_runs()
+                    .map(|r| r.line_w)
+                    .fold(0.0, f32::max);
+                let trailing = line.cells[seg.seg_end..col].len() as f32 * self.char_width;
+                return seg.seg_x + text_w + trailing;
+            }
+        }
+        grid_x
+    }
+
+    fn cursor_quads(&self, x: f32, y: f32, shape: CursorShape, out: &mut Vec<Quad>) {
+        let (w, h) = (self.char_width, self.line_height);
+        let color = self.to_target_color(self.palette.cursor);
+        let t = (self.scale * 1.5).round().max(1.0);
+        let hollow = |out: &mut Vec<Quad>| {
+            out.push((x, y, w, t, color));
+            out.push((x, y + h - t, w, t, color));
+            out.push((x, y, t, h, color));
+            out.push((x + w - t, y, t, h, color));
+        };
+        match shape {
+            CursorShape::Hidden => {}
+            _ if !self.focused => hollow(out),
+            CursorShape::Block => out.push((x, y, w, h, color)),
+            CursorShape::HollowBlock => hollow(out),
+            CursorShape::Beam => out.push((x, y, t, h, color)),
+            CursorShape::Underline => out.push((x, y + h - t * 2.0, w, t * 2.0, color)),
+        }
+    }
+
     pub fn render(&mut self, lines: &[LineData], cursor: &CursorState) -> anyhow::Result<()> {
         let surface_texture = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
-            wgpu::CurrentSurfaceTexture::Outdated => return Ok(()),
+            wgpu::CurrentSurfaceTexture::Success(t)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
+                // Swapchain no longer matches the window (resize, display change, GPU reset).
+                self.surface.configure(&self.device, &self.config);
+                self.window.request_redraw();
+                return Ok(());
+            }
             _ => return Ok(()),
         };
         let view = surface_texture
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let metrics = Metrics::new(self.font_size, self.line_height);
-        let default_attrs = Attrs::new().family(Family::Monospace);
-        let default_bg = self.palette.background;
-        let default_bg_color = self.to_target_color(default_bg);
+        let default_bg_color = self.to_target_color(self.palette.background);
+        let mut quads: Vec<Quad> = Vec::new();
+        let mut cursor_quads: Vec<Quad> = Vec::new();
 
-        let mut background_quads = Vec::new();
-        let win_w = self.config.width as f32;
-        let win_h = self.config.height as f32;
-
-        // 1. Full window background
-        background_quads.push((0.0, 0.0, win_w, win_h, default_bg_color));
-
-        if self.row_caches.len() < lines.len() {
-            self.row_caches.resize(
-                lines.len(),
-                CachedRow {
-                    hash: 0,
-                    segments: Vec::new(),
-                    geom_cells: Vec::new(),
-                    bg_cells: Vec::new(),
-                },
-            );
+        if self.row_caches.len() != lines.len() {
+            self.row_caches.resize(lines.len(), CachedRow::default());
         }
 
-        let mut cursor_visual_pos: Option<(f32, f32)> = None;
-
-        // Update dirty rows and collect quads
         for (r, line) in lines.iter().enumerate() {
             let y = self.padding_top + r as f32 * self.line_height;
-            let cols = line.cells.len();
-            let current_hash = hash_cells(&line.cells);
+            let row_cursor = (cursor.is_visible && cursor.row == r).then_some(RowCursor {
+                col: cursor.col,
+                block: self.focused && cursor.shape == CursorShape::Block,
+            });
 
-            if self.row_caches[r].hash != current_hash {
-                let mut geom_cells = Vec::new();
-                let mut bg_cells = Vec::new();
-                let mut geom_rendered = vec![false; cols];
-
-                for (c, cell) in line.cells.iter().enumerate() {
-                    let bg = self.palette.resolve(cell.bg, true);
-                    if bg != default_bg {
-                        bg_cells.push((c, cell.bg));
-                    }
-                    let mut test_quads = Vec::new();
-                    let rendered = try_render_box_or_block(
-                        cell.c,
-                        0.0,
-                        0.0,
-                        self.char_width,
-                        self.line_height,
-                        [0.0; 4],
-                        &mut test_quads,
-                    );
-                    if rendered {
-                        geom_rendered[c] = true;
-                        geom_cells.push((c, cell.c, cell.fg));
-                    }
-                }
-
-                let mut segments = Vec::new();
-                let mut col_idx = 0;
-                while col_idx < cols {
-                    while col_idx < cols && (geom_rendered[col_idx] || line.cells[col_idx].c == ' ') {
-                        col_idx += 1;
-                    }
-                    if col_idx >= cols {
-                        break;
-                    }
-
-                    let seg_start = col_idx;
-                    let mut seg_end = col_idx;
-
-                    while seg_end < cols && !geom_rendered[seg_end] {
-                        if line.cells[seg_end].c == ' ' {
-                            let mut space_run = 0;
-                            let mut peek = seg_end;
-                            while peek < cols && line.cells[peek].c == ' ' && !geom_rendered[peek] {
-                                space_run += 1;
-                                peek += 1;
-                            }
-                            if space_run >= 8 || (peek < cols && geom_rendered[peek]) {
-                                break;
-                            }
-                        }
-                        seg_end += 1;
-                    }
-
-                    while seg_end > seg_start && line.cells[seg_end - 1].c == ' ' {
-                        seg_end -= 1;
-                    }
-
-                    if seg_start < seg_end {
-                        let seg_x = self.padding_left + seg_start as f32 * self.char_width;
-
-                        let mut spans_data: Vec<(String, cosmic_text::Attrs)> = Vec::new();
-                        let mut cur_text = String::new();
-                        let mut cur_attrs: Option<cosmic_text::Attrs> = None;
-                        let mut seg_has_rtl = false;
-
-                        for cell in line.cells[seg_start..seg_end].iter() {
-                            let class = bidi_class(cell.c);
-                            if class == BidiClass::R || class == BidiClass::AL {
-                                seg_has_rtl = true;
-                            }
-
-                            let fg = self.palette.resolve(cell.fg, false);
-                            let mut attrs = default_attrs.clone().color(fg.to_glyphon());
-                            if cell.flags.contains(alacritty_terminal::term::cell::Flags::BOLD) {
-                                attrs = attrs.weight(cosmic_text::Weight::BOLD);
-                            }
-                            if cell.flags.contains(alacritty_terminal::term::cell::Flags::ITALIC) {
-                                attrs = attrs.style(cosmic_text::Style::Italic);
-                            }
-
-                            let attrs_match = cur_attrs
-                                .as_ref()
-                                .map(|a| a.color_opt == attrs.color_opt && a.weight == attrs.weight)
-                                .unwrap_or(false);
-
-                            if attrs_match {
-                                cur_text.push(cell.c);
-                            } else {
-                                if !cur_text.is_empty() {
-                                    if let Some(prev) = cur_attrs.take() {
-                                        spans_data.push((std::mem::take(&mut cur_text), prev));
-                                    }
-                                }
-                                cur_text.push(cell.c);
-                                cur_attrs = Some(attrs);
-                            }
-                        }
-
-                        if !cur_text.is_empty() {
-                            if let Some(prev) = cur_attrs.take() {
-                                spans_data.push((cur_text, prev));
-                            }
-                        }
-
-                        if !spans_data.is_empty() {
-                            if seg_has_rtl {
-                                spans_data.insert(0, ("‎".to_string(), default_attrs.clone()));
-                            }
-
-                            let mut buf = Buffer::new_empty(metrics);
-                            let span_refs: Vec<(&str, cosmic_text::Attrs)> = spans_data
-                                .iter()
-                                .map(|(s, a)| (s.as_str(), a.clone()))
-                                .collect();
-
-                            let shaping_mode = if seg_has_rtl {
-                                Shaping::Advanced
-                            } else {
-                                Shaping::Basic
-                            };
-
-                            buf.set_rich_text(span_refs, &default_attrs, shaping_mode, None);
-                            buf.shape_until_scroll(&mut self.font_system, false);
-
-                            segments.push(CachedSegment {
-                                seg_start,
-                                seg_end,
-                                seg_x,
-                                buffer: buf,
-                                has_rtl: seg_has_rtl,
-                            });
-                        }
-                    }
-
-                    col_idx = seg_end;
-                }
-
+            let hash = hash_row(&line.cells, row_cursor);
+            if self.row_caches[r].hash != hash {
+                let segments = self.build_row(line, row_cursor);
+                let row_quads = self.build_row_quads(line);
                 self.row_caches[r] = CachedRow {
-                    hash: current_hash,
+                    hash,
                     segments,
-                    geom_cells,
-                    bg_cells,
+                    quads: row_quads,
                 };
             }
 
-            // Draw backgrounds and geometry from cached row data
             let cached = &self.row_caches[r];
-            for &(c, bg_color) in &cached.bg_cells {
-                let bg = self.palette.resolve(bg_color, true);
-                let x = self.padding_left + c as f32 * self.char_width;
-                background_quads.push((x, y, self.char_width, self.line_height, self.to_target_color(bg)));
-            }
-            for &(c, ch, fg_color) in &cached.geom_cells {
-                let fg = self.palette.resolve(fg_color, false);
-                let x = self.padding_left + c as f32 * self.char_width;
-                let _ = try_render_box_or_block(
-                    ch,
-                    x,
-                    y,
-                    self.char_width,
-                    self.line_height,
-                    self.to_target_color(fg),
-                    &mut background_quads,
-                );
-            }
+            quads.extend(
+                cached
+                    .quads
+                    .iter()
+                    .map(|&(x, qy, w, h, c)| (self.padding_left + x, y + qy, w, h, c)),
+            );
 
-            // Compute cursor if on this row
-            if cursor.is_visible && cursor.row == r {
-                for seg in &cached.segments {
-                    if cursor.col >= seg.seg_start && cursor.col <= seg.seg_end + 10 {
-                        if cursor.col >= seg.seg_end {
-                            let text_width = seg.buffer.layout_runs().map(|run| run.line_w).fold(0.0, f32::max);
-                            cursor_visual_pos = Some((seg.seg_x + text_width, y));
-                        } else {
-                            let mut byte_target: usize = line.cells[seg.seg_start..cursor.col]
-                                .iter()
-                                .map(|c| c.c.len_utf8())
-                                .sum();
-                            if seg.has_rtl {
-                                byte_target += "‎".len();
-                            }
-                            for run in seg.buffer.layout_runs() {
-                                for glyph in run.glyphs.iter() {
-                                    if byte_target >= glyph.start && byte_target < glyph.end {
-                                        cursor_visual_pos = Some((seg.seg_x + glyph.x, y));
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        break;
-                    }
-                }
-                if cursor_visual_pos.is_none() {
-                    let cx = self.padding_left + cursor.col as f32 * self.char_width;
-                    cursor_visual_pos = Some((cx, y));
-                }
+            if let Some(rc) = row_cursor {
+                let x = self.padding_left + self.cursor_x(cached, line, rc.col);
+                self.cursor_quads(x, y, cursor.shape, &mut cursor_quads);
             }
         }
 
-        // Cursor Quad
-        if let Some((cx, cy)) = cursor_visual_pos {
-            let cursor_color = self.to_target_color(self.palette.cursor);
-            background_quads.push((cx, cy, self.char_width, self.line_height, cursor_color));
-        }
+        // The cursor sits above cell backgrounds but below text (its glyph was recolored).
+        quads.extend(cursor_quads);
+        self.quad_renderer
+            .set_rects(&self.device, &self.queue, &quads);
 
-        self.quad_renderer.set_rects(&self.device, &background_quads);
-
-        // Prepare text areas directly from cached row buffers
+        let bounds = TextBounds {
+            left: 0,
+            top: 0,
+            right: self.config.width as i32,
+            bottom: self.config.height as i32,
+        };
         let mut text_areas: Vec<TextArea> = Vec::new();
-        for (r, cached_row) in self.row_caches.iter().enumerate().take(lines.len()) {
+        for (r, cached_row) in self.row_caches.iter().enumerate() {
             let y = self.padding_top + r as f32 * self.line_height;
             for seg in &cached_row.segments {
                 text_areas.push(TextArea {
                     buffer: &seg.buffer,
-                    left: seg.seg_x,
+                    left: self.padding_left + seg.seg_x,
                     top: y,
                     scale: 1.0,
-                    bounds: TextBounds {
-                        left: 0,
-                        top: 0,
-                        right: self.config.width as i32,
-                        bottom: self.config.height as i32,
-                    },
+                    bounds,
                     default_color: self.palette.foreground.to_glyphon(),
                     custom_glyphs: &[],
                 });
@@ -551,22 +688,6 @@ impl Renderer {
             });
 
         {
-            let clear_r = if self.is_srgb {
-                default_bg_color[0] as f64
-            } else {
-                default_bg.r as f64
-            };
-            let clear_g = if self.is_srgb {
-                default_bg_color[1] as f64
-            } else {
-                default_bg.g as f64
-            };
-            let clear_b = if self.is_srgb {
-                default_bg_color[2] as f64
-            } else {
-                default_bg.b as f64
-            };
-
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("twitty render pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -574,9 +695,9 @@ impl Renderer {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: clear_r,
-                            g: clear_g,
-                            b: clear_b,
+                            r: default_bg_color[0] as f64,
+                            g: default_bg_color[1] as f64,
+                            b: default_bg_color[2] as f64,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
