@@ -123,6 +123,10 @@ impl CachedSegment {
 #[derive(Clone, Default)]
 pub struct CachedRow {
     pub hash: u64,
+    /// Visual extents of cells in RTL segments (see `visual_cell_extents`), for hit testing.
+    pub visual: Vec<Option<(f32, f32)>>,
+    /// Cells whose character is right-to-left (their left and right halves are swapped).
+    pub rtl_cells: Vec<bool>,
     pub segments: Vec<CachedSegment>,
     /// Backgrounds, box drawing and text decorations, relative to the row origin.
     pub quads: Vec<Quad>,
@@ -136,6 +140,51 @@ pub struct RowCursor {
 }
 
 impl CachedRow {
+    /// The cell drawn under `x` (relative to the row origin) and which side of it, so mouse
+    /// selection and mouse reports follow what is on screen even where Arabic is reordered.
+    pub fn hit_test(&self, x: f32, char_width: f32, cols: usize) -> (usize, Side) {
+        let is_rtl = |c: usize| self.rtl_cells.get(c).copied().unwrap_or(false);
+        let sized = || {
+            self.visual
+                .iter()
+                .enumerate()
+                .filter_map(|(c, e)| e.filter(|(l, r)| r > l).map(|e| (c, e)))
+        };
+        let in_rtl_segment = |x: f32| {
+            self.segments.iter().any(|s| {
+                s.has_rtl
+                    && x >= s.seg_start as f32 * char_width
+                    && x < s.seg_end as f32 * char_width
+            })
+        };
+        let hit = sized().find(|(_, (l, r))| x >= *l && x < *r).or_else(|| {
+            // Inside an RTL segment but between glyphs: take the nearest drawn cell.
+            in_rtl_segment(x).then(|| {
+                sized().min_by(|(_, a), (_, b)| {
+                    let d = |(l, r): (f32, f32)| (l - x).abs().min((r - x).abs());
+                    d(*a).total_cmp(&d(*b))
+                })
+            })?
+        });
+        if let Some((col, (l, r))) = hit {
+            let left_half = x < (l + r) / 2.0;
+            let side = if left_half != is_rtl(col) {
+                Side::Left
+            } else {
+                Side::Right
+            };
+            return (col, side);
+        }
+        let rel = (x / char_width).max(0.0);
+        let col = (rel as usize).min(cols.saturating_sub(1));
+        let side = if rel.fract() < 0.5 {
+            Side::Left
+        } else {
+            Side::Right
+        };
+        (col, side)
+    }
+
     /// Where the cursor goes (relative to the left padding), and whether it should extend to the
     /// left of that point. After Arabic text the caret sits on the text's left, where the next
     /// Arabic letter will appear; after Latin text it sits on the right.
@@ -542,28 +591,13 @@ pub fn cell_colors(palette: &Palette, cell: &CellData) -> (Rgba, Rgba) {
     (fg, bg)
 }
 
-/// Backgrounds, box geometry and decorations of a row. Cells inside RTL segments follow the
-/// glyphs that hold them; everything else sits on the grid. `metrics` is (cell width, line
-/// height, font px).
-pub fn build_row_quads(
-    palette: &Palette,
-    is_srgb: bool,
-    metrics: (f32, f32, f32),
+/// Where each cell of a row is drawn, relative to the row origin: `Some((left, right))` for
+/// cells inside RTL segments (they follow their glyphs), `None` for cells on the grid.
+pub fn visual_cell_extents(
     line: &LineData,
     segments: &[CachedSegment],
-) -> Vec<Quad> {
-    let (cw, lh, font_px) = metrics;
-    let target = |rgba: Rgba| {
-        if is_srgb {
-            rgba.to_linear()
-        } else {
-            rgba.to_array()
-        }
-    };
-    let thickness = (font_px / 14.0).round().max(1.0);
-    let underline_y = ((lh + font_px) * 0.5).round().min(lh - thickness);
-    let strike_y = (lh * 0.5).round();
-
+    cw: f32,
+) -> Vec<Option<(f32, f32)>> {
     let mut visual: Vec<Option<(f32, f32)>> = vec![None; line.cells.len()];
     for seg in segments.iter().filter(|s| s.has_rtl) {
         let mut extents = seg.cell_extents(&line.cells);
@@ -598,6 +632,32 @@ pub fn build_row_quads(
             };
         }
     }
+    visual
+}
+
+/// Backgrounds, box geometry and decorations of a row. Cells inside RTL segments follow the
+/// glyphs that hold them; everything else sits on the grid. `metrics` is (cell width, line
+/// height, font px).
+pub fn build_row_quads(
+    palette: &Palette,
+    is_srgb: bool,
+    metrics: (f32, f32, f32),
+    line: &LineData,
+    segments: &[CachedSegment],
+) -> Vec<Quad> {
+    let (cw, lh, font_px) = metrics;
+    let target = |rgba: Rgba| {
+        if is_srgb {
+            rgba.to_linear()
+        } else {
+            rgba.to_array()
+        }
+    };
+    let thickness = (font_px / 14.0).round().max(1.0);
+    let underline_y = ((lh + font_px) * 0.5).round().min(lh - thickness);
+    let strike_y = (lh * 0.5).round();
+
+    let visual = visual_cell_extents(line, segments, cw);
 
     let mut quads = Vec::new();
     for (c, cell) in line.cells.iter().enumerate() {
@@ -935,6 +995,27 @@ impl Renderer {
         ((col as usize).min(cols - 1), (row as usize).min(rows - 1))
     }
 
+    /// Map a pixel to the cell drawn there and its side. Unlike `pixel_to_cell`, this follows
+    /// reordered Arabic glyphs, so selections and mouse reports match what is on screen.
+    pub fn pixel_to_visual_cell(
+        &self,
+        pane: PaneId,
+        rect: Rect,
+        x: f64,
+        y: f64,
+    ) -> (usize, usize, Side) {
+        let (col, row) = self.pixel_to_cell(rect, x, y);
+        let (cols, _) = self.compute_grid_size(rect);
+        let rel_x = (x - (rect.x + self.padding_left) as f64) as f32;
+        match self.pane_caches.get(&pane).and_then(|rows| rows.get(row)) {
+            Some(cached) => {
+                let (col, side) = cached.hit_test(rel_x, self.char_width, cols);
+                (col, row, side)
+            }
+            None => (col, row, self.pixel_side(rect, x)),
+        }
+    }
+
     /// Which half of its cell the pixel falls in (selections include a cell only when the
     /// pointer passes its middle).
     pub fn pixel_side(&self, rect: Rect, x: f64) -> Side {
@@ -1094,6 +1175,8 @@ impl Renderer {
                     let row_quads = self.build_row_quads(line, &segments);
                     rows[r] = CachedRow {
                         hash,
+                        visual: visual_cell_extents(line, &segments, self.char_width),
+                        rtl_cells: line.cells.iter().map(|c| is_rtl_char(c.c)).collect(),
                         segments,
                         quads: row_quads,
                     };

@@ -2,7 +2,9 @@
 use alacritty_terminal::index::Side;
 use cosmic_text::FontSystem;
 use twitty::color::Palette;
-use twitty::renderer::{build_row_quads, CachedRow, CachedSegment, RowCursor, RowShaper};
+use twitty::renderer::{
+    build_row_quads, visual_cell_extents, CachedRow, CachedSegment, RowCursor, RowShaper,
+};
 use twitty::terminal::{LineData, Terminal};
 
 const CW: f32 = 9.0;
@@ -49,6 +51,12 @@ fn reshape(term: Terminal) -> Shaped {
         term,
         line: lines[0].clone(),
         row: CachedRow {
+            visual: visual_cell_extents(&lines[0], &segments, CW),
+            rtl_cells: lines[0]
+                .cells
+                .iter()
+                .map(|c| matches!(c.c, '\u{0600}'..='\u{06FF}'))
+                .collect(),
             segments,
             ..Default::default()
         },
@@ -180,4 +188,38 @@ fn arabic_led_output_reads_right_to_left_but_typing_does_not() {
 
     let s = shaped("مرحبا world", true);
     assert!(span(&s.row, 6, 10).0 >= span(&s.row, 0, 4).1 - 0.5);
+}
+
+#[test]
+fn mouse_hits_the_letter_drawn_under_the_pointer() {
+    // Finished Arabic output reads right to left: the rightmost pixels hold the first letter.
+    let s = shaped("قال مرحبا بك", false);
+    let (gl, gr) = span(&s.row, 4, 8); // "مرحبا"
+    let (left_col, _) = s.row.hit_test(gl + 1.0, CW, 40);
+    let (right_col, _) = s.row.hit_test(gr - 1.0, CW, 40);
+    assert_eq!(left_col, 8, "left edge of the word is its last letter");
+    assert_eq!(right_col, 4, "right edge of the word is its first letter");
+}
+
+#[test]
+fn dragging_across_an_arabic_word_copies_that_word() {
+    for (from_left, label) in [(true, "left to right"), (false, "right to left")] {
+        let s = shaped("قال مرحبا بك", false);
+        let (gl, gr) = span(&s.row, 4, 8);
+        let (a, b) = if from_left {
+            (gl + 0.5, gr - 0.5)
+        } else {
+            (gr - 0.5, gl + 0.5)
+        };
+        let (c0, s0) = s.row.hit_test(a, CW, 40);
+        let (c1, s1) = s.row.hit_test(b, CW, 40);
+        let mut term = s.term;
+        term.start_selection(c0, 0, s0, 1);
+        term.update_selection(c1, 0, s1);
+        assert_eq!(
+            term.selection_text().as_deref(),
+            Some("مرحبا"),
+            "dragging {label}"
+        );
+    }
 }

@@ -1,5 +1,6 @@
 //! One shell session: its terminal, PTY and the UI state that belongs to it alone.
 
+use alacritty_terminal::index::Side;
 use alacritty_terminal::term::TermMode;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -20,7 +21,8 @@ pub struct Pane {
     pub mouse_row: usize,
     /// Buttons currently held, for drag reporting (xterm codes 0-2).
     pub mouse_button_down: Option<u8>,
-    pub mouse_x: f64,
+    /// Side of the cell under the pointer (see `Renderer::pixel_to_visual_cell`).
+    pub mouse_side: Side,
     /// A mouse selection is being dragged.
     pub selecting: bool,
     /// The current left press opened a link, so its release is swallowed.
@@ -51,7 +53,7 @@ impl Pane {
             mouse_col: 0,
             mouse_row: 0,
             mouse_button_down: None,
-            mouse_x: 0.0,
+            mouse_side: Side::Left,
             selecting: false,
             link_press: false,
             selection_generation: 0,

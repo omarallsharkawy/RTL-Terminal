@@ -567,15 +567,8 @@ impl App {
     }
 
     fn start_selection(&mut self, id: PaneId) {
-        let Some(rect) = self.pane_rect(id) else {
-            return;
-        };
         let now = Instant::now();
-        let side = self
-            .renderer
-            .as_ref()
-            .zip(self.panes.get(&id))
-            .map_or(Side::Left, |(r, p)| r.pixel_side(rect, p.mouse_x));
+        let side = self.panes.get(&id).map_or(Side::Left, |p| p.mouse_side);
         let Some(pane) = self.panes.get_mut(&id) else {
             return;
         };
@@ -1182,12 +1175,11 @@ impl ApplicationHandler<AppEvent> for App {
                     return;
                 };
                 let Some(ref r) = self.renderer else { return };
-                let (col, row) = r.pixel_to_cell(rect, position.x, position.y);
-                let side = r.pixel_side(rect, position.x);
+                let (col, row, side) = r.pixel_to_visual_cell(id, rect, position.x, position.y);
                 let Some(pane) = self.panes.get_mut(&id) else {
                     return;
                 };
-                pane.mouse_x = position.x;
+                pane.mouse_side = side;
                 if pane.selecting {
                     if let Ok(mut term) = pane.terminal.lock() {
                         term.update_selection(col, row, side);
