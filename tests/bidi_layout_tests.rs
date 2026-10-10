@@ -121,6 +121,30 @@ fn rtl_cell_backgrounds_have_no_holes_or_overlaps() {
 }
 
 #[test]
+fn colored_rtl_line_fills_its_cells_to_the_grid_edge() {
+    // A TUI highlight or selection over a whole Arabic line must not leave an unpainted hole
+    // between the (narrower) glyphs and the end of the line's cells.
+    for (text, last) in [
+        ("بس فيه حاجة صغيرة:", 17),
+        ("بقى مفصول عن الخلفية #15161e", 27),
+    ] {
+        let mut s = shaped(text, false);
+        s.term.start_selection(0, 0, Side::Left, 1);
+        s.term.update_selection(last, 0, Side::Right);
+        let s = reshape(s.term);
+        let q = bg_quads(&s);
+        let left = q.iter().map(|q| q.0).fold(f32::MAX, f32::min);
+        let right = q.iter().map(|q| q.0 + q.2).fold(f32::MIN, f32::max);
+        assert!(left <= 0.5, "{text}: starts at {left}");
+        assert!(
+            right >= (last + 1) as f32 * CW - 0.5,
+            "{text}: painted up to {right}, cells end at {}",
+            (last + 1) as f32 * CW
+        );
+    }
+}
+
+#[test]
 fn trailing_symbol_stays_on_the_arabic_side() {
     for cursor_on_row in [false, true] {
         for (text, last) in [("تم الحفظ ✓", 9), ("مرحبا!", 5), ("جاهزة.", 5)] {

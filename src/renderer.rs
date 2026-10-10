@@ -566,7 +566,29 @@ pub fn build_row_quads(
 
     let mut visual: Vec<Option<(f32, f32)>> = vec![None; line.cells.len()];
     for seg in segments.iter().filter(|s| s.has_rtl) {
-        for (i, ext) in seg.cell_extents(&line.cells).into_iter().enumerate() {
+        let mut extents = seg.cell_extents(&line.cells);
+        // Arabic glyphs are usually narrower than the cells they occupy: stretch the visually
+        // outermost cells to the segment's grid edges, so colored backgrounds (selections, TUI
+        // highlights) don't leave unpainted holes at the end of the text.
+        let (grid_l, grid_r) = (seg.seg_start as f32 * cw, seg.seg_end as f32 * cw);
+        let sized = |e: &Option<(f32, f32)>| e.filter(|(l, r)| r > l);
+        if let Some(i) = (0..extents.len())
+            .filter(|&i| sized(&extents[i]).is_some())
+            .max_by(|&a, &b| extents[a].unwrap().1.total_cmp(&extents[b].unwrap().1))
+        {
+            if let Some((_, r)) = extents[i].as_mut() {
+                *r = r.max(grid_r);
+            }
+        }
+        if let Some(i) = (0..extents.len())
+            .filter(|&i| sized(&extents[i]).is_some())
+            .min_by(|&a, &b| extents[a].unwrap().0.total_cmp(&extents[b].unwrap().0))
+        {
+            if let Some((l, _)) = extents[i].as_mut() {
+                *l = l.min(grid_l);
+            }
+        }
+        for (i, ext) in extents.into_iter().enumerate() {
             let c = seg.seg_start + i;
             visual[c] = if line.cells[c].is_spacer() {
                 let x = c as f32 * cw;
