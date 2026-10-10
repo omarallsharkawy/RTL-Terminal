@@ -556,12 +556,12 @@ impl ApplicationHandler<AppEvent> for App {
                 }
             }
             WindowEvent::KeyboardInput { event, .. } => {
-                let app_cursor = self
+                let mode = self
                     .terminal
                     .lock()
-                    .map(|t| t.is_app_cursor())
-                    .unwrap_or(false);
-                if let Some(action) = handle_key(&event, self.modifiers, app_cursor) {
+                    .map(|t| t.mode())
+                    .unwrap_or_else(|_| TermMode::empty());
+                if let Some(action) = handle_key(&event, self.modifiers, mode) {
                     match action {
                         InputAction::Bytes(bytes) => {
                             self.clear_selection();

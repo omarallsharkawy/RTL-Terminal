@@ -117,7 +117,14 @@ impl Terminal {
         let listener = ForwardListener {
             on_event: Arc::new(on_event),
         };
-        let term = Term::new(Config::default(), &size, listener);
+        let term = Term::new(
+            Config {
+                kitty_keyboard: true,
+                ..Config::default()
+            },
+            &size,
+            listener,
+        );
         let parser = Processor::<StdSyncHandler>::new();
         Self {
             term,
