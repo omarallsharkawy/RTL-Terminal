@@ -1,7 +1,9 @@
 use alacritty_terminal::event::{Event as TermEvent, WindowSize};
+use alacritty_terminal::index::Side;
 use alacritty_terminal::term::TermMode;
 use alacritty_terminal::vte::ansi::{Color as AnsiColor, Rgb};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
@@ -17,12 +19,18 @@ use crate::terminal::Terminal;
 const WINDOW_TITLE: &str = "Twitty · RTL Terminal";
 const DEFAULT_FONT_SIZE: f32 = 14.5;
 const LINES_PER_WHEEL_NOTCH: f64 = 3.0;
+/// Clicks closer together than this (on the same cell) count as double/triple clicks.
+const MULTI_CLICK: Duration = Duration::from_millis(400);
+/// How long a copied selection stays highlighted before it is cleared.
+const COPIED_HIGHLIGHT: Duration = Duration::from_millis(350);
 
 #[derive(Debug)]
 pub enum AppEvent {
     PtyData(Vec<u8>),
     Terminal(TermEvent),
     PtyExit,
+    /// Clear the highlight of a copied selection, unless a newer selection was started.
+    ClearSelection(u64),
 }
 
 pub struct App {
@@ -35,6 +43,16 @@ pub struct App {
     mouse_row: usize,
     /// Buttons currently held, for drag reporting (xterm codes 0-2).
     mouse_button_down: Option<u8>,
+    mouse_x: f64,
+    /// Kept alive for the whole session: on Linux, copied text is served by this object and
+    /// would vanish if it were dropped right after copying.
+    clipboard: Option<arboard::Clipboard>,
+    /// A mouse selection is being dragged.
+    selecting: bool,
+    /// Bumped on every new selection, so a delayed clear never removes a newer one.
+    selection_generation: u64,
+    last_click: Option<(Instant, usize, usize)>,
+    click_count: u8,
     /// Fractional wheel/trackpad lines not yet applied.
     scroll_accum: f64,
     config: TwittyConfig,
@@ -58,6 +76,12 @@ impl App {
             mouse_col: 0,
             mouse_row: 0,
             mouse_button_down: None,
+            mouse_x: 0.0,
+            clipboard: None,
+            selecting: false,
+            selection_generation: 0,
+            last_click: None,
+            click_count: 0,
             scroll_accum: 0.0,
             config: TwittyConfig::load(),
             config_dirty: false,
@@ -147,12 +171,84 @@ impl App {
     }
 
     fn paste_clipboard(&mut self) {
-        let Ok(text) = arboard::Clipboard::new().and_then(|mut c| c.get_text()) else {
+        let Some(Ok(text)) = self.clipboard().map(|c| c.get_text()) else {
             return;
         };
         let bracketed = self.mode().contains(TermMode::BRACKETED_PASTE);
         self.write_pty(&encode_paste(&text, bracketed));
         self.scroll_to_bottom();
+    }
+
+    fn clipboard(&mut self) -> Option<&mut arboard::Clipboard> {
+        if self.clipboard.is_none() {
+            self.clipboard = arboard::Clipboard::new().ok();
+        }
+        self.clipboard.as_mut()
+    }
+
+    fn set_clipboard(&mut self, text: String) {
+        if let Some(clipboard) = self.clipboard() {
+            let _ = clipboard.set_text(text);
+        }
+    }
+
+    fn clear_selection(&mut self) {
+        let had = match self.terminal.lock() {
+            Ok(mut term) if term.has_selection() => {
+                term.clear_selection();
+                true
+            }
+            _ => false,
+        };
+        self.selecting = false;
+        if had {
+            self.request_redraw();
+        }
+    }
+
+    /// Copy the selection to the clipboard. Returns false when nothing is selected.
+    fn copy_selection(&mut self) -> bool {
+        let text = self.terminal.lock().ok().and_then(|t| t.selection_text());
+        let Some(text) = text else { return false };
+        self.set_clipboard(text);
+        true
+    }
+
+    fn start_selection(&mut self) {
+        let now = Instant::now();
+        let (col, row) = (self.mouse_col, self.mouse_row);
+        self.click_count = match self.last_click {
+            Some((t, c, r)) if now - t < MULTI_CLICK && (c, r) == (col, row) => {
+                self.click_count % 3 + 1
+            }
+            _ => 1,
+        };
+        self.last_click = Some((now, col, row));
+        self.selection_generation += 1;
+        let side = self
+            .renderer
+            .as_ref()
+            .map_or(Side::Left, |r| r.pixel_side(self.mouse_x));
+        if let Ok(mut term) = self.terminal.lock() {
+            term.start_selection(col, row, side, self.click_count);
+        }
+        self.selecting = true;
+        self.request_redraw();
+    }
+
+    /// Mouse released: copy what was selected, flash it briefly, then clear the highlight.
+    fn finish_selection(&mut self) {
+        self.selecting = false;
+        if !self.copy_selection() {
+            self.clear_selection();
+            return;
+        }
+        let generation = self.selection_generation;
+        let proxy = self.proxy.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(COPIED_HIGHLIGHT);
+            let _ = proxy.send_event(AppEvent::ClearSelection(generation));
+        });
     }
 
     fn send_mouse(&self, button: u8, pressed: bool) {
@@ -218,9 +314,7 @@ impl App {
             }
             TermEvent::ClipboardStore(_, text) => {
                 // OSC 52 copy (e.g. from tmux/vim over SSH).
-                if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                    let _ = clipboard.set_text(text);
-                }
+                self.set_clipboard(text);
             }
             // OSC 52 reads are refused: any program could silently exfiltrate the clipboard.
             TermEvent::ClipboardLoad(..) => {}
@@ -288,6 +382,11 @@ impl ApplicationHandler<AppEvent> for App {
             // The shell exited (`exit`, crash, or closed by the OS): close the window
             // like Windows Terminal does, instead of respawning forever.
             AppEvent::PtyExit => event_loop.exit(),
+            AppEvent::ClearSelection(generation) => {
+                if generation == self.selection_generation && !self.selecting {
+                    self.clear_selection();
+                }
+            }
         }
     }
 
@@ -320,6 +419,11 @@ impl ApplicationHandler<AppEvent> for App {
                 self.sync_grid();
             }
             WindowEvent::Focused(focused) => {
+                // The release of a drag that ends outside the window may never arrive.
+                if !focused && self.selecting {
+                    self.mouse_button_down = None;
+                    self.finish_selection();
+                }
                 if let Some(ref mut r) = self.renderer {
                     r.set_focused(focused);
                     r.window.request_redraw();
@@ -334,6 +438,14 @@ impl ApplicationHandler<AppEvent> for App {
             WindowEvent::CursorMoved { position, .. } => {
                 let Some(ref r) = self.renderer else { return };
                 let (col, row) = r.pixel_to_cell(position.x, position.y);
+                let side = r.pixel_side(position.x);
+                self.mouse_x = position.x;
+                if self.selecting {
+                    if let Ok(mut term) = self.terminal.lock() {
+                        term.update_selection(col, row, side);
+                    }
+                    self.request_redraw();
+                }
                 if (col, row) == (self.mouse_col, self.mouse_row) {
                     return;
                 }
@@ -367,6 +479,12 @@ impl ApplicationHandler<AppEvent> for App {
                 // Shift bypasses mouse reporting, as in xterm and Windows Terminal.
                 if mode.intersects(TermMode::MOUSE_MODE) && !self.modifiers.shift_key() {
                     self.send_mouse(code, pressed);
+                } else if button == MouseButton::Left {
+                    if pressed {
+                        self.start_selection();
+                    } else if self.selecting {
+                        self.finish_selection();
+                    }
                 } else if pressed && button == MouseButton::Middle {
                     self.paste_clipboard();
                 }
@@ -446,6 +564,7 @@ impl ApplicationHandler<AppEvent> for App {
                 if let Some(action) = handle_key(&event, self.modifiers, app_cursor) {
                     match action {
                         InputAction::Bytes(bytes) => {
+                            self.clear_selection();
                             self.write_pty(&bytes);
                             self.scroll_to_bottom();
                         }
@@ -459,8 +578,9 @@ impl ApplicationHandler<AppEvent> for App {
                         }
                         InputAction::ZoomReset => self.update_font_size(DEFAULT_FONT_SIZE),
                         InputAction::Paste => self.paste_clipboard(),
-                        // Selection is not implemented yet (review item #9).
-                        InputAction::Copy => {}
+                        InputAction::Copy => {
+                            self.copy_selection();
+                        }
                     }
                 }
             }

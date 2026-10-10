@@ -52,6 +52,8 @@ pub struct Palette {
     pub background: Rgba,
     pub foreground: Rgba,
     pub cursor: Rgba,
+    /// Background of mouse-selected text.
+    pub selection: Rgba,
     pub ansi: [Rgba; 16],
 }
 
@@ -62,6 +64,7 @@ impl Default for Palette {
             background: Rgba::from_rgb8(21, 22, 30), // #15161e (crisp dark background)
             foreground: Rgba::from_rgb8(192, 202, 245), // #c0caf5
             cursor: Rgba::from_rgb8(245, 224, 220),  // #f5e0dc
+            selection: Rgba::from_rgb8(51, 70, 124), // #33467c (Tokyo Night selection)
             ansi: [
                 Rgba::from_rgb8(21, 22, 30),    // 0: Black
                 Rgba::from_rgb8(247, 118, 142), // 1: Red

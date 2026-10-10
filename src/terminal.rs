@@ -1,8 +1,10 @@
 use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::Scroll;
+use alacritty_terminal::index::{Column, Point, Side};
+use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::cell::Flags as CellFlags;
-use alacritty_terminal::term::point_to_viewport;
 use alacritty_terminal::term::test::TermSize;
+use alacritty_terminal::term::{point_to_viewport, viewport_to_point};
 use alacritty_terminal::term::{Config, Term, TermMode};
 use alacritty_terminal::vte::ansi::{
     Color as AnsiColor, CursorShape, NamedColor, Processor, StdSyncHandler,
@@ -28,6 +30,8 @@ pub struct CellData {
     pub fg: AnsiColor,
     pub bg: AnsiColor,
     pub flags: CellFlags,
+    /// Inside the mouse selection.
+    pub selected: bool,
 }
 
 impl CellData {
@@ -38,6 +42,7 @@ impl CellData {
             fg: AnsiColor::Named(NamedColor::Foreground),
             bg: AnsiColor::Named(NamedColor::Background),
             flags: CellFlags::empty(),
+            selected: false,
         }
     }
 
@@ -156,9 +161,52 @@ impl Terminal {
         self.term.grid().display_offset()
     }
 
+    fn grid_point(&self, col: usize, row: usize) -> Point {
+        let col = col.min(self.cols.saturating_sub(1));
+        let row = row.min(self.rows.saturating_sub(1));
+        viewport_to_point(self.display_offset(), Point::new(row, Column(col)))
+    }
+
+    /// Start a selection at a viewport cell: 1 click = characters, 2 = word, 3 = line.
+    pub fn start_selection(&mut self, col: usize, row: usize, side: Side, clicks: u8) {
+        let ty = match clicks {
+            1 => SelectionType::Simple,
+            2 => SelectionType::Semantic,
+            _ => SelectionType::Lines,
+        };
+        let point = self.grid_point(col, row);
+        self.term.selection = Some(Selection::new(ty, point, side));
+    }
+
+    pub fn update_selection(&mut self, col: usize, row: usize, side: Side) {
+        let point = self.grid_point(col, row);
+        if let Some(selection) = self.term.selection.as_mut() {
+            selection.update(point, side);
+        }
+    }
+
+    pub fn clear_selection(&mut self) {
+        self.term.selection = None;
+    }
+
+    pub fn has_selection(&self) -> bool {
+        self.term.selection.as_ref().is_some_and(|s| !s.is_empty())
+    }
+
+    /// Selected text, or `None` when nothing (or only an empty range) is selected.
+    pub fn selection_text(&self) -> Option<String> {
+        if !self.has_selection() {
+            return None;
+        }
+        self.term
+            .selection_to_string()
+            .filter(|text| !text.is_empty())
+    }
+
     pub fn snapshot(&self) -> (Vec<LineData>, CursorState) {
         let content = self.term.renderable_content();
         let display_offset = content.display_offset;
+        let selection = content.selection;
         let mut lines = vec![
             LineData {
                 cells: vec![CellData::blank(); self.cols],
@@ -187,6 +235,7 @@ impl Terminal {
                 fg: cell.fg,
                 bg: cell.bg,
                 flags: cell.flags,
+                selected: selection.is_some_and(|range| range.contains(cell.point)),
             };
         }
 
