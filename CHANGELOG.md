@@ -6,6 +6,7 @@
 - `font_family` option picks the terminal font; a family that is not installed falls back to the system monospace font.
 - Relicensed under MIT OR Apache-2.0, at your option. This replaces the old end-user license agreement, which was written for the legacy installer.
 - Color themes: pick one with `"theme"` in config.json (`tokyo-night` is still the default; also `catppuccin-mocha`, `gruvbox-dark`, `dracula`, `nord`, `one-dark`, `solarized-dark`, `github-light`). The optional `"colors"` block overrides the background, foreground, cursor, selection and ANSI colors.
+- Box drawing: double, heavy and dashed lines, block eighths, quadrants and shades are drawn pixel-exact.
 
 ## 3.0.0 — 2026-10-11
 
