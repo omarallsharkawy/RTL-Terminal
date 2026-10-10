@@ -34,6 +34,7 @@ Arabic letters join, sentences flow right-to-left, and English words, hashes and
 - Select with the mouse (double-click for a word, triple-click for a line). Releasing the mouse copies the text.
 - See-through window background.
 - Cursor style: block, beam or underline. It turns hollow when the window loses focus.
+- Ctrl+Click opens OSC 8 hyperlinks and plain `http(s)`, `file`, `ftp` and `mailto` URLs.
 - Zoom with Ctrl+wheel or Ctrl+= / Ctrl+-, saved between sessions.
 - HiDPI aware. Falls back to a software GPU adapter on VMs and RDP.
 
@@ -77,6 +78,7 @@ cargo build --release
 | Select inside vim, Claude Code, etc. | Hold Shift while dragging |
 | Zoom in / out / reset | Ctrl+= / Ctrl+- / Ctrl+0, or Ctrl+wheel |
 | Background transparency | Ctrl+Shift+wheel |
+| Open a link (OSC 8 or plain URL) | Ctrl+Click |
 
 ### Configuration
 

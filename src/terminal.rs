@@ -1,3 +1,4 @@
+use crate::links::find_url_at;
 use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::Scroll;
 use alacritty_terminal::index::{Column, Point, Side};
@@ -9,6 +10,7 @@ use alacritty_terminal::term::{Config, Term, TermMode};
 use alacritty_terminal::vte::ansi::{
     Color as AnsiColor, CursorShape, NamedColor, Processor, StdSyncHandler,
 };
+use std::ops::Range;
 use std::sync::Arc;
 use unicode_bidi::{bidi_class, BidiClass};
 
@@ -32,6 +34,8 @@ pub struct CellData {
     pub flags: CellFlags,
     /// Inside the mouse selection.
     pub selected: bool,
+    /// Under the Ctrl-hovered link.
+    pub link_hover: bool,
 }
 
 impl CellData {
@@ -43,6 +47,7 @@ impl CellData {
             bg: AnsiColor::Named(NamedColor::Background),
             flags: CellFlags::empty(),
             selected: false,
+            link_hover: false,
         }
     }
 
@@ -74,6 +79,14 @@ impl CellData {
     }
 }
 
+/// A link under a viewport cell: its target and the cells it covers on that row.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Link {
+    pub uri: String,
+    pub row: usize,
+    pub cols: Range<usize>,
+}
+
 #[derive(Clone, Debug)]
 pub struct LineData {
     pub cells: Vec<CellData>,
@@ -93,6 +106,7 @@ pub struct Terminal {
     parser: Processor<StdSyncHandler>,
     cols: usize,
     rows: usize,
+    link_hover: Option<(usize, Range<usize>)>,
 }
 
 impl Terminal {
@@ -124,6 +138,7 @@ impl Terminal {
             parser,
             cols,
             rows,
+            link_hover: None,
         }
     }
 
@@ -207,6 +222,7 @@ impl Terminal {
         let content = self.term.renderable_content();
         let display_offset = content.display_offset;
         let selection = content.selection;
+        let hover = self.link_hover.clone();
         let mut lines = vec![
             LineData {
                 cells: vec![CellData::blank(); self.cols],
@@ -236,6 +252,9 @@ impl Terminal {
                 bg: cell.bg,
                 flags: cell.flags,
                 selected: selection.is_some_and(|range| range.contains(cell.point)),
+                link_hover: hover
+                    .as_ref()
+                    .is_some_and(|(r, cols)| *r == row && cols.contains(&col)),
             };
         }
 
@@ -257,5 +276,75 @@ impl Terminal {
         };
 
         (lines, cursor)
+    }
+
+    /// Underline these cells (a Ctrl-hovered link), or nothing. Returns true if it changed.
+    pub fn set_link_hover(&mut self, hover: Option<(usize, Range<usize>)>) -> bool {
+        let changed = self.link_hover != hover;
+        self.link_hover = hover;
+        changed
+    }
+
+    /// The link at a viewport cell: an OSC 8 hyperlink, else a plain URL in the row's text.
+    pub fn link_at(&self, col: usize, row: usize) -> Option<Link> {
+        if col >= self.cols || row >= self.rows {
+            return None;
+        }
+        let line = viewport_to_point(self.display_offset(), Point::new(row, Column(0))).line;
+        let grid = self.term.grid();
+        let at = |c: usize| &grid[line][Column(c)];
+
+        if let Some(h) = at(col).hyperlink() {
+            let same = |c: usize| at(c).hyperlink().is_some_and(|o| o == h);
+            let (mut a, mut b) = (col, col + 1);
+            while a > 0 && same(a - 1) {
+                a -= 1;
+            }
+            while b < self.cols && same(b) {
+                b += 1;
+            }
+            return Some(Link {
+                uri: h.uri().to_string(),
+                row,
+                cols: a..b,
+            });
+        }
+
+        // Row text with a char -> column map (spacers carry no text).
+        let mut text = String::new();
+        let mut char_cols = Vec::new();
+        let mut hit = None;
+        for c in 0..self.cols {
+            let cell = at(c);
+            if cell
+                .flags
+                .intersects(CellFlags::WIDE_CHAR_SPACER | CellFlags::LEADING_WIDE_CHAR_SPACER)
+            {
+                continue;
+            }
+            let before = char_cols.len();
+            text.push(cell.c);
+            char_cols.push(c);
+            for z in cell.zerowidth().unwrap_or(&[]) {
+                text.push(*z);
+                char_cols.push(c);
+            }
+            let width = if cell.flags.contains(CellFlags::WIDE_CHAR) {
+                2
+            } else {
+                1
+            };
+            if (c..c + width).contains(&col) {
+                hit = Some(before);
+            }
+        }
+        let (start, end, uri) = find_url_at(&text, hit?)?;
+        let last = char_cols[end - 1];
+        let wide = at(last).flags.contains(CellFlags::WIDE_CHAR);
+        Some(Link {
+            uri,
+            row,
+            cols: char_cols[start]..(last + if wide { 2 } else { 1 }).min(self.cols),
+        })
     }
 }
