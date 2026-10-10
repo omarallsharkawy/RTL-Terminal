@@ -9,6 +9,8 @@ pub enum InputAction {
     ZoomReset,
     Copy,
     Paste,
+    /// Open interactive scrollback search.
+    Search,
 }
 
 pub fn handle_key(
@@ -148,6 +150,7 @@ pub fn handle_key_raw(
             match key_code {
                 KeyCode::KeyC => return Some(InputAction::Copy),
                 KeyCode::KeyV => return Some(InputAction::Paste),
+                KeyCode::KeyF => return Some(InputAction::Search),
                 _ => {}
             }
         }

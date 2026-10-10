@@ -23,6 +23,16 @@ impl Rgba {
         }
     }
 
+    /// Linear blend towards `other` (`t` = 0 keeps `self`).
+    pub fn mix(self, other: Rgba, t: f32) -> Rgba {
+        Rgba {
+            r: self.r + (other.r - self.r) * t,
+            g: self.g + (other.g - self.g) * t,
+            b: self.b + (other.b - self.b) * t,
+            a: self.a,
+        }
+    }
+
     pub fn to_linear(self) -> [f32; 4] {
         let conv = |c: f32| {
             if c <= 0.04045 {
@@ -54,35 +64,43 @@ pub struct Palette {
     pub cursor: Rgba,
     /// Background of mouse-selected text.
     pub selection: Rgba,
+    /// Background of search matches (text on it uses `background` for contrast).
+    pub search_match: Rgba,
+    /// Background of the focused search match.
+    pub search_focus: Rgba,
     pub ansi: [Rgba; 16],
 }
 
 impl Default for Palette {
     fn default() -> Self {
         // Deep dark terminal palette (Tokyo Night / OpenCode compatible)
+        let ansi = [
+            Rgba::from_rgb8(21, 22, 30),    // 0: Black
+            Rgba::from_rgb8(247, 118, 142), // 1: Red
+            Rgba::from_rgb8(158, 206, 106), // 2: Green
+            Rgba::from_rgb8(224, 175, 104), // 3: Yellow
+            Rgba::from_rgb8(122, 162, 247), // 4: Blue
+            Rgba::from_rgb8(187, 154, 247), // 5: Magenta
+            Rgba::from_rgb8(125, 207, 255), // 6: Cyan
+            Rgba::from_rgb8(169, 177, 214), // 7: White
+            Rgba::from_rgb8(65, 72, 104),   // 8: Bright Black (gutter/borders)
+            Rgba::from_rgb8(247, 118, 142), // 9: Bright Red
+            Rgba::from_rgb8(158, 206, 106), // 10: Bright Green
+            Rgba::from_rgb8(224, 175, 104), // 11: Bright Yellow
+            Rgba::from_rgb8(122, 162, 247), // 12: Bright Blue
+            Rgba::from_rgb8(187, 154, 247), // 13: Bright Magenta
+            Rgba::from_rgb8(125, 207, 255), // 14: Bright Cyan
+            Rgba::from_rgb8(192, 202, 245), // 15: Bright White
+        ];
+        let background = Rgba::from_rgb8(21, 22, 30); // #15161e (crisp dark background)
         Self {
-            background: Rgba::from_rgb8(21, 22, 30), // #15161e (crisp dark background)
+            search_match: background.mix(ansi[3], 0.6),
+            search_focus: ansi[11],
+            ansi,
+            background,
             foreground: Rgba::from_rgb8(192, 202, 245), // #c0caf5
-            cursor: Rgba::from_rgb8(245, 224, 220),  // #f5e0dc
-            selection: Rgba::from_rgb8(51, 70, 124), // #33467c (Tokyo Night selection)
-            ansi: [
-                Rgba::from_rgb8(21, 22, 30),    // 0: Black
-                Rgba::from_rgb8(247, 118, 142), // 1: Red
-                Rgba::from_rgb8(158, 206, 106), // 2: Green
-                Rgba::from_rgb8(224, 175, 104), // 3: Yellow
-                Rgba::from_rgb8(122, 162, 247), // 4: Blue
-                Rgba::from_rgb8(187, 154, 247), // 5: Magenta
-                Rgba::from_rgb8(125, 207, 255), // 6: Cyan
-                Rgba::from_rgb8(169, 177, 214), // 7: White
-                Rgba::from_rgb8(65, 72, 104),   // 8: Bright Black (gutter/borders)
-                Rgba::from_rgb8(247, 118, 142), // 9: Bright Red
-                Rgba::from_rgb8(158, 206, 106), // 10: Bright Green
-                Rgba::from_rgb8(224, 175, 104), // 11: Bright Yellow
-                Rgba::from_rgb8(122, 162, 247), // 12: Bright Blue
-                Rgba::from_rgb8(187, 154, 247), // 13: Bright Magenta
-                Rgba::from_rgb8(125, 207, 255), // 14: Bright Cyan
-                Rgba::from_rgb8(192, 202, 245), // 15: Bright White
-            ],
+            cursor: Rgba::from_rgb8(245, 224, 220),     // #f5e0dc
+            selection: Rgba::from_rgb8(51, 70, 124),    // #33467c (Tokyo Night selection)
         }
     }
 }

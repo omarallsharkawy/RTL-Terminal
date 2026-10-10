@@ -356,6 +356,8 @@ pub struct Renderer {
     /// Configured cursor style ("block", "beam"/"bar", "underline").
     pub cursor_style: String,
     pub row_caches: Vec<CachedRow>,
+    /// One-line bar drawn over the last row (search query, messages), if any.
+    pub status_line: Option<String>,
 }
 
 fn hash_row(cells: &[CellData], cursor: Option<RowCursor>) -> u64 {
@@ -368,6 +370,7 @@ fn hash_row(cells: &[CellData], cursor: Option<RowCursor>) -> u64 {
         hash_color(&cell.bg, &mut hasher);
         cell.flags.bits().hash(&mut hasher);
         cell.selected.hash(&mut hasher);
+        cell.search_match.hash(&mut hasher);
     }
     cursor.hash(&mut hasher);
     hasher.finish()
@@ -408,6 +411,14 @@ pub fn cell_colors(palette: &Palette, cell: &CellData) -> (Rgba, Rgba) {
     }
     if cell.flags.contains(CellFlags::HIDDEN) {
         fg = bg;
+    }
+    if cell.search_match > 0 {
+        bg = if cell.search_match > 1 {
+            palette.search_focus
+        } else {
+            palette.search_match
+        };
+        fg = palette.background;
     }
     if cell.selected {
         bg = palette.selection;
@@ -555,6 +566,7 @@ impl Renderer {
             opacity: 1.0,
             cursor_style: "block".into(),
             row_caches: Vec::new(),
+            status_line: None,
         };
         renderer.update_metrics();
         Ok(renderer)
@@ -587,6 +599,35 @@ impl Renderer {
 
     pub fn set_focused(&mut self, focused: bool) {
         self.focused = focused;
+    }
+
+    /// Show (or hide, with `None`) a one-line bar over the last terminal row.
+    pub fn set_status_line(&mut self, text: Option<String>) {
+        self.status_line = text;
+    }
+
+    /// Background quad and shaped text for the status line, positioned over the last row.
+    fn status_line_parts(&mut self, rows: usize) -> Option<(Quad, Buffer, f32)> {
+        let text = self.status_line.clone()?;
+        let y = self.padding_top + rows.checked_sub(1)? as f32 * self.line_height;
+        let bar = mix(self.palette.background, self.palette.foreground, 0.14);
+        let quad = (
+            0.0,
+            y,
+            self.config.width as f32,
+            self.line_height,
+            self.to_target_color(bar),
+        );
+        let metrics = Metrics::new(self.font_px(), self.line_height);
+        let mut buffer = Buffer::new_empty(metrics);
+        buffer.set_text(
+            &text,
+            &Attrs::new().family(Family::Monospace),
+            Shaping::Advanced,
+            None,
+        );
+        buffer.shape_until_scroll(&mut self.font_system, false);
+        Some((quad, buffer, y))
     }
 
     pub fn set_opacity(&mut self, opacity: f32) {
@@ -782,6 +823,10 @@ impl Renderer {
 
         // The cursor sits above cell backgrounds but below text (its glyph was recolored).
         quads.extend(cursor_quads);
+        let status = self.status_line_parts(lines.len());
+        if let Some((quad, _, _)) = &status {
+            quads.push(*quad);
+        }
         self.quad_renderer
             .set_rects(&self.device, &self.queue, &quads);
 
@@ -793,6 +838,9 @@ impl Renderer {
         };
         let mut text_areas: Vec<TextArea> = Vec::new();
         for (r, cached_row) in self.row_caches.iter().enumerate() {
+            if status.is_some() && r + 1 == lines.len() {
+                break;
+            }
             let y = self.padding_top + r as f32 * self.line_height;
             for seg in &cached_row.segments {
                 text_areas.push(TextArea {
@@ -805,6 +853,18 @@ impl Renderer {
                     custom_glyphs: &[],
                 });
             }
+        }
+
+        if let Some((_, buffer, y)) = &status {
+            text_areas.push(TextArea {
+                buffer,
+                left: self.padding_left,
+                top: *y,
+                scale: 1.0,
+                bounds,
+                default_color: self.palette.foreground.to_glyphon(),
+                custom_glyphs: &[],
+            });
         }
 
         self.text_renderer

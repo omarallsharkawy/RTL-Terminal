@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Scrollback search: Ctrl+Shift+F opens a search bar at the bottom. Matching is literal and case-insensitive, updates as you type (Arabic included), highlights every visible match, and shows `n/N`. Enter jumps to the next older match, Shift+Enter to a newer one, Esc closes.
 - Relicensed under MIT OR Apache-2.0, at your option. This replaces the old end-user license agreement, which was written for the legacy installer.
 
 ## 3.0.0 — 2026-10-11
