@@ -17,6 +17,8 @@ pub struct TwittyConfig {
     /// Per-field color overrides, applied on top of `theme`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub colors: Option<ThemeColors>,
+    /// Font family for the terminal grid, e.g. "JetBrains Mono". Unset or not installed: monospace.
+    pub font_family: Option<String>,
     /// Keys this version does not know about are kept so saving never drops them.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
@@ -30,6 +32,7 @@ impl Default for TwittyConfig {
             cursor_style: "block".into(),
             theme: None,
             colors: None,
+            font_family: None,
             extra: serde_json::Map::new(),
         }
     }

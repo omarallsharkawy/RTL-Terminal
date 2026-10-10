@@ -1,7 +1,8 @@
+use crate::fonts::{family_installed, grid_family, new_font_system};
 use alacritty_terminal::index::Side;
 use alacritty_terminal::term::cell::Flags as CellFlags;
 use alacritty_terminal::vte::ansi::CursorShape;
-use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping};
+use cosmic_text::{Attrs, Buffer, FontSystem, Metrics, Shaping};
 use glyphon::{
     Cache, Resolution, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
 };
@@ -107,12 +108,14 @@ pub struct RowShaper<'a> {
     pub font_px: f32,
     pub char_width: f32,
     pub line_height: f32,
+    /// Configured font family; `None` is the generic monospace.
+    pub family: Option<&'static str>,
 }
 
 impl RowShaper<'_> {
     fn shape_buffer(&mut self, spans: &[(String, Attrs<'static>)], shaping: Shaping) -> Buffer {
         let metrics = Metrics::new(self.font_px, self.line_height);
-        let default_attrs = Attrs::new().family(Family::Monospace);
+        let default_attrs = Attrs::new().family(grid_family(self.family));
         let mut buf = Buffer::new_empty(metrics);
         buf.set_rich_text(
             spans.iter().map(|(s, a)| (s.as_str(), a.clone())),
@@ -138,7 +141,10 @@ impl RowShaper<'_> {
         let mut byte = 0;
         let mut complex = has_rtl;
         if has_rtl {
-            spans.push((LRM.to_string(), Attrs::new().family(Family::Monospace)));
+            spans.push((
+                LRM.to_string(),
+                Attrs::new().family(grid_family(self.family)),
+            ));
             byte += LRM.len();
         }
 
@@ -190,7 +196,7 @@ impl RowShaper<'_> {
                 fg = bg;
             }
             let mut attrs = Attrs::new()
-                .family(Family::Monospace)
+                .family(grid_family(self.family))
                 .color(fg.to_glyphon());
             if cell.flags.contains(CellFlags::BOLD) {
                 attrs = attrs.weight(cosmic_text::Weight::BOLD);
@@ -335,6 +341,8 @@ pub struct Renderer {
     pub config: wgpu::SurfaceConfiguration,
     pub quad_renderer: QuadRenderer,
     pub font_system: FontSystem,
+    /// Configured terminal font family (leaked once per change; `None` = monospace).
+    pub font_family: Option<&'static str>,
     pub swash_cache: SwashCache,
     pub text_atlas: TextAtlas,
     pub text_renderer: TextRenderer,
@@ -416,11 +424,16 @@ pub fn cell_colors(palette: &Palette, cell: &CellData) -> (Rgba, Rgba) {
 }
 
 /// Measure the advance of one monospace cell at the given pixel size.
-fn measure_char_width(font_system: &mut FontSystem, font_px: f32, line_height: f32) -> f32 {
+pub fn measure_char_width(
+    font_system: &mut FontSystem,
+    family: Option<&'static str>,
+    font_px: f32,
+    line_height: f32,
+) -> f32 {
     let mut buffer = Buffer::new_empty(Metrics::new(font_px, line_height));
     buffer.set_text(
         "MMMMMMMMMM",
-        &Attrs::new().family(Family::Monospace),
+        &Attrs::new().family(grid_family(family)),
         Shaping::Basic,
         None,
     );
@@ -516,7 +529,7 @@ impl Renderer {
         let quad_renderer = QuadRenderer::new(&device, format);
         quad_renderer.update_screen_size(&queue, width as f32, height as f32);
 
-        let font_system = FontSystem::new();
+        let font_system = new_font_system();
         let swash_cache = SwashCache::new();
         let cache = Cache::new(&device);
         let mut viewport = Viewport::new(&device, &cache);
@@ -539,6 +552,7 @@ impl Renderer {
             config,
             quad_renderer,
             font_system,
+            font_family: None,
             swash_cache,
             text_atlas,
             text_renderer,
@@ -569,10 +583,31 @@ impl Renderer {
         self.font_size = self.font_size.clamp(8.0, 48.0);
         let font_px = self.font_px();
         self.line_height = (font_px * LINE_HEIGHT_FACTOR).round();
-        self.char_width = measure_char_width(&mut self.font_system, font_px, self.line_height);
+        self.char_width = measure_char_width(
+            &mut self.font_system,
+            self.font_family,
+            font_px,
+            self.line_height,
+        );
         self.padding_left = (PADDING_LEFT * self.scale).round();
         self.padding_top = (PADDING_TOP * self.scale).round();
         self.row_caches.clear();
+    }
+
+    /// Use `name` for the terminal grid. An uninstalled family falls back to monospace.
+    pub fn set_font_family(&mut self, name: Option<&str>) {
+        let name = name.map(str::trim).filter(|n| !n.is_empty());
+        self.font_family = match name {
+            Some(n) if family_installed(&self.font_system, n) => {
+                Some(Box::leak(n.to_string().into_boxed_str()))
+            }
+            Some(n) => {
+                eprintln!("twitty: font_family {n:?} is not installed, using monospace");
+                None
+            }
+            None => None,
+        };
+        self.update_metrics();
     }
 
     pub fn set_font_size(&mut self, new_size: f32) {
@@ -653,6 +688,7 @@ impl Renderer {
             palette: &self.palette,
             char_width: self.char_width,
             line_height: self.line_height,
+            family: self.font_family,
         }
     }
 

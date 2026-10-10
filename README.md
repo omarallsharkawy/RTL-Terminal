@@ -93,6 +93,7 @@ The config file is `~/.config/twitty/config.json` (`%APPDATA%\twitty\config.json
 | Key | Values |
 | --- | --- |
 | `font_size` | 8 to 48 |
+| `font_family` | Font for the terminal grid, e.g. `JetBrains Mono`. Unset, or not installed: the system monospace font. Arabic uses an embedded Noto Naskh Arabic when no system font covers it. |
 | `background_opacity` | 0.2 (very see-through) to 1.0 (solid) |
 | `cursor_style` | `block`, `beam` or `underline`. Programs that set their own cursor shape (vim insert mode, for example) still win. |
 

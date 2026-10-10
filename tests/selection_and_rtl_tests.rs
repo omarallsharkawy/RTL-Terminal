@@ -102,6 +102,7 @@ fn shaped(text: &str) -> (CachedRow, CursorState) {
         font_px: 15.0,
         char_width: CW,
         line_height: 23.0,
+        family: None,
     };
     let row_cursor = RowCursor {
         col: cursor.col,

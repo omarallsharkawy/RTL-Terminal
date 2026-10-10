@@ -353,6 +353,7 @@ impl ApplicationHandler<AppEvent> for App {
                 }
             };
 
+        renderer.set_font_family(self.config.font_family.as_deref());
         renderer.set_opacity(self.config.background_opacity);
         renderer.cursor_style = self.config.cursor_style.clone();
         renderer.palette = self.config.palette();
