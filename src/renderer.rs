@@ -6,11 +6,13 @@ use cosmic_text::{Attrs, Buffer, FontSystem, Metrics, Shaping};
 use glyphon::{
     Cache, Resolution, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
 };
+use std::collections::HashMap;
 use std::sync::Arc;
 use unicode_bidi::{bidi_class, BidiClass};
 use winit::window::Window;
 
 use crate::color::{Palette, Rgba};
+use crate::layout::{tab_rects, truncate_title, PaneId, Rect};
 use crate::quad::{try_render_box_or_block, QuadRenderer};
 use crate::terminal::{CellData, CursorState, LineData};
 
@@ -29,6 +31,28 @@ const LRI: &str = "\u{2066}";
 const PDI: &str = "\u{2069}";
 
 type Quad = (f32, f32, f32, f32, [f32; 4]);
+
+/// Widest a tab in the tab bar gets, in cells.
+const MAX_TAB_CELLS: f32 = 28.0;
+
+/// Everything the renderer needs to draw one pane.
+pub struct PaneFrame {
+    pub id: PaneId,
+    /// Where the pane goes in the window (physical pixels, padding included).
+    pub rect: Rect,
+    pub lines: Vec<LineData>,
+    pub cursor: CursorState,
+    /// The pane keyboard input goes to; the others get a hollow cursor.
+    pub focused: bool,
+    /// One-line bar drawn over the pane's last row (search query), if any.
+    pub status: Option<String>,
+}
+
+/// A tab in the tab bar.
+pub struct TabLabel {
+    pub title: String,
+    pub active: bool,
+}
 
 #[derive(Clone)]
 pub struct CachedSegment {
@@ -431,9 +455,8 @@ pub struct Renderer {
     pub cursor_style: String,
     /// Blink phase: while false the cursor is not drawn (and its block glyph is not recolored).
     pub cursor_blink_on: bool,
-    pub row_caches: Vec<CachedRow>,
-    /// One-line bar drawn over the last row (search query, messages), if any.
-    pub status_line: Option<String>,
+    /// Shaped rows of every pane, so a pane that did not change is not reshaped.
+    pub pane_caches: HashMap<PaneId, Vec<CachedRow>>,
     /// Input-method composition drawn at the cursor.
     pub ime: crate::ime::PreeditState,
 }
@@ -727,8 +750,7 @@ impl Renderer {
             opacity: 1.0,
             cursor_style: "block".into(),
             cursor_blink_on: true,
-            row_caches: Vec::new(),
-            status_line: None,
+            pane_caches: HashMap::new(),
             ime: Default::default(),
         };
         renderer.update_metrics();
@@ -752,7 +774,7 @@ impl Renderer {
         );
         self.padding_left = (PADDING_LEFT * self.scale).round();
         self.padding_top = (PADDING_TOP * self.scale).round();
-        self.row_caches.clear();
+        self.pane_caches.clear();
     }
 
     /// Use `name` for the terminal grid. An uninstalled family falls back to monospace.
@@ -785,27 +807,31 @@ impl Renderer {
         self.focused = focused;
     }
 
-    /// Show (or hide, with `None`) a one-line bar over the last terminal row.
-    pub fn set_status_line(&mut self, text: Option<String>) {
-        self.status_line = text;
+    /// Forget the cached rows of a closed pane.
+    pub fn forget_pane(&mut self, id: PaneId) {
+        self.pane_caches.remove(&id);
     }
 
-    /// Background quad and shaped text for the status line, positioned over the last row.
-    fn status_line_parts(&mut self, rows: usize) -> Option<(Quad, Buffer, f32)> {
-        let text = self.status_line.clone()?;
-        let y = self.padding_top + rows.checked_sub(1)? as f32 * self.line_height;
+    /// Background quad and shaped text for a pane's status line, positioned over its last row.
+    fn status_line_parts(
+        &mut self,
+        rect: Rect,
+        rows: usize,
+        text: &str,
+    ) -> Option<(Quad, Buffer, f32)> {
+        let y = rect.y + self.padding_top + rows.checked_sub(1)? as f32 * self.line_height;
         let bar = mix(self.palette.background, self.palette.foreground, 0.14);
         let quad = (
-            0.0,
+            rect.x,
             y,
-            self.config.width as f32,
+            rect.w,
             self.line_height,
             self.to_target_color(bar),
         );
         let metrics = Metrics::new(self.font_px(), self.line_height);
         let mut buffer = Buffer::new_empty(metrics);
         buffer.set_text(
-            &text,
+            text,
             &Attrs::new().family(grid_family(self.font_family)),
             Shaping::Advanced,
             None,
@@ -840,31 +866,58 @@ impl Renderer {
                 .update(&self.queue, Resolution { width, height });
             self.quad_renderer
                 .update_screen_size(&self.queue, width as f32, height as f32);
-            self.row_caches.clear();
+            self.pane_caches.clear();
         }
     }
 
-    pub fn compute_grid_size(&self) -> (usize, usize) {
-        let avail_w = (self.config.width as f32 - self.padding_left * 2.0).max(10.0);
-        let avail_h = (self.config.height as f32 - self.padding_top * 2.0).max(10.0);
+    /// Width of the divider between panes.
+    pub fn divider_gap(&self) -> f32 {
+        self.scale.round().max(1.0)
+    }
+
+    /// Height of the tab bar (shown only with two or more tabs).
+    pub fn tab_bar_height(&self, tab_count: usize) -> f32 {
+        if tab_count >= 2 {
+            self.line_height
+        } else {
+            0.0
+        }
+    }
+
+    /// The window area below the tab bar, where panes are laid out.
+    pub fn content_rect(&self, tab_count: usize) -> Rect {
+        let bar = self.tab_bar_height(tab_count);
+        Rect::new(
+            0.0,
+            bar,
+            self.config.width as f32,
+            (self.config.height as f32 - bar).max(1.0),
+        )
+    }
+
+    /// Grid size (cols, rows) of a pane occupying `rect`.
+    pub fn compute_grid_size(&self, rect: Rect) -> (usize, usize) {
+        let avail_w = (rect.w - self.padding_left * 2.0).max(10.0);
+        let avail_h = (rect.h - self.padding_top * 2.0).max(10.0);
         let cols = (avail_w / self.char_width).floor() as usize;
         let rows = (avail_h / self.line_height).floor() as usize;
         (cols.max(10), rows.max(4))
     }
 
-    /// Map a physical pixel position to a (col, row) cell, clamped to the grid.
-    pub fn pixel_to_cell(&self, x: f64, y: f64) -> (usize, usize) {
-        let (cols, rows) = self.compute_grid_size();
-        let col = ((x - self.padding_left as f64) / self.char_width as f64).max(0.0) as usize;
-        let row = ((y - self.padding_top as f64) / self.line_height as f64).max(0.0) as usize;
-        (col.min(cols - 1), row.min(rows - 1))
+    /// Map a physical pixel position to a (col, row) cell of the pane in `rect`, clamped to
+    /// its grid.
+    pub fn pixel_to_cell(&self, rect: Rect, x: f64, y: f64) -> (usize, usize) {
+        let (cols, rows) = self.compute_grid_size(rect);
+        let col = ((x - (rect.x + self.padding_left) as f64) / self.char_width as f64).max(0.0);
+        let row = ((y - (rect.y + self.padding_top) as f64) / self.line_height as f64).max(0.0);
+        ((col as usize).min(cols - 1), (row as usize).min(rows - 1))
     }
 
     /// Which half of its cell the pixel falls in (selections include a cell only when the
     /// pointer passes its middle).
-    pub fn pixel_side(&self, x: f64) -> Side {
-        let rel = (x - self.padding_left as f64) / self.char_width as f64;
-        if rel.fract() < 0.5 {
+    pub fn pixel_side(&self, rect: Rect, x: f64) -> Side {
+        let rel = (x - (rect.x + self.padding_left) as f64) / self.char_width as f64;
+        if rel.rem_euclid(1.0) < 0.5 {
             Side::Left
         } else {
             Side::Right
@@ -900,7 +953,7 @@ impl Renderer {
         )
     }
 
-    fn cursor_quads(&self, x: f32, y: f32, shape: CursorShape, out: &mut Vec<Quad>) {
+    fn cursor_quads(&self, x: f32, y: f32, shape: CursorShape, focused: bool, out: &mut Vec<Quad>) {
         let (w, h) = (self.char_width, self.line_height);
         let color = self.to_target_color(self.palette.cursor);
         let t = (self.scale * 1.5).round().max(1.0);
@@ -912,7 +965,7 @@ impl Renderer {
         };
         match shape {
             CursorShape::Hidden => {}
-            _ if !self.focused => hollow(out),
+            _ if !focused => hollow(out),
             CursorShape::Block => out.push((x, y, w, h, color)),
             CursorShape::HollowBlock => hollow(out),
             CursorShape::Beam => out.push((x, y, t, h, color)),
@@ -920,7 +973,13 @@ impl Renderer {
         }
     }
 
-    pub fn render(&mut self, lines: &[LineData], cursor: &CursorState) -> anyhow::Result<()> {
+    /// Draw the tab bar (with two or more tabs), every pane and the dividers between them.
+    pub fn render(
+        &mut self,
+        tabs: &[TabLabel],
+        panes: &[PaneFrame],
+        dividers: &[Rect],
+    ) -> anyhow::Result<()> {
         let surface_texture = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t)
             | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
@@ -937,88 +996,202 @@ impl Renderer {
             .create_view(&wgpu::TextureViewDescriptor::default());
 
         let default_bg_color = self.to_target_color(self.palette.background);
-        let shape = self.effective_cursor_shape(cursor.shape);
         let mut quads: Vec<Quad> = Vec::new();
+        // The focused pane's cursor is separate: a preedit replaces it.
         let mut cursor_quads: Vec<Quad> = Vec::new();
+        let mut other_cursor_quads: Vec<Quad> = Vec::new();
         let mut ime_caret: Option<(f32, f32, bool)> = None;
+        let mut ime_bounds: Option<TextBounds> = None;
+        let rect_bounds = |r: Rect| TextBounds {
+            left: r.x as i32,
+            top: r.y as i32,
+            right: r.right() as i32,
+            bottom: r.bottom() as i32,
+        };
 
-        if self.row_caches.len() != lines.len() {
-            self.row_caches.resize(lines.len(), CachedRow::default());
+        let tab_geometry = if tabs.len() >= 2 {
+            let max_tab = MAX_TAB_CELLS * self.char_width;
+            tab_rects(
+                tabs.len(),
+                self.config.width as f32,
+                self.line_height,
+                max_tab,
+            )
+        } else {
+            Vec::new()
+        };
+        if !tab_geometry.is_empty() {
+            let bar = mix(self.palette.background, self.palette.foreground, 0.08);
+            quads.push((
+                0.0,
+                0.0,
+                self.config.width as f32,
+                self.line_height,
+                self.to_target_color(bar),
+            ));
+            let accent = (self.scale * 2.0).round().max(1.0);
+            for (_, rect) in tabs.iter().zip(&tab_geometry).filter(|(t, _)| t.active) {
+                quads.push((rect.x, rect.y, rect.w, rect.h, default_bg_color));
+                quads.push((
+                    rect.x,
+                    rect.y,
+                    rect.w,
+                    accent,
+                    self.to_target_color(self.palette.cursor),
+                ));
+            }
         }
 
-        for (r, line) in lines.iter().enumerate() {
-            let y = self.padding_top + r as f32 * self.line_height;
-            // The cursor row stays marked during the blink's off phase: shaping depends on it
-            // (an Arabic line being typed keeps its LTR base), only the block recolor turns off.
-            let row_cursor = (cursor.is_visible && cursor.row == r).then_some(RowCursor {
-                col: cursor.col,
-                block: self.focused && self.cursor_blink_on && shape == CursorShape::Block,
-            });
-
-            let hash = hash_row(&line.cells, row_cursor);
-            if self.row_caches[r].hash != hash {
-                let segments = self.shaper().build_row(line, row_cursor);
-                let row_quads = self.build_row_quads(line, &segments);
-                self.row_caches[r] = CachedRow {
-                    hash,
-                    segments,
-                    quads: row_quads,
-                };
+        // Row caches are taken out of the map while drawing so shaping can borrow `self`.
+        let mut caches: Vec<Vec<CachedRow>> = Vec::with_capacity(panes.len());
+        for pane in panes {
+            let rect = pane.rect;
+            let (origin_x, origin_y) = (rect.x + self.padding_left, rect.y + self.padding_top);
+            let mut rows = self.pane_caches.remove(&pane.id).unwrap_or_default();
+            if rows.len() != pane.lines.len() {
+                rows.resize(pane.lines.len(), CachedRow::default());
             }
+            let shape = self.effective_cursor_shape(pane.cursor.shape);
+            let cursor_focused = self.focused && pane.focused;
 
-            let cached = &self.row_caches[r];
-            quads.extend(
-                cached
-                    .quads
-                    .iter()
-                    .map(|&(x, qy, w, h, c)| (self.padding_left + x, y + qy, w, h, c)),
-            );
+            for (r, line) in pane.lines.iter().enumerate() {
+                let y = origin_y + r as f32 * self.line_height;
+                // The cursor row stays marked during the blink's off phase: shaping depends on it
+                // (an Arabic line being typed keeps its LTR base), only the block recolor turns off.
+                let row_cursor =
+                    (pane.cursor.is_visible && pane.cursor.row == r).then_some(RowCursor {
+                        col: pane.cursor.col,
+                        block: cursor_focused
+                            && self.cursor_blink_on
+                            && shape == CursorShape::Block,
+                    });
 
-            if cursor.row == r {
-                let (x, ext) = cached.cursor_anchor(cursor.col, self.char_width);
-                ime_caret = Some((self.padding_left + x, y, ext));
-            }
-
-            if let Some(rc) = row_cursor.filter(|_| self.cursor_blink_on) {
-                let (x, extends_left) = cached.cursor_anchor(rc.col, self.char_width);
-                let mut x = self.padding_left + x;
-                if extends_left {
-                    x -= match shape {
-                        CursorShape::Beam => (self.scale * 1.5).round().max(1.0),
-                        _ => self.char_width,
+                let hash = hash_row(&line.cells, row_cursor);
+                if rows[r].hash != hash {
+                    let segments = self.shaper().build_row(line, row_cursor);
+                    let row_quads = self.build_row_quads(line, &segments);
+                    rows[r] = CachedRow {
+                        hash,
+                        segments,
+                        quads: row_quads,
                     };
                 }
-                self.cursor_quads(x.max(0.0), y, shape, &mut cursor_quads);
+
+                let cached = &rows[r];
+                quads.extend(
+                    cached
+                        .quads
+                        .iter()
+                        .map(|&(x, qy, w, h, c)| (origin_x + x, y + qy, w, h, c)),
+                );
+
+                if pane.focused && pane.cursor.row == r {
+                    let (x, ext) = cached.cursor_anchor(pane.cursor.col, self.char_width);
+                    ime_caret = Some((origin_x + x, y, ext));
+                    ime_bounds = Some(rect_bounds(rect));
+                }
+
+                // Only the focused pane's cursor blinks.
+                if let Some(rc) = row_cursor.filter(|_| !pane.focused || self.cursor_blink_on) {
+                    let (x, extends_left) = cached.cursor_anchor(rc.col, self.char_width);
+                    let mut x = origin_x + x;
+                    if extends_left {
+                        x -= match shape {
+                            CursorShape::Beam => (self.scale * 1.5).round().max(1.0),
+                            _ => self.char_width,
+                        };
+                    }
+                    let out = if pane.focused {
+                        &mut cursor_quads
+                    } else {
+                        &mut other_cursor_quads
+                    };
+                    self.cursor_quads(x.max(0.0), y, shape, cursor_focused, out);
+                }
             }
+            caches.push(rows);
         }
 
         let preedit_origin = self.prepare_preedit(ime_caret, &mut quads, &mut cursor_quads);
         // The cursor sits above cell backgrounds but below text (its glyph was recolored).
+        quads.extend(other_cursor_quads);
         quads.extend(cursor_quads);
-        let status = self.status_line_parts(lines.len());
-        if let Some((quad, _, _)) = &status {
-            quads.push(*quad);
+
+        let mut statuses: Vec<Option<(Quad, Buffer, f32)>> = Vec::with_capacity(panes.len());
+        for pane in panes {
+            let status = match &pane.status {
+                Some(text) => self.status_line_parts(pane.rect, pane.lines.len(), text),
+                None => None,
+            };
+            if let Some((quad, _, _)) = &status {
+                quads.push(*quad);
+            }
+            statuses.push(status);
         }
+
+        let divider_color =
+            self.to_target_color(mix(self.palette.background, self.palette.foreground, 0.28));
+        quads.extend(dividers.iter().map(|d| (d.x, d.y, d.w, d.h, divider_color)));
         self.quad_renderer
             .set_rects(&self.device, &self.queue, &quads);
 
-        let bounds = TextBounds {
-            left: 0,
-            top: 0,
-            right: self.config.width as i32,
-            bottom: self.config.height as i32,
-        };
+        // Tab titles are shaped with full shaping so Arabic titles render.
+        let mut tab_texts: Vec<(Buffer, Rect, glyphon::Color)> = Vec::new();
+        for (rect, tab) in tab_geometry.iter().zip(tabs) {
+            let cols = ((rect.w / self.char_width).floor() as usize).saturating_sub(2);
+            let title = truncate_title(&tab.title, cols);
+            let mut buffer = Buffer::new_empty(Metrics::new(self.font_px(), self.line_height));
+            buffer.set_text(
+                &title,
+                &Attrs::new().family(grid_family(self.font_family)),
+                Shaping::Advanced,
+                None,
+            );
+            buffer.shape_until_scroll(&mut self.font_system, false);
+            let color = if tab.active {
+                self.palette.foreground
+            } else {
+                mix(self.palette.foreground, self.palette.background, 0.45)
+            };
+            tab_texts.push((buffer, *rect, color.to_glyphon()));
+        }
+
         let mut text_areas: Vec<TextArea> = Vec::new();
-        for (r, cached_row) in self.row_caches.iter().enumerate() {
-            if status.is_some() && r + 1 == lines.len() {
-                break;
+        for (buffer, rect, color) in &tab_texts {
+            text_areas.push(TextArea {
+                buffer,
+                left: rect.x + self.char_width,
+                top: rect.y,
+                scale: 1.0,
+                bounds: rect_bounds(*rect),
+                default_color: *color,
+                custom_glyphs: &[],
+            });
+        }
+        for ((pane, rows), status) in panes.iter().zip(&caches).zip(&statuses) {
+            let bounds = rect_bounds(pane.rect);
+            for (r, cached_row) in rows.iter().enumerate() {
+                if status.is_some() && r + 1 == rows.len() {
+                    break;
+                }
+                let y = pane.rect.y + self.padding_top + r as f32 * self.line_height;
+                for seg in &cached_row.segments {
+                    text_areas.push(TextArea {
+                        buffer: &seg.buffer,
+                        left: pane.rect.x + self.padding_left + seg.seg_x,
+                        top: y,
+                        scale: 1.0,
+                        bounds,
+                        default_color: self.palette.foreground.to_glyphon(),
+                        custom_glyphs: &[],
+                    });
+                }
             }
-            let y = self.padding_top + r as f32 * self.line_height;
-            for seg in &cached_row.segments {
+            if let Some((_, buffer, y)) = status {
                 text_areas.push(TextArea {
-                    buffer: &seg.buffer,
-                    left: self.padding_left + seg.seg_x,
-                    top: y,
+                    buffer,
+                    left: pane.rect.x + self.padding_left,
+                    top: *y,
                     scale: 1.0,
                     bounds,
                     default_color: self.palette.foreground.to_glyphon(),
@@ -1026,19 +1199,15 @@ impl Renderer {
                 });
             }
         }
-
-        if let Some((_, buffer, y)) = &status {
-            text_areas.push(TextArea {
-                buffer,
-                left: self.padding_left,
-                top: *y,
-                scale: 1.0,
-                bounds,
-                default_color: self.palette.foreground.to_glyphon(),
-                custom_glyphs: &[],
-            });
-        }
         if let Some(origin) = preedit_origin {
+            let bounds = ime_bounds.unwrap_or_else(|| {
+                rect_bounds(Rect::new(
+                    0.0,
+                    0.0,
+                    self.config.width as f32,
+                    self.config.height as f32,
+                ))
+            });
             text_areas.extend(self.ime.text_area(
                 origin,
                 bounds,
@@ -1046,17 +1215,19 @@ impl Renderer {
             ));
         }
 
-        self.text_renderer
-            .prepare(
-                &self.device,
-                &self.queue,
-                &mut self.font_system,
-                &mut self.text_atlas,
-                &self.viewport,
-                text_areas,
-                &mut self.swash_cache,
-            )
-            .map_err(|e| anyhow::anyhow!("Text prepare error: {:?}", e))?;
+        let prepared = self.text_renderer.prepare(
+            &self.device,
+            &self.queue,
+            &mut self.font_system,
+            &mut self.text_atlas,
+            &self.viewport,
+            text_areas,
+            &mut self.swash_cache,
+        );
+        for (pane, rows) in panes.iter().zip(caches) {
+            self.pane_caches.insert(pane.id, rows);
+        }
+        prepared.map_err(|e| anyhow::anyhow!("Text prepare error: {:?}", e))?;
 
         let mut encoder = self
             .device

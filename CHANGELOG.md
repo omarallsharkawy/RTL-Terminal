@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Tabs and split panes. Ctrl+Shift+T opens a tab, Ctrl+Shift+E / Ctrl+Shift+O split the focused pane side by side or stacked, Ctrl+Shift+W closes a pane (the last pane closes the tab, the last tab closes the window), Ctrl+Tab / Ctrl+PageDown cycle tabs, Alt+Arrow moves focus between panes, and dragging a divider resizes a split. Each pane has its own shell, selection, search and links; the unfocused pane's cursor is hollow. A tab bar (titles from the program's OSC 0/2 title, Arabic included) shows with two or more tabs. Ctrl+Tab no longer reaches programs; Ctrl+Alt+Tab still does.
 - Noto Naskh Arabic is embedded, so Arabic renders on machines without an Arabic font. System fonts still win where they cover the script.
 - `font_family` option picks the terminal font; a family that is not installed falls back to the system monospace font.
 - Scrollback search: Ctrl+Shift+F opens a search bar at the bottom. Matching is literal and case-insensitive, updates as you type (Arabic included), highlights every visible match, and shows `n/N`. Enter jumps to the next older match, Shift+Enter to a newer one, Esc closes.

@@ -1,3 +1,4 @@
+use crate::layout::FocusDir;
 use alacritty_terminal::term::TermMode;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey};
@@ -13,6 +14,17 @@ pub enum InputAction {
     Paste,
     /// Open interactive scrollback search.
     Search,
+    NewTab,
+    /// Close the focused pane (its tab, or the window, when it is the last one).
+    ClosePane,
+    NextTab,
+    PrevTab,
+    /// Split the focused pane side by side.
+    SplitRight,
+    /// Split the focused pane top and bottom.
+    SplitDown,
+    /// Move focus to the neighbouring pane.
+    Focus(FocusDir),
 }
 
 pub fn handle_key(
@@ -49,6 +61,28 @@ fn app_shortcut(key_code: KeyCode, modifiers: ModifiersState) -> Option<InputAct
             KeyCode::KeyC => return Some(InputAction::Copy),
             KeyCode::KeyV => return Some(InputAction::Paste),
             KeyCode::KeyF => return Some(InputAction::Search),
+            KeyCode::KeyT => return Some(InputAction::NewTab),
+            KeyCode::KeyW => return Some(InputAction::ClosePane),
+            KeyCode::KeyE => return Some(InputAction::SplitRight),
+            KeyCode::KeyO => return Some(InputAction::SplitDown),
+            _ => {}
+        }
+    }
+    if ctrl && !alt {
+        match key_code {
+            KeyCode::Tab if shift => return Some(InputAction::PrevTab),
+            KeyCode::Tab => return Some(InputAction::NextTab),
+            KeyCode::PageDown if !shift => return Some(InputAction::NextTab),
+            KeyCode::PageUp if !shift => return Some(InputAction::PrevTab),
+            _ => {}
+        }
+    }
+    if alt && !ctrl && !shift {
+        match key_code {
+            KeyCode::ArrowLeft => return Some(InputAction::Focus(FocusDir::Left)),
+            KeyCode::ArrowRight => return Some(InputAction::Focus(FocusDir::Right)),
+            KeyCode::ArrowUp => return Some(InputAction::Focus(FocusDir::Up)),
+            KeyCode::ArrowDown => return Some(InputAction::Focus(FocusDir::Down)),
             _ => {}
         }
     }
