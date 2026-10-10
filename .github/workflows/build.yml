@@ -43,7 +43,7 @@ jobs:
         run: cargo test
 
   build-windows:
-    name: Build Windows executable
+    name: Build Windows binary
     needs: rust-quality
     runs-on: windows-latest
 
@@ -65,12 +65,53 @@ jobs:
       - name: Build release executable
         run: cargo build --release --target x86_64-pc-windows-msvc
 
+      - name: Name the asset
+        shell: pwsh
+        run: |
+          $version = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/x86_64-pc-windows-msvc/release/twitty.exe "dist/twitty-$version-windows-x86_64.exe"
+
       - name: Upload Windows build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: twitty-windows-installer
+          name: twitty-windows
           if-no-files-found: error
-          path: target/x86_64-pc-windows-msvc/release/twitty.exe
+          path: dist/*
+
+  build-linux:
+    name: Build Linux binary
+    needs: rust-quality
+    runs-on: ubuntu-latest
+
+    env:
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build output
+        uses: swatinem/rust-cache@v2
+
+      - name: Build release executable
+        run: cargo build --release
+
+      - name: Package the asset
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          mkdir -p dist
+          tar -czf "dist/twitty-$version-linux-x86_64.tar.gz" -C target/release twitty
+
+      - name: Upload Linux build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: twitty-linux
+          if-no-files-found: error
+          path: dist/*
 
   rust-security:
     name: Audit Rust dependencies
@@ -90,64 +131,47 @@ jobs:
 
   release:
     name: Create GitHub Release
-    needs: [build-windows, rust-quality, rust-security]
+    needs: [build-windows, build-linux, rust-quality, rust-security]
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download Windows artifacts
+      - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
-          name: twitty-windows-installer
-          path: ./artifacts-windows
-
-      - name: List artifacts
-        shell: pwsh
-        run: Get-ChildItem -Recurse ./artifacts-windows | Select-Object FullName, Length
+          path: ./artifacts
+          merge-multiple: true
 
       - name: Generate SHA-256 checksums
-        shell: pwsh
+        working-directory: ./artifacts
         run: |
-          $releaseFiles = @(
-            Get-ChildItem -Recurse ./artifacts-windows -File |
-              Where-Object { $_.Extension -in '.exe', '.msi' }
-          )
-          if ($releaseFiles.Count -eq 0) {
-            Write-Error "No Windows release assets found."
-            exit 1
-          }
+          ls -la
+          sha256sum twitty-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
-          $checksums = @(
-            foreach ($file in $releaseFiles) {
-              $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-              "$hash  $($file.Name)"
-            }
-          )
-          $checksums | Set-Content -LiteralPath ./artifacts-windows/SHA256SUMS.txt -Encoding ascii
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '
+            $0 ~ "^## " v "( |$)" { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "CHANGELOG.md has no section for $version" >&2
+            exit 1
+          fi
 
       - name: Create GitHub release
-        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $assets = @(
-            Get-ChildItem -Recurse ./artifacts-windows -File |
-              Where-Object { $_.Extension -in '.exe', '.msi' } |
-              Select-Object -ExpandProperty FullName
-          )
-          if ($assets.Count -eq 0) {
-            Write-Error "No Windows release assets found."
-            exit 1
-          }
-          $assets += (Resolve-Path ./artifacts-windows/SHA256SUMS.txt).Path
-
-          & gh release create $env:GITHUB_REF_NAME @assets `
-            --repo $env:GITHUB_REPOSITORY `
-            --target $env:GITHUB_SHA `
-            --title "Twitty $env:GITHUB_REF_NAME" `
-            --notes-file CHANGELOG.md
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          gh release create "$GITHUB_REF_NAME" artifacts/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Twitty $GITHUB_REF_NAME" \
+            --notes-file release-notes.md

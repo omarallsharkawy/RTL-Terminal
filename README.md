@@ -1,201 +1,142 @@
 <div align="center">
 
-<img src="docs/assets/twitty-logo.png" alt="Twitty bidirectional terminal mark" width="128">
+<img src="docs/assets/twitty-logo.png" alt="Twitty logo" width="112">
 
-# Twitty · RTL Terminal
+# Twitty
 
-**A bidirectional terminal emulator that renders Arabic the way it's meant to be read.**
+**A native, GPU-rendered terminal that reads Arabic the way it's written.**
 
-Mixed Arabic/English text shapes contextually and flows right-to-left — inline and in real shells — with guarded PTY/session handling for stable day-to-day terminal use.
+Arabic letters join, sentences flow right-to-left, and English words, hashes and numbers inside them stay intact, all without touching the bytes your shell and TUIs rely on.
 
-[![Build RTL Terminal](https://github.com/omarallsharkawy/RTL-Terminal/actions/workflows/build.yml/badge.svg)](https://github.com/omarallsharkawy/RTL-Terminal/actions/workflows/build.yml)
-&nbsp;·&nbsp; Tauri v2 &nbsp;·&nbsp; React 19 &nbsp;·&nbsp; xterm.js 6 &nbsp;·&nbsp; Rust
+[![Build](https://github.com/omarallsharkawy/RTL-Terminal/actions/workflows/build.yml/badge.svg)](https://github.com/omarallsharkawy/RTL-Terminal/actions/workflows/build.yml)
+&nbsp;·&nbsp; Rust · wgpu · cosmic-text · alacritty_terminal
 
-<img src="docs/assets/screenshot-hero.png" alt="Twitty rendering mixed Arabic and English: Arabic letters joined contextually and flowing right-to-left, English staying left-to-right, with crisp box-drawing borders." width="900">
+<img src="docs/assets/screenshot.png" alt="Twitty showing git output with Arabic commit messages, a mixed Arabic/English sentence with an intact commit hash, and a box-drawn table with Arabic and English columns." width="860">
 
 </div>
 
----
-
-## Why Twitty
-
-Most terminals treat Arabic as a stream of disconnected, left-to-right cells. Letters don't join, words read backwards, and anything bidirectional turns into noise. Twitty keeps the PTY stream unchanged and groups each visible Arabic phrase into a single xterm.js DOM render run. The browser then recalculates contextual shaping and right-to-left order from the complete current line after every character, while Latin text, numbers, ANSI styling, and box-drawing keep their normal terminal positions.
-
-The app also hardens the PTY bridge around real terminal behavior: backend reads preserve split UTF-8 sequences, frontend listeners are cleaned up safely, ordered input batching prevents keystroke races across the async bridge, and session IDs prevent stale shell events from respawning or writing into the wrong terminal instance.
-
 ## Features
 
-- **Contextual Arabic shaping** — full-line browser shaping updates correctly even when a shell echoes one character at a time.
-- **Cross-style bidirectional ordering** — Arabic flows right-to-left even across adjacent ANSI-colored spans; English, digits, symbols, and TUI geometry stay left-to-right.
-- **Protocol-safe rendering** — Unicode and ANSI/control sequences reach xterm unchanged; direction handling exists only in the DOM renderer.
-- **Session-hardened PTY bridge** — split UTF-8 reads, stale shell events, and reconnect cleanup are handled defensively.
-- **Ordered mixed-script input** — burst typing and paste are serialized per session, preserving Arabic, English, and control-key order exactly.
-- **Fast native startup** — the Tauri bridge is bundled eagerly, shell listeners register in parallel, and Windows shell discovery avoids slow PATH scans.
-- **Real Windows shell, real PTY** — PowerShell runs inside Windows ConPTY via Rust `portable-pty`.
-- **Full ANSI support** — xterm's dynamic 24-bit palette stylesheet is permitted by the native CSP; alternate screen, scroll regions, mouse reporting, and 10k-line scrollback remain intact.
-- **Windows-native typography** — Cascadia Mono/Consolas for the grid, Segoe UI for shaped Arabic, and bundled Noto Naskh Arabic as fallback.
-- **F11 fullscreen**, native **Ctrl+C** interrupt, auto-resize, and shell auto-respawn on exit.
-- **Terminal-only surface** — no internal title rail, shell selector, direction switch, status bar, or shortcut legend.
-- **Browser demo mode** — open without a PTY to preview the rendering (the screenshots above are this mode).
-- **Windows-focused builds** — one tested x64 NSIS installer and Windows-native CI gates.
+**Arabic and mixed text**
+- Contextual Arabic shaping with harakat (تشكيل) kept on their letters.
+- Right-to-left flow inside a line, while prompts and terminal layout stay left-to-right, so nothing flips.
+- English words, commit hashes and numbers inside Arabic stay whole and in order (`7abaf40`, `v3.0.0`, `2026`).
+- While you type Arabic, the cursor sits on the left of what you wrote, and spaces stay on that side too.
 
-## Screenshots
+**Terminal**
+- Full ANSI and 24-bit color, bold/italic/dim/inverse, underline, strikethrough.
+- Pixel-exact box drawing and block elements for TUIs (htop, vim, lazygit…).
+- Scrollback with mouse wheel and trackpad, bracketed paste, xterm mouse reporting.
+- Complete key encoding: Alt/Meta, F1–F12, modified arrows and navigation keys, AltGr layouts.
+- Window title, bell, OSC 52 copy and OSC 10/11 color queries.
 
-| Mixed Arabic + English, shaped and ordered | Crisp box-drawing for TUIs |
+**Everyday use**
+- Select with the mouse (double-click for a word, triple-click for a line). Releasing the mouse copies the text.
+- See-through window background.
+- Cursor style: block, beam or underline. It turns hollow when the window loses focus.
+- Zoom with Ctrl+wheel or Ctrl+= / Ctrl+-, saved between sessions.
+- HiDPI aware. Falls back to a software GPU adapter on VMs and RDP.
+
+## Install
+
+### Linux
+
+Download `twitty-<version>-linux-x86_64.tar.gz` from the [latest release](https://github.com/omarallsharkawy/RTL-Terminal/releases/latest), then:
+
+```bash
+tar -xzf twitty-*-linux-x86_64.tar.gz
+install -m755 twitty ~/.local/bin/twitty
+```
+
+Works on Wayland and X11.
+
+### Windows
+
+Download `twitty-<version>-windows-x86_64.exe` from the [latest release](https://github.com/omarallsharkawy/RTL-Terminal/releases/latest) and run it. Each release ships a `SHA256SUMS.txt`. Builds are not code-signed yet, so SmartScreen may warn about an unknown publisher.
+
+### From source
+
+Requires [Rust](https://rustup.rs/) (stable).
+
+```bash
+git clone https://github.com/omarallsharkawy/RTL-Terminal.git
+cd RTL-Terminal
+cargo build --release
+./target/release/twitty
+```
+
+## Usage
+
+### Shortcuts
+
+| Action | Keys |
 | --- | --- |
-| ![Arabic and English mixed inline](docs/assets/screenshot-main.png) | ![Box-drawing table rendering](docs/assets/screenshot-wide.png) |
+| Copy selection | Release the mouse, or Ctrl+Shift+C |
+| Paste | Ctrl+Shift+V, or middle-click |
+| Select word / line | Double-click / triple-click |
+| Select inside vim, Claude Code, etc. | Hold Shift while dragging |
+| Zoom in / out / reset | Ctrl+= / Ctrl+- / Ctrl+0, or Ctrl+wheel |
+| Background transparency | Ctrl+Shift+wheel |
 
-> The Arabic phrase `مرحبا بك في Twitty` reads right-to-left while `Twitty` stays left-to-right; the comma in `السلام عليكم, world` lands between the two scripts correctly.
+### Configuration
 
-## Quick start
+The config file is `~/.config/twitty/config.json` (`%APPDATA%\twitty\config.json` on Windows). Every key is optional:
 
-### Install on Windows
-
-1. Open the [latest Twitty release](https://github.com/omarallsharkawy/RTL-Terminal/releases/latest).
-2. Under **Assets**, download `Twitty_<version>_x64-setup.exe`. If that release also lists `SHA256SUMS.txt`, download it too.
-3. When a checksum file is available, verify the installer with `Get-FileHash .\Twitty_<version>_x64-setup.exe -Algorithm SHA256` and compare it with `SHA256SUMS.txt`.
-4. Run the installer, choose English or العربية, then continue through the setup pages.
-
-The x64 installer is for Windows 10/11 and installs for the current user, so
-the default installation does not require an Administrator prompt.
-
-During setup you can:
-
-- keep the default `%LOCALAPPDATA%\Twitty` destination or choose another writable folder;
-- create the Start Menu folder, rename it, or opt out of Start Menu shortcuts;
-- optionally create a desktop shortcut on the finish page (off by default);
-- launch Twitty immediately after installation.
-
-Setup includes the WebView2 bootstrapper: it detects an existing WebView2
-runtime and installs it when needed. An internet connection may therefore be
-needed on a fresh Windows installation. Setup also blocks accidental downgrades.
-Current community builds are not Authenticode-signed, so Windows SmartScreen may
-show an unknown-publisher warning. The published SHA-256 checksum verifies file
-integrity; publisher identity will require a future code-signing certificate.
-
-### Browser demo (no shell)
-
-```bash
-npm ci
-npm run dev
+```json
+{
+  "font_size": 14.5,
+  "background_opacity": 0.78,
+  "cursor_style": "beam"
+}
 ```
 
-Open the printed `localhost` URL. There's no PTY in the browser, so this shows a demo banner — useful for previewing the Arabic rendering.
-
-### Desktop app (real shell)
-
-Install [Rust 1.88 or newer](https://rustup.rs/) first, then:
-
-```bash
-npm ci
-npm run tauri:dev
-```
-
-The backend uses `TWITTY_SHELL` when set, then checks the standard PowerShell 7 and Windows PowerShell locations before falling back through PATH, `%COMSPEC%`, and `cmd.exe`. PowerShell starts with `-NoLogo -NoProfile`. `TWITTY_SHELL` is a trusted developer override: Twitty launches that executable with the current user's permissions and does not sandbox it, so only point it at software you trust.
-
-Each Twitty window owns one active PTY session. Starting a replacement session
-shuts down the previous one; tabs and multiple simultaneous sessions are not part
-of the current release.
-
-### Production build
-
-```bash
-npm ci
-npm run build         # type-check + bundle the frontend
-npm run tauri:build -- --bundles nsis --ci --no-sign
-```
-
-The installer is written to
-`src-tauri/target/release/bundle/nsis/Twitty_<version>_x64-setup.exe`.
-
-## How the RTL rendering works
-
-The hard part of an Arabic terminal isn't only shaping — it's shaping without changing terminal protocol data. Twitty incrementally decodes PTY UTF-8 so Arabic characters are not split at read boundaries, sends the original Unicode and ANSI stream into xterm, then joins Arabic phrases only at DOM-render time.
-
-```
-┌─────────────┐   raw bytes    ┌──────────────┐  unchanged UTF-8/ANSI  ┌─────────────────────┐
-│  Real shell │ ─────────────▶ │  Rust PTY    │ ────────────────────▶ │ xterm.js buffer     │
-│ (PTY/ConPTY)│                │  bridge      │ session-scoped events  │ terminal grid       │
-└─────────────┘                └──────────────┘                         └──────────┬──────────┘
-                                                                                  │ visible line
-                                                                                  ▼
-                                                                       ┌─────────────────────┐
-                                                                       │ DOM character joiner│
-                                                                       │ browser Arabic/BiDi │
-                                                                       └─────────────────────┘
-```
-
-1. **The backend preserves UTF-8 boundaries.** PTY bytes are decoded incrementally, so Arabic characters split across read chunks are not replaced with `�`.
-2. **Events are session-scoped.** `terminal://data` and `terminal://exited` include a session ID so stale killed shells cannot write to or respawn the current terminal.
-3. **The xterm buffer stays canonical.** Shell input and output remain ordinary Unicode; the app never replaces Arabic with presentation-form characters.
-4. **Arabic joins in the DOM renderer.** A character joiner groups each complete Arabic phrase so the browser shapes and orders the latest full line, including slow character-by-character echo.
-5. **ANSI styles share one local RTL group.** Adjacent colored Arabic spans keep their individual colors and cell widths inside one atomic RTL wrapper, so styling individual words does not reverse their sentence order.
-6. **The terminal grid stays LTR.** Active prompts remain on xterm's LTR grid; completed Arabic-led or Arabic-dominant prose receives a scoped RTL paragraph base while embedded Latin remains LTR.
-
-> **Note on `allowProposedApi`:** `registerCharacterJoiner` is a proposed API in xterm.js v6, so the terminal is constructed with `allowProposedApi: true`.
-
-## Architecture
-
-The Rust backend spawns a real shell inside a PTY and streams incrementally decoded output to the frontend as session-scoped `terminal://data` events. The frontend writes that stream unchanged into xterm.js, whose DOM character joiner handles visible Arabic phrases. Keystrokes enter a per-session queue that batches same-turn input and serializes every `write_terminal` call; window resizes via `resize_terminal`.
-
-### Key files
-
-| File | Responsibility |
+| Key | Values |
 | --- | --- |
-| `src/components/XtermTerminal.tsx` | xterm.js setup, session-scoped PTY events, key handling |
-| `src/components/arabicRenderer.ts` | Arabic phrase detection for xterm's DOM character joiner |
-| `src/components/terminalInputQueue.ts` | Ordered, session-scoped terminal input batching |
-| `src/App.tsx` | Terminal-only surface and contextual recovery notice |
-| `src/styles.css` | Full-window terminal layout and bundled Arabic `@font-face` |
-| `src-tauri/src/pty.rs` | PTY session lifecycle, incremental UTF-8 decoding, shell selection |
-| `src-tauri/src/lib.rs` | Tauri commands: `start_terminal`, `write_terminal`, `interrupt_terminal`, `resize_terminal`, `stop_terminal` |
-| `branding/` | Canonical app mark and branded NSIS artwork |
-| `src-tauri/installer-assets/` | Generated Windows installer ICO/BMP assets |
-| `src-tauri/installer-hooks.nsh` | Installer defaults such as the optional desktop shortcut |
-| `src-tauri/tauri.conf.json` | App + Windows installer config, CSP, window |
-| `.github/workflows/build.yml` | Windows build, quality gates, and GitHub release |
+| `font_size` | 8 to 48 |
+| `background_opacity` | 0.2 (very see-through) to 1.0 (solid) |
+| `cursor_style` | `block`, `beam` or `underline`. Programs that set their own cursor shape (vim insert mode, for example) still win. |
 
-### Tech stack
+Zoom and transparency changes are written back to this file when Twitty closes. Keys Twitty doesn't recognize are left untouched.
 
-- **Shell:** [Tauri v2](https://tauri.app/) (Rust core, system WebView).
-- **Backend:** Rust with [`portable-pty`](https://crates.io/crates/portable-pty) for Windows ConPTY.
-- **Frontend:** [React 19](https://react.dev/) + [Vite 6](https://vitejs.dev/) + [xterm.js 6](https://xtermjs.org/) with `@xterm/addon-fit`.
-- **Font:** Cascadia Mono/Consolas + Segoe UI, with Noto Naskh Arabic (SIL OFL) fallback.
+### Shell
 
-### CSP rationale
+On Linux and macOS Twitty starts `$SHELL` as a login shell. On Windows it picks PowerShell 7 (`pwsh.exe`), then Windows PowerShell, then `%COMSPEC%`. Set `TWITTY_SHELL` to override, arguments included:
 
-Twitty permits no remote scripts or arbitrary remote content. The only CSP
-exception is inline `style-src`, because xterm.js generates its ANSI palette,
-cell positions, cursor rules, and renderer styles at runtime. Tauri's asset-CSP
-rewrite is disabled for `style-src` only; every other directive remains
-enforced. Object embeds, base URL rewriting, and form submission are blocked
-explicitly. `npm run test:windows` guards this narrow exception and verifies that
-the explicit CSP does not broaden accidentally.
+```bash
+TWITTY_SHELL="bash --norc" twitty
+```
 
-## Platform support
+## How the Arabic rendering works
 
-| Platform | WebView engine | Status |
-| --- | --- | --- |
-| Windows 10/11 | WebView2 (Chromium) | Supported target |
+A terminal grid is a row of fixed-width cells, and Arabic is not. Twitty keeps the grid as the source of truth and only changes how each row is drawn:
+
+1. **The terminal state is untouched.** `alacritty_terminal` parses the PTY stream into cells exactly as any terminal would. Twitty never rewrites what the shell sent.
+2. **Rows are split into segments.** A segment breaks at background color changes, box-drawing characters and wide gaps, so TUI columns and borders never bleed into each other.
+3. **Each segment is shaped with full bidi.** `cosmic-text` joins the Arabic letters and orders the runs. A leading LRM keeps the paragraph left-to-right so prompts never jump to the other side. Latin words and numbers inside Arabic are wrapped in LRI/PDI isolates so they can't be torn apart.
+4. **Glyphs map back to cells.** Every glyph remembers which cell it came from. The cursor, cell backgrounds and selection therefore line up with what you see, not just with grid columns.
+5. **Everything else stays on the grid.** Latin-only text, symbols and emoji are pinned to their cell, and box drawing is rendered as geometry.
 
 ## Development
 
 ```bash
-npm run dev           # Vite dev server (browser demo)
-npm run tauri:dev     # Tauri dev (real shell; PTY failure surfaces an inline retry notice)
-npm run build         # tsc + vite build
-npm test              # rendering + session + input + Windows + 50k-line stress tests
-npm run test:stress   # run the mixed Arabic/English stress probe directly
-node scripts/measure-pty-lifecycle.mjs <twitty.exe>  # Windows PTY handle/thread benchmark
-node scripts/capture-shots.mjs   # regenerate docs screenshots
+cargo test                                  # all tests, no GPU needed
+cargo clippy --all-targets -- -D warnings
+cargo fmt
 ```
+
+| Path | What it does |
+| --- | --- |
+| `src/app.rs` | Window events, mouse, selection, clipboard, scrolling |
+| `src/renderer.rs` | Row segmentation, bidi shaping, cursor placement, GPU drawing |
+| `src/terminal.rs` | `alacritty_terminal` wrapper: snapshots, scrollback, selection |
+| `src/input.rs` | Keyboard, paste and mouse encoding |
+| `src/pty.rs` | Shell discovery and PTY I/O |
+| `src/quad.rs` | Backgrounds, cursor, box-drawing geometry |
+| `src/color.rs` | Palette (Tokyo Night) and color resolution |
+| `src/config.rs` | `config.json` loading and saving |
+
+CI runs fmt, clippy and tests, builds Windows and Linux binaries, and audits dependencies. Pushing a `v*` tag publishes a release whose notes come from the matching section of [`CHANGELOG.md`](CHANGELOG.md).
 
 ## License
 
-Twitty is distributed under the End User License Agreement in [`LICENSE.txt`](LICENSE.txt). The bundled Noto Naskh Arabic font is licensed separately under the SIL Open Font License.
-
-## Notes
-
-- The `kitty/` directory is vendored reference source, not part of the build, and is gitignored.
-- GitHub Actions audits npm and Rust dependencies; Dependabot checks npm, Cargo, and workflow actions weekly.
-- The Windows installer is built by GitHub Actions; newly built version-tag releases include `SHA256SUMS.txt`.
+See [`LICENSE.txt`](LICENSE.txt).
