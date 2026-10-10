@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Relicensed under MIT OR Apache-2.0, at your option. This replaces the old end-user license agreement, which was written for the legacy installer.
+- Box drawing: double, heavy and dashed lines, block eighths, quadrants and shades are drawn pixel-exact.
 
 ## 3.0.0 — 2026-10-11
 
