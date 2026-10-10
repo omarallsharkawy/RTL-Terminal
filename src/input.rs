@@ -11,6 +11,8 @@ pub enum InputAction {
     ZoomReset,
     Copy,
     Paste,
+    /// Open interactive scrollback search.
+    Search,
 }
 
 pub fn handle_key(
@@ -46,6 +48,7 @@ fn app_shortcut(key_code: KeyCode, modifiers: ModifiersState) -> Option<InputAct
         match key_code {
             KeyCode::KeyC => return Some(InputAction::Copy),
             KeyCode::KeyV => return Some(InputAction::Paste),
+            KeyCode::KeyF => return Some(InputAction::Search),
             _ => {}
         }
     }

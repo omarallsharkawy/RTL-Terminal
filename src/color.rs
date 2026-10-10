@@ -23,6 +23,16 @@ impl Rgba {
         }
     }
 
+    /// Linear blend towards `other` (`t` = 0 keeps `self`).
+    pub fn mix(self, other: Rgba, t: f32) -> Rgba {
+        Rgba {
+            r: self.r + (other.r - self.r) * t,
+            g: self.g + (other.g - self.g) * t,
+            b: self.b + (other.b - self.b) * t,
+            a: self.a,
+        }
+    }
+
     pub fn to_linear(self) -> [f32; 4] {
         let conv = |c: f32| {
             if c <= 0.04045 {
@@ -55,35 +65,43 @@ pub struct Palette {
     pub cursor: Rgba,
     /// Background of mouse-selected text.
     pub selection: Rgba,
+    /// Background of search matches (text on it uses `background` for contrast).
+    pub search_match: Rgba,
+    /// Background of the focused search match.
+    pub search_focus: Rgba,
     pub ansi: [Rgba; 16],
 }
 
 impl Default for Palette {
     fn default() -> Self {
         // Deep dark terminal palette (Tokyo Night / OpenCode compatible)
+        let ansi = [
+            Rgba::from_rgb8(21, 22, 30),    // 0: Black
+            Rgba::from_rgb8(247, 118, 142), // 1: Red
+            Rgba::from_rgb8(158, 206, 106), // 2: Green
+            Rgba::from_rgb8(224, 175, 104), // 3: Yellow
+            Rgba::from_rgb8(122, 162, 247), // 4: Blue
+            Rgba::from_rgb8(187, 154, 247), // 5: Magenta
+            Rgba::from_rgb8(125, 207, 255), // 6: Cyan
+            Rgba::from_rgb8(169, 177, 214), // 7: White
+            Rgba::from_rgb8(65, 72, 104),   // 8: Bright Black (gutter/borders)
+            Rgba::from_rgb8(247, 118, 142), // 9: Bright Red
+            Rgba::from_rgb8(158, 206, 106), // 10: Bright Green
+            Rgba::from_rgb8(224, 175, 104), // 11: Bright Yellow
+            Rgba::from_rgb8(122, 162, 247), // 12: Bright Blue
+            Rgba::from_rgb8(187, 154, 247), // 13: Bright Magenta
+            Rgba::from_rgb8(125, 207, 255), // 14: Bright Cyan
+            Rgba::from_rgb8(192, 202, 245), // 15: Bright White
+        ];
+        let background = Rgba::from_rgb8(21, 22, 30); // #15161e (crisp dark background)
         Self {
-            background: Rgba::from_rgb8(21, 22, 30), // #15161e (crisp dark background)
+            search_match: background.mix(ansi[3], 0.6),
+            search_focus: ansi[11],
+            ansi,
+            background,
             foreground: Rgba::from_rgb8(192, 202, 245), // #c0caf5
-            cursor: Rgba::from_rgb8(245, 224, 220),  // #f5e0dc
-            selection: Rgba::from_rgb8(51, 70, 124), // #33467c (Tokyo Night selection)
-            ansi: [
-                Rgba::from_rgb8(21, 22, 30),    // 0: Black
-                Rgba::from_rgb8(247, 118, 142), // 1: Red
-                Rgba::from_rgb8(158, 206, 106), // 2: Green
-                Rgba::from_rgb8(224, 175, 104), // 3: Yellow
-                Rgba::from_rgb8(122, 162, 247), // 4: Blue
-                Rgba::from_rgb8(187, 154, 247), // 5: Magenta
-                Rgba::from_rgb8(125, 207, 255), // 6: Cyan
-                Rgba::from_rgb8(169, 177, 214), // 7: White
-                Rgba::from_rgb8(65, 72, 104),   // 8: Bright Black (gutter/borders)
-                Rgba::from_rgb8(247, 118, 142), // 9: Bright Red
-                Rgba::from_rgb8(158, 206, 106), // 10: Bright Green
-                Rgba::from_rgb8(224, 175, 104), // 11: Bright Yellow
-                Rgba::from_rgb8(122, 162, 247), // 12: Bright Blue
-                Rgba::from_rgb8(187, 154, 247), // 13: Bright Magenta
-                Rgba::from_rgb8(125, 207, 255), // 14: Bright Cyan
-                Rgba::from_rgb8(192, 202, 245), // 15: Bright White
-            ],
+            cursor: Rgba::from_rgb8(245, 224, 220),     // #f5e0dc
+            selection: Rgba::from_rgb8(51, 70, 124),    // #33467c (Tokyo Night selection)
         }
     }
 }
@@ -140,13 +158,16 @@ impl Palette {
     /// underscores may be used in place of dashes.
     pub fn named(name: &str) -> Option<Palette> {
         let key = name.trim().to_ascii_lowercase().replace([' ', '_'], "-");
-        let p = match key.as_str() {
+        let mut p = match key.as_str() {
             "tokyo-night" => Palette::default(),
             "catppuccin-mocha" => Palette {
                 background: hex(0x1e1e2e),
                 foreground: hex(0xcdd6f4),
                 cursor: hex(0xf5e0dc),
                 selection: hex(0x585b70),
+                // Filled in from the theme colors below.
+                search_match: hex(0),
+                search_focus: hex(0),
                 ansi: [
                     hex(0x45475a),
                     hex(0xf38ba8),
@@ -171,6 +192,9 @@ impl Palette {
                 foreground: hex(0xebdbb2),
                 cursor: hex(0xebdbb2),
                 selection: hex(0x504945),
+                // Filled in from the theme colors below.
+                search_match: hex(0),
+                search_focus: hex(0),
                 ansi: [
                     hex(0x282828),
                     hex(0xcc241d),
@@ -195,6 +219,9 @@ impl Palette {
                 foreground: hex(0xf8f8f2),
                 cursor: hex(0xf8f8f2),
                 selection: hex(0x44475a),
+                // Filled in from the theme colors below.
+                search_match: hex(0),
+                search_focus: hex(0),
                 ansi: [
                     hex(0x21222c),
                     hex(0xff5555),
@@ -219,6 +246,9 @@ impl Palette {
                 foreground: hex(0xd8dee9),
                 cursor: hex(0xd8dee9),
                 selection: hex(0x434c5e),
+                // Filled in from the theme colors below.
+                search_match: hex(0),
+                search_focus: hex(0),
                 ansi: [
                     hex(0x3b4252),
                     hex(0xbf616a),
@@ -243,6 +273,9 @@ impl Palette {
                 foreground: hex(0xabb2bf),
                 cursor: hex(0x528bff),
                 selection: hex(0x3e4451),
+                // Filled in from the theme colors below.
+                search_match: hex(0),
+                search_focus: hex(0),
                 ansi: [
                     hex(0x282c34),
                     hex(0xe06c75),
@@ -267,6 +300,9 @@ impl Palette {
                 foreground: hex(0x839496),
                 cursor: hex(0x93a1a1),
                 selection: hex(0x073642),
+                // Filled in from the theme colors below.
+                search_match: hex(0),
+                search_focus: hex(0),
                 ansi: [
                     hex(0x073642),
                     hex(0xdc322f),
@@ -291,6 +327,9 @@ impl Palette {
                 foreground: hex(0x24292e),
                 cursor: hex(0x24292e),
                 selection: hex(0xc8e1ff),
+                // Filled in from the theme colors below.
+                search_match: hex(0),
+                search_focus: hex(0),
                 ansi: [
                     hex(0x24292e),
                     hex(0xcf222e),
@@ -312,6 +351,10 @@ impl Palette {
             },
             _ => return None,
         };
+        if key != "tokyo-night" {
+            p.search_match = p.background.mix(p.ansi[3], 0.6);
+            p.search_focus = p.ansi[11];
+        }
         Some(p)
     }
 

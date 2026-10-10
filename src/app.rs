@@ -1,13 +1,13 @@
 use alacritty_terminal::event::{Event as TermEvent, WindowSize};
-use alacritty_terminal::index::Side;
+use alacritty_terminal::index::{Direction, Side};
 use alacritty_terminal::term::TermMode;
 use alacritty_terminal::vte::ansi::{Color as AnsiColor, Rgb};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
-use winit::keyboard::ModifiersState;
+use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{UserAttentionType, WindowAttributes, WindowId};
 
 use crate::config::TwittyConfig;
@@ -58,6 +58,8 @@ pub struct App {
     config: TwittyConfig,
     config_dirty: bool,
     needs_redraw: bool,
+    /// Query being typed while scrollback search is open (keys go here, not to the PTY).
+    search_query: Option<String>,
 }
 
 impl App {
@@ -86,6 +88,7 @@ impl App {
             config: TwittyConfig::load(),
             config_dirty: false,
             needs_redraw: false,
+            search_query: None,
         }
     }
 
@@ -319,6 +322,97 @@ impl App {
             // OSC 52 reads are refused: any program could silently exfiltrate the clipboard.
             TermEvent::ClipboardLoad(..) => {}
             _ => {}
+        }
+    }
+}
+
+impl App {
+    /// Text of the search bar for the current query and match position.
+    fn search_bar_text(&self, query: &str) -> String {
+        let status = match self.terminal.lock() {
+            Ok(_) if query.is_empty() => String::new(),
+            Ok(term) if !term.has_search_match() => "  no matches".to_owned(),
+            Ok(term) => term
+                .search_position()
+                .map_or(String::new(), |(i, n)| format!("  {i}/{n}")),
+            Err(_) => String::new(),
+        };
+        format!("Find: {query}{status}")
+    }
+
+    fn refresh_search_bar(&mut self) {
+        let text = self
+            .search_query
+            .as_deref()
+            .map(|q| self.search_bar_text(q));
+        if let Some(ref mut r) = self.renderer {
+            r.set_status_line(text);
+        }
+        self.request_redraw();
+    }
+
+    fn open_search(&mut self) {
+        self.search_query = Some(String::new());
+        self.clear_selection();
+        self.refresh_search_bar();
+    }
+
+    fn close_search(&mut self) {
+        self.search_query = None;
+        if let Ok(mut term) = self.terminal.lock() {
+            term.clear_search();
+        }
+        self.refresh_search_bar();
+    }
+
+    /// Run the search for the current query in `direction` and update the bar.
+    fn run_search(&mut self, direction: Direction) {
+        let Some(query) = self.search_query.clone() else {
+            return;
+        };
+        if let Ok(mut term) = self.terminal.lock() {
+            term.search(&query, direction);
+        }
+        self.refresh_search_bar();
+    }
+
+    /// Key press while the search bar is open. Nothing reaches the PTY.
+    fn handle_search_key(&mut self, event: &KeyEvent) {
+        if !event.state.is_pressed() {
+            return;
+        }
+        match &event.logical_key {
+            Key::Named(NamedKey::Escape) => self.close_search(),
+            Key::Named(NamedKey::Enter) => {
+                let direction = if self.modifiers.shift_key() {
+                    Direction::Right
+                } else {
+                    Direction::Left
+                };
+                self.run_search(direction);
+            }
+            Key::Named(NamedKey::Backspace) => {
+                if let Some(query) = self.search_query.as_mut() {
+                    query.pop();
+                }
+                self.run_search(Direction::Left);
+            }
+            _ => {
+                if self.modifiers.control_key() || self.modifiers.alt_key() {
+                    return;
+                }
+                let Some(text) = event.text.as_deref() else {
+                    return;
+                };
+                let text: String = text.chars().filter(|c| !c.is_control()).collect();
+                if text.is_empty() {
+                    return;
+                }
+                if let Some(query) = self.search_query.as_mut() {
+                    query.push_str(&text);
+                }
+                self.run_search(Direction::Left);
+            }
         }
     }
 }
@@ -558,6 +652,10 @@ impl ApplicationHandler<AppEvent> for App {
                 }
             }
             WindowEvent::KeyboardInput { event, .. } => {
+                if self.search_query.is_some() {
+                    self.handle_search_key(&event);
+                    return;
+                }
                 let mode = self
                     .terminal
                     .lock()
@@ -583,6 +681,7 @@ impl ApplicationHandler<AppEvent> for App {
                         InputAction::Copy => {
                             self.copy_selection();
                         }
+                        InputAction::Search => self.open_search(),
                     }
                 }
             }
