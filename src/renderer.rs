@@ -355,6 +355,8 @@ pub struct Renderer {
     pub opacity: f32,
     /// Configured cursor style ("block", "beam"/"bar", "underline").
     pub cursor_style: String,
+    /// Blink phase: while false the cursor is not drawn (and its block glyph is not recolored).
+    pub cursor_blink_on: bool,
     pub row_caches: Vec<CachedRow>,
 }
 
@@ -554,6 +556,7 @@ impl Renderer {
             focused: true,
             opacity: 1.0,
             cursor_style: "block".into(),
+            cursor_blink_on: true,
             row_caches: Vec::new(),
         };
         renderer.update_metrics();
@@ -743,10 +746,11 @@ impl Renderer {
 
         for (r, line) in lines.iter().enumerate() {
             let y = self.padding_top + r as f32 * self.line_height;
-            let row_cursor = (cursor.is_visible && cursor.row == r).then_some(RowCursor {
-                col: cursor.col,
-                block: self.focused && shape == CursorShape::Block,
-            });
+            let row_cursor = (cursor.is_visible && self.cursor_blink_on && cursor.row == r)
+                .then_some(RowCursor {
+                    col: cursor.col,
+                    block: self.focused && shape == CursorShape::Block,
+                });
 
             let hash = hash_row(&line.cells, row_cursor);
             if self.row_caches[r].hash != hash {

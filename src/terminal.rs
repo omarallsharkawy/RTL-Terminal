@@ -7,7 +7,7 @@ use alacritty_terminal::term::test::TermSize;
 use alacritty_terminal::term::{point_to_viewport, viewport_to_point};
 use alacritty_terminal::term::{Config, Term, TermMode};
 use alacritty_terminal::vte::ansi::{
-    Color as AnsiColor, CursorShape, NamedColor, Processor, StdSyncHandler,
+    Color as AnsiColor, CursorShape, CursorStyle, NamedColor, Processor, StdSyncHandler,
 };
 use std::sync::Arc;
 use unicode_bidi::{bidi_class, BidiClass};
@@ -95,6 +95,18 @@ pub struct Terminal {
     rows: usize,
 }
 
+/// Terminal config whose default cursor blinks as `cursor_blink` says. DECSCUSR (`CSI n SP q`)
+/// overrides it, and `CSI 0 SP q` falls back to it.
+fn term_config(cursor_blink: bool) -> Config {
+    Config {
+        default_cursor_style: CursorStyle {
+            shape: CursorShape::Block,
+            blinking: cursor_blink,
+        },
+        ..Config::default()
+    }
+}
+
 impl Terminal {
     /// Terminal that only forwards replies destined for the PTY (used by tests).
     pub fn new<F>(cols: usize, rows: usize, on_pty_write: F) -> Self
@@ -117,7 +129,7 @@ impl Terminal {
         let listener = ForwardListener {
             on_event: Arc::new(on_event),
         };
-        let term = Term::new(Config::default(), &size, listener);
+        let term = Term::new(term_config(true), &size, listener);
         let parser = Processor::<StdSyncHandler>::new();
         Self {
             term,
@@ -129,6 +141,22 @@ impl Terminal {
 
     pub fn process_bytes(&mut self, bytes: &[u8]) {
         self.parser.advance(&mut self.term, bytes);
+    }
+
+    /// Default blinking for when the program has not chosen a cursor style.
+    pub fn set_default_cursor_blink(&mut self, cursor_blink: bool) {
+        self.term.set_options(term_config(cursor_blink));
+    }
+
+    /// Whether the cursor should blink: the program's DECSCUSR choice, else the default.
+    pub fn cursor_blinking(&self) -> bool {
+        self.term.cursor_style().blinking
+    }
+
+    /// Grid position of the cursor, to tell whether output moved it.
+    pub fn cursor_position(&self) -> (i32, usize) {
+        let point = self.term.grid().cursor.point;
+        (point.line.0, point.column.0)
     }
 
     pub fn resize(&mut self, cols: usize, rows: usize) {

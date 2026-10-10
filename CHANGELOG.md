@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Blinking cursor (530 ms on/off), controlled by `cursor_blink` (default `true`) and by programs that request a blinking or steady cursor. It stays solid while typing and while the window is unfocused.
 - Relicensed under MIT OR Apache-2.0, at your option. This replaces the old end-user license agreement, which was written for the legacy installer.
 
 ## 3.0.0 — 2026-10-11

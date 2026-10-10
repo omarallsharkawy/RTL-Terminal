@@ -10,6 +10,8 @@ pub struct TwittyConfig {
     pub background_opacity: f32,
     /// "block", "beam"/"bar" or "underline": the cursor shape when the app does not ask for one.
     pub cursor_style: String,
+    /// Blink the cursor, unless the running program asks for a steady one (DECSCUSR).
+    pub cursor_blink: bool,
     /// Keys this version does not know about are kept so saving never drops them.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
@@ -21,6 +23,7 @@ impl Default for TwittyConfig {
             font_size: 14.5,
             background_opacity: 0.78,
             cursor_style: "block".into(),
+            cursor_blink: true,
             extra: serde_json::Map::new(),
         }
     }
