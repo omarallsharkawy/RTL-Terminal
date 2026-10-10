@@ -31,6 +31,7 @@ Arabic letters join, sentences flow right-to-left, and English words, hashes and
 - Window title, bell, OSC 52 copy and OSC 10/11 color queries.
 
 **Everyday use**
+- Input methods (fcitx5, ibus, Windows IME) with inline composition at the cursor and the candidate popup next to it.
 - Select with the mouse (double-click for a word, triple-click for a line). Releasing the mouse copies the text.
 - See-through window background.
 - Cursor style: block, beam or underline. It turns hollow when the window loses focus.

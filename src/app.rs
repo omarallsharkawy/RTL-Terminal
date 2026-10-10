@@ -5,7 +5,7 @@ use alacritty_terminal::vte::ansi::{Color as AnsiColor, Rgb};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
 use winit::keyboard::ModifiersState;
 use winit::window::{UserAttentionType, WindowAttributes, WindowId};
@@ -58,6 +58,8 @@ pub struct App {
     config: TwittyConfig,
     config_dirty: bool,
     needs_redraw: bool,
+    /// An IME composition (preedit) is on screen.
+    preedit_active: bool,
 }
 
 impl App {
@@ -86,6 +88,7 @@ impl App {
             config: TwittyConfig::load(),
             config_dirty: false,
             needs_redraw: false,
+            preedit_active: false,
         }
     }
 
@@ -121,6 +124,14 @@ impl App {
         if let Some(ref pty) = self.pty {
             let _ = pty.write(bytes);
         }
+    }
+
+    fn update_preedit(&mut self, preedit: Option<(String, Option<(usize, usize)>)>) {
+        self.preedit_active = preedit.is_some();
+        if let Some(ref mut r) = self.renderer {
+            r.set_preedit(preedit);
+        }
+        self.request_redraw();
     }
 
     fn request_redraw(&mut self) {
@@ -343,6 +354,9 @@ impl ApplicationHandler<AppEvent> for App {
             }
         };
 
+        window.set_ime_allowed(true);
+        window.set_ime_purpose(winit::window::ImePurpose::Terminal);
+
         let mut renderer =
             match pollster::block_on(Renderer::new(window.clone(), self.config.font_size)) {
                 Ok(r) => r,
@@ -555,6 +569,21 @@ impl ApplicationHandler<AppEvent> for App {
                     self.request_redraw();
                 }
             }
+            WindowEvent::Ime(ime) => match ime {
+                Ime::Enabled => {}
+                Ime::Disabled => self.update_preedit(None),
+                Ime::Preedit(text, cursor) => {
+                    self.update_preedit(crate::ime::normalize_preedit(text, cursor))
+                }
+                Ime::Commit(text) => {
+                    self.update_preedit(None);
+                    self.clear_selection();
+                    self.write_pty(text.as_bytes());
+                    self.scroll_to_bottom();
+                }
+            },
+            WindowEvent::KeyboardInput { .. }
+                if !crate::ime::should_forward_key(self.preedit_active) => {}
             WindowEvent::KeyboardInput { event, .. } => {
                 let app_cursor = self
                     .terminal
