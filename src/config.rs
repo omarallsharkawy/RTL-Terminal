@@ -19,6 +19,8 @@ pub struct TwittyConfig {
     pub colors: Option<ThemeColors>,
     /// Font family for the terminal grid, e.g. "JetBrains Mono". Unset or not installed: monospace.
     pub font_family: Option<String>,
+    /// Blink the cursor, unless the running program asks for a steady one (DECSCUSR).
+    pub cursor_blink: bool,
     /// Keys this version does not know about are kept so saving never drops them.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
@@ -33,6 +35,7 @@ impl Default for TwittyConfig {
             theme: None,
             colors: None,
             font_family: None,
+            cursor_blink: true,
             extra: serde_json::Map::new(),
         }
     }

@@ -363,6 +363,8 @@ pub struct Renderer {
     pub opacity: f32,
     /// Configured cursor style ("block", "beam"/"bar", "underline").
     pub cursor_style: String,
+    /// Blink phase: while false the cursor is not drawn (and its block glyph is not recolored).
+    pub cursor_blink_on: bool,
     pub row_caches: Vec<CachedRow>,
     /// One-line bar drawn over the last row (search query, messages), if any.
     pub status_line: Option<String>,
@@ -582,6 +584,7 @@ impl Renderer {
             focused: true,
             opacity: 1.0,
             cursor_style: "block".into(),
+            cursor_blink_on: true,
             row_caches: Vec::new(),
             status_line: None,
             ime: Default::default(),
@@ -825,9 +828,11 @@ impl Renderer {
 
         for (r, line) in lines.iter().enumerate() {
             let y = self.padding_top + r as f32 * self.line_height;
+            // The cursor row stays marked during the blink's off phase: shaping depends on it
+            // (an Arabic line being typed keeps its LTR base), only the block recolor turns off.
             let row_cursor = (cursor.is_visible && cursor.row == r).then_some(RowCursor {
                 col: cursor.col,
-                block: self.focused && shape == CursorShape::Block,
+                block: self.focused && self.cursor_blink_on && shape == CursorShape::Block,
             });
 
             let hash = hash_row(&line.cells, row_cursor);
@@ -854,7 +859,7 @@ impl Renderer {
                 ime_caret = Some((self.padding_left + x, y, ext));
             }
 
-            if let Some(rc) = row_cursor {
+            if let Some(rc) = row_cursor.filter(|_| self.cursor_blink_on) {
                 let (x, extends_left) = cached.cursor_anchor(rc.col, self.char_width);
                 let mut x = self.padding_left + x;
                 if extends_left {

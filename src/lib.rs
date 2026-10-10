@@ -1,4 +1,5 @@
 pub mod app;
+pub mod blink;
 pub mod color;
 pub mod config;
 pub mod fonts;

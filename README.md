@@ -100,6 +100,7 @@ The config file is `~/.config/twitty/config.json` (`%APPDATA%\twitty\config.json
 | `font_family` | Font for the terminal grid, e.g. `JetBrains Mono`. Unset, or not installed: the system monospace font. Arabic uses an embedded Noto Naskh Arabic when no system font covers it. |
 | `background_opacity` | 0.2 (very see-through) to 1.0 (solid) |
 | `cursor_style` | `block`, `beam` or `underline`. Programs that set their own cursor shape (vim insert mode, for example) still win. |
+| `cursor_blink` | `true` (default) blinks the cursor, `false` keeps it solid. Programs that ask for a blinking or steady cursor (`CSI n SP q`) override this. The cursor stays solid while you type and while the window is unfocused. |
 
 Zoom and transparency changes are written back to this file when Twitty closes. Keys Twitty doesn't recognize are left untouched.
 

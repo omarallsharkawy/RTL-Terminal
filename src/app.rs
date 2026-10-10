@@ -6,10 +6,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, Ime, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{CursorIcon, UserAttentionType, WindowAttributes, WindowId};
 
+use crate::blink::{BlinkState, BLINK_INTERVAL};
 use crate::config::TwittyConfig;
 use crate::input::{encode_mouse, encode_paste, handle_key, InputAction};
 use crate::pty::Pty;
@@ -64,6 +65,7 @@ pub struct App {
     search_query: Option<String>,
     /// An IME composition (preedit) is on screen.
     preedit_active: bool,
+    cursor_blink: BlinkState,
 }
 
 impl App {
@@ -95,6 +97,7 @@ impl App {
             needs_redraw: false,
             search_query: None,
             preedit_active: false,
+            cursor_blink: BlinkState::new(BLINK_INTERVAL),
         }
     }
 
@@ -193,6 +196,7 @@ impl App {
         };
         let bracketed = self.mode().contains(TermMode::BRACKETED_PASTE);
         self.write_pty(&encode_paste(&text, bracketed));
+        self.cursor_blink.reset(Instant::now());
         self.scroll_to_bottom();
     }
 
@@ -495,6 +499,9 @@ impl ApplicationHandler<AppEvent> for App {
         renderer.set_opacity(self.config.background_opacity);
         renderer.cursor_style = self.config.cursor_style.clone();
         renderer.palette = self.config.palette();
+        if let Ok(mut term) = self.terminal.lock() {
+            term.set_default_cursor_blink(self.config.cursor_blink);
+        }
 
         let (cols, rows) = renderer.compute_grid_size();
         if let Ok(mut term) = self.terminal.lock() {
@@ -513,8 +520,15 @@ impl ApplicationHandler<AppEvent> for App {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
             AppEvent::PtyData(data) => {
+                let mut moved = false;
                 if let Ok(mut term) = self.terminal.lock() {
+                    let before = term.cursor_position();
                     term.process_bytes(&data);
+                    moved = term.cursor_position() != before;
+                }
+                // Output that moves the cursor keeps it solid while text is appearing.
+                if moved {
+                    self.cursor_blink.reset(Instant::now());
                 }
                 self.request_redraw();
             }
@@ -528,6 +542,32 @@ impl ApplicationHandler<AppEvent> for App {
                 }
             }
         }
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let now = Instant::now();
+        let (blinking, shown) = match self.terminal.lock() {
+            Ok(t) => (
+                t.cursor_blinking(),
+                t.mode().contains(TermMode::SHOW_CURSOR),
+            ),
+            Err(_) => (false, false),
+        };
+        self.cursor_blink.set_enabled(now, blinking && shown);
+        self.cursor_blink.tick(now);
+
+        let visible = self.cursor_blink.visible();
+        if self
+            .renderer
+            .as_ref()
+            .is_some_and(|r| r.cursor_blink_on != visible)
+        {
+            self.request_redraw();
+        }
+        event_loop.set_control_flow(match self.cursor_blink.next_deadline() {
+            Some(deadline) => ControlFlow::WaitUntil(deadline),
+            None => ControlFlow::Wait,
+        });
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
@@ -564,6 +604,7 @@ impl ApplicationHandler<AppEvent> for App {
                     self.mouse_button_down = None;
                     self.finish_selection();
                 }
+                self.cursor_blink.set_focused(Instant::now(), focused);
                 if let Some(ref mut r) = self.renderer {
                     r.set_focused(focused);
                     r.window.request_redraw();
@@ -751,6 +792,7 @@ impl ApplicationHandler<AppEvent> for App {
                         InputAction::Bytes(bytes) => {
                             self.clear_selection();
                             self.write_pty(&bytes);
+                            self.cursor_blink.reset(Instant::now());
                             self.scroll_to_bottom();
                         }
                         InputAction::ZoomIn => {
@@ -773,6 +815,7 @@ impl ApplicationHandler<AppEvent> for App {
             WindowEvent::RedrawRequested => {
                 self.needs_redraw = false;
                 if let Some(ref mut r) = self.renderer {
+                    r.cursor_blink_on = self.cursor_blink.visible();
                     let (lines, cursor) = self.terminal.lock().unwrap().snapshot();
                     if let Err(e) = r.render(&lines, &cursor) {
                         eprintln!("Render error: {:?}", e);
