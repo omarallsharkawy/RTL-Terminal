@@ -3,13 +3,26 @@ use std::fs;
 use std::path::PathBuf;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(default)]
 pub struct TwittyConfig {
     pub font_size: f32,
+    /// Window background opacity, 0.2 (very see-through) to 1.0 (solid).
+    pub background_opacity: f32,
+    /// "block", "beam"/"bar" or "underline": the cursor shape when the app does not ask for one.
+    pub cursor_style: String,
+    /// Keys this version does not know about are kept so saving never drops them.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl Default for TwittyConfig {
     fn default() -> Self {
-        Self { font_size: 14.5 }
+        Self {
+            font_size: 14.5,
+            background_opacity: 0.78,
+            cursor_style: "block".into(),
+            extra: serde_json::Map::new(),
+        }
     }
 }
 

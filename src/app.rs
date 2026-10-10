@@ -237,7 +237,8 @@ impl ApplicationHandler<AppEvent> for App {
 
         let window_attrs = WindowAttributes::default()
             .with_title(WINDOW_TITLE)
-            .with_inner_size(winit::dpi::LogicalSize::new(960.0, 580.0));
+            .with_inner_size(winit::dpi::LogicalSize::new(960.0, 580.0))
+            .with_transparent(true);
 
         let window = match event_loop.create_window(window_attrs) {
             Ok(w) => Arc::new(w),
@@ -248,7 +249,7 @@ impl ApplicationHandler<AppEvent> for App {
             }
         };
 
-        let renderer =
+        let mut renderer =
             match pollster::block_on(Renderer::new(window.clone(), self.config.font_size)) {
                 Ok(r) => r,
                 Err(e) => {
@@ -257,6 +258,9 @@ impl ApplicationHandler<AppEvent> for App {
                     return;
                 }
             };
+
+        renderer.set_opacity(self.config.background_opacity);
+        renderer.cursor_style = self.config.cursor_style.clone();
 
         let (cols, rows) = renderer.compute_grid_size();
         if let Ok(mut term) = self.terminal.lock() {
@@ -377,6 +381,18 @@ impl ApplicationHandler<AppEvent> for App {
                     MouseScrollDelta::PixelDelta(p) => p.y / line_height,
                 };
 
+                if self.modifiers.control_key() && self.modifiers.shift_key() {
+                    // Ctrl + Shift + wheel: background opacity.
+                    let step = if lines > 0.0 { 0.05 } else { -0.05 };
+                    let opacity = (self.config.background_opacity + step).clamp(0.2, 1.0);
+                    self.config.background_opacity = opacity;
+                    self.config_dirty = true;
+                    if let Some(ref mut r) = self.renderer {
+                        r.set_opacity(opacity);
+                    }
+                    self.request_redraw();
+                    return;
+                }
                 if self.modifiers.control_key() {
                     // Ctrl + wheel: zoom one step per notch.
                     if lines > 0.0 {

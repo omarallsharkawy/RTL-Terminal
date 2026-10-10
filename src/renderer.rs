@@ -19,6 +19,12 @@ const PADDING_LEFT: f32 = 8.0;
 const PADDING_TOP: f32 = 6.0;
 /// Left-to-right mark prepended to RTL segments so prompts never flip direction.
 const LRM: &str = "\u{200E}";
+/// Right-to-left mark appended after spaces typed at the end of Arabic, so they stay on its left.
+const RLM: &str = "\u{200F}";
+/// Left-to-right isolate / pop directional isolate: wrap Latin words and numbers inside Arabic so
+/// hashes like `7abaf40` are never torn into `7` … `abaf40`.
+const LRI: &str = "\u{2066}";
+const PDI: &str = "\u{2069}";
 
 type Quad = (f32, f32, f32, f32, [f32; 4]);
 
@@ -73,6 +79,10 @@ pub struct Renderer {
     pub padding_top: f32,
     pub is_srgb: bool,
     pub focused: bool,
+    /// Window background opacity (1.0 = solid).
+    pub opacity: f32,
+    /// Configured cursor style ("block", "beam"/"bar", "underline").
+    pub cursor_style: String,
     pub row_caches: Vec<CachedRow>,
 }
 
@@ -213,7 +223,14 @@ impl Renderer {
             width,
             height,
             present_mode,
-            alpha_mode: surface_caps.alpha_modes[0],
+            // A pre/post-multiplied surface lets the compositor show what is behind the window.
+            alpha_mode: [
+                wgpu::CompositeAlphaMode::PreMultiplied,
+                wgpu::CompositeAlphaMode::PostMultiplied,
+            ]
+            .into_iter()
+            .find(|m| surface_caps.alpha_modes.contains(m))
+            .unwrap_or(surface_caps.alpha_modes[0]),
             view_formats: vec![],
             desired_maximum_frame_latency: 1,
             color_space: Default::default(),
@@ -259,6 +276,8 @@ impl Renderer {
             padding_top: 0.0,
             is_srgb,
             focused: true,
+            opacity: 1.0,
+            cursor_style: "block".into(),
             row_caches: Vec::new(),
         };
         renderer.update_metrics();
@@ -292,6 +311,23 @@ impl Renderer {
 
     pub fn set_focused(&mut self, focused: bool) {
         self.focused = focused;
+    }
+
+    pub fn set_opacity(&mut self, opacity: f32) {
+        self.opacity = opacity.clamp(0.2, 1.0);
+    }
+
+    /// The configured style replaces the default block; shapes an app asks for (vim insert
+    /// mode's beam, for example) are kept.
+    fn effective_cursor_shape(&self, shape: CursorShape) -> CursorShape {
+        if shape != CursorShape::Block {
+            return shape;
+        }
+        match self.cursor_style.as_str() {
+            "beam" | "bar" => CursorShape::Beam,
+            "underline" => CursorShape::Underline,
+            _ => CursorShape::Block,
+        }
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -363,10 +399,44 @@ impl Renderer {
             byte += LRM.len();
         }
 
+        // Words (runs of non-blank cells) with Latin letters or digits and no Arabic.
+        let mut isolate = vec![(false, false); end - start];
+        if has_rtl {
+            let mut c = start;
+            while c < end {
+                if cells[c].is_blank() {
+                    c += 1;
+                    continue;
+                }
+                let word_start = c;
+                while c < end && !cells[c].is_blank() {
+                    c += 1;
+                }
+                let word = &cells[word_start..c];
+                if word.iter().any(|w| w.c.is_ascii_alphanumeric())
+                    && !word.iter().any(|w| is_rtl_char(w.c))
+                {
+                    isolate[word_start - start].0 = true;
+                    isolate[c - 1 - start].1 = true;
+                }
+            }
+        }
+
         for (col, cell) in cells.iter().enumerate().take(end).skip(start) {
+            let (opens, closes) = isolate[col - start];
+            let mut text = String::new();
+            if opens {
+                text.push_str(LRI);
+                byte += LRI.len();
+            }
             cell_bytes.push(byte);
             byte += cell.text_len();
-            if cell.is_spacer() {
+            cell.push_text(&mut text);
+            if closes {
+                text.push_str(PDI);
+                byte += PDI.len();
+            }
+            if text.is_empty() {
                 continue;
             }
             complex |= !cell.c.is_ascii() || !cell.zerowidth.is_empty();
@@ -387,17 +457,23 @@ impl Renderer {
             }
 
             match spans.last_mut() {
-                Some((text, a))
+                Some((existing, a))
                     if a.color_opt == attrs.color_opt
                         && a.weight == attrs.weight
                         && a.style == attrs.style =>
                 {
-                    cell.push_text(text)
+                    existing.push_str(&text)
                 }
-                _ => {
-                    let mut text = String::new();
-                    cell.push_text(&mut text);
-                    spans.push((text, attrs));
+                _ => spans.push((text, attrs)),
+            }
+        }
+
+        // Spaces typed right after Arabic belong to it: keep them on its left, not the right.
+        if has_rtl && end > start && cells[end - 1].is_blank() {
+            let last_text = cells[start..end].iter().rev().find(|c| !c.is_blank());
+            if last_text.is_some_and(|c| is_rtl_char(c.c)) {
+                if let Some((text, _)) = spans.last_mut() {
+                    text.push_str(RLM);
                 }
             }
         }
@@ -460,6 +536,16 @@ impl Renderer {
             }
             while end > start && cells[end - 1].is_blank() {
                 end -= 1;
+            }
+            // Spaces the user just typed after Arabic text stay part of it (see RLM above).
+            if let Some(c) = cursor {
+                if c.col > end
+                    && c.col <= cols
+                    && is_rtl_char(cells[end - 1].c)
+                    && cells[end..c.col].iter().all(|cell| cell.is_blank())
+                {
+                    end = c.col;
+                }
             }
             col = end;
 
@@ -530,40 +616,43 @@ impl Renderer {
         quads
     }
 
-    /// X position (relative to the left padding) where the cursor should be drawn.
-    fn cursor_x(&self, row: &CachedRow, line: &LineData, col: usize) -> f32 {
+    /// Where the cursor goes (relative to the left padding), and whether it should extend to the
+    /// left of that point. After Arabic text the caret sits on the text's left, where the next
+    /// Arabic letter will appear; after Latin text it sits on the right.
+    fn cursor_x(&self, row: &CachedRow, col: usize) -> (f32, bool) {
         let grid_x = col as f32 * self.char_width;
+        let glyph_of = |seg: &CachedSegment, c: usize| {
+            let target = seg.cell_bytes[c - seg.seg_start];
+            seg.buffer.layout_runs().find_map(|run| {
+                run.glyphs
+                    .iter()
+                    .find(|g| target >= g.start && target < g.end)
+                    .map(|g| (seg.seg_x + g.x, seg.seg_x + g.x + g.w, g.level.is_rtl()))
+            })
+        };
         for (i, seg) in row.segments.iter().enumerate() {
             if !seg.has_rtl {
                 continue;
             }
             if col >= seg.seg_start && col < seg.seg_end {
-                // Inside RTL text: sit on the glyph that holds this logical cell.
-                let target = seg.cell_bytes[col - seg.seg_start];
-                for run in seg.buffer.layout_runs() {
-                    if let Some(g) = run
-                        .glyphs
-                        .iter()
-                        .find(|g| target >= g.start && target < g.end)
-                    {
-                        return seg.seg_x + g.x;
-                    }
-                }
-                return grid_x;
+                // Inside the text: the insertion point is the cell's leading edge.
+                return match glyph_of(seg, col) {
+                    Some((_, right, true)) => (right, true),
+                    Some((left, _, false)) => (left, false),
+                    None => (grid_x, false),
+                };
             }
             let next_start = row.segments.get(i + 1).map_or(usize::MAX, |s| s.seg_start);
             if col >= seg.seg_end && col < next_start {
-                // After RTL text (including the user's trailing spaces): anchor to its visual end.
-                let text_w = seg
-                    .buffer
-                    .layout_runs()
-                    .map(|r| r.line_w)
-                    .fold(0.0, f32::max);
-                let trailing = line.cells[seg.seg_end..col].len() as f32 * self.char_width;
-                return seg.seg_x + text_w + trailing;
+                let gap = (col - seg.seg_end) as f32 * self.char_width;
+                return match glyph_of(seg, seg.seg_end - 1) {
+                    Some((left, _, true)) => (left - gap, true),
+                    Some((_, right, false)) => (right + gap, false),
+                    None => (grid_x, false),
+                };
             }
         }
-        grid_x
+        (grid_x, false)
     }
 
     fn cursor_quads(&self, x: f32, y: f32, shape: CursorShape, out: &mut Vec<Quad>) {
@@ -603,6 +692,7 @@ impl Renderer {
             .create_view(&wgpu::TextureViewDescriptor::default());
 
         let default_bg_color = self.to_target_color(self.palette.background);
+        let shape = self.effective_cursor_shape(cursor.shape);
         let mut quads: Vec<Quad> = Vec::new();
         let mut cursor_quads: Vec<Quad> = Vec::new();
 
@@ -614,7 +704,7 @@ impl Renderer {
             let y = self.padding_top + r as f32 * self.line_height;
             let row_cursor = (cursor.is_visible && cursor.row == r).then_some(RowCursor {
                 col: cursor.col,
-                block: self.focused && cursor.shape == CursorShape::Block,
+                block: self.focused && shape == CursorShape::Block,
             });
 
             let hash = hash_row(&line.cells, row_cursor);
@@ -637,8 +727,15 @@ impl Renderer {
             );
 
             if let Some(rc) = row_cursor {
-                let x = self.padding_left + self.cursor_x(cached, line, rc.col);
-                self.cursor_quads(x, y, cursor.shape, &mut cursor_quads);
+                let (x, extends_left) = self.cursor_x(cached, rc.col);
+                let mut x = self.padding_left + x;
+                if extends_left {
+                    x -= match shape {
+                        CursorShape::Beam => (self.scale * 1.5).round().max(1.0),
+                        _ => self.char_width,
+                    };
+                }
+                self.cursor_quads(x.max(0.0), y, shape, &mut cursor_quads);
             }
         }
 
@@ -695,10 +792,11 @@ impl Renderer {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: default_bg_color[0] as f64,
-                            g: default_bg_color[1] as f64,
-                            b: default_bg_color[2] as f64,
-                            a: 1.0,
+                            // Premultiplied, so transparency keeps the theme's tint.
+                            r: (default_bg_color[0] * self.opacity) as f64,
+                            g: (default_bg_color[1] * self.opacity) as f64,
+                            b: (default_bg_color[2] * self.opacity) as f64,
+                            a: self.opacity as f64,
                         }),
                         store: wgpu::StoreOp::Store,
                     },
