@@ -366,6 +366,8 @@ pub struct Renderer {
     pub row_caches: Vec<CachedRow>,
     /// One-line bar drawn over the last row (search query, messages), if any.
     pub status_line: Option<String>,
+    /// Input-method composition drawn at the cursor.
+    pub ime: crate::ime::PreeditState,
 }
 
 fn hash_row(cells: &[CellData], cursor: Option<RowCursor>) -> u64 {
@@ -581,12 +583,13 @@ impl Renderer {
             cursor_style: "block".into(),
             row_caches: Vec::new(),
             status_line: None,
+            ime: Default::default(),
         };
         renderer.update_metrics();
         Ok(renderer)
     }
 
-    fn font_px(&self) -> f32 {
+    pub(crate) fn font_px(&self) -> f32 {
         self.font_size * self.scale
     }
 
@@ -733,7 +736,7 @@ impl Renderer {
         }
     }
 
-    fn to_target_color(&self, rgba: Rgba) -> [f32; 4] {
+    pub(crate) fn to_target_color(&self, rgba: Rgba) -> [f32; 4] {
         if self.is_srgb {
             rgba.to_linear()
         } else {
@@ -813,6 +816,7 @@ impl Renderer {
         let shape = self.effective_cursor_shape(cursor.shape);
         let mut quads: Vec<Quad> = Vec::new();
         let mut cursor_quads: Vec<Quad> = Vec::new();
+        let mut ime_caret: Option<(f32, f32, bool)> = None;
 
         if self.row_caches.len() != lines.len() {
             self.row_caches.resize(lines.len(), CachedRow::default());
@@ -844,6 +848,11 @@ impl Renderer {
                     .map(|&(x, qy, w, h, c)| (self.padding_left + x, y + qy, w, h, c)),
             );
 
+            if cursor.row == r {
+                let (x, ext) = cached.cursor_anchor(cursor.col, self.char_width);
+                ime_caret = Some((self.padding_left + x, y, ext));
+            }
+
             if let Some(rc) = row_cursor {
                 let (x, extends_left) = cached.cursor_anchor(rc.col, self.char_width);
                 let mut x = self.padding_left + x;
@@ -857,6 +866,7 @@ impl Renderer {
             }
         }
 
+        let preedit_origin = self.prepare_preedit(ime_caret, &mut quads, &mut cursor_quads);
         // The cursor sits above cell backgrounds but below text (its glyph was recolored).
         quads.extend(cursor_quads);
         let status = self.status_line_parts(lines.len());
@@ -901,6 +911,13 @@ impl Renderer {
                 default_color: self.palette.foreground.to_glyphon(),
                 custom_glyphs: &[],
             });
+        }
+        if let Some(origin) = preedit_origin {
+            text_areas.extend(self.ime.text_area(
+                origin,
+                bounds,
+                self.palette.foreground.to_glyphon(),
+            ));
         }
 
         self.text_renderer
