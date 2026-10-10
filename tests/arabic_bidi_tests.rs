@@ -140,11 +140,11 @@ fn test_mixed_arabic_with_alphanumeric_hashes() {
         glyphs.sort_by(|a, b| a.x.partial_cmp(&b.x).unwrap());
         let g_7 = glyphs
             .iter()
-            .find(|g| g.start > 0 && &run.text[g.start..g.end] == "7")
+            .find(|g| &run.text[g.start..g.end] == "7")
             .unwrap();
         let g_a = glyphs
             .iter()
-            .find(|g| g.start > 0 && &run.text[g.start..g.end] == "a")
+            .find(|g| &run.text[g.start..g.end] == "a")
             .unwrap();
         assert!(
             (g_7.x - g_a.x).abs() <= 15.0,

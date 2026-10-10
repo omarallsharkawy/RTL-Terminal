@@ -1,3 +1,4 @@
+use alacritty_terminal::vte::ansi::CursorShape;
 use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping};
 use glyphon::{
     Cache, ColorMode, Resolution, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer,
@@ -16,6 +17,30 @@ pub enum RenderStatus {
     Presented,
     Retry,
     Skipped,
+}
+
+/// The cursor shape actually drawn: the user's `cursor_style` replaces the terminal's
+/// default block, and an unfocused window shows a hollow block.
+pub fn effective_cursor_shape(
+    shape: CursorShape,
+    cursor_style: &str,
+    focused: bool,
+) -> CursorShape {
+    let shape = if shape == CursorShape::Block {
+        match cursor_style {
+            "beam" | "bar" => CursorShape::Beam,
+            "underline" => CursorShape::Underline,
+            "hollow" => CursorShape::HollowBlock,
+            _ => CursorShape::Block,
+        }
+    } else {
+        shape
+    };
+    if !focused && shape != CursorShape::Hidden {
+        CursorShape::HollowBlock
+    } else {
+        shape
+    }
 }
 
 pub struct Renderer {
@@ -41,6 +66,7 @@ pub struct Renderer {
     pub opacity: f32,
     pub cursor_style: String,
     pub font_family: Option<String>,
+    pub focused: bool,
     pub row_caches: Vec<CachedRow>,
 }
 
@@ -61,14 +87,23 @@ impl Renderer {
 
         let instance = wgpu::Instance::default();
         let surface = instance.create_surface(window.clone())?;
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                compatible_surface: Some(&surface),
-                force_fallback_adapter: false,
-                apply_limit_buckets: false,
-            })
-            .await?;
+        // Prefer a real GPU; fall back to a software adapter (WARP / llvmpipe) on VMs and RDP.
+        let mut adapter = None;
+        for force_fallback_adapter in [false, true] {
+            if let Ok(a) = instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::HighPerformance,
+                    compatible_surface: Some(&surface),
+                    force_fallback_adapter,
+                    apply_limit_buckets: false,
+                })
+                .await
+            {
+                adapter = Some(a);
+                break;
+            }
+        }
+        let adapter = adapter.ok_or_else(|| anyhow::anyhow!("No compatible GPU adapter found"))?;
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
@@ -200,6 +235,7 @@ impl Renderer {
             opacity: opacity.clamp(0.1, 1.0),
             cursor_style,
             font_family,
+            focused: true,
             row_caches: Vec::new(),
         })
     }
@@ -405,7 +441,12 @@ impl Renderer {
             );
         }
 
+        let cursor = &CursorState {
+            shape: effective_cursor_shape(cursor.shape, &self.cursor_style, self.focused),
+            ..cursor.clone()
+        };
         let mut cursor_visual_pos: Option<(f32, f32)> = None;
+        let mut cursor_extends_left = false;
 
         // Update dirty rows and collect quads
         for (r, line) in lines.iter().enumerate() {
@@ -472,53 +513,22 @@ impl Renderer {
 
             // Cursor Calculation
             if cursor.is_visible && cursor.row == r {
-                for seg in &cached.segments {
-                    if cursor.col >= seg.seg_start && cursor.col <= seg.seg_end + 15 {
-                        if seg.has_rtl {
-                            if cursor.col >= seg.seg_end {
-                                let text_width = seg
-                                    .buffer
-                                    .layout_runs()
-                                    .map(|run| run.line_w)
-                                    .fold(0.0, f32::max);
-                                cursor_visual_pos = Some((seg.seg_x + text_width, y));
-                            } else {
-                                let mut byte_target: usize = line.cells[seg.seg_start..cursor.col]
-                                    .iter()
-                                    .map(|c| c.c.len_utf8())
-                                    .sum();
-                                byte_target += "\u{200E}".len();
-                                for run in seg.buffer.layout_runs() {
-                                    for glyph in run.glyphs.iter() {
-                                        if byte_target >= glyph.start && byte_target < glyph.end {
-                                            let gx = if glyph.level.is_rtl() {
-                                                glyph.x + glyph.w
-                                            } else {
-                                                glyph.x
-                                            };
-                                            cursor_visual_pos = Some((seg.seg_x + gx, y));
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            let cx =
-                                seg.seg_x + (cursor.col - seg.seg_start) as f32 * self.char_width;
-                            cursor_visual_pos = Some((cx, y));
-                        }
-                        break;
-                    }
-                }
-                if cursor_visual_pos.is_none() {
-                    let cx = self.padding_left + cursor.col as f32 * self.char_width;
-                    cursor_visual_pos = Some((cx, y));
-                }
+                let (cx, extends_left) =
+                    cached.cursor_anchor(cursor.col, self.char_width, self.padding_left);
+                cursor_visual_pos = Some((cx, y));
+                cursor_extends_left = extends_left;
             }
         }
 
         // Custom Cursor Style Rendering
-        if let Some((cx, cy)) = cursor_visual_pos {
+        if let Some((caret_x, cy)) = cursor_visual_pos {
+            // Box-shaped cursors at the end of Arabic text sit left of the caret, not over
+            // the letter just typed; the beam is drawn exactly at the caret.
+            let cx = match (cursor_extends_left, cursor.shape) {
+                (false, _) => caret_x,
+                (true, CursorShape::Beam) => caret_x - (2.0 * self.scale).round().max(1.0),
+                (true, _) => caret_x - self.char_width,
+            };
             if cursor.is_visible {
                 self.window.set_ime_cursor_area(
                     winit::dpi::PhysicalPosition::new(cx, cy),
@@ -526,19 +536,14 @@ impl Renderer {
                 );
             }
             let cursor_color = self.to_target_color(self.palette.cursor);
-            let effective_shape = match cursor.shape {
-                alacritty_terminal::vte::ansi::CursorShape::Block => "block",
-                alacritty_terminal::vte::ansi::CursorShape::Underline => "underline",
-                alacritty_terminal::vte::ansi::CursorShape::Beam => "beam",
-                alacritty_terminal::vte::ansi::CursorShape::HollowBlock => "hollow",
-                alacritty_terminal::vte::ansi::CursorShape::Hidden => "hidden",
+            let shape_str = match cursor.shape {
+                CursorShape::Block => "block",
+                CursorShape::Underline => "underline",
+                CursorShape::Beam => "beam",
+                CursorShape::HollowBlock => "hollow",
+                CursorShape::Hidden => "hidden",
             };
-            let shape_str = if effective_shape == "block" && self.cursor_style != "block" {
-                // If terminal mode is at default block, check if user preferred a custom style
-                self.cursor_style.as_str()
-            } else {
-                effective_shape
-            };
+            let thickness = (2.0 * self.scale).round().max(1.0);
 
             match shape_str {
                 "hidden" => {}
@@ -574,18 +579,18 @@ impl Renderer {
                 "underline" => {
                     background_quads.push((
                         cx,
-                        cy + self.line_height - 2.0,
+                        cy + self.line_height - thickness,
                         self.char_width,
-                        2.0,
+                        thickness,
                         cursor_color,
                     ));
                 }
                 _ => {
-                    // Sleek beam cursor (2.0px wide, vertically centered)
+                    // Sleek beam cursor (2px wide at 1x, vertically centered)
                     background_quads.push((
                         cx,
                         cy + 1.0,
-                        2.0,
+                        thickness,
                         self.line_height - 2.0,
                         cursor_color,
                     ));

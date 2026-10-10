@@ -92,6 +92,35 @@ fn match_ctrl_letter(physical: Option<KeyCode>, logical: &Key) -> Option<char> {
     }
 }
 
+/// Cursor keys: `ESC [ X` (`ESC O X` in application mode), `ESC [ 1 ; m X` with modifiers.
+fn cursor_key(final_byte: char, mod_code: u8, app_cursor: bool) -> Vec<u8> {
+    if mod_code > 1 {
+        format!("\x1b[1;{mod_code}{final_byte}").into_bytes()
+    } else if app_cursor {
+        format!("\x1bO{final_byte}").into_bytes()
+    } else {
+        format!("\x1b[{final_byte}").into_bytes()
+    }
+}
+
+/// Editing and function keys: `ESC [ n ~`, or `ESC [ n ; m ~` with modifiers.
+fn tilde_key(code: u8, mod_code: u8) -> Vec<u8> {
+    if mod_code > 1 {
+        format!("\x1b[{code};{mod_code}~").into_bytes()
+    } else {
+        format!("\x1b[{code}~").into_bytes()
+    }
+}
+
+/// F1-F4: `ESC O P..S`, or `ESC [ 1 ; m P..S` with modifiers.
+fn ss3_key(final_byte: char, mod_code: u8) -> Vec<u8> {
+    if mod_code > 1 {
+        format!("\x1b[1;{mod_code}{final_byte}").into_bytes()
+    } else {
+        format!("\x1bO{final_byte}").into_bytes()
+    }
+}
+
 pub fn handle_key(
     event: &KeyEvent,
     modifiers: ModifiersState,
@@ -155,6 +184,19 @@ pub fn handle_key_raw_mode(
 
     let mod_code = 1 + (shift as u8) + (alt as u8 * 2) + (ctrl as u8 * 4);
 
+    // AltGr arrives as Ctrl+Alt on Windows: let symbols such as @ € { } \\ through untouched
+    // instead of turning them into Ctrl+Alt+letter control codes.
+    if ctrl && alt {
+        if let Some(t) = text {
+            if !t.is_empty()
+                && t.chars()
+                    .all(|c| !c.is_control() && !c.is_ascii_alphanumeric())
+            {
+                return Some(InputAction::Bytes(t.as_bytes().to_vec()));
+            }
+        }
+    }
+
     // Ctrl + Shift + F -> Scrollback Search
     if ctrl && shift {
         if let Some(KeyCode::KeyF) = physical {
@@ -177,6 +219,7 @@ pub fn handle_key_raw_mode(
                 KeyCode::BracketLeft => return Some(InputAction::Bytes(vec![27])),
                 KeyCode::Backslash => return Some(InputAction::Bytes(vec![28])),
                 KeyCode::BracketRight => return Some(InputAction::Bytes(vec![29])),
+                KeyCode::Slash => return Some(InputAction::Bytes(vec![31])),
                 _ => {}
             }
         }
@@ -270,246 +313,63 @@ pub fn handle_key_raw_mode(
     }
 
     // 2. Named Navigation / Control Keys
-    match logical {
-        Key::Named(named) => match named {
+    if let Key::Named(named) = logical {
+        let esc_prefixed = |mut bytes: Vec<u8>| {
+            if alt {
+                bytes.insert(0, 0x1b);
+            }
+            Some(InputAction::Bytes(bytes))
+        };
+        match named {
             NamedKey::Backspace => {
-                let bytes = if alt { vec![0x1b, 0x7f] } else { vec![0x7f] };
-                return Some(InputAction::Bytes(bytes));
+                // Ctrl+Backspace sends ^H (delete word in PowerShell/PSReadLine), like Windows Terminal.
+                return esc_prefixed(vec![if ctrl { 0x08 } else { 0x7f }]);
             }
-            NamedKey::Enter => {
-                let bytes = if alt { vec![0x1b, b'\r'] } else { vec![b'\r'] };
-                return Some(InputAction::Bytes(bytes));
-            }
-            NamedKey::Tab => {
-                let mut bytes = if shift {
-                    b"\x1b[Z".to_vec()
-                } else {
-                    vec![b'\t']
-                };
-                if alt {
-                    bytes.insert(0, 0x1b);
-                }
-                return Some(InputAction::Bytes(bytes));
-            }
-            NamedKey::Escape => {
-                let bytes = if alt { vec![0x1b, 0x1b] } else { vec![0x1b] };
-                return Some(InputAction::Bytes(bytes));
-            }
+            NamedKey::Enter => return esc_prefixed(vec![b'\r']),
+            NamedKey::Tab if shift => return esc_prefixed(b"\x1b[Z".to_vec()),
+            NamedKey::Tab => return esc_prefixed(vec![b'\t']),
+            NamedKey::Escape => return esc_prefixed(vec![0x1b]),
             NamedKey::Copy => return Some(InputAction::Copy),
             NamedKey::Paste => return Some(InputAction::Paste),
             NamedKey::Cut => return Some(InputAction::Cut),
             NamedKey::Undo => return Some(InputAction::Bytes(vec![26])),
-            NamedKey::ArrowUp => {
-                let bytes = if ctrl && !alt && !shift {
-                    b"\x1b[1;5A".to_vec()
-                } else if shift && !alt && !ctrl {
-                    b"\x1b[1;2A".to_vec()
-                } else if app_cursor {
-                    b"\x1bOA".to_vec()
-                } else {
-                    b"\x1b[A".to_vec()
-                };
-                let mut bytes = bytes;
-                if alt {
-                    bytes.insert(0, 0x1b);
-                }
-                return Some(InputAction::Bytes(bytes));
-            }
-            NamedKey::ArrowDown => {
-                let bytes = if ctrl && !alt && !shift {
-                    b"\x1b[1;5B".to_vec()
-                } else if shift && !alt && !ctrl {
-                    b"\x1b[1;2B".to_vec()
-                } else if app_cursor {
-                    b"\x1bOB".to_vec()
-                } else {
-                    b"\x1b[B".to_vec()
-                };
-                let mut bytes = bytes;
-                if alt {
-                    bytes.insert(0, 0x1b);
-                }
-                return Some(InputAction::Bytes(bytes));
-            }
-            NamedKey::ArrowRight => {
-                let bytes = if ctrl && !alt && !shift {
-                    b"\x1b[1;5C".to_vec()
-                } else if shift && !alt && !ctrl {
-                    b"\x1b[1;2C".to_vec()
-                } else if app_cursor {
-                    b"\x1bOC".to_vec()
-                } else {
-                    b"\x1b[C".to_vec()
-                };
-                let mut bytes = bytes;
-                if alt {
-                    bytes.insert(0, 0x1b);
-                }
-                return Some(InputAction::Bytes(bytes));
-            }
-            NamedKey::ArrowLeft => {
-                let bytes = if ctrl && !alt && !shift {
-                    b"\x1b[1;5D".to_vec()
-                } else if shift && !alt && !ctrl {
-                    b"\x1b[1;2D".to_vec()
-                } else if app_cursor {
-                    b"\x1bOD".to_vec()
-                } else {
-                    b"\x1b[D".to_vec()
-                };
-                let mut bytes = bytes;
-                if alt {
-                    bytes.insert(0, 0x1b);
-                }
-                return Some(InputAction::Bytes(bytes));
-            }
-            NamedKey::Home => {
-                let bytes = if ctrl && !alt && !shift {
-                    b"\x1b[1;5H".to_vec()
-                } else if shift && !alt && !ctrl {
-                    b"\x1b[1;2H".to_vec()
-                } else if app_cursor {
-                    b"\x1bOH".to_vec()
-                } else {
-                    b"\x1b[H".to_vec()
-                };
-                let mut bytes = bytes;
-                if alt {
-                    bytes.insert(0, 0x1b);
-                }
-                return Some(InputAction::Bytes(bytes));
-            }
-            NamedKey::End => {
-                let bytes = if ctrl && !alt && !shift {
-                    b"\x1b[1;5F".to_vec()
-                } else if shift && !alt && !ctrl {
-                    b"\x1b[1;2F".to_vec()
-                } else if app_cursor {
-                    b"\x1bOF".to_vec()
-                } else {
-                    b"\x1b[F".to_vec()
-                };
-                let mut bytes = bytes;
-                if alt {
-                    bytes.insert(0, 0x1b);
-                }
-                return Some(InputAction::Bytes(bytes));
-            }
-            NamedKey::PageUp => {
-                let mut bytes = b"\x1b[5~".to_vec();
-                if alt {
-                    bytes.insert(0, 0x1b);
-                }
-                return Some(InputAction::Bytes(bytes));
-            }
-            NamedKey::PageDown => {
-                let mut bytes = b"\x1b[6~".to_vec();
-                if alt {
-                    bytes.insert(0, 0x1b);
-                }
-                return Some(InputAction::Bytes(bytes));
-            }
-            NamedKey::Delete => {
-                let mut bytes = b"\x1b[3~".to_vec();
-                if alt {
-                    bytes.insert(0, 0x1b);
-                }
-                return Some(InputAction::Bytes(bytes));
-            }
-            NamedKey::Insert => {
-                let mut bytes = b"\x1b[2~".to_vec();
-                if alt {
-                    bytes.insert(0, 0x1b);
-                }
-                return Some(InputAction::Bytes(bytes));
-            }
-            NamedKey::F1 => {
-                let mut bytes = b"\x1bOP".to_vec();
-                if alt {
-                    bytes.insert(0, 0x1b);
-                }
-                return Some(InputAction::Bytes(bytes));
-            }
-            NamedKey::F2 => {
-                let mut bytes = b"\x1bOQ".to_vec();
-                if alt {
-                    bytes.insert(0, 0x1b);
-                }
-                return Some(InputAction::Bytes(bytes));
-            }
-            NamedKey::F3 => {
-                let mut bytes = b"\x1bOR".to_vec();
-                if alt {
-                    bytes.insert(0, 0x1b);
-                }
-                return Some(InputAction::Bytes(bytes));
-            }
-            NamedKey::F4 => {
-                let mut bytes = b"\x1bOS".to_vec();
-                if alt {
-                    bytes.insert(0, 0x1b);
-                }
-                return Some(InputAction::Bytes(bytes));
-            }
-            NamedKey::F5 => {
-                let mut bytes = b"\x1b[15~".to_vec();
-                if alt {
-                    bytes.insert(0, 0x1b);
-                }
-                return Some(InputAction::Bytes(bytes));
-            }
-            NamedKey::F6 => {
-                let mut bytes = b"\x1b[17~".to_vec();
-                if alt {
-                    bytes.insert(0, 0x1b);
-                }
-                return Some(InputAction::Bytes(bytes));
-            }
-            NamedKey::F7 => {
-                let mut bytes = b"\x1b[18~".to_vec();
-                if alt {
-                    bytes.insert(0, 0x1b);
-                }
-                return Some(InputAction::Bytes(bytes));
-            }
-            NamedKey::F8 => {
-                let mut bytes = b"\x1b[19~".to_vec();
-                if alt {
-                    bytes.insert(0, 0x1b);
-                }
-                return Some(InputAction::Bytes(bytes));
-            }
-            NamedKey::F9 => {
-                let mut bytes = b"\x1b[20~".to_vec();
-                if alt {
-                    bytes.insert(0, 0x1b);
-                }
-                return Some(InputAction::Bytes(bytes));
-            }
-            NamedKey::F10 => {
-                let mut bytes = b"\x1b[21~".to_vec();
-                if alt {
-                    bytes.insert(0, 0x1b);
-                }
-                return Some(InputAction::Bytes(bytes));
-            }
-            NamedKey::F11 => {
-                let mut bytes = b"\x1b[23~".to_vec();
-                if alt {
-                    bytes.insert(0, 0x1b);
-                }
-                return Some(InputAction::Bytes(bytes));
-            }
-            NamedKey::F12 => {
-                let mut bytes = b"\x1b[24~".to_vec();
-                if alt {
-                    bytes.insert(0, 0x1b);
-                }
-                return Some(InputAction::Bytes(bytes));
-            }
             _ => {}
-        },
-        _ => {}
+        }
+        // Alt alone keeps the ESC-prefixed form (Meta); Ctrl/Shift combos use xterm
+        // `CSI 1;m` parameters (Alt then adds 2 to m).
+        let alt_only = alt && !ctrl && !shift;
+        let mod_code = if alt_only { 1 } else { mod_code };
+        let bytes = match named {
+            NamedKey::ArrowUp => Some(cursor_key('A', mod_code, app_cursor)),
+            NamedKey::ArrowDown => Some(cursor_key('B', mod_code, app_cursor)),
+            NamedKey::ArrowRight => Some(cursor_key('C', mod_code, app_cursor)),
+            NamedKey::ArrowLeft => Some(cursor_key('D', mod_code, app_cursor)),
+            NamedKey::Home => Some(cursor_key('H', mod_code, app_cursor)),
+            NamedKey::End => Some(cursor_key('F', mod_code, app_cursor)),
+            NamedKey::Insert => Some(tilde_key(2, mod_code)),
+            NamedKey::Delete => Some(tilde_key(3, mod_code)),
+            NamedKey::PageUp => Some(tilde_key(5, mod_code)),
+            NamedKey::PageDown => Some(tilde_key(6, mod_code)),
+            NamedKey::F1 => Some(ss3_key('P', mod_code)),
+            NamedKey::F2 => Some(ss3_key('Q', mod_code)),
+            NamedKey::F3 => Some(ss3_key('R', mod_code)),
+            NamedKey::F4 => Some(ss3_key('S', mod_code)),
+            NamedKey::F5 => Some(tilde_key(15, mod_code)),
+            NamedKey::F6 => Some(tilde_key(17, mod_code)),
+            NamedKey::F7 => Some(tilde_key(18, mod_code)),
+            NamedKey::F8 => Some(tilde_key(19, mod_code)),
+            NamedKey::F9 => Some(tilde_key(20, mod_code)),
+            NamedKey::F10 => Some(tilde_key(21, mod_code)),
+            NamedKey::F11 => Some(tilde_key(23, mod_code)),
+            NamedKey::F12 => Some(tilde_key(24, mod_code)),
+            _ => None,
+        };
+        if let Some(mut bytes) = bytes {
+            if alt_only {
+                bytes.insert(0, 0x1b);
+            }
+            return Some(InputAction::Bytes(bytes));
+        }
     }
 
     // 3. Normal typed text (Arabic, Latin, numbers, symbols, with Alt ESC prefix support)
@@ -528,6 +388,19 @@ pub fn handle_key_raw_mode(
 
     None
 }
+/// Prepare clipboard text for the PTY. With bracketed paste the shell receives it verbatim
+/// (multi-line pastes are not executed line by line); otherwise newlines become carriage
+/// returns like a typed Enter, without doubling Windows CRLF line endings.
+pub fn encode_paste(text: &str, bracketed: bool) -> String {
+    if bracketed {
+        // Drop ESC so pasted content can't close the bracket early and inject keystrokes.
+        let body: String = text.chars().filter(|&c| c != '\x1b').collect();
+        format!("\x1b[200~{body}\x1b[201~")
+    } else {
+        text.replace("\r\n", "\r").replace('\n', "\r")
+    }
+}
+
 pub fn format_mouse_seq(
     mode: alacritty_terminal::term::TermMode,
     btn: u8,
@@ -541,8 +414,9 @@ pub fn format_mouse_seq(
     } else {
         let b = if is_release { 3 } else { btn };
         let b_char = 32u8.saturating_add(b);
-        let c_char = 32u8.saturating_add((col as u8).min(223));
-        let r_char = 32u8.saturating_add((row as u8).min(223));
+        // Legacy encoding caps coordinates at 223 (cast after clamping to avoid wrap-around).
+        let c_char = 32 + col.min(223) as u8;
+        let r_char = 32 + row.min(223) as u8;
         vec![0x1b, b'[', b'M', b_char, c_char, r_char]
     }
 }

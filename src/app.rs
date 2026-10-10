@@ -18,6 +18,7 @@ use alacritty_terminal::vte::ansi::Color as AnsiColor;
 pub enum AppEvent {
     PtyData(Vec<u8>),
     PtyWriteResponse(String),
+    Paste(String),
     ClipboardStore(String),
     ClipboardLoad(Arc<dyn Fn(&str) -> String + Sync + Send + 'static>),
     ClipboardPasteRequest(bool),
@@ -52,6 +53,8 @@ pub struct App {
     custom_command: Option<(String, Vec<String>)>,
     initial_font_size: f32,
     mouse_router: MouseRouter,
+    /// Fractional wheel notches not yet applied (smooth trackpad scrolling).
+    wheel_accum: f64,
 }
 
 impl App {
@@ -87,6 +90,9 @@ impl App {
                 let _ = proxy_bell.send_event(AppEvent::Bell);
             },
         )));
+        if let Ok(mut term) = terminal.lock() {
+            term.set_osc52(config.osc52_mode());
+        }
 
         Self {
             proxy,
@@ -114,6 +120,7 @@ impl App {
             initial_font_size,
             custom_command,
             mouse_router: MouseRouter::new(),
+            wheel_accum: 0.0,
         }
     }
 
@@ -175,6 +182,22 @@ impl App {
         }
     }
 
+    /// Input sent to the shell snaps the view back to the live screen.
+    fn scroll_to_bottom(&mut self) {
+        let scrolled = match self.terminal.lock() {
+            Ok(mut term) if term.display_offset() > 0 => {
+                term.scroll_to_bottom();
+                true
+            }
+            _ => false,
+        };
+        if scrolled {
+            if let Some(ref r) = self.renderer {
+                r.window.request_redraw();
+            }
+        }
+    }
+
     fn update_font_size(&mut self, new_size: f32) {
         let clamped = new_size.clamp(8.0, 48.0);
         self.config.font_size = clamped;
@@ -183,6 +206,20 @@ impl App {
             r.set_font_size(clamped);
         }
         self.sync_grid();
+    }
+
+    fn update_opacity(&mut self, delta: f32) {
+        let opacity =
+            ((self.config.background_opacity + delta).clamp(0.1, 1.0) * 100.0).round() / 100.0;
+        if opacity == self.config.background_opacity {
+            return;
+        }
+        self.config.background_opacity = opacity;
+        TwittyConfig::update_background_opacity(opacity);
+        if let Some(ref mut r) = self.renderer {
+            r.opacity = opacity;
+            r.window.request_redraw();
+        }
     }
 
     fn execute_mouse_command(&mut self, cmd: MouseCommand, mode: TermMode) {
@@ -435,21 +472,6 @@ fn get_primary_text() -> Option<String> {
     get_clipboard_text()
 }
 
-#[allow(dead_code)]
-fn paste_text(pty: &Pty, text: &str, bracketed: bool) {
-    if bracketed {
-        let sanitized = text.replace("\x1b[201~", "");
-        let mut payload = Vec::with_capacity(sanitized.len() + 16);
-        payload.extend_from_slice(b"\x1b[200~");
-        payload.extend_from_slice(sanitized.as_bytes());
-        payload.extend_from_slice(b"\x1b[201~");
-        let _ = pty.write(&payload);
-    } else {
-        let converted = text.replace('\n', "\r");
-        let _ = pty.write(converted.as_bytes());
-    }
-}
-
 fn set_clipboard_text(text: &str) {
     let text = text.to_string();
     std::thread::spawn(move || {
@@ -585,6 +607,12 @@ impl ApplicationHandler<AppEvent> for App {
                     let _ = pty.write(text.as_bytes());
                 }
             }
+            AppEvent::Paste(payload) => {
+                if let Some(ref pty) = self.pty {
+                    let _ = pty.write(payload.as_bytes());
+                }
+                self.scroll_to_bottom();
+            }
             AppEvent::ClipboardStore(text) => {
                 set_clipboard_text(&text);
             }
@@ -610,14 +638,8 @@ impl ApplicationHandler<AppEvent> for App {
                         get_clipboard_text()
                     };
                     if let Some(text) = content {
-                        if bracketed {
-                            let sanitized = text.replace("\x1b[201~", "");
-                            let payload = format!("\x1b[200~{}\x1b[201~", sanitized);
-                            let _ = proxy.send_event(AppEvent::PtyWriteResponse(payload));
-                        } else {
-                            let converted = text.replace('\n', "\r");
-                            let _ = proxy.send_event(AppEvent::PtyWriteResponse(converted));
-                        }
+                        let payload = crate::input::encode_paste(&text, bracketed);
+                        let _ = proxy.send_event(AppEvent::Paste(payload));
                     }
                 });
             }
@@ -661,6 +683,9 @@ impl ApplicationHandler<AppEvent> for App {
                         let _ = pty.write(seq);
                     }
                 }
+                if let Some(ref mut r) = self.renderer {
+                    r.focused = is_focused;
+                }
                 if !is_focused {
                     if let Some(cmd) = self.mouse_router.on_focus_lost() {
                         self.execute_mouse_command(cmd, mode);
@@ -692,6 +717,7 @@ impl ApplicationHandler<AppEvent> for App {
                     if let Some(ref pty) = self.pty {
                         let _ = pty.write(text.as_bytes());
                     }
+                    self.scroll_to_bottom();
                     if let Some(ref r) = self.renderer {
                         r.window.request_redraw();
                     }
@@ -725,6 +751,10 @@ impl ApplicationHandler<AppEvent> for App {
                         .min(grid_rows.saturating_sub(1) as f64)
                         as usize;
                     let col = r.col_from_position(position.x as f32, row);
+                    // Only cell changes matter for selection and mouse reporting.
+                    if (col, row) == (self.mouse_col, self.mouse_row) {
+                        return;
+                    }
                     self.mouse_col = col;
                     self.mouse_row = row;
 
@@ -892,40 +922,55 @@ impl ApplicationHandler<AppEvent> for App {
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                let delta_y = match delta {
-                    MouseScrollDelta::LineDelta(_, y) => y,
-                    MouseScrollDelta::PixelDelta(p) => (p.y / 20.0) as f32,
-                };
-
-                if self.modifiers.control_key() {
-                    // Ctrl + Wheel: Zoom in / Zoom out & save config
-                    if delta_y > 0.1 {
-                        let cur = self.config.font_size;
-                        self.update_font_size(cur + 1.0);
-                    } else if delta_y < -0.1 {
-                        let cur = self.config.font_size;
-                        self.update_font_size(cur - 1.0);
+                // Work in wheel notches; trackpads deliver pixels, so accumulate them
+                // (3 lines per notch) instead of scrolling on every tiny event.
+                let notches = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => y as f64,
+                    MouseScrollDelta::PixelDelta(p) => {
+                        let line_height = self
+                            .renderer
+                            .as_ref()
+                            .map_or(20.0, |r| r.line_height as f64);
+                        p.y / (line_height * 3.0)
                     }
+                };
+                self.wheel_accum += notches;
+                let steps = self.wheel_accum.trunc() as i32;
+                if steps == 0 {
+                    return;
+                }
+                self.wheel_accum -= steps as f64;
+                let delta_y = steps.signum() as f32;
+
+                if self.modifiers.control_key() && self.modifiers.shift_key() {
+                    // Ctrl + Shift + Wheel: adjust background opacity & save config
+                    self.update_opacity(steps as f32 * 0.05);
+                } else if self.modifiers.control_key() {
+                    // Ctrl + Wheel: Zoom in / Zoom out & save config
+                    let cur = self.config.font_size;
+                    self.update_font_size(cur + steps as f32);
                 } else {
                     let mode = self
                         .terminal
                         .lock()
                         .map(|t| t.mode())
                         .unwrap_or(TermMode::NONE);
-                    let display_offset = self
-                        .terminal
-                        .lock()
-                        .map(|t| t.display_offset())
-                        .unwrap_or(0);
-                    let cmd = self.mouse_router.on_wheel(
-                        delta_y,
-                        self.mouse_col,
-                        self.mouse_row,
-                        self.modifiers.shift_key(),
-                        mode,
-                        display_offset,
-                    );
-                    self.execute_mouse_command(cmd, mode);
+                    for _ in 0..steps.unsigned_abs() {
+                        let display_offset = self
+                            .terminal
+                            .lock()
+                            .map(|t| t.display_offset())
+                            .unwrap_or(0);
+                        let cmd = self.mouse_router.on_wheel(
+                            delta_y,
+                            self.mouse_col,
+                            self.mouse_row,
+                            self.modifiers.shift_key(),
+                            mode,
+                            display_offset,
+                        );
+                        self.execute_mouse_command(cmd, mode);
+                    }
                 }
             }
             WindowEvent::KeyboardInput { event, .. } => {
@@ -1082,6 +1127,7 @@ impl ApplicationHandler<AppEvent> for App {
                             if let Some(ref pty) = self.pty {
                                 let _ = pty.write(&bytes);
                             }
+                            self.scroll_to_bottom();
                         }
                         InputAction::ZoomIn => {
                             let cur = self.config.font_size;

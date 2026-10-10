@@ -27,6 +27,22 @@ impl Default for TwittyConfig {
 }
 
 impl TwittyConfig {
+    /// OSC 52 policy from `"osc52"`: "copypaste" (default), "copy", "paste" or "disabled".
+    pub fn osc52_mode(&self) -> alacritty_terminal::term::Osc52 {
+        use alacritty_terminal::term::Osc52;
+        let value = self
+            .osc52
+            .as_deref()
+            .unwrap_or("copypaste")
+            .to_ascii_lowercase();
+        match value.replace(['-', '_', ' '], "").as_str() {
+            "disabled" | "off" | "none" | "false" => Osc52::Disabled,
+            "copy" | "onlycopy" => Osc52::OnlyCopy,
+            "paste" | "onlypaste" => Osc52::OnlyPaste,
+            _ => Osc52::CopyPaste,
+        }
+    }
+
     pub fn config_path() -> Option<PathBuf> {
         #[cfg(target_os = "windows")]
         {
@@ -74,6 +90,15 @@ impl TwittyConfig {
     }
 
     pub fn update_font_size(new_size: f32) {
+        Self::update_field("font_size", serde_json::json!(new_size));
+    }
+
+    pub fn update_background_opacity(opacity: f32) {
+        Self::update_field("background_opacity", serde_json::json!(opacity));
+    }
+
+    /// Persist one key, leaving the rest of the user's file (and unknown keys) untouched.
+    fn update_field(key: &str, value: serde_json::Value) {
         if let Some(path) = Self::config_path() {
             if let Some(parent) = path.parent() {
                 let _ = fs::create_dir_all(parent);
@@ -84,7 +109,7 @@ impl TwittyConfig {
                 serde_json::json!({})
             };
             if let Some(obj) = val.as_object_mut() {
-                obj.insert("font_size".to_string(), serde_json::json!(new_size));
+                obj.insert(key.to_string(), value);
             }
             if let Ok(json) = serde_json::to_string_pretty(&val) {
                 let _ = fs::write(&path, json);

@@ -32,33 +32,38 @@ fn test_cell_locked_segments_for_mixed_code_and_arabic() {
         default_bg,
     );
 
-    // Must be split into distinct scoped segments so code and hashes are cell-locked
-    assert!(
-        cached.segments.len() >= 4,
-        "Must isolate code tokens and Arabic runs into scoped segments"
-    );
-
-    // For each segment, seg_x MUST strictly equal padding_left + seg_start * char_width
+    // Segments start on their grid column.
     for seg in &cached.segments {
         let expected_x = padding_left + seg.seg_start as f32 * char_width;
         assert!(
             (seg.seg_x - expected_x).abs() < f32::EPSILON,
-            "Segment must be cell-locked at its grid start position"
+            "Segment must start at its grid position"
         );
     }
 
-    // Verify that commit hash '43f9bb8' is contained in its own LTR segment without Arabic tearing
-    let hash_seg = cached.segments.iter().find(|s| {
-        let slice: String = lines[0].cells[s.seg_start..s.seg_end]
+    // Code tokens inside Arabic text stay intact and left-to-right: every character of
+    // each hash sits right of the previous one, with no Arabic torn in between.
+    let cells = &lines[0].cells;
+    let text: String = cells.iter().map(|c| c.c).collect();
+    for hash in ["7abaf40", "43f9bb8", "Ctrl+D/E/K"] {
+        let byte = text
+            .find(hash)
+            .unwrap_or_else(|| panic!("{hash} not on the line"));
+        let col = text[..byte].chars().count();
+        let seg = cached
+            .segments
             .iter()
-            .map(|c| c.c)
+            .find(|s| s.seg_start <= col && col + hash.len() <= s.seg_end)
+            .unwrap_or_else(|| panic!("{hash} must not be split across segments"));
+        let xs: Vec<f32> = (col..col + hash.len())
+            .map(|c| seg.cell_edges[c - seg.seg_start].0)
             .collect();
-        slice.contains("43f9bb8")
-    });
-    assert!(hash_seg.is_some(), "Must have a segment containing 43f9bb8");
-    let hash_seg = hash_seg.unwrap();
-    assert!(
-        !hash_seg.has_rtl,
-        "43f9bb8 must be shaped as an LTR segment"
-    );
+        for pair in xs.windows(2) {
+            let step = pair[1] - pair[0];
+            assert!(
+                step > 0.0 && step < char_width * 1.5,
+                "{hash} must read left-to-right without gaps, got {xs:?}"
+            );
+        }
+    }
 }

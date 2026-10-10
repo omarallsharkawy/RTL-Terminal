@@ -220,6 +220,14 @@ impl MouseRouter {
     }
 
     pub fn on_focus_lost(&mut self) -> Option<MouseCommand> {
+        // A local drag-selection interrupted by a focus change never gets its release event:
+        // finish it now (copy + clear) instead of leaving the highlight stuck on screen.
+        if self.press_local && self.active_button == Some(MouseButton::Left) {
+            self.active_button = None;
+            self.press_local = false;
+            self.is_dragging = false;
+            return Some(MouseCommand::CopySelection);
+        }
         let had_press = !self.press_local && self.active_button.is_some();
         let btn = match self.active_button {
             Some(MouseButton::Left) => 0,

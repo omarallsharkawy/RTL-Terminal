@@ -158,3 +158,14 @@ fn test_focus_lost_clears_pending_tui_press() {
         })
     );
 }
+
+#[test]
+fn test_focus_lost_mid_selection_finishes_it() {
+    let mut router = MouseRouter::new();
+    let (cmd, _) = router.on_press(MouseButton::Left, 3, 1, 1, false, TermMode::NONE, 0);
+    assert!(matches!(cmd, MouseCommand::StartSelection { .. }));
+    router.on_move(9, 2, true, false, TermMode::NONE, 0);
+    // Release never arrives (window lost focus mid-drag): the selection must not stay stuck.
+    assert_eq!(router.on_focus_lost(), Some(MouseCommand::CopySelection));
+    assert_eq!(router.on_focus_lost(), None);
+}

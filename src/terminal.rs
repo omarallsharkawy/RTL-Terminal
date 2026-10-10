@@ -5,7 +5,7 @@ use alacritty_terminal::index::{Column, Line, Point, Side};
 pub use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::cell::Flags as CellFlags;
 use alacritty_terminal::term::test::TermSize;
-use alacritty_terminal::term::{viewport_to_point, Config, Term, TermMode};
+use alacritty_terminal::term::{viewport_to_point, Config, Osc52, Term, TermMode};
 use alacritty_terminal::vte::ansi::{Color as AnsiColor, CursorShape, Processor, StdSyncHandler};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
@@ -85,6 +85,7 @@ pub struct Terminal {
     parser: Processor<StdSyncHandler>,
     cols: usize,
     rows: usize,
+    scrollback_lines: usize,
     cell_width: Arc<AtomicU16>,
     cell_height: Arc<AtomicU16>,
     num_cols: Arc<AtomicU16>,
@@ -168,10 +169,11 @@ impl Terminal {
             num_cols: num_cols.clone(),
             num_lines: num_lines.clone(),
         };
+        let scrollback_lines = scrollback_lines.max(100);
         let term_config = Config {
-            scrolling_history: scrollback_lines.max(100),
-            // OSC 52 clipboard access: default CopyPaste as requested, configurable via config.json
-            osc52: alacritty_terminal::term::Osc52::CopyPaste,
+            scrolling_history: scrollback_lines,
+            // OSC 52 clipboard access: default CopyPaste, configurable via `osc52` in config.json
+            osc52: Osc52::CopyPaste,
             ..Default::default()
         };
         let term = Term::new(term_config, &size, listener);
@@ -181,11 +183,21 @@ impl Terminal {
             parser,
             cols,
             rows,
+            scrollback_lines,
             cell_width,
             cell_height,
             num_cols,
             num_lines,
         }
+    }
+
+    /// Change which OSC 52 clipboard operations programs may perform.
+    pub fn set_osc52(&mut self, osc52: Osc52) {
+        self.term.set_options(Config {
+            scrolling_history: self.scrollback_lines,
+            osc52,
+            ..Default::default()
+        });
     }
 
     pub fn process_bytes(&mut self, bytes: &[u8]) {

@@ -1,6 +1,6 @@
 use std::env;
 use std::io::{Read, Write};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{channel, Sender};
 use std::thread;
 
 use anyhow::{Context, Result};
@@ -8,7 +8,8 @@ use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 
 pub struct Pty {
     master: Box<dyn MasterPty + Send>,
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    /// Writes go through a dedicated thread so a large paste never blocks the UI thread.
+    writer: Sender<Vec<u8>>,
 }
 
 impl Pty {
@@ -50,11 +51,22 @@ impl Pty {
             .master
             .try_clone_reader()
             .context("Failed to clone PTY reader")?;
-        let writer = Arc::new(Mutex::new(
-            pair.master
-                .take_writer()
-                .context("Failed to take PTY writer")?,
-        ));
+        let mut pty_writer = pair
+            .master
+            .take_writer()
+            .context("Failed to take PTY writer")?;
+        let (writer, write_rx) = channel::<Vec<u8>>();
+        thread::spawn(move || {
+            for data in write_rx {
+                if pty_writer
+                    .write_all(&data)
+                    .and_then(|_| pty_writer.flush())
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
 
         thread::spawn(move || {
             let mut buf = [0u8; 8192];
@@ -110,11 +122,9 @@ impl Pty {
     }
 
     pub fn write(&self, data: &[u8]) -> Result<()> {
-        if let Ok(mut writer) = self.writer.lock() {
-            writer.write_all(data)?;
-            writer.flush()?;
-        }
-        Ok(())
+        self.writer
+            .send(data.to_vec())
+            .map_err(|_| anyhow::anyhow!("PTY writer closed"))
     }
 
     pub fn resize(&self, cols: u16, rows: u16) -> Result<()> {
@@ -132,19 +142,27 @@ impl Pty {
 
 fn default_shell() -> (String, Vec<String>) {
     if let Ok(shell) = env::var("TWITTY_SHELL") {
-        if !shell.trim().is_empty() {
-            return (shell, vec![]);
+        // Allow arguments, e.g. TWITTY_SHELL="pwsh -NoLogo".
+        let mut parts = shell.split_whitespace().map(str::to_string);
+        if let Some(program) = parts.next() {
+            return (program, parts.collect());
         }
     }
 
     #[cfg(windows)]
     {
+        // Prefer PowerShell 7, then Windows PowerShell; %COMSPEC% (cmd.exe) is the last resort.
+        for candidate in ["pwsh.exe", "powershell.exe"] {
+            if find_in_path(candidate) {
+                return (candidate.to_string(), vec!["-NoLogo".to_string()]);
+            }
+        }
         if let Ok(comspec) = env::var("COMSPEC") {
             if !comspec.trim().is_empty() {
                 return (comspec, vec![]);
             }
         }
-        ("powershell.exe".to_string(), vec!["-NoLogo".to_string()])
+        ("cmd.exe".to_string(), vec![])
     }
 
     #[cfg(not(windows))]
@@ -156,4 +174,11 @@ fn default_shell() -> (String, Vec<String>) {
         }
         ("/bin/bash".to_string(), vec!["-l".to_string()])
     }
+}
+
+#[cfg(windows)]
+fn find_in_path(program: &str) -> bool {
+    env::var_os("PATH")
+        .map(|paths| env::split_paths(&paths).any(|dir| dir.join(program).is_file()))
+        .unwrap_or(false)
 }
