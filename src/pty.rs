@@ -4,12 +4,20 @@ use std::sync::mpsc::{channel, Sender};
 use std::thread;
 
 use anyhow::{Context, Result};
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 
 pub struct Pty {
     master: Box<dyn MasterPty + Send>,
     /// Writes go through a dedicated thread so a large paste never blocks the UI.
     writer: Sender<Vec<u8>>,
+    /// Ends the shell when the pane is closed (the reader thread keeps the PTY open otherwise).
+    killer: Box<dyn ChildKiller + Send + Sync>,
+}
+
+impl Drop for Pty {
+    fn drop(&mut self) {
+        let _ = self.killer.kill();
+    }
 }
 
 impl Pty {
@@ -46,6 +54,7 @@ impl Pty {
             .context("Failed to spawn shell in PTY")?;
         drop(pair.slave);
 
+        let killer = child.clone_killer();
         let mut reader = pair
             .master
             .try_clone_reader()
@@ -85,6 +94,7 @@ impl Pty {
         Ok(Self {
             master: pair.master,
             writer,
+            killer,
         })
     }
 

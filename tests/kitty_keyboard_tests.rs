@@ -77,14 +77,22 @@ fn plain_enter_stays_legacy() {
 }
 
 #[test]
-fn ctrl_tab_and_shift_tab() {
+fn tab_encoding_and_ctrl_tab_shortcut() {
+    // Ctrl+Tab switches tabs; Ctrl+Alt+Tab still reaches the program.
     let r = press(
         KeyCode::Tab,
         Key::Named(NamedKey::Tab),
         ModifiersState::CONTROL,
         D,
     );
-    assert_eq!(r, bytes("\x1b[9;5u"));
+    assert_eq!(r, Some(InputAction::NextTab));
+    let r = press(
+        KeyCode::Tab,
+        Key::Named(NamedKey::Tab),
+        ModifiersState::CONTROL | ModifiersState::ALT,
+        D,
+    );
+    assert_eq!(r, bytes("\x1b[9;7u"));
     let r = press(
         KeyCode::Tab,
         Key::Named(NamedKey::Tab),
