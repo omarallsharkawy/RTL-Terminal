@@ -355,6 +355,7 @@ impl ApplicationHandler<AppEvent> for App {
 
         renderer.set_opacity(self.config.background_opacity);
         renderer.cursor_style = self.config.cursor_style.clone();
+        renderer.palette = self.config.palette();
 
         let (cols, rows) = renderer.compute_grid_size();
         if let Ok(mut term) = self.terminal.lock() {

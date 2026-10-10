@@ -98,6 +98,27 @@ The config file is `~/.config/twitty/config.json` (`%APPDATA%\twitty\config.json
 
 Zoom and transparency changes are written back to this file when Twitty closes. Keys Twitty doesn't recognize are left untouched.
 
+#### Themes
+
+Set `theme` to one of the built-in names below. Names are case-insensitive, and spaces or underscores work in place of dashes. The default is `tokyo-night`.
+
+`tokyo-night`, `catppuccin-mocha`, `gruvbox-dark`, `dracula`, `nord`, `one-dark`, `solarized-dark`, `github-light`
+
+An unknown name prints a warning and falls back to `tokyo-night`.
+
+`colors` overrides individual parts of the theme. Every field is optional, and values are `#rgb` or `#rrggbb`. `ansi` takes up to 16 colors in palette order (black, red, green, yellow, blue, magenta, cyan, white, then the bright versions). A shorter list changes only the indices it covers. Invalid values are skipped with a warning.
+
+```json
+{
+  "theme": "dracula",
+  "colors": {
+    "background": "#000000",
+    "cursor": "#ff79c6",
+    "ansi": ["#21222c", "#ff5555"]
+  }
+}
+```
+
 ### Shell
 
 On Linux and macOS Twitty starts `$SHELL` as a login shell. On Windows it picks PowerShell 7 (`pwsh.exe`), then Windows PowerShell, then `%COMSPEC%`. Set `TWITTY_SHELL` to override, arguments included:

@@ -48,6 +48,7 @@ impl Rgba {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct Palette {
     pub background: Rgba,
     pub foreground: Rgba,
@@ -87,7 +88,233 @@ impl Default for Palette {
     }
 }
 
+/// Built-in theme names, as accepted by `Palette::named` and the `theme` config key.
+pub fn theme_names() -> &'static [&'static str] {
+    &[
+        "tokyo-night",
+        "catppuccin-mocha",
+        "gruvbox-dark",
+        "dracula",
+        "nord",
+        "one-dark",
+        "solarized-dark",
+        "github-light",
+    ]
+}
+
+/// Parses `#rgb` or `#rrggbb` (the leading `#` is optional).
+pub fn parse_hex(s: &str) -> Option<Rgba> {
+    let digits = s.trim().strip_prefix('#').unwrap_or(s.trim());
+    if !digits.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    match digits.len() {
+        3 => {
+            let v = |i: usize| {
+                u8::from_str_radix(&digits[i..i + 1], 16)
+                    .ok()
+                    .map(|d| d * 17)
+            };
+            Some(Rgba::from_rgb8(v(0)?, v(1)?, v(2)?))
+        }
+        6 => {
+            let v = |i: usize| u8::from_str_radix(&digits[i..i + 2], 16).ok();
+            Some(Rgba::from_rgb8(v(0)?, v(2)?, v(4)?))
+        }
+        _ => None,
+    }
+}
+
+/// Builds an opaque color from a 0xRRGGBB literal.
+const fn hex(v: u32) -> Rgba {
+    Rgba::new(
+        ((v >> 16) & 0xff) as f32 / 255.0,
+        ((v >> 8) & 0xff) as f32 / 255.0,
+        (v & 0xff) as f32 / 255.0,
+        1.0,
+    )
+}
+
 impl Palette {
+    /// Looks up a built-in theme. Names are case-insensitive, and spaces or
+    /// underscores may be used in place of dashes.
+    pub fn named(name: &str) -> Option<Palette> {
+        let key = name.trim().to_ascii_lowercase().replace([' ', '_'], "-");
+        let p = match key.as_str() {
+            "tokyo-night" => Palette::default(),
+            "catppuccin-mocha" => Palette {
+                background: hex(0x1e1e2e),
+                foreground: hex(0xcdd6f4),
+                cursor: hex(0xf5e0dc),
+                selection: hex(0x585b70),
+                ansi: [
+                    hex(0x45475a),
+                    hex(0xf38ba8),
+                    hex(0xa6e3a1),
+                    hex(0xf9e2af),
+                    hex(0x89b4fa),
+                    hex(0xf5c2e7),
+                    hex(0x94e2d5),
+                    hex(0xbac2de),
+                    hex(0x585b70),
+                    hex(0xf38ba8),
+                    hex(0xa6e3a1),
+                    hex(0xf9e2af),
+                    hex(0x89b4fa),
+                    hex(0xf5c2e7),
+                    hex(0x94e2d5),
+                    hex(0xa6adc8),
+                ],
+            },
+            "gruvbox-dark" => Palette {
+                background: hex(0x282828),
+                foreground: hex(0xebdbb2),
+                cursor: hex(0xebdbb2),
+                selection: hex(0x504945),
+                ansi: [
+                    hex(0x282828),
+                    hex(0xcc241d),
+                    hex(0x98971a),
+                    hex(0xd79921),
+                    hex(0x458588),
+                    hex(0xb16286),
+                    hex(0x689d6a),
+                    hex(0xa89984),
+                    hex(0x928374),
+                    hex(0xfb4934),
+                    hex(0xb8bb26),
+                    hex(0xfabd2f),
+                    hex(0x83a598),
+                    hex(0xd3869b),
+                    hex(0x8ec07c),
+                    hex(0xebdbb2),
+                ],
+            },
+            "dracula" => Palette {
+                background: hex(0x282a36),
+                foreground: hex(0xf8f8f2),
+                cursor: hex(0xf8f8f2),
+                selection: hex(0x44475a),
+                ansi: [
+                    hex(0x21222c),
+                    hex(0xff5555),
+                    hex(0x50fa7b),
+                    hex(0xf1fa8c),
+                    hex(0xbd93f9),
+                    hex(0xff79c6),
+                    hex(0x8be9fd),
+                    hex(0xf8f8f2),
+                    hex(0x6272a4),
+                    hex(0xff6e6e),
+                    hex(0x69ff94),
+                    hex(0xffffa5),
+                    hex(0xd6acff),
+                    hex(0xff92df),
+                    hex(0xa4ffff),
+                    hex(0xffffff),
+                ],
+            },
+            "nord" => Palette {
+                background: hex(0x2e3440),
+                foreground: hex(0xd8dee9),
+                cursor: hex(0xd8dee9),
+                selection: hex(0x434c5e),
+                ansi: [
+                    hex(0x3b4252),
+                    hex(0xbf616a),
+                    hex(0xa3be8c),
+                    hex(0xebcb8b),
+                    hex(0x81a1c1),
+                    hex(0xb48ead),
+                    hex(0x88c0d0),
+                    hex(0xe5e9f0),
+                    hex(0x4c566a),
+                    hex(0xbf616a),
+                    hex(0xa3be8c),
+                    hex(0xebcb8b),
+                    hex(0x81a1c1),
+                    hex(0xb48ead),
+                    hex(0x8fbcbb),
+                    hex(0xeceff4),
+                ],
+            },
+            "one-dark" => Palette {
+                background: hex(0x282c34),
+                foreground: hex(0xabb2bf),
+                cursor: hex(0x528bff),
+                selection: hex(0x3e4451),
+                ansi: [
+                    hex(0x282c34),
+                    hex(0xe06c75),
+                    hex(0x98c379),
+                    hex(0xe5c07b),
+                    hex(0x61afef),
+                    hex(0xc678dd),
+                    hex(0x56b6c2),
+                    hex(0xabb2bf),
+                    hex(0x5c6370),
+                    hex(0xe06c75),
+                    hex(0x98c379),
+                    hex(0xe5c07b),
+                    hex(0x61afef),
+                    hex(0xc678dd),
+                    hex(0x56b6c2),
+                    hex(0xdcdfe4),
+                ],
+            },
+            "solarized-dark" => Palette {
+                background: hex(0x002b36),
+                foreground: hex(0x839496),
+                cursor: hex(0x93a1a1),
+                selection: hex(0x073642),
+                ansi: [
+                    hex(0x073642),
+                    hex(0xdc322f),
+                    hex(0x859900),
+                    hex(0xb58900),
+                    hex(0x268bd2),
+                    hex(0xd33682),
+                    hex(0x2aa198),
+                    hex(0xeee8d5),
+                    hex(0x002b36),
+                    hex(0xcb4b16),
+                    hex(0x586e75),
+                    hex(0x657b83),
+                    hex(0x839496),
+                    hex(0x6c71c4),
+                    hex(0x93a1a1),
+                    hex(0xfdf6e3),
+                ],
+            },
+            "github-light" => Palette {
+                background: hex(0xffffff),
+                foreground: hex(0x24292e),
+                cursor: hex(0x24292e),
+                selection: hex(0xc8e1ff),
+                ansi: [
+                    hex(0x24292e),
+                    hex(0xcf222e),
+                    hex(0x116329),
+                    hex(0x4d2d00),
+                    hex(0x0969da),
+                    hex(0x8250df),
+                    hex(0x1b7c83),
+                    hex(0x6e7781),
+                    hex(0x57606a),
+                    hex(0xa40e26),
+                    hex(0x1a7f37),
+                    hex(0x633c01),
+                    hex(0x218bff),
+                    hex(0xa475f9),
+                    hex(0x3192aa),
+                    hex(0x8c959f),
+                ],
+            },
+            _ => return None,
+        };
+        Some(p)
+    }
+
     pub fn resolve(&self, color: AnsiColor, is_bg: bool) -> Rgba {
         match color {
             AnsiColor::Named(named) => match named {
