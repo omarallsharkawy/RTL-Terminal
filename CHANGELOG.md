@@ -8,6 +8,7 @@
 - Input method (IME) support: composition text is drawn inline at the cursor, and the candidate popup follows the caret.
 - Clickable links: Ctrl+Click opens OSC 8 hyperlinks and plain URLs (http, https, file, ftp, mailto). The link is underlined and the cursor becomes a pointer while Ctrl is held over it.
 - Blinking cursor (530 ms on/off), controlled by `cursor_blink` (default `true`) and by programs that request a blinking or steady cursor. It stays solid while typing and while the window is unfocused.
+- Arabic layout: selection, background colors and underlines now follow the drawn glyphs of right-to-left text; punctuation and symbols after Arabic (`تم ✓`, `مرحبا!`) stay on its left; finished output lines that start with Arabic read right to left as a whole (the line being typed keeps its stable layout); neighbouring Latin words and numbers keep their order together.
 - Relicensed under MIT OR Apache-2.0, at your option. This replaces the old end-user license agreement, which was written for the legacy installer.
 - Color themes: pick one with `"theme"` in config.json (`tokyo-night` is still the default; also `catppuccin-mocha`, `gruvbox-dark`, `dracula`, `nord`, `one-dark`, `solarized-dark`, `github-light`). The optional `"colors"` block overrides the background, foreground, cursor, selection and ANSI colors.
 - Box drawing: double, heavy and dashed lines, block eighths, quadrants and shades are drawn pixel-exact.

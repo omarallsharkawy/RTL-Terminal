@@ -42,6 +42,60 @@ pub struct CachedSegment {
     pub cell_bytes: Vec<usize>,
 }
 
+impl CachedSegment {
+    /// Visual `(left, right)` x of each cell (relative to the left padding), taken from the glyphs
+    /// that hold it so backgrounds follow reordered RTL text. A glyph shared by several cells
+    /// (ligature, cluster) is split between them; cells without a glyph are `None`, spacers are
+    /// empty.
+    pub fn cell_extents(&self, cells: &[CellData]) -> Vec<Option<(f32, f32)>> {
+        let mut out: Vec<Option<(f32, f32)>> = vec![None; self.seg_end - self.seg_start];
+        let mut real = Vec::new();
+        let mut real_bytes = Vec::new();
+        for (i, cell) in cells[self.seg_start..self.seg_end].iter().enumerate() {
+            if cell.is_spacer() {
+                continue;
+            }
+            real.push(i);
+            real_bytes.push(self.cell_bytes[i]);
+        }
+        if real.is_empty() {
+            return out;
+        }
+        // Zero-width glyphs (marks, isolates) are reordered far from their cell, so they only
+        // place cells that have no sized glyph, as an empty extent.
+        for sized in [true, false] {
+            for run in self.buffer.layout_runs() {
+                for g in run.glyphs.iter().filter(|g| (g.w > 0.0) == sized) {
+                    let i0 = real_bytes
+                        .partition_point(|&b| b <= g.start)
+                        .saturating_sub(1);
+                    let i1 = real_bytes
+                        .partition_point(|&b| b < g.end)
+                        .saturating_sub(1)
+                        .max(i0);
+                    let n = (i1 - i0 + 1) as f32;
+                    let part = g.w / n;
+                    for k in 0..=(i1 - i0) {
+                        let left = if g.level.is_rtl() {
+                            g.x + g.w - (k + 1) as f32 * part
+                        } else {
+                            g.x + k as f32 * part
+                        };
+                        let (l, r) = (self.seg_x + left, self.seg_x + left + part);
+                        let slot = &mut out[real[i0 + k]];
+                        match slot {
+                            None => *slot = Some((l, r)),
+                            Some((a, b)) if sized => *slot = Some((a.min(l), b.max(r))),
+                            Some(_) => {}
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct CachedRow {
     pub hash: u64,
@@ -140,17 +194,24 @@ impl RowShaper<'_> {
         let mut cell_bytes = Vec::with_capacity(end - start);
         let mut byte = 0;
         let mut complex = has_rtl;
+        // Finished output that starts with Arabic reads right to left as a whole; the line being
+        // typed (cursor on this row) keeps an LTR base so editing never flips it.
+        let rtl_base = has_rtl && cursor.is_none() && is_rtl_char(cells[start].c);
         if has_rtl {
+            let mark = if rtl_base { RLM } else { LRM };
             spans.push((
-                LRM.to_string(),
+                mark.to_string(),
                 Attrs::new().family(grid_family(self.family)),
             ));
-            byte += LRM.len();
+            byte += mark.len();
         }
 
-        // Words (runs of non-blank cells) with Latin letters or digits and no Arabic.
+        // Words (runs of non-blank cells) with Latin letters or digits and no Arabic. Neighbouring
+        // ones share one isolate so "world 123" keeps its order inside right-to-left text.
         let mut isolate = vec![(false, false); end - start];
         if has_rtl {
+            let mut open: Option<usize> = None;
+            let mut last_end = start;
             let mut c = start;
             while c < end {
                 if cells[c].is_blank() {
@@ -165,9 +226,16 @@ impl RowShaper<'_> {
                 if word.iter().any(|w| w.c.is_ascii_alphanumeric())
                     && !word.iter().any(|w| is_rtl_char(w.c))
                 {
-                    isolate[word_start - start].0 = true;
-                    isolate[c - 1 - start].1 = true;
+                    open.get_or_insert(word_start);
+                    last_end = c;
+                } else if let Some(o) = open.take() {
+                    isolate[o - start].0 = true;
+                    isolate[last_end - 1 - start].1 = true;
                 }
+            }
+            if let Some(o) = open {
+                isolate[o - start].0 = true;
+                isolate[last_end - 1 - start].1 = true;
             }
         }
 
@@ -217,13 +285,11 @@ impl RowShaper<'_> {
             }
         }
 
-        // Spaces typed right after Arabic belong to it: keep them on its left, not the right.
-        if has_rtl && end > start && cells[end - 1].is_blank() {
-            let last_text = cells[start..end].iter().rev().find(|c| !c.is_blank());
-            if last_text.is_some_and(|c| is_rtl_char(c.c)) {
-                if let Some((text, _)) = spans.last_mut() {
-                    text.push_str(RLM);
-                }
+        // Spaces and punctuation after the last Arabic letter belong to it: keep them on its left
+        // (typed spaces, "تم ✓", "مرحبا!"), not at the far right of the LTR paragraph.
+        if has_rtl && trails_rtl_neutrals(&cells[start..end]) {
+            if let Some((text, _)) = spans.last_mut() {
+                text.push_str(RLM);
             }
         }
 
@@ -403,6 +469,20 @@ fn is_rtl_char(c: char) -> bool {
     matches!(bidi_class(c), BidiClass::R | BidiClass::AL)
 }
 
+/// True when the last strong character is Arabic/Hebrew and only neutrals (spaces, punctuation,
+/// symbols) follow it. Digits are excluded: numbers are isolated and keep their own side.
+fn trails_rtl_neutrals(cells: &[CellData]) -> bool {
+    let mut trailing = 0;
+    for cell in cells.iter().rev() {
+        match bidi_class(cell.c) {
+            BidiClass::R | BidiClass::AL => return trailing > 0,
+            BidiClass::L | BidiClass::EN | BidiClass::AN => return false,
+            _ => trailing += 1,
+        }
+    }
+    false
+}
+
 fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {
     Rgba {
         r: a.r + (b.r - a.r) * t,
@@ -437,6 +517,68 @@ pub fn cell_colors(palette: &Palette, cell: &CellData) -> (Rgba, Rgba) {
         bg = palette.selection;
     }
     (fg, bg)
+}
+
+/// Backgrounds, box geometry and decorations of a row. Cells inside RTL segments follow the
+/// glyphs that hold them; everything else sits on the grid. `metrics` is (cell width, line
+/// height, font px).
+pub fn build_row_quads(
+    palette: &Palette,
+    is_srgb: bool,
+    metrics: (f32, f32, f32),
+    line: &LineData,
+    segments: &[CachedSegment],
+) -> Vec<Quad> {
+    let (cw, lh, font_px) = metrics;
+    let target = |rgba: Rgba| {
+        if is_srgb {
+            rgba.to_linear()
+        } else {
+            rgba.to_array()
+        }
+    };
+    let thickness = (font_px / 14.0).round().max(1.0);
+    let underline_y = ((lh + font_px) * 0.5).round().min(lh - thickness);
+    let strike_y = (lh * 0.5).round();
+
+    let mut visual: Vec<Option<(f32, f32)>> = vec![None; line.cells.len()];
+    for seg in segments.iter().filter(|s| s.has_rtl) {
+        for (i, ext) in seg.cell_extents(&line.cells).into_iter().enumerate() {
+            let c = seg.seg_start + i;
+            visual[c] = if line.cells[c].is_spacer() {
+                let x = c as f32 * cw;
+                Some((x, x))
+            } else {
+                ext
+            };
+        }
+    }
+
+    let mut quads = Vec::new();
+    for (c, cell) in line.cells.iter().enumerate() {
+        let (fg, bg) = cell_colors(palette, cell);
+        let (x, w) = visual[c].map_or((c as f32 * cw, cw), |(l, r)| (l, r - l));
+        if bg != palette.background && w > 0.0 {
+            quads.push((x, 0.0, w, lh, target(bg)));
+        }
+        let fg_color = target(fg);
+        if !cell.flags.contains(CellFlags::HIDDEN) {
+            try_render_box_or_block(cell.c, x, 0.0, w, lh, fg_color, &mut quads);
+        }
+        if w <= 0.0 {
+            continue;
+        }
+        if cell.flags.contains(CellFlags::DOUBLE_UNDERLINE) {
+            quads.push((x, underline_y - thickness * 2.0, w, thickness, fg_color));
+            quads.push((x, underline_y, w, thickness, fg_color));
+        } else if cell.link_hover || cell.flags.intersects(CellFlags::ALL_UNDERLINES) {
+            quads.push((x, underline_y, w, thickness, fg_color));
+        }
+        if cell.flags.contains(CellFlags::STRIKEOUT) {
+            quads.push((x, strike_y, w, thickness, fg_color));
+        }
+    }
+    quads
 }
 
 /// Measure the advance of one monospace cell at the given pixel size.
@@ -748,36 +890,14 @@ impl Renderer {
         }
     }
 
-    fn build_row_quads(&self, line: &LineData) -> Vec<Quad> {
-        let cw = self.char_width;
-        let lh = self.line_height;
-        let font_px = self.font_px();
-        let thickness = (font_px / 14.0).round().max(1.0);
-        let underline_y = ((lh + font_px) * 0.5).round().min(lh - thickness);
-        let strike_y = (lh * 0.5).round();
-
-        let mut quads = Vec::new();
-        for (c, cell) in line.cells.iter().enumerate() {
-            let (fg, bg) = cell_colors(&self.palette, cell);
-            let x = c as f32 * cw;
-            if bg != self.palette.background {
-                quads.push((x, 0.0, cw, lh, self.to_target_color(bg)));
-            }
-            let fg_color = self.to_target_color(fg);
-            if !cell.flags.contains(CellFlags::HIDDEN) {
-                try_render_box_or_block(cell.c, x, 0.0, cw, lh, fg_color, &mut quads);
-            }
-            if cell.flags.contains(CellFlags::DOUBLE_UNDERLINE) {
-                quads.push((x, underline_y - thickness * 2.0, cw, thickness, fg_color));
-                quads.push((x, underline_y, cw, thickness, fg_color));
-            } else if cell.link_hover || cell.flags.intersects(CellFlags::ALL_UNDERLINES) {
-                quads.push((x, underline_y, cw, thickness, fg_color));
-            }
-            if cell.flags.contains(CellFlags::STRIKEOUT) {
-                quads.push((x, strike_y, cw, thickness, fg_color));
-            }
-        }
-        quads
+    fn build_row_quads(&self, line: &LineData, segments: &[CachedSegment]) -> Vec<Quad> {
+        build_row_quads(
+            &self.palette,
+            self.is_srgb,
+            (self.char_width, self.line_height, self.font_px()),
+            line,
+            segments,
+        )
     }
 
     fn cursor_quads(&self, x: f32, y: f32, shape: CursorShape, out: &mut Vec<Quad>) {
@@ -838,7 +958,7 @@ impl Renderer {
             let hash = hash_row(&line.cells, row_cursor);
             if self.row_caches[r].hash != hash {
                 let segments = self.shaper().build_row(line, row_cursor);
-                let row_quads = self.build_row_quads(line);
+                let row_quads = self.build_row_quads(line, &segments);
                 self.row_caches[r] = CachedRow {
                     hash,
                     segments,
