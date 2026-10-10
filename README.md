@@ -139,4 +139,13 @@ CI runs fmt, clippy and tests, builds Windows and Linux binaries, and audits dep
 
 ## License
 
-See [`LICENSE.txt`](LICENSE.txt).
+Twitty is licensed under either of
+
+- [MIT license](LICENSE-MIT)
+- [Apache License, Version 2.0](LICENSE-APACHE)
+
+at your option.
+
+Unless you explicitly state otherwise, any contribution you intentionally submit for inclusion in Twitty, as defined in the Apache-2.0 license, is dual licensed as above, without any additional terms or conditions.
+
+The licenses cover the code. The Twitty name and logo are not licensed for use by forks or derivative products.

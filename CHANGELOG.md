@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Relicensed under MIT OR Apache-2.0, at your option. This replaces the old end-user license agreement, which was written for the legacy installer.
+
 ## 3.0.0 — 2026-10-11
 
 Twitty is now a native Rust terminal (wgpu + cosmic-text + alacritty_terminal). It replaces the earlier Tauri/xterm.js app. This release builds on the native rewrite from the `v2-native` line. The 2.1.0 line is archived on the `archive/old-main` branch.

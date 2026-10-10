@@ -4,7 +4,8 @@ version = "3.0.0"
 edition = "2021"
 authors = ["Omar Sharkawy"]
 description = "Twitty - Native Bidirectional RTL Terminal Emulator"
-license = "MIT"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/omarallsharkawy/RTL-Terminal"
 
 [dependencies]
 portable-pty = "0.9.0"
