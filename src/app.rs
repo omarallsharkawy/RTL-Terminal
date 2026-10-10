@@ -8,7 +8,7 @@ use winit::application::ApplicationHandler;
 use winit::event::{ElementState, Ime, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
-use winit::window::{UserAttentionType, WindowAttributes, WindowId};
+use winit::window::{CursorIcon, UserAttentionType, WindowAttributes, WindowId};
 
 use crate::config::TwittyConfig;
 use crate::input::{encode_mouse, encode_paste, handle_key, InputAction};
@@ -49,6 +49,8 @@ pub struct App {
     clipboard: Option<arboard::Clipboard>,
     /// A mouse selection is being dragged.
     selecting: bool,
+    /// The current left press opened a link, so its release is swallowed.
+    link_press: bool,
     /// Bumped on every new selection, so a delayed clear never removes a newer one.
     selection_generation: u64,
     last_click: Option<(Instant, usize, usize)>,
@@ -83,6 +85,7 @@ impl App {
             mouse_x: 0.0,
             clipboard: None,
             selecting: false,
+            link_press: false,
             selection_generation: 0,
             last_click: None,
             click_count: 0,
@@ -263,6 +266,33 @@ impl App {
             std::thread::sleep(COPIED_HIGHLIGHT);
             let _ = proxy.send_event(AppEvent::ClearSelection(generation));
         });
+    }
+
+    /// Underline the link under the pointer while Ctrl is held, and show a pointer cursor.
+    fn update_link_hover(&mut self) {
+        let link = if self.modifiers.control_key() {
+            self.terminal
+                .lock()
+                .ok()
+                .and_then(|t| t.link_at(self.mouse_col, self.mouse_row))
+        } else {
+            None
+        };
+        let hover = link.as_ref().map(|l| (l.row, l.cols.clone()));
+        let changed = self
+            .terminal
+            .lock()
+            .is_ok_and(|mut t| t.set_link_hover(hover));
+        if changed {
+            if let Some(ref r) = self.renderer {
+                r.window.set_cursor(if link.is_some() {
+                    CursorIcon::Pointer
+                } else {
+                    CursorIcon::Text
+                });
+            }
+            self.request_redraw();
+        }
     }
 
     fn send_mouse(&self, button: u8, pressed: bool) {
@@ -544,6 +574,7 @@ impl ApplicationHandler<AppEvent> for App {
             }
             WindowEvent::ModifiersChanged(mods) => {
                 self.modifiers = mods.state();
+                self.update_link_hover();
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let Some(ref r) = self.renderer else { return };
@@ -561,6 +592,7 @@ impl ApplicationHandler<AppEvent> for App {
                 }
                 self.mouse_col = col;
                 self.mouse_row = row;
+                self.update_link_hover();
 
                 // 1003 reports every motion, 1002 only while a button is held.
                 let mode = self.mode();
@@ -584,6 +616,24 @@ impl ApplicationHandler<AppEvent> for App {
                     _ => return,
                 };
                 let pressed = state == ElementState::Pressed;
+                // Ctrl+Click opens a link and takes priority over mouse reporting.
+                if button == MouseButton::Left {
+                    if pressed && self.modifiers.control_key() {
+                        let link = self
+                            .terminal
+                            .lock()
+                            .ok()
+                            .and_then(|t| t.link_at(self.mouse_col, self.mouse_row));
+                        if let Some(link) = link {
+                            crate::links::open_url(&link.uri);
+                            self.link_press = true;
+                            return;
+                        }
+                    } else if !pressed && self.link_press {
+                        self.link_press = false;
+                        return;
+                    }
+                }
                 self.mouse_button_down = if pressed { Some(code) } else { None };
 
                 // Shift bypasses mouse reporting, as in xterm and Windows Terminal.

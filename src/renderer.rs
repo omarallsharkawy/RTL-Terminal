@@ -381,6 +381,7 @@ fn hash_row(cells: &[CellData], cursor: Option<RowCursor>) -> u64 {
         cell.flags.bits().hash(&mut hasher);
         cell.selected.hash(&mut hasher);
         cell.search_match.hash(&mut hasher);
+        cell.link_hover.hash(&mut hasher);
     }
     cursor.hash(&mut hasher);
     hasher.finish()
@@ -766,7 +767,7 @@ impl Renderer {
             if cell.flags.contains(CellFlags::DOUBLE_UNDERLINE) {
                 quads.push((x, underline_y - thickness * 2.0, cw, thickness, fg_color));
                 quads.push((x, underline_y, cw, thickness, fg_color));
-            } else if cell.flags.intersects(CellFlags::ALL_UNDERLINES) {
+            } else if cell.link_hover || cell.flags.intersects(CellFlags::ALL_UNDERLINES) {
                 quads.push((x, underline_y, cw, thickness, fg_color));
             }
             if cell.flags.contains(CellFlags::STRIKEOUT) {

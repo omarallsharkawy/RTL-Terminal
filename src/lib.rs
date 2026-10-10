@@ -4,6 +4,7 @@ pub mod config;
 pub mod fonts;
 pub mod ime;
 pub mod input;
+pub mod links;
 pub mod pty;
 pub mod quad;
 pub mod renderer;

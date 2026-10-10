@@ -6,6 +6,7 @@
 - `font_family` option picks the terminal font; a family that is not installed falls back to the system monospace font.
 - Scrollback search: Ctrl+Shift+F opens a search bar at the bottom. Matching is literal and case-insensitive, updates as you type (Arabic included), highlights every visible match, and shows `n/N`. Enter jumps to the next older match, Shift+Enter to a newer one, Esc closes.
 - Input method (IME) support: composition text is drawn inline at the cursor, and the candidate popup follows the caret.
+- Clickable links: Ctrl+Click opens OSC 8 hyperlinks and plain URLs (http, https, file, ftp, mailto). The link is underlined and the cursor becomes a pointer while Ctrl is held over it.
 - Relicensed under MIT OR Apache-2.0, at your option. This replaces the old end-user license agreement, which was written for the legacy installer.
 - Color themes: pick one with `"theme"` in config.json (`tokyo-night` is still the default; also `catppuccin-mocha`, `gruvbox-dark`, `dracula`, `nord`, `one-dark`, `solarized-dark`, `github-light`). The optional `"colors"` block overrides the background, foreground, cursor, selection and ANSI colors.
 - Box drawing: double, heavy and dashed lines, block eighths, quadrants and shades are drawn pixel-exact.
