@@ -19,6 +19,8 @@ pub struct QuadRenderer {
     vertex_buffer: Option<wgpu::Buffer>,
     vertex_capacity: usize,
     vertex_count: usize,
+    /// CPU-side vertices, kept between frames so they are not reallocated every frame.
+    vertices: Vec<QuadVertex>,
 }
 
 impl QuadRenderer {
@@ -156,6 +158,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             vertex_buffer: None,
             vertex_capacity: 0,
             vertex_count: 0,
+            vertices: Vec::new(),
         }
     }
 
@@ -178,7 +181,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             return;
         }
 
-        let mut vertices = Vec::with_capacity(quads.len() * 6);
+        let vertices = &mut self.vertices;
+        vertices.clear();
+        vertices.reserve(quads.len() * 6);
         for &(x, y, w, h, color) in quads {
             let x2 = x + w;
             let y2 = y + h;
@@ -222,7 +227,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             self.vertex_capacity = capacity;
         }
         if let Some(ref buffer) = self.vertex_buffer {
-            queue.write_buffer(buffer, 0, bytemuck::cast_slice(&vertices));
+            queue.write_buffer(buffer, 0, bytemuck::cast_slice(vertices));
         }
     }
 
