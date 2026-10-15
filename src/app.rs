@@ -86,6 +86,8 @@ pub struct App {
     /// An IME composition (preedit) is on screen.
     preedit_active: bool,
     cursor_blink: BlinkState,
+    /// Fractional Ctrl+wheel notches not yet turned into zoom or opacity steps.
+    zoom_accum: f64,
 }
 
 impl App {
@@ -109,6 +111,7 @@ impl App {
             needs_redraw: false,
             preedit_active: false,
             cursor_blink: BlinkState::new(BLINK_INTERVAL),
+            zoom_accum: 0.0,
         }
     }
 
@@ -1286,26 +1289,27 @@ impl ApplicationHandler<AppEvent> for App {
                     MouseScrollDelta::PixelDelta(p) => p.y / line_height,
                 };
 
-                if self.modifiers.control_key() && self.modifiers.shift_key() {
-                    // Ctrl + Shift + wheel: background opacity.
-                    let step = if lines > 0.0 { 0.05 } else { -0.05 };
-                    let opacity = (self.config.background_opacity + step).clamp(0.2, 1.0);
-                    self.config.background_opacity = opacity;
-                    self.config_dirty = true;
-                    if let Some(ref mut r) = self.renderer {
-                        r.set_opacity(opacity);
-                    }
-                    self.request_redraw();
-                    return;
-                }
                 if self.modifiers.control_key() {
-                    // Ctrl + wheel: zoom one step per notch.
-                    if lines > 0.0 {
+                    // Ctrl (+ Shift) + wheel: one zoom (opacity) step per notch. Trackpads send
+                    // many tiny deltas, so they are summed into notches first.
+                    self.zoom_accum += lines / LINES_PER_WHEEL_NOTCH;
+                    let steps = self.zoom_accum.trunc();
+                    self.zoom_accum -= steps;
+                    if steps == 0.0 {
+                        return;
+                    }
+                    if self.modifiers.shift_key() {
+                        let opacity =
+                            (self.config.background_opacity + 0.05 * steps as f32).clamp(0.2, 1.0);
+                        self.config.background_opacity = opacity;
+                        self.config_dirty = true;
+                        if let Some(ref mut r) = self.renderer {
+                            r.set_opacity(opacity);
+                        }
+                        self.request_redraw();
+                    } else {
                         let cur = self.config.font_size;
-                        self.update_font_size(cur + 1.0);
-                    } else if lines < 0.0 {
-                        let cur = self.config.font_size;
-                        self.update_font_size(cur - 1.0);
+                        self.update_font_size(cur + steps as f32);
                     }
                     return;
                 }
