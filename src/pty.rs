@@ -1,5 +1,6 @@
 use std::env;
 use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Sender};
 use std::thread;
 
@@ -47,6 +48,8 @@ pub struct Pty {
     writer: Sender<Vec<u8>>,
     /// Ends the shell when the pane is closed (the reader thread keeps the PTY open otherwise).
     killer: Box<dyn ChildKiller + Send + Sync>,
+    /// Process id of the shell, to find its working directory.
+    pid: Option<u32>,
 }
 
 impl Drop for Pty {
@@ -56,7 +59,22 @@ impl Drop for Pty {
 }
 
 impl Pty {
-    pub fn spawn<F, E>(cols: u16, rows: u16, mut on_data: F, mut on_exit: E) -> Result<Self>
+    pub fn spawn<F, E>(cols: u16, rows: u16, on_data: F, on_exit: E) -> Result<Self>
+    where
+        F: FnMut(Vec<u8>) + Send + 'static,
+        E: FnMut() + Send + 'static,
+    {
+        Self::spawn_in(None, cols, rows, on_data, on_exit)
+    }
+
+    /// Like `spawn`, starting the shell in `cwd` when it is an existing directory.
+    pub fn spawn_in<F, E>(
+        cwd: Option<&Path>,
+        cols: u16,
+        rows: u16,
+        mut on_data: F,
+        mut on_exit: E,
+    ) -> Result<Self>
     where
         F: FnMut(Vec<u8>) + Send + 'static,
         E: FnMut() + Send + 'static,
@@ -87,6 +105,10 @@ impl Pty {
             cmd.env("LANG", "en_US.UTF-8");
         }
 
+        if let Some(dir) = cwd.filter(|d| d.is_dir()) {
+            cmd.cwd(dir);
+        }
+
         let mut child = pair
             .slave
             .spawn_command(cmd)
@@ -94,6 +116,7 @@ impl Pty {
         drop(pair.slave);
 
         let killer = child.clone_killer();
+        let pid = child.process_id();
         let mut reader = pair
             .master
             .try_clone_reader()
@@ -134,7 +157,21 @@ impl Pty {
             master: pair.master,
             writer,
             killer,
+            pid,
         })
+    }
+
+    /// The shell's current working directory, so a new tab or split can open in it.
+    /// Only known on Linux (through `/proc`).
+    pub fn cwd(&self) -> Option<PathBuf> {
+        #[cfg(target_os = "linux")]
+        {
+            std::fs::read_link(format!("/proc/{}/cwd", self.pid?)).ok()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            None
+        }
     }
 
     pub fn write(&self, data: &[u8]) -> Result<()> {

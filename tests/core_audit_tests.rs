@@ -89,3 +89,18 @@ fn shell_does_not_inherit_another_terminals_identity() {
     }
     assert!(!VARS.contains(&"TERM_PROGRAM"));
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn shell_starts_in_the_requested_directory_and_reports_it() {
+    use std::time::{Duration, Instant};
+    use twitty::pty::Pty;
+    let dir = std::env::temp_dir().canonicalize().unwrap();
+    std::env::set_var("TWITTY_SHELL", "sleep 5");
+    let pty = Pty::spawn_in(Some(&dir), 80, 24, |_| {}, || {}).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while pty.cwd().as_deref() != Some(dir.as_path()) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(pty.cwd(), Some(dir));
+}
