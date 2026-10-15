@@ -13,7 +13,9 @@ use winit::window::{CursorIcon, UserAttentionType, WindowAttributes, WindowId};
 
 use crate::blink::{BlinkState, BLINK_INTERVAL};
 use crate::config::TwittyConfig;
-use crate::input::{encode_mouse, encode_paste, handle_key, InputAction};
+use crate::input::{
+    encode_mouse, encode_paste, handle_key, key_shortcut, terminal_key, InputAction,
+};
 use crate::layout::{
     dividers, layout, neighbor, ratio_at, set_ratio, tab_rects, Divider, FocusDir, Node, PaneId,
     Rect, SplitDir,
@@ -84,6 +86,8 @@ pub struct App {
     /// An IME composition (preedit) is on screen.
     preedit_active: bool,
     cursor_blink: BlinkState,
+    /// Fractional Ctrl+wheel notches not yet turned into zoom or opacity steps.
+    zoom_accum: f64,
 }
 
 impl App {
@@ -107,6 +111,7 @@ impl App {
             needs_redraw: false,
             preedit_active: false,
             cursor_blink: BlinkState::new(BLINK_INTERVAL),
+            zoom_accum: 0.0,
         }
     }
 
@@ -279,6 +284,7 @@ impl App {
             focused: id,
         });
         self.active = self.tabs.len() - 1;
+        self.release_held_buttons();
         self.capture = None;
         self.drag_divider = None;
         // A second tab shows the tab bar, which shrinks every pane.
@@ -366,6 +372,7 @@ impl App {
         }
         let old = self.focused_id();
         self.active = index;
+        self.release_held_buttons();
         self.capture = None;
         self.drag_divider = None;
         if let Some(new) = self.focused_id() {
@@ -686,13 +693,26 @@ impl App {
                 return;
             }
         }
+        // Shift bypasses mouse reporting, as in xterm and Windows Terminal. A release goes where
+        // its press went, so a Shift+drag selection never leaks drag/release reports.
+        let held = self.panes.get(&id).and_then(|p| p.mouse_button_down);
+        let report = if pressed {
+            mode.intersects(TermMode::MOUSE_MODE) && !self.modifiers.shift_key()
+        } else {
+            held == Some(code)
+        };
         if let Some(p) = self.panes.get_mut(&id) {
-            p.mouse_button_down = if pressed { Some(code) } else { None };
+            if pressed && report {
+                p.mouse_button_down = Some(code);
+            } else if !pressed && held == Some(code) {
+                p.mouse_button_down = None;
+            }
         }
 
-        // Shift bypasses mouse reporting, as in xterm and Windows Terminal.
-        if mode.intersects(TermMode::MOUSE_MODE) && !self.modifiers.shift_key() {
-            self.send_mouse(id, code, pressed);
+        if report {
+            if mode.intersects(TermMode::MOUSE_MODE) {
+                self.send_mouse(id, code, pressed);
+            }
         } else if button == MouseButton::Left {
             if pressed {
                 self.start_selection(id);
@@ -701,6 +721,24 @@ impl App {
             }
         } else if pressed && button == MouseButton::Middle {
             self.paste_clipboard(id);
+        }
+    }
+
+    /// Release every button a program saw pressed, e.g. when the window loses focus mid-drag and
+    /// the real release may never arrive. Otherwise later motion is reported as a drag.
+    fn release_held_buttons(&mut self) {
+        let held: Vec<(PaneId, u8)> = self
+            .panes
+            .values()
+            .filter_map(|p| p.mouse_button_down.map(|b| (p.id, b)))
+            .collect();
+        for (id, button) in held {
+            if self.mode_of(id).intersects(TermMode::MOUSE_MODE) {
+                self.send_mouse(id, button, false);
+            }
+            if let Some(p) = self.panes.get_mut(&id) {
+                p.mouse_button_down = None;
+            }
         }
     }
 
@@ -1112,11 +1150,9 @@ impl ApplicationHandler<AppEvent> for App {
                         .map(|p| p.id)
                         .collect();
                     for id in selecting {
-                        if let Some(p) = self.panes.get_mut(&id) {
-                            p.mouse_button_down = None;
-                        }
                         self.finish_selection(id);
                     }
+                    self.release_held_buttons();
                     self.capture = None;
                     self.drag_divider = None;
                 }
@@ -1194,16 +1230,17 @@ impl ApplicationHandler<AppEvent> for App {
                 }
                 pane.mouse_col = col;
                 pane.mouse_row = row;
-                let down = pane.mouse_button_down;
+                let (down, selecting) = (pane.mouse_button_down, pane.selecting);
                 self.update_link_hover(id);
 
-                // 1003 reports every motion, 1002 only while a button is held.
+                // 1003 reports every motion, 1002 only while a button is held; a Shift+drag
+                // selection is not reported.
                 let mode = self.mode_of(id);
                 let button = match down {
                     Some(b) if mode.intersects(TermMode::MOUSE_DRAG | TermMode::MOUSE_MOTION) => {
                         Some(b)
                     }
-                    None if mode.contains(TermMode::MOUSE_MOTION) => Some(3),
+                    None if mode.contains(TermMode::MOUSE_MOTION) && !selecting => Some(3),
                     _ => None,
                 };
                 if let Some(b) = button {
@@ -1252,26 +1289,27 @@ impl ApplicationHandler<AppEvent> for App {
                     MouseScrollDelta::PixelDelta(p) => p.y / line_height,
                 };
 
-                if self.modifiers.control_key() && self.modifiers.shift_key() {
-                    // Ctrl + Shift + wheel: background opacity.
-                    let step = if lines > 0.0 { 0.05 } else { -0.05 };
-                    let opacity = (self.config.background_opacity + step).clamp(0.2, 1.0);
-                    self.config.background_opacity = opacity;
-                    self.config_dirty = true;
-                    if let Some(ref mut r) = self.renderer {
-                        r.set_opacity(opacity);
-                    }
-                    self.request_redraw();
-                    return;
-                }
                 if self.modifiers.control_key() {
-                    // Ctrl + wheel: zoom one step per notch.
-                    if lines > 0.0 {
+                    // Ctrl (+ Shift) + wheel: one zoom (opacity) step per notch. Trackpads send
+                    // many tiny deltas, so they are summed into notches first.
+                    self.zoom_accum += lines / LINES_PER_WHEEL_NOTCH;
+                    let steps = self.zoom_accum.trunc();
+                    self.zoom_accum -= steps;
+                    if steps == 0.0 {
+                        return;
+                    }
+                    if self.modifiers.shift_key() {
+                        let opacity =
+                            (self.config.background_opacity + 0.05 * steps as f32).clamp(0.2, 1.0);
+                        self.config.background_opacity = opacity;
+                        self.config_dirty = true;
+                        if let Some(ref mut r) = self.renderer {
+                            r.set_opacity(opacity);
+                        }
+                        self.request_redraw();
+                    } else {
                         let cur = self.config.font_size;
-                        self.update_font_size(cur + 1.0);
-                    } else if lines < 0.0 {
-                        let cur = self.config.font_size;
-                        self.update_font_size(cur - 1.0);
+                        self.update_font_size(cur + steps as f32);
                     }
                     return;
                 }
@@ -1341,7 +1379,22 @@ impl ApplicationHandler<AppEvent> for App {
                 if !crate::ime::should_forward_key(self.preedit_active) => {}
             WindowEvent::KeyboardInput { event, .. } => {
                 let Some(id) = self.focused_id() else { return };
-                let action = handle_key(&event, self.modifiers, self.mode_of(id));
+                let mode = self.mode_of(id);
+                let mut action = handle_key(&event, self.modifiers, mode);
+                // With a single pane / tab these shortcuts have nothing to do, so the key goes
+                // to the program instead (Alt+Left in fish, Ctrl+PageUp in vim...).
+                // Decided from the shortcut itself, so the release follows its press.
+                let idle = match key_shortcut(&event, self.modifiers) {
+                    Some(InputAction::Focus(_)) => self
+                        .tabs
+                        .get(self.active)
+                        .is_some_and(|t| matches!(t.root, Node::Leaf(_))),
+                    Some(InputAction::NextTab | InputAction::PrevTab) => self.tabs.len() < 2,
+                    _ => false,
+                };
+                if idle {
+                    action = terminal_key(&event, self.modifiers, mode).map(InputAction::Bytes);
+                }
                 // Layout shortcuts keep working while the search bar has the keyboard.
                 let layout_action = matches!(
                     action,

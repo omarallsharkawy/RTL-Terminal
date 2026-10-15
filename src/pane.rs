@@ -19,7 +19,8 @@ pub struct Pane {
     pub title: Option<String>,
     pub mouse_col: usize,
     pub mouse_row: usize,
-    /// Buttons currently held, for drag reporting (xterm codes 0-2).
+    /// Button whose press was reported to the program (xterm codes 0-2), for drag and release
+    /// reporting.
     pub mouse_button_down: Option<u8>,
     /// Side of the cell under the pointer (see `Renderer::pixel_to_visual_cell`).
     pub mouse_side: Side,

@@ -14,7 +14,9 @@ fn matches_at(chars: &[char], i: usize, scheme: &str) -> bool {
 }
 
 fn is_stop(c: char) -> bool {
-    c.is_whitespace() || c.is_control() || matches!(c, '"' | '\'' | '<' | '>' | '`')
+    c.is_whitespace()
+        || c.is_control()
+        || matches!(c, '"' | '\'' | '<' | '>' | '`' | '«' | '»' | '“' | '”')
 }
 
 /// Drop trailing punctuation; closing brackets stay only when balanced inside the URL.
@@ -22,7 +24,8 @@ fn trimmed_end(chars: &[char], start: usize, mut end: usize) -> usize {
     while end > start {
         let c = chars[end - 1];
         let drop = match c {
-            '.' | ',' | ';' | ':' | '!' | '?' => true,
+            // Latin and Arabic sentence punctuation (، ؛ ؟ ۔) and a closing quote.
+            '.' | ',' | ';' | ':' | '!' | '?' | '،' | '؛' | '؟' | '۔' | '’' => true,
             ')' | ']' | '}' => {
                 let open = match c {
                     ')' => '(',
