@@ -36,7 +36,7 @@ Arabic letters join, sentences flow right-to-left, and English words, hashes and
 - See-through window background.
 - Cursor style: block, beam or underline. It turns hollow when the window loses focus.
 - Ctrl+Click opens OSC 8 hyperlinks and plain `http(s)`, `file`, `ftp` and `mailto` URLs.
-- Tabs and split panes: each pane is its own shell; a tab bar appears with two or more tabs, panes split side by side or stacked, and the divider can be dragged.
+- Tabs and split panes: each pane is its own shell; a tab bar appears with two or more tabs, panes split side by side or stacked, and the divider can be dragged. New tabs and splits open in the focused pane's directory (Linux).
 - Zoom with Ctrl+wheel or Ctrl+= / Ctrl+-, saved between sessions.
 - HiDPI aware. Falls back to a software GPU adapter on VMs and RDP.
 
@@ -87,6 +87,8 @@ cargo build --release
 | Split right / split down | Ctrl+Shift+E / Ctrl+Shift+O |
 | Focus the pane to the left / right / above / below | Alt+Arrow keys, or click the pane |
 | Resize a split | Drag the divider |
+
+With a single pane, Alt+Arrow goes to the program (fish, readline word jumps); with a single tab, so do Ctrl+Tab and Ctrl+PageUp/PageDown.
 
 ### Configuration
 

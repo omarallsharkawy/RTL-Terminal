@@ -131,7 +131,14 @@ impl App {
         terminal.set_default_cursor_blink(self.config.cursor_blink);
         let proxy = self.proxy.clone();
         let proxy_exit = self.proxy.clone();
-        let pty = match Pty::spawn(
+        // New tabs and splits open in the directory of the pane that has focus.
+        let cwd = self
+            .focused_id()
+            .and_then(|f| self.panes.get(&f))
+            .and_then(|p| p.pty.as_ref())
+            .and_then(Pty::cwd);
+        let pty = match Pty::spawn_in(
+            cwd.as_deref(),
             cols as u16,
             rows as u16,
             move |data| {
