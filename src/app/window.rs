@@ -10,7 +10,7 @@ use winit::window::{CursorIcon, UserAttentionType, WindowAttributes};
 use super::App;
 use crate::config::TwittyConfig;
 use crate::layout::{PaneId, Rect};
-use crate::renderer::{PaneFrame, Renderer, TabLabel};
+use crate::render::{PaneFrame, Renderer, TabLabel};
 use crate::session::workspace::{GridGeometry, Workspace};
 use crate::ui::hit::{hit_test, Hit, HitGeometry};
 use crate::ui::settings::{clamp_font_size, step_opacity};

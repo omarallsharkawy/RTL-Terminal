@@ -4,7 +4,7 @@ use alacritty_terminal::term::cell::Flags as CellFlags;
 use glyphon::{ColorMode, TextBounds};
 use twitty::color::Palette;
 use twitty::ime::bounds_outside;
-use twitty::renderer::{cell_colors, cursor_cell_width, text_color_mode};
+use twitty::render::{cell_colors, cursor_cell_width, text_color_mode};
 use twitty::terminal::{CellData, Terminal};
 
 fn hidden_cell() -> CellData {

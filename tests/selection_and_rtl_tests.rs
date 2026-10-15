@@ -4,7 +4,7 @@ use alacritty_terminal::vte::ansi::CursorShape;
 use cosmic_text::FontSystem;
 use twitty::color::Palette;
 use twitty::config::TwittyConfig;
-use twitty::renderer::{cell_colors, CachedRow, RowCursor, RowShaper};
+use twitty::render::{cell_colors, CachedRow, RowCursor, RowShaper};
 use twitty::terminal::{CursorState, Terminal};
 
 const CW: f32 = 9.0;

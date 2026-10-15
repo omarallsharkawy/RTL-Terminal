@@ -1,6 +1,6 @@
 //! The configured font family is matched case-insensitively, then used with the installed
 //! spelling: cosmic-text compares family names exactly, so "jetbrains mono" would never match.
-use twitty::fonts::{installed_family, new_font_system};
+use twitty::render::text::fonts::{installed_family, new_font_system};
 
 #[test]
 fn family_name_resolves_to_the_installed_spelling() {

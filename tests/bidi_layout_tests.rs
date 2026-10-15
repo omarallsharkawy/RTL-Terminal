@@ -2,7 +2,7 @@
 use alacritty_terminal::index::Side;
 use cosmic_text::FontSystem;
 use twitty::color::Palette;
-use twitty::renderer::{
+use twitty::render::{
     build_row_quads, visual_cell_extents, CachedRow, CachedSegment, RowCursor, RowShaper,
 };
 use twitty::terminal::{LineData, Terminal};

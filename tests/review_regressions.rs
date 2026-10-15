@@ -3,7 +3,7 @@ use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::vte::ansi::{Color as AnsiColor, NamedColor};
 use twitty::color::Palette;
 use twitty::input::{encode_mouse, encode_paste, handle_key_raw, InputAction};
-use twitty::renderer::cell_colors;
+use twitty::render::cell_colors;
 use twitty::terminal::{CellData, Terminal};
 use winit::event::ElementState;
 use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey};

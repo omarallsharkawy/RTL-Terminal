@@ -109,7 +109,7 @@ fn shell_starts_in_the_requested_directory_and_reports_it() {
 fn concealed_text_is_drawn_transparent() {
     use cosmic_text::FontSystem;
     use twitty::color::Palette;
-    use twitty::renderer::RowShaper;
+    use twitty::render::RowShaper;
     let mut term = Terminal::new(20, 2, |_| {});
     term.process_bytes(b"ab\x1b[8mxyz\x1b[0mcd\r\n");
     let (lines, _) = term.snapshot();

@@ -1,6 +1,6 @@
 //! Double-line box drawing: crossings keep their channels open and single lines join both
 //! double verticals.
-use twitty::quad::try_render_box_or_block;
+use twitty::render::try_render_box_or_block;
 
 type Quad = (f32, f32, f32, f32, [f32; 4]);
 

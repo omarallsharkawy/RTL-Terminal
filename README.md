@@ -164,12 +164,11 @@ cargo fmt
 | `src/app/` | The winit app: routes window events to keyboard, mouse, selection, pane and window modules; `window.rs` holds every renderer call |
 | `src/session/` | Panes (terminal + PTY), the workspace of tabs and splits, shell spawning |
 | `src/ui/` | Window-free UI logic: hit testing, search bar, selection lifecycle, zoom/opacity, clipboard |
-| `src/renderer.rs` | Row segmentation, bidi shaping, cursor placement, GPU drawing |
+| `src/render/` | Rendering. `text/`: fonts, bidi and row shaping; `row/`: shaped-row cache, hit testing, caret placement; `scene/`: CPU frame layout (cell quads, box drawing, cursor, tab bar, status line, IME preedit); `gpu/`: wgpu surface, quad and glyphon text pipelines |
 | `src/terminal.rs` | `alacritty_terminal` wrapper: snapshots, scrollback, selection |
 | `src/input/` | Keyboard, paste and mouse encoding; key routing; mouse and pointer state machines |
 | `src/layout.rs` | Split tree, pane and divider geometry, tab bar |
 | `src/pty.rs` | Shell discovery and PTY I/O |
-| `src/quad.rs` | Backgrounds, cursor, box-drawing geometry |
 | `src/color.rs` | Palette (Tokyo Night) and color resolution |
 | `src/config.rs` | `config.json` loading and saving |
 

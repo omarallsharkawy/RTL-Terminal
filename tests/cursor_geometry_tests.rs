@@ -2,7 +2,7 @@
 //! top of the cursor, like text glyphs, instead of disappearing beneath it.
 use alacritty_terminal::term::cell::Flags as CellFlags;
 use twitty::color::Palette;
-use twitty::renderer::{cell_colors, geometry_under_block_cursor};
+use twitty::render::{cell_colors, geometry_under_block_cursor};
 use twitty::terminal::CellData;
 
 fn cell(c: char) -> CellData {

@@ -2,7 +2,7 @@
 //! border or other content between the text and the cursor.
 use cosmic_text::FontSystem;
 use twitty::color::Palette;
-use twitty::renderer::{CachedRow, RowCursor, RowShaper};
+use twitty::render::{CachedRow, RowCursor, RowShaper};
 use twitty::terminal::Terminal;
 
 const CW: f32 = 9.0;

@@ -1,7 +1,7 @@
 use cosmic_text::{Attrs, Buffer, Family, Metrics, Shaping};
 use twitty::config::TwittyConfig;
-use twitty::fonts::{grid_family, new_font_system};
-use twitty::renderer::measure_char_width;
+use twitty::render::measure_char_width;
+use twitty::render::text::fonts::{grid_family, new_font_system};
 
 #[test]
 fn embedded_arabic_font_is_registered() {

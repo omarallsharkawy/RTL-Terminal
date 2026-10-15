@@ -1,3 +1,13 @@
+//! Rendering, split by what each part needs:
+//!
+//! - `text`: fonts, bidi helpers and row shaping (cosmic-text only).
+//! - `row`: a shaped row, its hit testing and caret placement, and the per-pane row cache.
+//! - `metrics`: cell size and pane geometry.
+//! - `style`, `scene`: the frame laid out on the CPU (quads and text runs), testable headless.
+//! - `gpu`: wgpu surface, quad pipeline and glyphon text pipeline.
+//!
+//! `Renderer` ties them together for the app.
+
 pub mod gpu;
 pub mod metrics;
 pub mod row;
