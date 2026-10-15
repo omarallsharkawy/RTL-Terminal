@@ -150,7 +150,7 @@ pub fn visual_cell_extents(
     let mut visual: Vec<Option<(f32, f32)>> = vec![None; line.cells.len()];
     for seg in segments.iter().filter(|s| s.has_rtl) {
         let mut extents = seg.cell_extents(&line.cells);
-        // Arabic glyphs are usually narrower than the cells they occupy: stretch the visually
+        // Arabic glyphs are usually narrower than the cells they occupy: pin the visually
         // outermost cells to the segment's grid edges, so colored backgrounds (selections, TUI
         // highlights) don't leave unpainted holes at the end of the text.
         let (grid_l, grid_r) = (seg.seg_start as f32 * cw, seg.seg_end as f32 * cw);
@@ -160,7 +160,7 @@ pub fn visual_cell_extents(
             .max_by(|&a, &b| extents[a].unwrap().1.total_cmp(&extents[b].unwrap().1))
         {
             if let Some((_, r)) = extents[i].as_mut() {
-                *r = r.max(grid_r);
+                *r = grid_r;
             }
         }
         if let Some(i) = (0..extents.len())
@@ -168,8 +168,14 @@ pub fn visual_cell_extents(
             .min_by(|&a, &b| extents[a].unwrap().0.total_cmp(&extents[b].unwrap().0))
         {
             if let Some((l, _)) = extents[i].as_mut() {
-                *l = l.min(grid_l);
+                *l = grid_l;
             }
+        }
+        // Glyphs a little wider than their cells (some Arabic letters) must not push a
+        // background past the segment onto the next cell's.
+        for (l, r) in extents.iter_mut().flatten() {
+            *l = l.clamp(grid_l, grid_r);
+            *r = r.clamp(grid_l, grid_r);
         }
         for (i, ext) in extents.into_iter().enumerate() {
             let c = seg.seg_start + i;

@@ -223,3 +223,18 @@ fn dragging_across_an_arabic_word_copies_that_word() {
         );
     }
 }
+
+#[test]
+fn wide_arabic_glyphs_never_push_a_background_onto_the_next_cell() {
+    // Found by tests/property_tests.rs: "دي" is drawn slightly wider than its two cells.
+    let text = "(x) 7abaf40 123 دي 2026 ";
+    let mut s = shaped(text, false);
+    s.term.start_selection(0, 0, Side::Left, 1);
+    s.term.update_selection(23, 0, Side::Right);
+    let s = reshape(s.term);
+    let q = bg_quads(&s);
+    for pair in q.windows(2) {
+        let gap = pair[1].0 - (pair[0].0 + pair[0].2);
+        assert!(gap.abs() < 0.01, "gap {gap}");
+    }
+}
