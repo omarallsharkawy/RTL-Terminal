@@ -1,6 +1,7 @@
 //! Turning terminal rows and labels into shaped cosmic-text buffers.
 
 use alacritty_terminal::term::cell::Flags as CellFlags;
+use alacritty_terminal::vte::ansi::Color as AnsiColor;
 use cosmic_text::{Attrs, Buffer, FontSystem, Metrics, Shaping};
 
 use super::bidi::{is_rtl_char, trails_rtl_neutrals, LRI, LRM, PDI, RLM};
@@ -202,6 +203,9 @@ impl RowShaper<'_> {
             let start = col;
             let mut end = col;
             while end < cols && !geom[end] {
+                if end > start && is_region_boundary(cells, end) {
+                    break;
+                }
                 if cells[end].is_blank() {
                     let mut peek = end;
                     while peek < cols && cells[peek].is_blank() {
@@ -261,6 +265,34 @@ impl RowShaper<'_> {
         }
         segments
     }
+}
+
+/// Background of a cell as drawn, ignoring selection and search (which must never reorder text).
+fn region_bg(cell: &CellData) -> AnsiColor {
+    if cell.flags.contains(CellFlags::INVERSE) {
+        cell.fg
+    } else {
+        cell.bg
+    }
+}
+
+/// True when column `col` starts a different UI region than `col - 1`: the background changes
+/// and the new or the old side is padded with at least two blank cells. TUI popups, panels and
+/// status bars look like that (opencode's command palette over an Arabic prompt), while a word
+/// highlighted inside a sentence does not, so the sentence keeps its bidi context.
+fn is_region_boundary(cells: &[CellData], col: usize) -> bool {
+    let (before, after) = (region_bg(&cells[col - 1]), region_bg(&cells[col]));
+    if before == after {
+        return false;
+    }
+    let padded = |range: &mut dyn Iterator<Item = &CellData>, bg: AnsiColor| {
+        range
+            .take(2)
+            .filter(|c| c.is_blank() && region_bg(c) == bg)
+            .count()
+            == 2
+    };
+    padded(&mut cells[col..].iter(), after) || padded(&mut cells[..col].iter().rev(), before)
 }
 
 /// Measure the advance of one monospace cell at the given pixel size.
