@@ -8,6 +8,7 @@ use crate::input::mouse::{ClickCounter, StepAccumulator};
 use crate::layout::PaneId;
 use crate::pty::Pty;
 use crate::terminal::Terminal;
+use crate::ui::selection::SelectionState;
 
 pub struct Pane {
     pub id: PaneId,
@@ -24,12 +25,9 @@ pub struct Pane {
     pub mouse_button_down: Option<u8>,
     /// Side of the cell under the pointer (see `Renderer::pixel_to_visual_cell`).
     pub mouse_side: Side,
-    /// A mouse selection is being dragged.
-    pub selecting: bool,
+    pub selection: SelectionState,
     /// The current left press opened a link, so its release is swallowed.
     pub link_press: bool,
-    /// Bumped on every new selection, so a delayed clear never removes a newer one.
-    pub selection_generation: u64,
     pub clicks: ClickCounter,
     /// Fractional wheel/trackpad lines not yet applied.
     pub scroll_steps: StepAccumulator,
@@ -54,9 +52,8 @@ impl Pane {
             mouse_row: 0,
             mouse_button_down: None,
             mouse_side: Side::Left,
-            selecting: false,
+            selection: SelectionState::default(),
             link_press: false,
-            selection_generation: 0,
             clicks: ClickCounter::default(),
             scroll_steps: StepAccumulator::default(),
             search_query: None,

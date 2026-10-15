@@ -4,11 +4,11 @@ use alacritty_terminal::term::TermMode;
 use alacritty_terminal::vte::ansi::{Color as AnsiColor, Rgb};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, Ime, KeyEvent, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
-use winit::keyboard::{Key, ModifiersState, NamedKey};
+use winit::keyboard::ModifiersState;
 use winit::window::{CursorIcon, UserAttentionType, WindowAttributes, WindowId};
 
 use crate::blink::{BlinkState, BLINK_INTERVAL};
@@ -30,12 +30,13 @@ use crate::pane::Pane;
 use crate::pty::Pty;
 use crate::renderer::{PaneFrame, Renderer, TabLabel};
 use crate::terminal::Terminal;
+use crate::ui::clipboard::Clipboard;
 use crate::ui::hit::{hit_test, Hit, HitGeometry};
+use crate::ui::search::{search_bar_text, search_key, SearchCmd};
+use crate::ui::selection::COPIED_HIGHLIGHT;
+use crate::ui::settings::{clamp_font_size, step_opacity, DEFAULT_FONT_SIZE};
 
 const WINDOW_TITLE: &str = "Twitty · RTL Terminal";
-const DEFAULT_FONT_SIZE: f32 = 14.5;
-/// How long a copied selection stays highlighted before it is cleared.
-const COPIED_HIGHLIGHT: Duration = Duration::from_millis(350);
 /// A pane is only split when both halves keep at least this many columns / rows.
 const MIN_SPLIT_COLS: usize = 24;
 const MIN_SPLIT_ROWS: usize = 10;
@@ -65,9 +66,7 @@ pub struct App {
     modifiers: ModifiersState,
     pointer: PointerState,
     cursor_icon: CursorIcon,
-    /// Kept alive for the whole session: on Linux, copied text is served by this object and
-    /// would vanish if it were dropped right after copying.
-    clipboard: Option<arboard::Clipboard>,
+    clipboard: Clipboard,
     config: TwittyConfig,
     config_dirty: bool,
     needs_redraw: bool,
@@ -90,7 +89,7 @@ impl App {
             modifiers: ModifiersState::empty(),
             pointer: PointerState::default(),
             cursor_icon: CursorIcon::Default,
-            clipboard: None,
+            clipboard: Clipboard::default(),
             config: TwittyConfig::load(),
             config_dirty: false,
             needs_redraw: false,
@@ -313,17 +312,20 @@ impl App {
         }
         if self.renderer.as_ref().is_some_and(|r| r.focused) {
             if let Some(old) = old {
-                if self.mode_of(old).contains(TermMode::FOCUS_IN_OUT) {
-                    self.write_to(old, b"\x1b[O");
-                }
+                self.report_focus(old, false);
             }
-            if self.mode_of(new).contains(TermMode::FOCUS_IN_OUT) {
-                self.write_to(new, b"\x1b[I");
-            }
+            self.report_focus(new, true);
         }
         self.cursor_blink.reset(Instant::now());
         self.refresh_window_title();
         self.request_redraw();
+    }
+
+    /// Tell the program in pane `id` it gained or lost focus, if it asked (mode 1004).
+    fn report_focus(&self, id: PaneId, focused: bool) {
+        if self.mode_of(id).contains(TermMode::FOCUS_IN_OUT) {
+            self.write_to(id, if focused { b"\x1b[I" } else { b"\x1b[O" });
+        }
     }
 
     fn focus_pane(&mut self, id: PaneId) {
@@ -467,8 +469,14 @@ impl App {
         }
     }
 
+    /// Zoom by `steps` points.
+    fn zoom_by(&mut self, steps: i32) {
+        let size = self.config.font_size + steps as f32;
+        self.update_font_size(size);
+    }
+
     fn update_font_size(&mut self, new_size: f32) {
-        let clamped = new_size.clamp(8.0, 48.0);
+        let clamped = clamp_font_size(new_size);
         self.config.font_size = clamped;
         // Written once on exit instead of on every zoom step.
         self.config_dirty = true;
@@ -479,26 +487,13 @@ impl App {
     }
 
     fn paste_clipboard(&mut self, id: PaneId) {
-        let Some(Ok(text)) = self.clipboard().map(|c| c.get_text()) else {
+        let Some(text) = self.clipboard.text() else {
             return;
         };
         let bracketed = self.mode_of(id).contains(TermMode::BRACKETED_PASTE);
         self.write_to(id, &encode_paste(&text, bracketed));
         self.cursor_blink.reset(Instant::now());
         self.scroll_to_bottom(id);
-    }
-
-    fn clipboard(&mut self) -> Option<&mut arboard::Clipboard> {
-        if self.clipboard.is_none() {
-            self.clipboard = arboard::Clipboard::new().ok();
-        }
-        self.clipboard.as_mut()
-    }
-
-    fn set_clipboard(&mut self, text: String) {
-        if let Some(clipboard) = self.clipboard() {
-            let _ = clipboard.set_text(text);
-        }
     }
 
     fn set_cursor_icon(&mut self, icon: CursorIcon) {
@@ -523,7 +518,7 @@ impl App {
             })
             .unwrap_or(false);
         if let Some(pane) = self.panes.get_mut(&id) {
-            pane.selecting = false;
+            pane.selection.end();
         }
         if had {
             self.request_redraw();
@@ -534,7 +529,7 @@ impl App {
     fn copy_selection(&mut self, id: PaneId) -> bool {
         let text = self.term(id, |t| t.selection_text()).flatten();
         let Some(text) = text else { return false };
-        self.set_clipboard(text);
+        self.clipboard.set_text(text);
         true
     }
 
@@ -546,24 +541,23 @@ impl App {
         };
         let (col, row) = (pane.mouse_col, pane.mouse_row);
         let clicks = pane.clicks.click(now, col, row);
-        pane.selection_generation += 1;
+        pane.selection.begin();
         if let Ok(mut term) = pane.terminal.lock() {
             term.start_selection(col, row, side, clicks);
         }
-        pane.selecting = true;
         self.request_redraw();
     }
 
     /// Mouse released: copy what was selected, flash it briefly, then clear the highlight.
     fn finish_selection(&mut self, id: PaneId) {
         if let Some(pane) = self.panes.get_mut(&id) {
-            pane.selecting = false;
+            pane.selection.end();
         }
         if !self.copy_selection(id) {
             self.clear_selection(id);
             return;
         }
-        let Some(generation) = self.panes.get(&id).map(|p| p.selection_generation) else {
+        let Some(generation) = self.panes.get(&id).map(|p| p.selection.generation()) else {
             return;
         };
         let proxy = self.proxy.clone();
@@ -661,7 +655,7 @@ impl App {
         } else if button == MouseButton::Left {
             if pressed {
                 self.start_selection(id);
-            } else if self.panes.get(&id).is_some_and(|p| p.selecting) {
+            } else if self.panes.get(&id).is_some_and(|p| p.selection.selecting) {
                 self.finish_selection(id);
             }
         } else if pressed && button == MouseButton::Middle {
@@ -758,7 +752,7 @@ impl App {
             }
             TermEvent::ClipboardStore(_, text) => {
                 // OSC 52 copy (e.g. from tmux/vim over SSH).
-                self.set_clipboard(text);
+                self.clipboard.set_text(text);
             }
             // OSC 52 reads are refused: any program could silently exfiltrate the clipboard.
             TermEvent::ClipboardLoad(..) => {}
@@ -770,19 +764,10 @@ impl App {
 impl App {
     /// Text of the search bar for the current query and match position.
     fn search_bar_text(&self, id: PaneId, query: &str) -> String {
-        let status = self
-            .term(id, |term| {
-                if query.is_empty() {
-                    String::new()
-                } else if !term.has_search_match() {
-                    "  no matches".to_owned()
-                } else {
-                    term.search_position()
-                        .map_or(String::new(), |(i, n)| format!("  {i}/{n}"))
-                }
-            })
-            .unwrap_or_default();
-        format!("Find: {query}{status}")
+        self.term(id, |t| {
+            search_bar_text(query, t.has_search_match(), || t.search_position())
+        })
+        .unwrap_or_else(|| format!("Find: {query}"))
     }
 
     fn open_search(&mut self, id: PaneId) {
@@ -815,46 +800,18 @@ impl App {
         if !event.state.is_pressed() {
             return;
         }
-        match &event.logical_key {
-            Key::Named(NamedKey::Escape) => self.close_search(id),
-            Key::Named(NamedKey::Enter) => {
-                let direction = if self.modifiers.shift_key() {
-                    Direction::Right
-                } else {
-                    Direction::Left
-                };
-                self.run_search(id, direction);
-            }
-            Key::Named(NamedKey::Backspace) => {
-                if let Some(query) = self
-                    .panes
-                    .get_mut(&id)
-                    .and_then(|p| p.search_query.as_mut())
-                {
-                    query.pop();
-                }
-                self.run_search(id, Direction::Left);
-            }
-            _ => {
-                if self.modifiers.control_key() || self.modifiers.alt_key() {
-                    return;
-                }
-                let Some(text) = event.text.as_deref() else {
-                    return;
-                };
-                let text: String = text.chars().filter(|c| !c.is_control()).collect();
-                if text.is_empty() {
-                    return;
-                }
-                if let Some(query) = self
-                    .panes
-                    .get_mut(&id)
-                    .and_then(|p| p.search_query.as_mut())
-                {
-                    query.push_str(&text);
-                }
-                self.run_search(id, Direction::Left);
-            }
+        let modifiers = self.modifiers;
+        let Some(query) = self
+            .panes
+            .get_mut(&id)
+            .and_then(|p| p.search_query.as_mut())
+        else {
+            return;
+        };
+        match search_key(query, &event.logical_key, event.text.as_deref(), modifiers) {
+            SearchCmd::Close => self.close_search(id),
+            SearchCmd::Search(direction) => self.run_search(id, direction),
+            SearchCmd::None => {}
         }
     }
 
@@ -867,14 +824,8 @@ impl App {
                 self.cursor_blink.reset(Instant::now());
                 self.scroll_to_bottom(id);
             }
-            InputAction::ZoomIn => {
-                let cur = self.config.font_size;
-                self.update_font_size(cur + 1.0);
-            }
-            InputAction::ZoomOut => {
-                let cur = self.config.font_size;
-                self.update_font_size(cur - 1.0);
-            }
+            InputAction::ZoomIn => self.zoom_by(1),
+            InputAction::ZoomOut => self.zoom_by(-1),
             InputAction::ZoomReset => self.update_font_size(DEFAULT_FONT_SIZE),
             InputAction::Paste => self.paste_clipboard(id),
             InputAction::Copy => {
@@ -1019,7 +970,7 @@ impl ApplicationHandler<AppEvent> for App {
                 let current = self
                     .panes
                     .get(&id)
-                    .is_some_and(|p| p.selection_generation == generation && !p.selecting);
+                    .is_some_and(|p| p.selection.may_clear(generation));
                 if current {
                     self.clear_selection(id);
                 }
@@ -1091,7 +1042,7 @@ impl ApplicationHandler<AppEvent> for App {
                     let selecting: Vec<PaneId> = self
                         .panes
                         .values()
-                        .filter(|p| p.selecting)
+                        .filter(|p| p.selection.selecting)
                         .map(|p| p.id)
                         .collect();
                     for id in selecting {
@@ -1106,9 +1057,7 @@ impl ApplicationHandler<AppEvent> for App {
                     r.window.request_redraw();
                 }
                 if let Some(id) = self.focused_id() {
-                    if self.mode_of(id).contains(TermMode::FOCUS_IN_OUT) {
-                        self.write_to(id, if focused { b"\x1b[I" } else { b"\x1b[O" });
-                    }
+                    self.report_focus(id, focused);
                 }
             }
             WindowEvent::ModifiersChanged(mods) => {
@@ -1142,7 +1091,7 @@ impl ApplicationHandler<AppEvent> for App {
                     return;
                 };
                 pane.mouse_side = side;
-                if pane.selecting {
+                if pane.selection.selecting {
                     if let Ok(mut term) = pane.terminal.lock() {
                         term.update_selection(col, row, side);
                     }
@@ -1156,7 +1105,7 @@ impl ApplicationHandler<AppEvent> for App {
                 }
                 pane.mouse_col = col;
                 pane.mouse_row = row;
-                let (down, selecting) = (pane.mouse_button_down, pane.selecting);
+                let (down, selecting) = (pane.mouse_button_down, pane.selection.selecting);
                 self.update_link_hover(id);
 
                 if let Some(button) = motion_report(self.mode_of(id), down, selecting) {
@@ -1201,8 +1150,7 @@ impl ApplicationHandler<AppEvent> for App {
                         return;
                     }
                     if self.modifiers.shift_key() {
-                        let opacity =
-                            (self.config.background_opacity + 0.05 * steps as f32).clamp(0.2, 1.0);
+                        let opacity = step_opacity(self.config.background_opacity, steps);
                         self.config.background_opacity = opacity;
                         self.config_dirty = true;
                         if let Some(ref mut r) = self.renderer {
@@ -1210,8 +1158,7 @@ impl ApplicationHandler<AppEvent> for App {
                         }
                         self.request_redraw();
                     } else {
-                        let cur = self.config.font_size;
-                        self.update_font_size(cur + steps as f32);
+                        self.zoom_by(steps);
                     }
                     return;
                 }
