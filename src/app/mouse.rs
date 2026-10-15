@@ -7,7 +7,7 @@ use winit::keyboard::ModifiersState;
 use winit::window::CursorIcon;
 
 use super::App;
-use crate::input::encode_mouse;
+use crate::input::encode_mouse_for_mode;
 use crate::input::mouse::{
     button_code, button_report, motion_report, wheel_action, wheel_lines, WheelAction,
     LINES_PER_WHEEL_NOTCH,
@@ -170,14 +170,13 @@ impl App {
         let Some(pane) = self.ws.pane(id) else {
             return;
         };
-        let sgr = pane.mode().contains(TermMode::SGR_MOUSE);
-        let seq = encode_mouse(
+        let seq = encode_mouse_for_mode(
             button,
             pane.ui.mouse_col,
             pane.ui.mouse_row,
             pressed,
             self.modifiers,
-            sgr,
+            pane.mode(),
         );
         pane.write(&seq);
     }

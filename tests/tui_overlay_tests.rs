@@ -106,13 +106,24 @@ fn prompt_arrow_before_arabic_is_not_mirrored() {
             block: false,
         });
         let segs = shaper.build_row(&lines[0], row_cursor);
-        let seg = segs.iter().find(|s| s.seg_start == 0).expect("segment at col 0");
+        let seg = segs
+            .iter()
+            .find(|s| s.seg_start == 0)
+            .expect("segment at col 0");
         let byte = seg.cell_bytes[0];
         let level_rtl = seg
             .buffer
             .layout_runs()
-            .find_map(|run| run.glyphs.iter().find(|g| byte >= g.start && byte < g.end).map(|g| g.level.is_rtl()))
+            .find_map(|run| {
+                run.glyphs
+                    .iter()
+                    .find(|g| byte >= g.start && byte < g.end)
+                    .map(|g| g.level.is_rtl())
+            })
             .expect("glyph");
-        assert!(!level_rtl, "❯ shaped right-to-left (mirrored), finished={finished}");
+        assert!(
+            !level_rtl,
+            "❯ shaped right-to-left (mirrored), finished={finished}"
+        );
     }
 }

@@ -437,6 +437,12 @@ fn legacy_key(key: &KeyInput, mode: TermMode, shortcuts: bool) -> Option<InputAc
 /// The legacy bytes of a pressed key that is not a shortcut.
 fn legacy_bytes(key: &KeyInput, key_code: Option<KeyCode>, mode: TermMode) -> Option<Vec<u8>> {
     let (ctrl, alt) = (key.modifiers.control_key(), key.modifiers.alt_key());
+    // Application keypad (DECKPAM): numpad keys send SS3 codes so programs can tell them apart.
+    if mode.contains(TermMode::APP_KEYPAD) && !ctrl && !alt {
+        if let Some(byte) = key.physical.and_then(app_keypad_byte) {
+            return Some(vec![0x1b, b'O', byte]);
+        }
+    }
     if ctrl {
         if let Some(byte) = key_code.and_then(ctrl_byte) {
             return Some(with_alt(alt, vec![byte]));
@@ -452,6 +458,30 @@ fn legacy_bytes(key: &KeyInput, key_code: Option<KeyCode>, mode: TermMode) -> Op
     key.text
         .filter(|t| !ctrl && !t.is_empty())
         .map(|t| with_alt(alt, t.as_bytes().to_vec()))
+}
+
+/// Final byte of the SS3 sequence a numpad key sends in application keypad mode (xterm).
+fn app_keypad_byte(code: KeyCode) -> Option<u8> {
+    Some(match code {
+        KeyCode::Numpad0 => b'p',
+        KeyCode::Numpad1 => b'q',
+        KeyCode::Numpad2 => b'r',
+        KeyCode::Numpad3 => b's',
+        KeyCode::Numpad4 => b't',
+        KeyCode::Numpad5 => b'u',
+        KeyCode::Numpad6 => b'v',
+        KeyCode::Numpad7 => b'w',
+        KeyCode::Numpad8 => b'x',
+        KeyCode::Numpad9 => b'y',
+        KeyCode::NumpadDecimal => b'n',
+        KeyCode::NumpadDivide => b'o',
+        KeyCode::NumpadMultiply => b'j',
+        KeyCode::NumpadSubtract => b'm',
+        KeyCode::NumpadAdd => b'k',
+        KeyCode::NumpadEnter => b'M',
+        KeyCode::NumpadEqual => b'X',
+        _ => return None,
+    })
 }
 
 /// Named navigation and control keys.
@@ -898,4 +928,35 @@ pub fn encode_mouse(
         let clamp = |v: usize| (v + 1).min(223) as u8 + 32;
         vec![0x1b, b'[', b'M', 32 + code, clamp(col), clamp(row)]
     }
+}
+
+/// Encode a mouse report in the format the program asked for: SGR (1006), UTF-8 (1005, for
+/// coordinates past 223 on wide screens) or the legacy one.
+pub fn encode_mouse_for_mode(
+    button: u8,
+    col: usize,
+    row: usize,
+    pressed: bool,
+    modifiers: ModifiersState,
+    mode: TermMode,
+) -> Vec<u8> {
+    if mode.contains(TermMode::SGR_MOUSE) || !mode.contains(TermMode::UTF8_MOUSE) {
+        return encode_mouse(
+            button,
+            col,
+            row,
+            pressed,
+            modifiers,
+            mode.contains(TermMode::SGR_MOUSE),
+        );
+    }
+    let mut out = encode_mouse(button, 0, 0, pressed, modifiers, false);
+    out.truncate(4);
+    // Each coordinate is one UTF-8 character, up to 2015 (the largest 2-byte code point - 32).
+    for v in [col, row] {
+        let c = char::from_u32((v + 1).min(2015) as u32 + 32).unwrap_or(' ');
+        let mut buf = [0u8; 4];
+        out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+    }
+    out
 }
