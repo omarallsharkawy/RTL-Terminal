@@ -150,6 +150,55 @@ jobs:
       - name: Measure line coverage
         run: cargo llvm-cov --release --summary-only
 
+  fuzz:
+    name: Fuzz (short run)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        uses: taiki-e/install-action@cargo-fuzz
+
+      - name: Fuzz each target for 60 seconds
+        run: |
+          cargo fuzz run terminal_bytes -- -max_total_time=60
+          cargo fuzz run shape_rows -- -max_total_time=60
+
+  golden:
+    name: Golden-image rendering tests
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Mesa software rendering
+        run: sudo apt-get update && sudo apt-get install -y libegl-mesa0 libgl1-mesa-dri mesa-vulkan-drivers
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build output
+        uses: swatinem/rust-cache@v2
+
+      - name: Compare rendered scenes with the reference images
+        env:
+          TWITTY_REQUIRE_GOLDEN: "1"
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: cargo test --release --test golden_tests
+
+      - name: Upload mismatches
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-failures
+          path: target/tmp/golden-failures/
+
   rust-licenses:
     name: Dependency licenses and sources
     runs-on: ubuntu-latest
