@@ -1,9 +1,11 @@
+pub mod gpu;
 pub mod metrics;
 pub mod row;
 pub mod scene;
 pub mod style;
 pub mod text;
 
+pub use gpu::text_pipeline::text_color_mode;
 pub use metrics::CellMetrics;
 pub use row::cache::RowCache;
 pub use row::{visual_cell_extents, CachedRow, RowCursor};
@@ -17,16 +19,13 @@ pub use text::shaper::{measure_char_width, shape_label, RowShaper};
 
 use alacritty_terminal::index::Side;
 use cosmic_text::FontSystem;
-use glyphon::{
-    Cache, ColorMode, Resolution, SwashCache, TextArea, TextAtlas, TextRenderer, Viewport,
-};
 use std::sync::Arc;
 use winit::window::Window;
 
 use crate::color::Palette;
 use crate::layout::{PaneId, Rect};
-use crate::quad::QuadRenderer;
 use crate::terminal::{CursorState, LineData};
+use gpu::Gpu;
 use scene::context::DrawContext;
 use scene::frame::{build_frame, FrameOptions};
 use text::fonts::{installed_family, new_font_system};
@@ -52,18 +51,12 @@ pub struct TabLabel {
 
 pub struct Renderer {
     pub window: Arc<Window>,
-    pub surface: wgpu::Surface<'static>,
-    pub device: wgpu::Device,
-    pub queue: wgpu::Queue,
+    /// Surface size and format.
     pub config: wgpu::SurfaceConfiguration,
-    pub quad_renderer: QuadRenderer,
+    gpu: Gpu,
     pub font_system: FontSystem,
     /// Configured terminal font family (leaked once per change; `None` = monospace).
     pub font_family: Option<&'static str>,
-    pub swash_cache: SwashCache,
-    pub text_atlas: TextAtlas,
-    pub text_renderer: TextRenderer,
-    pub viewport: Viewport,
     pub palette: Palette,
     /// Font size in logical points (what the user zooms and what is saved).
     pub font_size: f32,
@@ -88,130 +81,18 @@ pub struct Renderer {
     pub ime: crate::ime::PreeditState,
 }
 
-/// How glyphon treats text colors. `Accurate` linearizes them for an sRGB surface; on the
-/// non-sRGB surface that is preferred, colors must go out as-is (`Web`), like the quads, or text
-/// is drawn darker than its palette color.
-pub fn text_color_mode(is_srgb: bool) -> ColorMode {
-    if is_srgb {
-        ColorMode::Accurate
-    } else {
-        ColorMode::Web
-    }
-}
-
 impl Renderer {
     pub async fn new(window: Arc<Window>, initial_font_size: f32) -> anyhow::Result<Self> {
-        let size = window.inner_size();
-        let width = size.width.max(1);
-        let height = size.height.max(1);
-
-        let instance = wgpu::Instance::default();
-        let surface = instance.create_surface(window.clone())?;
-        let mut adapter = None;
-        // Prefer a real GPU; fall back to a software adapter (e.g. WARP on Windows VMs / RDP).
-        for force_fallback_adapter in [false, true] {
-            if let Ok(a) = instance
-                .request_adapter(&wgpu::RequestAdapterOptions {
-                    power_preference: wgpu::PowerPreference::HighPerformance,
-                    compatible_surface: Some(&surface),
-                    force_fallback_adapter,
-                    apply_limit_buckets: false,
-                })
-                .await
-            {
-                adapter = Some(a);
-                break;
-            }
-        }
-        let adapter = adapter.ok_or_else(|| anyhow::anyhow!("No compatible GPU adapter found"))?;
-
-        let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor {
-                label: Some("twitty device"),
-                required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::downlevel_defaults()
-                    .using_resolution(adapter.limits()),
-                experimental_features: wgpu::ExperimentalFeatures::disabled(),
-                trace: wgpu::Trace::Off,
-                memory_hints: Default::default(),
-            })
-            .await?;
-
-        let surface_caps = surface.get_capabilities(&adapter);
-        let format = surface_caps
-            .formats
-            .iter()
-            .copied()
-            .find(|f| !f.is_srgb())
-            .unwrap_or(surface_caps.formats[0]);
-        let is_srgb = format.is_srgb();
-
-        let present_mode = if surface_caps
-            .present_modes
-            .contains(&wgpu::PresentMode::Mailbox)
-        {
-            wgpu::PresentMode::Mailbox
-        } else if surface_caps
-            .present_modes
-            .contains(&wgpu::PresentMode::Immediate)
-        {
-            wgpu::PresentMode::Immediate
-        } else {
-            wgpu::PresentMode::AutoVsync
-        };
-
-        let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format,
-            width,
-            height,
-            present_mode,
-            // A pre/post-multiplied surface lets the compositor show what is behind the window.
-            alpha_mode: [
-                wgpu::CompositeAlphaMode::PreMultiplied,
-                wgpu::CompositeAlphaMode::PostMultiplied,
-            ]
-            .into_iter()
-            .find(|m| surface_caps.alpha_modes.contains(m))
-            .unwrap_or(surface_caps.alpha_modes[0]),
-            view_formats: vec![],
-            desired_maximum_frame_latency: 1,
-            color_space: Default::default(),
-        };
-        surface.configure(&device, &config);
-
-        let quad_renderer = QuadRenderer::new(&device, format);
-        quad_renderer.update_screen_size(&queue, width as f32, height as f32);
-
-        let font_system = new_font_system();
-        let swash_cache = SwashCache::new();
-        let cache = Cache::new(&device);
-        let mut viewport = Viewport::new(&device, &cache);
-        viewport.update(&queue, Resolution { width, height });
-
-        let mut text_atlas =
-            TextAtlas::with_color_mode(&device, &queue, &cache, format, text_color_mode(is_srgb));
-        let text_renderer = TextRenderer::new(
-            &mut text_atlas,
-            &device,
-            wgpu::MultisampleState::default(),
-            None,
-        );
+        let (gpu, config) = Gpu::new(window.clone()).await?;
+        let is_srgb = config.format.is_srgb();
 
         let scale = window.scale_factor() as f32;
         let mut renderer = Self {
             window,
-            surface,
-            device,
-            queue,
             config,
-            quad_renderer,
-            font_system,
+            gpu,
+            font_system: new_font_system(),
             font_family: None,
-            swash_cache,
-            text_atlas,
-            text_renderer,
-            viewport,
             palette: Palette::default(),
             font_size: initial_font_size,
             scale,
@@ -311,11 +192,7 @@ impl Renderer {
         if width > 0 && height > 0 {
             self.config.width = width;
             self.config.height = height;
-            self.surface.configure(&self.device, &self.config);
-            self.viewport
-                .update(&self.queue, Resolution { width, height });
-            self.quad_renderer
-                .update_screen_size(&self.queue, width as f32, height as f32);
+            self.gpu.resize(&self.config);
             self.row_cache.clear();
         }
     }
@@ -381,20 +258,9 @@ impl Renderer {
         panes: &[PaneFrame],
         dividers: &[Rect],
     ) -> anyhow::Result<()> {
-        let surface_texture = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(t)
-            | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
-            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                // Swapchain no longer matches the window (resize, display change, GPU reset).
-                self.surface.configure(&self.device, &self.config);
-                self.window.request_redraw();
-                return Ok(());
-            }
-            _ => return Ok(()),
+        let Some(surface_texture) = self.gpu.acquire(&self.config, &self.window) else {
+            return Ok(());
         };
-        let view = surface_texture
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
 
         let opts = FrameOptions {
             window_focused: self.focused,
@@ -424,74 +290,14 @@ impl Renderer {
                 winit::dpi::PhysicalSize::new(w, h),
             );
         }
-        self.quad_renderer
-            .set_rects(&self.device, &self.queue, &frame.quads);
-
-        let text_areas = frame
-            .text_runs(panes, &self.row_cache, &self.ime)
-            .into_iter()
-            .map(|run| TextArea {
-                buffer: run.buffer,
-                left: run.left,
-                top: run.top,
-                scale: 1.0,
-                bounds: run.bounds,
-                default_color: run.color,
-                custom_glyphs: &[],
-            });
-
-        let prepared = self.text_renderer.prepare(
-            &self.device,
-            &self.queue,
+        let runs = frame.text_runs(panes, &self.row_cache, &self.ime);
+        self.gpu.draw(
+            surface_texture,
+            &frame.quads,
+            runs,
             &mut self.font_system,
-            &mut self.text_atlas,
-            &self.viewport,
-            text_areas,
-            &mut self.swash_cache,
-        );
-        prepared.map_err(|e| anyhow::anyhow!("Text prepare error: {:?}", e))?;
-
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("twitty render encoder"),
-            });
-
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("twitty render pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            // Premultiplied, so transparency keeps the theme's tint.
-                            r: (frame.background[0] * self.opacity) as f64,
-                            g: (frame.background[1] * self.opacity) as f64,
-                            b: (frame.background[2] * self.opacity) as f64,
-                            a: self.opacity as f64,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-
-            self.quad_renderer.render(&mut pass);
-            self.text_renderer
-                .render(&self.text_atlas, &self.viewport, &mut pass)
-                .map_err(|e| anyhow::anyhow!("Text render error: {:?}", e))?;
-        }
-
-        self.queue.submit(Some(encoder.finish()));
-        self.queue.present(surface_texture);
-
-        self.text_atlas.trim();
-
-        Ok(())
+            frame.background,
+            self.opacity,
+        )
     }
 }
