@@ -104,3 +104,40 @@ fn shell_starts_in_the_requested_directory_and_reports_it() {
     }
     assert_eq!(pty.cwd(), Some(dir));
 }
+
+#[test]
+fn concealed_text_is_drawn_transparent() {
+    use cosmic_text::FontSystem;
+    use twitty::color::Palette;
+    use twitty::renderer::RowShaper;
+    let mut term = Terminal::new(20, 2, |_| {});
+    term.process_bytes(b"ab\x1b[8mxyz\x1b[0mcd\r\n");
+    let (lines, _) = term.snapshot();
+    let mut fs = FontSystem::new();
+    let palette = Palette::default();
+    let mut shaper = RowShaper {
+        font_system: &mut fs,
+        palette: &palette,
+        font_px: 15.0,
+        char_width: 9.0,
+        line_height: 23.0,
+        family: None,
+    };
+    let segments = shaper.build_row(&lines[0], None);
+    let mut seen = 0;
+    for seg in &segments {
+        for run in seg.buffer.layout_runs() {
+            for g in run.glyphs {
+                let ch = run.text[g.start..g.end].chars().next().unwrap();
+                let alpha = g.color_opt.map_or(255, |c| c.a());
+                if "xyz".contains(ch) {
+                    seen += 1;
+                    assert_eq!(alpha, 0, "concealed {ch:?} is visible");
+                } else if "abcd".contains(ch) {
+                    assert_eq!(alpha, 255, "{ch:?} must stay opaque");
+                }
+            }
+        }
+    }
+    assert_eq!(seen, 3);
+}

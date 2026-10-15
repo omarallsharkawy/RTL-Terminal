@@ -342,9 +342,14 @@ impl RowShaper<'_> {
                 // Text under a block cursor takes the cell's background so it stays legible.
                 fg = bg;
             }
-            let mut attrs = Attrs::new()
-                .family(grid_family(self.family))
-                .color(fg.to_glyphon());
+            // Concealed text (`\e[8m`) is drawn fully transparent: painting it in the background
+            // color would still show it over a see-through window.
+            let color = if cell.flags.contains(CellFlags::HIDDEN) && fg == bg {
+                cosmic_text::Color::rgba(0, 0, 0, 0)
+            } else {
+                fg.to_glyphon()
+            };
+            let mut attrs = Attrs::new().family(grid_family(self.family)).color(color);
             if cell.flags.contains(CellFlags::BOLD) {
                 attrs = attrs.weight(cosmic_text::Weight::BOLD);
             }
