@@ -2,7 +2,7 @@
 //! candidate popup goes.
 
 use cosmic_text::Buffer;
-use glyphon::{TextArea, TextBounds};
+use glyphon::TextBounds;
 
 use super::context::DrawContext;
 use crate::render::style::Quad;
@@ -153,21 +153,8 @@ impl PreeditState {
         (origin, moved.then_some(rect))
     }
 
-    /// Text area for the shaped preedit; borrows only this state so it can sit beside other areas.
-    pub(crate) fn text_area(
-        &self,
-        origin: (f32, f32),
-        bounds: TextBounds,
-        color: glyphon::Color,
-    ) -> Option<TextArea<'_>> {
-        Some(TextArea {
-            buffer: self.buffer.as_ref()?,
-            left: origin.0,
-            top: origin.1,
-            scale: 1.0,
-            bounds,
-            default_color: color,
-            custom_glyphs: &[],
-        })
+    /// The shaped preedit, once laid out.
+    pub fn buffer(&self) -> Option<&Buffer> {
+        self.buffer.as_ref()
     }
 }

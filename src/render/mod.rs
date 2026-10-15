@@ -16,11 +16,9 @@ pub use text::segment::CachedSegment;
 pub use text::shaper::{measure_char_width, shape_label, RowShaper};
 
 use alacritty_terminal::index::Side;
-use alacritty_terminal::vte::ansi::CursorShape;
-use cosmic_text::{Buffer, FontSystem};
+use cosmic_text::FontSystem;
 use glyphon::{
-    Cache, ColorMode, Resolution, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer,
-    Viewport,
+    Cache, ColorMode, Resolution, SwashCache, TextArea, TextAtlas, TextRenderer, Viewport,
 };
 use std::sync::Arc;
 use winit::window::Window;
@@ -29,11 +27,8 @@ use crate::color::Palette;
 use crate::layout::{PaneId, Rect};
 use crate::quad::QuadRenderer;
 use crate::terminal::{CursorState, LineData};
-use row::hash_row;
-use scene::chrome;
 use scene::context::DrawContext;
-use scene::cursor::{cursor_left, cursor_quads, effective_cursor_shape};
-use scene::preedit::bounds_outside;
+use scene::frame::{build_frame, FrameOptions};
 use text::fonts::{installed_family, new_font_system};
 
 /// Everything the renderer needs to draw one pane.
@@ -401,190 +396,49 @@ impl Renderer {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let (width, height) = (self.config.width as f32, self.config.height as f32);
-        let m = self.metrics();
+        let opts = FrameOptions {
+            window_focused: self.focused,
+            cursor_style: &self.cursor_style,
+            cursor_blink_on: self.cursor_blink_on,
+            surface: (self.config.width as f32, self.config.height as f32),
+        };
         let mut ctx = DrawContext {
+            metrics: self.metrics(),
             font_system: &mut self.font_system,
             family: self.font_family,
             palette: &self.palette,
-            metrics: m,
             is_srgb: self.is_srgb,
         };
-        let default_bg_color = ctx.color(ctx.palette.background);
-        let cursor_color = ctx.color(ctx.palette.cursor);
-        let mut quads: Vec<Quad> = Vec::new();
-        // The focused pane's cursor is separate: a preedit replaces it.
-        let mut focused_cursor: Vec<Quad> = Vec::new();
-        let mut other_cursors: Vec<Quad> = Vec::new();
-        let mut ime_caret: Option<(f32, f32, bool)> = None;
-        let mut ime_bounds: Option<TextBounds> = None;
-        let rect_bounds = |r: Rect| TextBounds {
-            left: r.x as i32,
-            top: r.y as i32,
-            right: r.right() as i32,
-            bottom: r.bottom() as i32,
-        };
-
-        let tab_geometry = chrome::tab_geometry(&ctx, tabs.len(), width);
-        chrome::tab_bar_quads(&ctx, tabs, &tab_geometry, width, &mut quads);
-
-        // Row caches are taken out of the map while drawing so shaping can borrow `self`.
-        let mut caches: Vec<Vec<CachedRow>> = Vec::with_capacity(panes.len());
-        for pane in panes {
-            let rect = pane.rect;
-            let (origin_x, origin_y) = (rect.x + m.padding_left, rect.y + m.padding_top);
-            let mut rows = self.row_cache.take(pane.id, pane.lines.len());
-            let shape = effective_cursor_shape(&self.cursor_style, pane.cursor.shape);
-            let cursor_focused = self.focused && pane.focused;
-
-            for (r, line) in pane.lines.iter().enumerate() {
-                let y = origin_y + r as f32 * m.line_height;
-                // The cursor row stays marked during the blink's off phase: shaping depends on it
-                // (an Arabic line being typed keeps its LTR base), only the block recolor turns off.
-                let row_cursor =
-                    (pane.cursor.is_visible && pane.cursor.row == r).then_some(RowCursor {
-                        col: pane.cursor.col,
-                        block: cursor_focused
-                            && self.cursor_blink_on
-                            && shape == CursorShape::Block,
-                    });
-
-                let hash = hash_row(&line.cells, row_cursor);
-                if rows[r].hash != hash {
-                    let segments = ctx.shaper().build_row(line, row_cursor);
-                    let row_quads = ctx.row_quads(line, &segments);
-                    rows[r] = CachedRow::new(hash, line, segments, row_quads, m.char_width);
-                }
-
-                let cached = &rows[r];
-                quads.extend(
-                    cached
-                        .quads
-                        .iter()
-                        .map(|&(x, qy, w, h, c)| (origin_x + x, y + qy, w, h, c)),
-                );
-
-                if pane.focused && pane.cursor.row == r {
-                    let (x, ext) = cached.cursor_anchor(pane.cursor.col, m.char_width);
-                    ime_caret = Some((origin_x + x, y, ext));
-                    ime_bounds = Some(rect_bounds(rect));
-                }
-
-                // Only the focused pane's cursor blinks.
-                if let Some(rc) = row_cursor.filter(|_| !pane.focused || self.cursor_blink_on) {
-                    let (x, extends_left) = cached.cursor_anchor(rc.col, m.char_width);
-                    let x = cursor_left(origin_x + x, extends_left, shape, &m);
-                    let out = if pane.focused {
-                        &mut focused_cursor
-                    } else {
-                        &mut other_cursors
-                    };
-                    let w = cursor_cell_width(line, rc.col, m.char_width);
-                    cursor_quads((x, y, w), shape, cursor_focused, &m, cursor_color, out);
-                    if let Some(cell) = line.cells.get(rc.col).filter(|_| rc.block) {
-                        let rect = (x, y, w, m.line_height);
-                        out.extend(geometry_under_block_cursor(
-                            ctx.palette,
-                            ctx.is_srgb,
-                            cell,
-                            rect,
-                        ));
-                    }
-                }
-            }
-            caches.push(rows);
-        }
-
-        let (preedit_box, ime_area) =
-            self.ime
-                .layout(&mut ctx, ime_caret, &mut quads, &mut focused_cursor);
-        if let Some((x, y, w, h)) = ime_area {
+        let frame = build_frame(
+            &mut ctx,
+            &opts,
+            &mut self.row_cache,
+            &mut self.ime,
+            tabs,
+            panes,
+            dividers,
+        );
+        if let Some((x, y, w, h)) = frame.ime_area {
             self.window.set_ime_cursor_area(
                 winit::dpi::PhysicalPosition::new(x, y),
                 winit::dpi::PhysicalSize::new(w, h),
             );
         }
-        // The cursor sits above cell backgrounds but below text (its glyph was recolored).
-        quads.extend(other_cursors);
-        quads.extend(focused_cursor);
-
-        let mut statuses: Vec<Option<(Quad, Buffer, f32)>> = Vec::with_capacity(panes.len());
-        for pane in panes {
-            let status = match &pane.status {
-                Some(text) => chrome::status_line(&mut ctx, pane.rect, pane.lines.len(), text),
-                None => None,
-            };
-            if let Some((quad, _, _)) = &status {
-                quads.push(*quad);
-            }
-            statuses.push(status);
-        }
-
-        quads.extend(chrome::divider_quads(&ctx, dividers));
         self.quad_renderer
-            .set_rects(&self.device, &self.queue, &quads);
+            .set_rects(&self.device, &self.queue, &frame.quads);
 
-        let tab_texts = chrome::tab_titles(&mut ctx, tabs, &tab_geometry);
-        let fg = ctx.palette.foreground.to_glyphon();
-
-        let mut text_areas: Vec<TextArea> = Vec::new();
-        for (buffer, rect, color) in &tab_texts {
-            text_areas.push(TextArea {
-                buffer,
-                left: rect.x + m.char_width,
-                top: rect.y,
+        let text_areas = frame
+            .text_runs(panes, &self.row_cache, &self.ime)
+            .into_iter()
+            .map(|run| TextArea {
+                buffer: run.buffer,
+                left: run.left,
+                top: run.top,
                 scale: 1.0,
-                bounds: rect_bounds(*rect),
-                default_color: *color,
+                bounds: run.bounds,
+                default_color: run.color,
                 custom_glyphs: &[],
             });
-        }
-        for ((pane, rows), status) in panes.iter().zip(&caches).zip(&statuses) {
-            let bounds = rect_bounds(pane.rect);
-            for (r, cached_row) in rows.iter().enumerate() {
-                if status.is_some() && r + 1 == rows.len() {
-                    break;
-                }
-                let y = pane.rect.y + m.padding_top + r as f32 * m.line_height;
-                // The row under the preedit is clipped around it, so its text does not show
-                // through the preedit's background.
-                let (parts, n) = match preedit_box {
-                    Some((left, _, width)) if pane.focused && pane.cursor.row == r => {
-                        (bounds_outside(bounds, left, left + width), 2)
-                    }
-                    _ => ([bounds, bounds], 1),
-                };
-                for seg in &cached_row.segments {
-                    for &bounds in &parts[..n] {
-                        text_areas.push(TextArea {
-                            buffer: &seg.buffer,
-                            left: pane.rect.x + m.padding_left + seg.seg_x,
-                            top: y,
-                            scale: 1.0,
-                            bounds,
-                            default_color: fg,
-                            custom_glyphs: &[],
-                        });
-                    }
-                }
-            }
-            if let Some((_, buffer, y)) = status {
-                text_areas.push(TextArea {
-                    buffer,
-                    left: pane.rect.x + m.padding_left,
-                    top: *y,
-                    scale: 1.0,
-                    bounds,
-                    default_color: fg,
-                    custom_glyphs: &[],
-                });
-            }
-        }
-        if let Some((left, top, _)) = preedit_box {
-            let bounds =
-                ime_bounds.unwrap_or_else(|| rect_bounds(Rect::new(0.0, 0.0, width, height)));
-            text_areas.extend(self.ime.text_area((left, top), bounds, fg));
-        }
 
         let prepared = self.text_renderer.prepare(
             &self.device,
@@ -595,9 +449,6 @@ impl Renderer {
             text_areas,
             &mut self.swash_cache,
         );
-        for (pane, rows) in panes.iter().zip(caches) {
-            self.row_cache.put(pane.id, rows);
-        }
         prepared.map_err(|e| anyhow::anyhow!("Text prepare error: {:?}", e))?;
 
         let mut encoder = self
@@ -615,9 +466,9 @@ impl Renderer {
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
                             // Premultiplied, so transparency keeps the theme's tint.
-                            r: (default_bg_color[0] * self.opacity) as f64,
-                            g: (default_bg_color[1] * self.opacity) as f64,
-                            b: (default_bg_color[2] * self.opacity) as f64,
+                            r: (frame.background[0] * self.opacity) as f64,
+                            g: (frame.background[1] * self.opacity) as f64,
+                            b: (frame.background[2] * self.opacity) as f64,
                             a: self.opacity as f64,
                         }),
                         store: wgpu::StoreOp::Store,
