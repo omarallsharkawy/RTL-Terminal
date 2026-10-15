@@ -593,6 +593,15 @@ pub fn cell_colors(palette: &Palette, cell: &CellData) -> (Rgba, Rgba) {
     (fg, bg)
 }
 
+/// Width of the cursor on `col`: two cells on a double-width character, so a block cursor
+/// covers all of the glyph it recolors.
+pub fn cursor_cell_width(line: &LineData, col: usize, cw: f32) -> f32 {
+    match line.cells.get(col) {
+        Some(cell) if cell.flags.contains(CellFlags::WIDE_CHAR) => cw * 2.0,
+        _ => cw,
+    }
+}
+
 /// Where each cell of a row is drawn, relative to the row origin: `Some((left, right))` for
 /// cells inside RTL segments (they follow their glyphs), `None` for cells on the grid.
 pub fn visual_cell_extents(
@@ -1070,8 +1079,14 @@ impl Renderer {
         )
     }
 
-    fn cursor_quads(&self, x: f32, y: f32, shape: CursorShape, focused: bool, out: &mut Vec<Quad>) {
-        let (w, h) = (self.char_width, self.line_height);
+    fn cursor_quads(
+        &self,
+        (x, y, w): (f32, f32, f32),
+        shape: CursorShape,
+        focused: bool,
+        out: &mut Vec<Quad>,
+    ) {
+        let h = self.line_height;
         let color = self.to_target_color(self.palette.cursor);
         let t = (self.scale * 1.5).round().max(1.0);
         let hollow = |out: &mut Vec<Quad>| {
@@ -1225,7 +1240,8 @@ impl Renderer {
                     } else {
                         &mut other_cursor_quads
                     };
-                    self.cursor_quads(x.max(0.0), y, shape, cursor_focused, out);
+                    let w = cursor_cell_width(line, rc.col, self.char_width);
+                    self.cursor_quads((x.max(0.0), y, w), shape, cursor_focused, out);
                 }
             }
             caches.push(rows);

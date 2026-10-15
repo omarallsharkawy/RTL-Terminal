@@ -3,8 +3,8 @@
 use alacritty_terminal::term::cell::Flags as CellFlags;
 use glyphon::ColorMode;
 use twitty::color::Palette;
-use twitty::renderer::{cell_colors, text_color_mode};
-use twitty::terminal::CellData;
+use twitty::renderer::{cell_colors, cursor_cell_width, text_color_mode};
+use twitty::terminal::{CellData, Terminal};
 
 fn hidden_cell() -> CellData {
     let mut cell = CellData::blank();
@@ -35,4 +35,17 @@ fn glyph_colors_match_quad_colors_on_a_non_srgb_surface() {
     // or text comes out darker than the palette (and than the block cursor it is drawn on).
     assert_eq!(text_color_mode(false), ColorMode::Web);
     assert_eq!(text_color_mode(true), ColorMode::Accurate);
+}
+
+#[test]
+fn block_cursor_covers_both_cells_of_a_wide_char() {
+    let mut term = Terminal::new(20, 2, |_| {});
+    term.process_bytes("a中b".as_bytes());
+    let (lines, _) = term.snapshot();
+    let line = &lines[0];
+    assert_eq!(cursor_cell_width(line, 0, 9.0), 9.0);
+    assert_eq!(cursor_cell_width(line, 1, 9.0), 18.0);
+    assert_eq!(cursor_cell_width(line, 3, 9.0), 9.0);
+    // Past the end of the row.
+    assert_eq!(cursor_cell_width(line, 99, 9.0), 9.0);
 }
