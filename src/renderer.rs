@@ -1,4 +1,4 @@
-use crate::fonts::{family_installed, grid_family, new_font_system};
+use crate::fonts::{grid_family, installed_family, new_font_system};
 use alacritty_terminal::index::Side;
 use alacritty_terminal::term::cell::Flags as CellFlags;
 use alacritty_terminal::vte::ansi::CursorShape;
@@ -886,13 +886,13 @@ impl Renderer {
     pub fn set_font_family(&mut self, name: Option<&str>) {
         let name = name.map(str::trim).filter(|n| !n.is_empty());
         self.font_family = match name {
-            Some(n) if family_installed(&self.font_system, n) => {
-                Some(Box::leak(n.to_string().into_boxed_str()))
-            }
-            Some(n) => {
-                eprintln!("twitty: font_family {n:?} is not installed, using monospace");
-                None
-            }
+            Some(n) => match installed_family(&self.font_system, n) {
+                Some(installed) => Some(Box::leak(installed.into_boxed_str())),
+                None => {
+                    eprintln!("twitty: font_family {n:?} is not installed, using monospace");
+                    None
+                }
+            },
             None => None,
         };
         self.update_metrics();
