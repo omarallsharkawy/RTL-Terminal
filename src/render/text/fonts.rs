@@ -4,7 +4,8 @@ use cosmic_text::{Family, FontSystem};
 
 /// Noto Naskh Arabic (SIL OFL 1.1, see `assets/fonts/OFL.txt`). Embedded so Arabic renders
 /// on machines that have no Arabic font installed.
-const NOTO_NASKH_ARABIC: &[u8] = include_bytes!("../assets/fonts/NotoNaskhArabic-Regular.ttf");
+const NOTO_NASKH_ARABIC: &[u8] =
+    include_bytes!("../../../assets/fonts/NotoNaskhArabic-Regular.ttf");
 
 /// A `FontSystem` with the system fonts plus the embedded Arabic font. System fonts win
 /// where they cover a script; the embedded one is only the safety net.

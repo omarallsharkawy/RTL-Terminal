@@ -1,4 +1,5 @@
-use crate::fonts::{grid_family, installed_family, new_font_system};
+pub mod text;
+
 use alacritty_terminal::index::Side;
 use alacritty_terminal::term::cell::Flags as CellFlags;
 use alacritty_terminal::vte::ansi::CursorShape;
@@ -9,28 +10,20 @@ use glyphon::{
 };
 use std::collections::HashMap;
 use std::sync::Arc;
-use unicode_bidi::{bidi_class, BidiClass};
 use winit::window::Window;
 
 use crate::color::{Palette, Rgba};
 use crate::layout::{tab_rects, truncate_title, PaneId, Rect};
 use crate::quad::{try_render_box_or_block, QuadRenderer};
 use crate::terminal::{CellData, CursorState, LineData};
+use text::bidi::{is_rtl_char, trails_rtl_neutrals, LRI, LRM, PDI, RLM};
+use text::fonts::{grid_family, installed_family, new_font_system};
 
 /// Line height as a multiple of the font size (tall enough for Arabic harakat).
 const LINE_HEIGHT_FACTOR: f32 = 1.55;
 /// Logical (DPI-independent) window padding.
 const PADDING_LEFT: f32 = 8.0;
 const PADDING_TOP: f32 = 6.0;
-/// Left-to-right mark prepended to RTL segments so prompts never flip direction.
-const LRM: &str = "\u{200E}";
-/// Right-to-left mark appended after spaces typed at the end of Arabic, so they stay on its left.
-const RLM: &str = "\u{200F}";
-/// Left-to-right isolate / pop directional isolate: wrap Latin words and numbers inside Arabic so
-/// hashes like `7abaf40` are never torn into `7` … `abaf40`.
-const LRI: &str = "\u{2066}";
-const PDI: &str = "\u{2069}";
-
 type Quad = (f32, f32, f32, f32, [f32; 4]);
 
 /// Widest a tab in the tab bar gets, in cells.
@@ -546,24 +539,6 @@ fn hash_color<H: std::hash::Hasher>(color: &alacritty_terminal::vte::ansi::Color
         Color::Spec(rgb) => (1u8, rgb.r, rgb.g, rgb.b).hash(hasher),
         Color::Indexed(idx) => (2u8, *idx).hash(hasher),
     }
-}
-
-fn is_rtl_char(c: char) -> bool {
-    matches!(bidi_class(c), BidiClass::R | BidiClass::AL)
-}
-
-/// True when the last strong character is Arabic/Hebrew and only neutrals (spaces, punctuation,
-/// symbols) follow it. Digits are excluded: numbers are isolated and keep their own side.
-fn trails_rtl_neutrals(cells: &[CellData]) -> bool {
-    let mut trailing = 0;
-    for cell in cells.iter().rev() {
-        match bidi_class(cell.c) {
-            BidiClass::R | BidiClass::AL => return trailing > 0,
-            BidiClass::L | BidiClass::EN | BidiClass::AN => return false,
-            _ => trailing += 1,
-        }
-    }
-    false
 }
 
 fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {
