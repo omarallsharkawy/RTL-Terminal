@@ -128,6 +128,8 @@ pub struct CachedRow {
     pub visual: Vec<Option<(f32, f32)>>,
     /// Cells whose character is right-to-left (their left and right halves are swapped).
     pub rtl_cells: Vec<bool>,
+    /// Cells holding a plain space (see `CellData::is_blank`).
+    pub blank_cells: Vec<bool>,
     pub segments: Vec<CachedSegment>,
     /// Backgrounds, box drawing and text decorations, relative to the row origin.
     pub quads: Vec<Quad>,
@@ -214,7 +216,10 @@ impl CachedRow {
                 };
             }
             let next_start = row.segments.get(i + 1).map_or(usize::MAX, |s| s.seg_start);
-            if col >= seg.seg_end && col < next_start {
+            // Only spaces may separate the caret from the text it follows; past a border or
+            // other content it stays on its own cell.
+            let only_spaces = || (seg.seg_end..col).all(|c| row.blank_cells.get(c) == Some(&true));
+            if col >= seg.seg_end && col < next_start && only_spaces() {
                 let gap = (col - seg.seg_end) as f32 * char_width;
                 return match glyph_of(seg, seg.seg_end - 1) {
                     Some((left, _, true)) => (left - gap, true),
@@ -1206,6 +1211,7 @@ impl Renderer {
                         hash,
                         visual: visual_cell_extents(line, &segments, self.char_width),
                         rtl_cells: line.cells.iter().map(|c| is_rtl_char(c.c)).collect(),
+                        blank_cells: line.cells.iter().map(CellData::is_blank).collect(),
                         segments,
                         quads: row_quads,
                     };
