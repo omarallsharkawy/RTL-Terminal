@@ -17,6 +17,7 @@ use crate::input::mouse::{
     button_code, button_report, motion_report, wheel_action, wheel_lines, StepAccumulator,
     WheelAction, LINES_PER_WHEEL_NOTCH,
 };
+use crate::input::pointer::{cursor_icon_for, PointerState, PressTarget};
 use crate::input::route::{route_key, shortcut_is_idle, KeyRoute};
 use crate::input::{
     encode_mouse, encode_paste, handle_key, key_shortcut, terminal_key, InputAction,
@@ -29,6 +30,7 @@ use crate::pane::Pane;
 use crate::pty::Pty;
 use crate::renderer::{PaneFrame, Renderer, TabLabel};
 use crate::terminal::Terminal;
+use crate::ui::hit::{hit_test, Hit, HitGeometry};
 
 const WINDOW_TITLE: &str = "Twitty · RTL Terminal";
 const DEFAULT_FONT_SIZE: f32 = 14.5;
@@ -53,15 +55,6 @@ struct Tab {
     focused: PaneId,
 }
 
-/// What lies under the pointer.
-enum Hit {
-    Tab(usize),
-    TabBar,
-    Divider(Divider),
-    Pane(PaneId),
-    Nothing,
-}
-
 pub struct App {
     proxy: EventLoopProxy<AppEvent>,
     panes: HashMap<PaneId, Pane>,
@@ -70,14 +63,7 @@ pub struct App {
     next_pane_id: u64,
     renderer: Option<Renderer>,
     modifiers: ModifiersState,
-    /// Last pointer position in physical pixels.
-    pointer: (f64, f64),
-    /// The pane a pressed mouse button belongs to until it is released.
-    capture: Option<PaneId>,
-    /// The pane the pointer last moved over.
-    hover_pane: Option<PaneId>,
-    /// A divider is being dragged.
-    drag_divider: Option<Divider>,
+    pointer: PointerState,
     cursor_icon: CursorIcon,
     /// Kept alive for the whole session: on Linux, copied text is served by this object and
     /// would vanish if it were dropped right after copying.
@@ -102,10 +88,7 @@ impl App {
             next_pane_id: 0,
             renderer: None,
             modifiers: ModifiersState::empty(),
-            pointer: (0.0, 0.0),
-            capture: None,
-            hover_pane: None,
-            drag_divider: None,
+            pointer: PointerState::default(),
             cursor_icon: CursorIcon::Default,
             clipboard: None,
             config: TwittyConfig::load(),
@@ -223,33 +206,14 @@ impl App {
             return Hit::Nothing;
         };
         let n = self.tabs.len();
-        if y < r.tab_bar_height(n) as f64 {
-            let max_tab = r.char_width * 28.0;
-            let tabs = tab_rects(n, r.config.width as f32, r.line_height, max_tab);
-            return match tabs.iter().position(|t| t.contains(x, y)) {
-                Some(i) => Hit::Tab(i),
-                None => Hit::TabBar,
-            };
-        }
-        if let (Some(tab), Some(content)) = (self.tabs.get(self.active), self.content_rect(n)) {
-            // The line is thin, so grab it from a few pixels either side.
-            let slop = (r.scale * 3.0).max(2.0);
-            for d in dividers(&tab.root, content, self.gap()) {
-                let grab = Rect::new(
-                    d.rect.x - slop,
-                    d.rect.y - slop,
-                    d.rect.w + slop * 2.0,
-                    d.rect.h + slop * 2.0,
-                );
-                if grab.contains(x, y) {
-                    return Hit::Divider(d);
-                }
-            }
-        }
-        match self.pane_at(x, y) {
-            Some(id) => Hit::Pane(id),
-            None => Hit::Nothing,
-        }
+        let geometry = HitGeometry {
+            tab_bar_height: r.tab_bar_height(n),
+            tabs: tab_rects(n, r.config.width as f32, r.line_height, r.char_width * 28.0),
+            content: r.content_rect(n),
+            gap: r.divider_gap(),
+            slop: (r.scale * 3.0).max(2.0),
+        };
+        hit_test(&geometry, self.tabs.get(self.active).map(|t| &t.root), x, y)
     }
 
     /// Give every pane of every tab the grid its rectangle allows.
@@ -294,8 +258,7 @@ impl App {
         });
         self.active = self.tabs.len() - 1;
         self.release_held_buttons();
-        self.capture = None;
-        self.drag_divider = None;
+        self.pointer.cancel();
         // A second tab shows the tab bar, which shrinks every pane.
         self.apply_layout();
         self.focus_changed(previous, id);
@@ -382,8 +345,7 @@ impl App {
         let old = self.focused_id();
         self.active = index;
         self.release_held_buttons();
-        self.capture = None;
-        self.drag_divider = None;
+        self.pointer.cancel();
         if let Some(new) = self.focused_id() {
             self.focus_changed(old, new);
         }
@@ -439,13 +401,7 @@ impl App {
         if let Some(r) = self.renderer.as_mut() {
             r.forget_pane(id);
         }
-        if self.capture == Some(id) {
-            self.capture = None;
-        }
-        if self.hover_pane == Some(id) {
-            self.hover_pane = None;
-        }
-        self.drag_divider = None;
+        self.pointer.forget(id);
         let Some(now) = self.focused_id() else {
             return true;
         };
@@ -733,8 +689,8 @@ impl App {
 
     fn drag_divider_to(&mut self, divider: &Divider) {
         let pos = match divider.dir {
-            SplitDir::Horizontal => self.pointer.0,
-            SplitDir::Vertical => self.pointer.1,
+            SplitDir::Horizontal => self.pointer.pos.0,
+            SplitDir::Vertical => self.pointer.pos.1,
         };
         let ratio = ratio_at(divider, pos, self.gap());
         if let Some(tab) = self.tabs.get_mut(self.active) {
@@ -1142,8 +1098,7 @@ impl ApplicationHandler<AppEvent> for App {
                         self.finish_selection(id);
                     }
                     self.release_held_buttons();
-                    self.capture = None;
-                    self.drag_divider = None;
+                    self.pointer.cancel();
                 }
                 self.cursor_blink.set_focused(Instant::now(), focused);
                 if let Some(ref mut r) = self.renderer {
@@ -1158,42 +1113,24 @@ impl ApplicationHandler<AppEvent> for App {
             }
             WindowEvent::ModifiersChanged(mods) => {
                 self.modifiers = mods.state();
-                if let Some(id) = self.hover_pane.or(self.focused_id()) {
+                if let Some(id) = self.pointer.hover.or(self.focused_id()) {
                     self.update_link_hover(id);
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                self.pointer = (position.x, position.y);
-                if let Some(divider) = self.drag_divider.clone() {
+                self.pointer.pos = (position.x, position.y);
+                if let Some(divider) = self.pointer.drag.clone() {
                     self.drag_divider_to(&divider);
                     return;
                 }
                 let hit = self.hit_test(position.x, position.y);
-                match &hit {
-                    Hit::Divider(d) if self.capture.is_none() => {
-                        self.set_cursor_icon(match d.dir {
-                            SplitDir::Horizontal => CursorIcon::ColResize,
-                            SplitDir::Vertical => CursorIcon::RowResize,
-                        });
-                    }
-                    _ if matches!(
-                        self.cursor_icon,
-                        CursorIcon::ColResize | CursorIcon::RowResize
-                    ) =>
-                    {
-                        self.set_cursor_icon(CursorIcon::Default)
-                    }
-                    _ => {}
+                let captured = self.pointer.capture.is_some();
+                if let Some(icon) = cursor_icon_for(&hit, captured, self.cursor_icon) {
+                    self.set_cursor_icon(icon);
                 }
-                let target = self.capture.or(match hit {
-                    Hit::Pane(id) => Some(id),
-                    _ => None,
-                });
-                if self.hover_pane != target {
-                    if let Some(old) = self.hover_pane {
-                        self.clear_link_hover(old);
-                    }
-                    self.hover_pane = target;
+                let (target, left) = self.pointer.moved(&hit);
+                if let Some(old) = left {
+                    self.clear_link_hover(old);
                 }
                 let Some(id) = target else { return };
                 let Some(rect) = self.pane_rect(id) else {
@@ -1228,34 +1165,25 @@ impl ApplicationHandler<AppEvent> for App {
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 let pressed = state == ElementState::Pressed;
-                if !pressed && self.drag_divider.take().is_some() {
-                    return;
-                }
-                if pressed {
-                    match self.hit_test(self.pointer.0, self.pointer.1) {
-                        Hit::Tab(i) => {
-                            if button == MouseButton::Left {
-                                self.set_active_tab(i);
-                            }
-                            return;
+                let target = if pressed {
+                    let (x, y) = self.pointer.pos;
+                    let hit = self.hit_test(x, y);
+                    match self.pointer.press(hit, button == MouseButton::Left) {
+                        PressTarget::Tab(i) => {
+                            self.set_active_tab(i);
+                            None
                         }
-                        Hit::Divider(d) => {
-                            if button == MouseButton::Left {
-                                self.drag_divider = Some(d);
-                            }
-                            return;
-                        }
-                        Hit::TabBar | Hit::Nothing => return,
-                        Hit::Pane(id) => {
+                        PressTarget::Pane(id) => {
                             self.focus_pane(id);
-                            self.capture = Some(id);
+                            Some(id)
                         }
+                        PressTarget::None => None,
                     }
-                }
-                let Some(id) = self.capture else { return };
-                self.handle_mouse_button(id, button, pressed);
-                if !pressed {
-                    self.capture = None;
+                } else {
+                    self.pointer.release()
+                };
+                if let Some(id) = target {
+                    self.handle_mouse_button(id, button, pressed);
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
@@ -1289,7 +1217,7 @@ impl ApplicationHandler<AppEvent> for App {
                 }
 
                 // The wheel scrolls the pane under the pointer.
-                let Some(id) = self.pane_at(self.pointer.0, self.pointer.1) else {
+                let Some(id) = self.pane_at(self.pointer.pos.0, self.pointer.pos.1) else {
                     return;
                 };
                 // Accumulate so trackpads scroll smoothly instead of 3 lines per tiny event.

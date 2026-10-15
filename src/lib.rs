@@ -12,3 +12,4 @@ pub mod pty;
 pub mod quad;
 pub mod renderer;
 pub mod terminal;
+pub mod ui;

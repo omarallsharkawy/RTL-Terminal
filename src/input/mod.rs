@@ -6,6 +6,7 @@
 
 mod keys;
 pub mod mouse;
+pub mod pointer;
 pub mod route;
 
 pub use keys::*;
