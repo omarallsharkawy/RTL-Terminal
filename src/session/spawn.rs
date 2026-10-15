@@ -54,7 +54,7 @@ impl PaneFactory for ShellFactory<'_> {
         ) {
             Ok(p) => p,
             Err(e) => {
-                eprintln!("Failed to spawn PTY: {:?}", e);
+                tracing::error!("failed to spawn PTY: {e:?}");
                 return None;
             }
         };

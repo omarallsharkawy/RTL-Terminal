@@ -61,7 +61,7 @@ impl Window {
         let window = match event_loop.create_window(window_attrs) {
             Ok(w) => Arc::new(w),
             Err(e) => {
-                eprintln!("Failed to create window: {:?}", e);
+                tracing::error!("failed to create window: {e:?}");
                 event_loop.exit();
                 return false;
             }
@@ -73,7 +73,7 @@ impl Window {
         let mut renderer = match pollster::block_on(Renderer::new(window, config.font_size)) {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("Failed to initialize renderer: {:?}", e);
+                tracing::error!("failed to initialize renderer: {e:?}");
                 event_loop.exit();
                 return false;
             }
@@ -265,7 +265,7 @@ impl Window {
         if let Some(ref mut r) = self.renderer {
             r.set_cursor_blink(blink);
             if let Err(e) = r.render(tabs, panes, dividers) {
-                eprintln!("Render error: {:?}", e);
+                tracing::error!("render error: {e:?}");
             }
         }
     }

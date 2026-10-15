@@ -67,7 +67,7 @@ static WARNINGS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// Report a configuration problem: printed to stderr and kept for `take_warnings`, so the
 /// app can also show it in the terminal (a Windows GUI app has no visible stderr).
 pub fn warn(message: String) {
-    eprintln!("{message}");
+    tracing::warn!("{message}");
     if let Ok(mut warnings) = WARNINGS.lock() {
         warnings.push(message);
     }
