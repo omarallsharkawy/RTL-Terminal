@@ -13,6 +13,7 @@ use winit::window::{CursorIcon, UserAttentionType, WindowAttributes, WindowId};
 
 use crate::blink::{BlinkState, BLINK_INTERVAL};
 use crate::config::TwittyConfig;
+use crate::input::route::{route_key, shortcut_is_idle, KeyRoute};
 use crate::input::{
     encode_mouse, encode_paste, handle_key, key_shortcut, terminal_key, InputAction,
 };
@@ -1388,46 +1389,26 @@ impl ApplicationHandler<AppEvent> for App {
                 let Some(id) = self.focused_id() else { return };
                 let mode = self.mode_of(id);
                 let mut action = handle_key(&event, self.modifiers, mode);
-                // With a single pane / tab these shortcuts have nothing to do, so the key goes
-                // to the program instead (Alt+Left in fish, Ctrl+PageUp in vim...).
-                // Decided from the shortcut itself, so the release follows its press.
-                let idle = match key_shortcut(&event, self.modifiers) {
-                    Some(InputAction::Focus(_)) => self
-                        .tabs
-                        .get(self.active)
-                        .is_some_and(|t| matches!(t.root, Node::Leaf(_))),
-                    Some(InputAction::NextTab | InputAction::PrevTab) => self.tabs.len() < 2,
-                    _ => false,
-                };
-                if idle {
+                let single_pane = self
+                    .tabs
+                    .get(self.active)
+                    .is_some_and(|t| matches!(t.root, Node::Leaf(_)));
+                let shortcut = key_shortcut(&event, self.modifiers);
+                if shortcut_is_idle(shortcut.as_ref(), single_pane, self.tabs.len()) {
                     action = terminal_key(&event, self.modifiers, mode).map(InputAction::Bytes);
                 }
-                // Layout shortcuts keep working while the search bar has the keyboard.
-                let layout_action = matches!(
-                    action,
-                    Some(
-                        InputAction::NewTab
-                            | InputAction::ClosePane
-                            | InputAction::NextTab
-                            | InputAction::PrevTab
-                            | InputAction::SplitRight
-                            | InputAction::SplitDown
-                            | InputAction::Focus(_)
-                    )
-                );
-                if !layout_action
-                    && self
-                        .panes
-                        .get(&id)
-                        .is_some_and(|p| p.search_query.is_some())
-                {
-                    self.handle_search_key(id, &event);
-                    return;
-                }
-                if let Some(action) = action {
-                    if self.run_action(id, action) {
-                        event_loop.exit();
+                let search_open = self
+                    .panes
+                    .get(&id)
+                    .is_some_and(|p| p.search_query.is_some());
+                match route_key(action, search_open) {
+                    KeyRoute::SearchBar => self.handle_search_key(id, &event),
+                    KeyRoute::Action(action) => {
+                        if self.run_action(id, action) {
+                            event_loop.exit();
+                        }
                     }
+                    KeyRoute::Ignore => {}
                 }
             }
             WindowEvent::RedrawRequested => {
