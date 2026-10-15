@@ -263,15 +263,15 @@ pub fn handle_key_raw(
         }
     }
 
-    // 1. App shortcuts and Ctrl combos by physical key (layout-independent).
-    if let Some(action) = shortcut_key(physical, logical).and_then(|k| app_shortcut(k, modifiers)) {
+    // 1. App shortcuts and Ctrl combos: by the typed Latin letter, else the physical key
+    //    (so Ctrl+A is ^A on AZERTY, and Ctrl works on Arabic layouts).
+    let key_code = shortcut_key(physical, logical);
+    if let Some(action) = key_code.and_then(|k| app_shortcut(k, modifiers)) {
         return Some(action);
     }
-    if let Some(key_code) = physical {
-        if ctrl {
-            if let Some(byte) = ctrl_byte(key_code) {
-                return Some(InputAction::Bytes(with_alt(alt, vec![byte])));
-            }
+    if ctrl {
+        if let Some(byte) = key_code.and_then(ctrl_byte) {
+            return Some(InputAction::Bytes(with_alt(alt, vec![byte])));
         }
     }
 
