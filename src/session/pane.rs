@@ -18,6 +18,12 @@ pub struct Pane {
     pub size: (usize, usize),
     /// Window title set by the program (OSC 0/2).
     pub title: Option<String>,
+    pub ui: PaneUi,
+}
+
+/// Pointer, selection and search state of one pane.
+#[derive(Debug)]
+pub struct PaneUi {
     pub mouse_col: usize,
     pub mouse_row: usize,
     /// Button whose press was reported to the program (xterm codes 0-2), for drag and release
@@ -35,6 +41,22 @@ pub struct Pane {
     pub search_query: Option<String>,
 }
 
+impl Default for PaneUi {
+    fn default() -> Self {
+        Self {
+            mouse_col: 0,
+            mouse_row: 0,
+            mouse_button_down: None,
+            mouse_side: Side::Left,
+            selection: SelectionState::default(),
+            link_press: false,
+            clicks: ClickCounter::default(),
+            scroll_steps: StepAccumulator::default(),
+            search_query: None,
+        }
+    }
+}
+
 impl Pane {
     pub fn new(
         id: PaneId,
@@ -48,15 +70,7 @@ impl Pane {
             pty,
             size,
             title: None,
-            mouse_col: 0,
-            mouse_row: 0,
-            mouse_button_down: None,
-            mouse_side: Side::Left,
-            selection: SelectionState::default(),
-            link_press: false,
-            clicks: ClickCounter::default(),
-            scroll_steps: StepAccumulator::default(),
-            search_query: None,
+            ui: PaneUi::default(),
         }
     }
 

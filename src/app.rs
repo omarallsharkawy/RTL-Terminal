@@ -26,9 +26,9 @@ use crate::layout::{
     dividers, layout, neighbor, ratio_at, set_ratio, tab_rects, Divider, FocusDir, Node, PaneId,
     Rect, SplitDir,
 };
-use crate::pane::Pane;
 use crate::pty::Pty;
 use crate::renderer::{PaneFrame, Renderer, TabLabel};
+use crate::session::pane::Pane;
 use crate::terminal::Terminal;
 use crate::ui::clipboard::Clipboard;
 use crate::ui::hit::{hit_test, Hit, HitGeometry};
@@ -518,7 +518,7 @@ impl App {
             })
             .unwrap_or(false);
         if let Some(pane) = self.panes.get_mut(&id) {
-            pane.selection.end();
+            pane.ui.selection.end();
         }
         if had {
             self.request_redraw();
@@ -535,13 +535,13 @@ impl App {
 
     fn start_selection(&mut self, id: PaneId) {
         let now = Instant::now();
-        let side = self.panes.get(&id).map_or(Side::Left, |p| p.mouse_side);
+        let side = self.panes.get(&id).map_or(Side::Left, |p| p.ui.mouse_side);
         let Some(pane) = self.panes.get_mut(&id) else {
             return;
         };
-        let (col, row) = (pane.mouse_col, pane.mouse_row);
-        let clicks = pane.clicks.click(now, col, row);
-        pane.selection.begin();
+        let (col, row) = (pane.ui.mouse_col, pane.ui.mouse_row);
+        let clicks = pane.ui.clicks.click(now, col, row);
+        pane.ui.selection.begin();
         if let Ok(mut term) = pane.terminal.lock() {
             term.start_selection(col, row, side, clicks);
         }
@@ -551,13 +551,13 @@ impl App {
     /// Mouse released: copy what was selected, flash it briefly, then clear the highlight.
     fn finish_selection(&mut self, id: PaneId) {
         if let Some(pane) = self.panes.get_mut(&id) {
-            pane.selection.end();
+            pane.ui.selection.end();
         }
         if !self.copy_selection(id) {
             self.clear_selection(id);
             return;
         }
-        let Some(generation) = self.panes.get(&id).map(|p| p.selection.generation()) else {
+        let Some(generation) = self.panes.get(&id).map(|p| p.ui.selection.generation()) else {
             return;
         };
         let proxy = self.proxy.clone();
@@ -569,7 +569,11 @@ impl App {
 
     /// Underline the link under the pointer while Ctrl is held, and show a pointer cursor.
     fn update_link_hover(&mut self, id: PaneId) {
-        let Some((col, row)) = self.panes.get(&id).map(|p| (p.mouse_col, p.mouse_row)) else {
+        let Some((col, row)) = self
+            .panes
+            .get(&id)
+            .map(|p| (p.ui.mouse_col, p.ui.mouse_row))
+        else {
             return;
         };
         let ctrl = self.modifiers.control_key();
@@ -602,8 +606,8 @@ impl App {
         let sgr = pane.mode().contains(TermMode::SGR_MOUSE);
         let seq = encode_mouse(
             button,
-            pane.mouse_col,
-            pane.mouse_row,
+            pane.ui.mouse_col,
+            pane.ui.mouse_row,
             pressed,
             self.modifiers,
             sgr,
@@ -622,7 +626,7 @@ impl App {
             let Some((col, row, link_press)) = self
                 .panes
                 .get(&id)
-                .map(|p| (p.mouse_col, p.mouse_row, p.link_press))
+                .map(|p| (p.ui.mouse_col, p.ui.mouse_row, p.ui.link_press))
             else {
                 return;
             };
@@ -631,21 +635,21 @@ impl App {
                 if let Some(link) = link {
                     crate::links::open_url(&link.uri);
                     if let Some(p) = self.panes.get_mut(&id) {
-                        p.link_press = true;
+                        p.ui.link_press = true;
                     }
                     return;
                 }
             } else if !pressed && link_press {
                 if let Some(p) = self.panes.get_mut(&id) {
-                    p.link_press = false;
+                    p.ui.link_press = false;
                 }
                 return;
             }
         }
-        let held = self.panes.get(&id).and_then(|p| p.mouse_button_down);
+        let held = self.panes.get(&id).and_then(|p| p.ui.mouse_button_down);
         let (report, held) = button_report(pressed, mode, self.modifiers.shift_key(), held, code);
         if let Some(p) = self.panes.get_mut(&id) {
-            p.mouse_button_down = held;
+            p.ui.mouse_button_down = held;
         }
 
         if report {
@@ -655,7 +659,11 @@ impl App {
         } else if button == MouseButton::Left {
             if pressed {
                 self.start_selection(id);
-            } else if self.panes.get(&id).is_some_and(|p| p.selection.selecting) {
+            } else if self
+                .panes
+                .get(&id)
+                .is_some_and(|p| p.ui.selection.selecting)
+            {
                 self.finish_selection(id);
             }
         } else if pressed && button == MouseButton::Middle {
@@ -669,14 +677,14 @@ impl App {
         let held: Vec<(PaneId, u8)> = self
             .panes
             .values()
-            .filter_map(|p| p.mouse_button_down.map(|b| (p.id, b)))
+            .filter_map(|p| p.ui.mouse_button_down.map(|b| (p.id, b)))
             .collect();
         for (id, button) in held {
             if self.mode_of(id).intersects(TermMode::MOUSE_MODE) {
                 self.send_mouse(id, button, false);
             }
             if let Some(p) = self.panes.get_mut(&id) {
-                p.mouse_button_down = None;
+                p.ui.mouse_button_down = None;
             }
         }
     }
@@ -773,14 +781,14 @@ impl App {
     fn open_search(&mut self, id: PaneId) {
         self.clear_selection(id);
         if let Some(pane) = self.panes.get_mut(&id) {
-            pane.search_query = Some(String::new());
+            pane.ui.search_query = Some(String::new());
         }
         self.request_redraw();
     }
 
     fn close_search(&mut self, id: PaneId) {
         if let Some(pane) = self.panes.get_mut(&id) {
-            pane.search_query = None;
+            pane.ui.search_query = None;
         }
         self.term(id, |t| t.clear_search());
         self.request_redraw();
@@ -788,7 +796,7 @@ impl App {
 
     /// Run the search for the current query in `direction` and update the bar.
     fn run_search(&mut self, id: PaneId, direction: Direction) {
-        let Some(query) = self.panes.get(&id).and_then(|p| p.search_query.clone()) else {
+        let Some(query) = self.panes.get(&id).and_then(|p| p.ui.search_query.clone()) else {
             return;
         };
         self.term(id, |t| t.search(&query, direction));
@@ -804,7 +812,7 @@ impl App {
         let Some(query) = self
             .panes
             .get_mut(&id)
-            .and_then(|p| p.search_query.as_mut())
+            .and_then(|p| p.ui.search_query.as_mut())
         else {
             return;
         };
@@ -859,6 +867,7 @@ impl App {
                 let pane = self.panes.get(&id)?;
                 let (lines, cursor) = pane.terminal.lock().ok()?.snapshot();
                 let status = pane
+                    .ui
                     .search_query
                     .as_deref()
                     .map(|q| self.search_bar_text(id, q));
@@ -970,7 +979,7 @@ impl ApplicationHandler<AppEvent> for App {
                 let current = self
                     .panes
                     .get(&id)
-                    .is_some_and(|p| p.selection.may_clear(generation));
+                    .is_some_and(|p| p.ui.selection.may_clear(generation));
                 if current {
                     self.clear_selection(id);
                 }
@@ -1042,7 +1051,7 @@ impl ApplicationHandler<AppEvent> for App {
                     let selecting: Vec<PaneId> = self
                         .panes
                         .values()
-                        .filter(|p| p.selection.selecting)
+                        .filter(|p| p.ui.selection.selecting)
                         .map(|p| p.id)
                         .collect();
                     for id in selecting {
@@ -1090,8 +1099,8 @@ impl ApplicationHandler<AppEvent> for App {
                 let Some(pane) = self.panes.get_mut(&id) else {
                     return;
                 };
-                pane.mouse_side = side;
-                if pane.selection.selecting {
+                pane.ui.mouse_side = side;
+                if pane.ui.selection.selecting {
                     if let Ok(mut term) = pane.terminal.lock() {
                         term.update_selection(col, row, side);
                     }
@@ -1100,12 +1109,12 @@ impl ApplicationHandler<AppEvent> for App {
                 let Some(pane) = self.panes.get_mut(&id) else {
                     return;
                 };
-                if (col, row) == (pane.mouse_col, pane.mouse_row) {
+                if (col, row) == (pane.ui.mouse_col, pane.ui.mouse_row) {
                     return;
                 }
-                pane.mouse_col = col;
-                pane.mouse_row = row;
-                let (down, selecting) = (pane.mouse_button_down, pane.selection.selecting);
+                pane.ui.mouse_col = col;
+                pane.ui.mouse_row = row;
+                let (down, selecting) = (pane.ui.mouse_button_down, pane.ui.selection.selecting);
                 self.update_link_hover(id);
 
                 if let Some(button) = motion_report(self.mode_of(id), down, selecting) {
@@ -1171,7 +1180,7 @@ impl ApplicationHandler<AppEvent> for App {
                 let Some(pane) = self.panes.get_mut(&id) else {
                     return;
                 };
-                let steps = pane.scroll_steps.add(lines);
+                let steps = pane.ui.scroll_steps.add(lines);
                 if steps == 0 {
                     return;
                 }
@@ -1202,7 +1211,7 @@ impl ApplicationHandler<AppEvent> for App {
                     if let Some(query) = self
                         .panes
                         .get_mut(&id)
-                        .and_then(|p| p.search_query.as_mut())
+                        .and_then(|p| p.ui.search_query.as_mut())
                     {
                         query.push_str(&text);
                         self.run_search(id, Direction::Left);
@@ -1230,7 +1239,7 @@ impl ApplicationHandler<AppEvent> for App {
                 let search_open = self
                     .panes
                     .get(&id)
-                    .is_some_and(|p| p.search_query.is_some());
+                    .is_some_and(|p| p.ui.search_query.is_some());
                 match route_key(action, search_open) {
                     KeyRoute::SearchBar => self.handle_search_key(id, &event),
                     KeyRoute::Action(action) => {

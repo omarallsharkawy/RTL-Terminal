@@ -7,9 +7,12 @@ pub mod ime;
 pub mod input;
 pub mod layout;
 pub mod links;
-pub mod pane;
 pub mod pty;
 pub mod quad;
 pub mod renderer;
+pub mod session;
 pub mod terminal;
 pub mod ui;
+
+/// Older path of `session::pane`.
+pub use session::pane;
