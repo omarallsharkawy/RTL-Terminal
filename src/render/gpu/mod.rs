@@ -1,7 +1,9 @@
 //! Everything that touches wgpu: device and surface, the quad pipeline and the glyphon text
-//! pipeline. It draws a frame the CPU side (`render::scene`) has already laid out.
+//! pipeline. It draws a frame the CPU side (`render::scene`) has already laid out, either to
+//! the window (`Gpu`) or to a texture read back to memory (`offscreen`, for golden tests).
 
 pub mod context;
+pub mod offscreen;
 pub mod quad_pipeline;
 pub mod text_pipeline;
 
@@ -71,34 +73,14 @@ impl Gpu {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("twitty render encoder"),
         });
-
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("twitty render pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            // Premultiplied, so transparency keeps the theme's tint.
-                            r: (background[0] * opacity) as f64,
-                            g: (background[1] * opacity) as f64,
-                            b: (background[2] * opacity) as f64,
-                            a: opacity as f64,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-
-            self.quads.render(&mut pass);
-            self.text.render(&mut pass)?;
-        }
+        encode_pass(
+            &mut encoder,
+            &view,
+            &self.quads,
+            &self.text,
+            background,
+            opacity,
+        )?;
 
         queue.submit(Some(encoder.finish()));
         queue.present(surface_texture);
@@ -107,4 +89,40 @@ impl Gpu {
 
         Ok(())
     }
+}
+
+/// Record a frame's render pass into `encoder`: clear `view` to `background` at `opacity`,
+/// then draw the prepared quads and text over it. Shared by the window and offscreen targets.
+pub(crate) fn encode_pass(
+    encoder: &mut wgpu::CommandEncoder,
+    view: &wgpu::TextureView,
+    quads: &QuadRenderer,
+    text: &TextPipeline,
+    background: [f32; 4],
+    opacity: f32,
+) -> anyhow::Result<()> {
+    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("twitty render pass"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(wgpu::Color {
+                    // Premultiplied, so transparency keeps the theme's tint.
+                    r: (background[0] * opacity) as f64,
+                    g: (background[1] * opacity) as f64,
+                    b: (background[2] * opacity) as f64,
+                    a: opacity as f64,
+                }),
+                store: wgpu::StoreOp::Store,
+            },
+            depth_slice: None,
+        })],
+        depth_stencil_attachment: None,
+        timestamp_writes: None,
+        occlusion_query_set: None,
+        multiview_mask: None,
+    });
+    quads.render(&mut pass);
+    text.render(&mut pass)
 }
