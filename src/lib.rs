@@ -10,5 +10,8 @@ pub mod links;
 pub mod pane;
 pub mod pty;
 pub mod quad;
-pub mod renderer;
+pub mod render;
 pub mod terminal;
+
+/// The renderer's historical path; everything lives in `render` now.
+pub use render as renderer;
