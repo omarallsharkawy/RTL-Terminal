@@ -2,21 +2,28 @@
 
 use alacritty_terminal::index::Side;
 use alacritty_terminal::term::TermMode;
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
+use crate::input::mouse::{ClickCounter, StepAccumulator};
 use crate::layout::PaneId;
 use crate::pty::Pty;
 use crate::terminal::Terminal;
+use crate::ui::selection::SelectionState;
 
 pub struct Pane {
     pub id: PaneId,
-    pub terminal: Arc<Mutex<Terminal>>,
+    /// Only touched on the event-loop thread: PTY output arrives as events, so no lock.
+    pub terminal: Terminal,
     pub pty: Option<Pty>,
     /// Grid size last sent to the terminal and the PTY.
     pub size: (usize, usize),
     /// Window title set by the program (OSC 0/2).
     pub title: Option<String>,
+    pub ui: PaneUi,
+}
+
+/// Pointer, selection and search state of one pane.
+#[derive(Debug)]
+pub struct PaneUi {
     pub mouse_col: usize,
     pub mouse_row: usize,
     /// Button whose press was reported to the program (xterm codes 0-2), for drag and release
@@ -24,52 +31,46 @@ pub struct Pane {
     pub mouse_button_down: Option<u8>,
     /// Side of the cell under the pointer (see `Renderer::pixel_to_visual_cell`).
     pub mouse_side: Side,
-    /// A mouse selection is being dragged.
-    pub selecting: bool,
+    pub selection: SelectionState,
     /// The current left press opened a link, so its release is swallowed.
     pub link_press: bool,
-    /// Bumped on every new selection, so a delayed clear never removes a newer one.
-    pub selection_generation: u64,
-    pub last_click: Option<(Instant, usize, usize)>,
-    pub click_count: u8,
+    pub clicks: ClickCounter,
     /// Fractional wheel/trackpad lines not yet applied.
-    pub scroll_accum: f64,
+    pub scroll_steps: StepAccumulator,
     /// Query being typed while scrollback search is open (keys go here, not to the PTY).
     pub search_query: Option<String>,
 }
 
+impl Default for PaneUi {
+    fn default() -> Self {
+        Self {
+            mouse_col: 0,
+            mouse_row: 0,
+            mouse_button_down: None,
+            mouse_side: Side::Left,
+            selection: SelectionState::default(),
+            link_press: false,
+            clicks: ClickCounter::default(),
+            scroll_steps: StepAccumulator::default(),
+            search_query: None,
+        }
+    }
+}
+
 impl Pane {
-    pub fn new(
-        id: PaneId,
-        terminal: Arc<Mutex<Terminal>>,
-        pty: Option<Pty>,
-        size: (usize, usize),
-    ) -> Self {
+    pub fn new(id: PaneId, terminal: Terminal, pty: Option<Pty>, size: (usize, usize)) -> Self {
         Self {
             id,
             terminal,
             pty,
             size,
             title: None,
-            mouse_col: 0,
-            mouse_row: 0,
-            mouse_button_down: None,
-            mouse_side: Side::Left,
-            selecting: false,
-            link_press: false,
-            selection_generation: 0,
-            last_click: None,
-            click_count: 0,
-            scroll_accum: 0.0,
-            search_query: None,
+            ui: PaneUi::default(),
         }
     }
 
     pub fn mode(&self) -> TermMode {
-        self.terminal
-            .lock()
-            .map(|t| t.mode())
-            .unwrap_or(TermMode::NONE)
+        self.terminal.mode()
     }
 
     pub fn write(&self, bytes: &[u8]) {
@@ -84,9 +85,7 @@ impl Pane {
             return;
         }
         self.size = (cols, rows);
-        if let Ok(mut term) = self.terminal.lock() {
-            term.resize(cols, rows);
-        }
+        self.terminal.resize(cols, rows);
         if let Some(ref pty) = self.pty {
             let _ = pty.resize(cols as u16, rows as u16);
         }

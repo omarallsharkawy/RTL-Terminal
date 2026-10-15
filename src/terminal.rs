@@ -4,6 +4,7 @@ use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Boundary, Column, Direction, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::cell::Flags as CellFlags;
+use alacritty_terminal::term::color::Colors;
 use alacritty_terminal::term::search::{Match, RegexIter, RegexSearch};
 use alacritty_terminal::term::test::TermSize;
 use alacritty_terminal::term::{point_to_viewport, viewport_to_point};
@@ -138,6 +139,18 @@ fn literal_pattern(query: &str) -> String {
     pattern
 }
 
+/// A palette color the program redefined with OSC 4 (pywal, vim themes), as a direct RGB
+/// color. Only the 256 indexed colors are taken over; the default foreground and background
+/// stay with the theme so the window and the cells keep matching.
+fn program_color(color: AnsiColor, colors: &Colors) -> AnsiColor {
+    let index = match color {
+        AnsiColor::Indexed(i) => i as usize,
+        AnsiColor::Named(n) if (n as usize) < 16 => n as usize,
+        _ => return color,
+    };
+    colors[index].map_or(color, AnsiColor::Spec)
+}
+
 /// Terminal config whose default cursor blinks as `cursor_blink` says. DECSCUSR (`CSI n SP q`)
 /// overrides it, and `CSI 0 SP q` falls back to it.
 fn term_config(cursor_blink: bool) -> Config {
@@ -188,6 +201,17 @@ impl Terminal {
 
     pub fn process_bytes(&mut self, bytes: &[u8]) {
         self.parser.advance(&mut self.term, bytes);
+    }
+
+    /// The RGB a program gave palette entry `index` (0..256) with OSC 4, if it changed it.
+    pub fn program_palette_color(
+        &self,
+        index: usize,
+    ) -> Option<alacritty_terminal::vte::ansi::Rgb> {
+        if index >= 256 {
+            return None;
+        }
+        self.term.colors()[index]
     }
 
     /// Default blinking for when the program has not chosen a cursor style.
@@ -284,6 +308,7 @@ impl Terminal {
         let content = self.term.renderable_content();
         let display_offset = content.display_offset;
         let selection = content.selection;
+        let colors = content.colors;
         let hover = self.link_hover.clone();
         let mut lines = vec![
             LineData {
@@ -310,8 +335,8 @@ impl Terminal {
             lines[row].cells[col] = CellData {
                 c,
                 zerowidth: cell.zerowidth().map(<[char]>::to_vec).unwrap_or_default(),
-                fg: cell.fg,
-                bg: cell.bg,
+                fg: program_color(cell.fg, colors),
+                bg: program_color(cell.bg, colors),
                 flags: cell.flags,
                 selected: selection.is_some_and(|range| range.contains(cell.point)),
                 search_match: 0,
