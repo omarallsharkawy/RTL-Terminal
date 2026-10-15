@@ -16,12 +16,15 @@ pub fn new_font_system() -> FontSystem {
     font_system
 }
 
-/// Whether a font family with this name (case-insensitive) is installed.
-pub fn family_installed(font_system: &FontSystem, name: &str) -> bool {
-    font_system
-        .db()
-        .faces()
-        .any(|f| f.families.iter().any(|(n, _)| n.eq_ignore_ascii_case(name)))
+/// The installed spelling of a font family named `name` (case-insensitive), if any. Shaping
+/// matches family names exactly, so the configured name must be replaced with this one.
+pub fn installed_family(font_system: &FontSystem, name: &str) -> Option<String> {
+    font_system.db().faces().find_map(|f| {
+        f.families
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(n, _)| n.clone())
+    })
 }
 
 /// The family used for terminal cells: the configured name, or the generic monospace.

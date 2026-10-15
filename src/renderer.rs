@@ -1,10 +1,11 @@
-use crate::fonts::{family_installed, grid_family, new_font_system};
+use crate::fonts::{grid_family, installed_family, new_font_system};
 use alacritty_terminal::index::Side;
 use alacritty_terminal::term::cell::Flags as CellFlags;
 use alacritty_terminal::vte::ansi::CursorShape;
 use cosmic_text::{Attrs, Buffer, FontSystem, Metrics, Shaping};
 use glyphon::{
-    Cache, Resolution, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
+    Cache, ColorMode, Resolution, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer,
+    Viewport,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -127,6 +128,8 @@ pub struct CachedRow {
     pub visual: Vec<Option<(f32, f32)>>,
     /// Cells whose character is right-to-left (their left and right halves are swapped).
     pub rtl_cells: Vec<bool>,
+    /// Cells holding a plain space (see `CellData::is_blank`).
+    pub blank_cells: Vec<bool>,
     pub segments: Vec<CachedSegment>,
     /// Backgrounds, box drawing and text decorations, relative to the row origin.
     pub quads: Vec<Quad>,
@@ -213,7 +216,10 @@ impl CachedRow {
                 };
             }
             let next_start = row.segments.get(i + 1).map_or(usize::MAX, |s| s.seg_start);
-            if col >= seg.seg_end && col < next_start {
+            // Only spaces may separate the caret from the text it follows; past a border or
+            // other content it stays on its own cell.
+            let only_spaces = || (seg.seg_end..col).all(|c| row.blank_cells.get(c) == Some(&true));
+            if col >= seg.seg_end && col < next_start && only_spaces() {
                 let gap = (col - seg.seg_end) as f32 * char_width;
                 return match glyph_of(seg, seg.seg_end - 1) {
                     Some((left, _, true)) => (left - gap, true),
@@ -574,9 +580,6 @@ pub fn cell_colors(palette: &Palette, cell: &CellData) -> (Rgba, Rgba) {
     if cell.flags.contains(CellFlags::DIM) {
         fg = mix(fg, bg, 0.34);
     }
-    if cell.flags.contains(CellFlags::HIDDEN) {
-        fg = bg;
-    }
     if cell.search_match > 0 {
         bg = if cell.search_match > 1 {
             palette.search_focus
@@ -588,7 +591,42 @@ pub fn cell_colors(palette: &Palette, cell: &CellData) -> (Rgba, Rgba) {
     if cell.selected {
         bg = palette.selection;
     }
+    // Last, so selecting or searching never reveals concealed text (passwords, `\e[8m`).
+    if cell.flags.contains(CellFlags::HIDDEN) {
+        fg = bg;
+    }
     (fg, bg)
+}
+
+/// Width of the cursor on `col`: two cells on a double-width character, so a block cursor
+/// covers all of the glyph it recolors.
+pub fn cursor_cell_width(line: &LineData, col: usize, cw: f32) -> f32 {
+    match line.cells.get(col) {
+        Some(cell) if cell.flags.contains(CellFlags::WIDE_CHAR) => cw * 2.0,
+        _ => cw,
+    }
+}
+
+/// Box drawing or block element of `cell` in its background color, for drawing on top of a
+/// block cursor at `rect` (x, y, w, h). Text under the cursor gets the same recolor when shaped;
+/// without this, geometry would vanish beneath the cursor.
+pub fn geometry_under_block_cursor(
+    palette: &Palette,
+    is_srgb: bool,
+    cell: &CellData,
+    (x, y, w, h): (f32, f32, f32, f32),
+) -> Vec<Quad> {
+    let mut quads = Vec::new();
+    if !cell.flags.contains(CellFlags::HIDDEN) {
+        let (_, bg) = cell_colors(palette, cell);
+        let color = if is_srgb {
+            bg.to_linear()
+        } else {
+            bg.to_array()
+        };
+        try_render_box_or_block(cell.c, x, y, w, h, color, &mut quads);
+    }
+    quads
 }
 
 /// Where each cell of a row is drawn, relative to the row origin: `Some((left, right))` for
@@ -684,6 +722,17 @@ pub fn build_row_quads(
         }
     }
     quads
+}
+
+/// How glyphon treats text colors. `Accurate` linearizes them for an sRGB surface; on the
+/// non-sRGB surface that is preferred, colors must go out as-is (`Web`), like the quads, or text
+/// is drawn darker than its palette color.
+pub fn text_color_mode(is_srgb: bool) -> ColorMode {
+    if is_srgb {
+        ColorMode::Accurate
+    } else {
+        ColorMode::Web
+    }
 }
 
 /// Measure the advance of one monospace cell at the given pixel size.
@@ -798,7 +847,8 @@ impl Renderer {
         let mut viewport = Viewport::new(&device, &cache);
         viewport.update(&queue, Resolution { width, height });
 
-        let mut text_atlas = TextAtlas::new(&device, &queue, &cache, format);
+        let mut text_atlas =
+            TextAtlas::with_color_mode(&device, &queue, &cache, format, text_color_mode(is_srgb));
         let text_renderer = TextRenderer::new(
             &mut text_atlas,
             &device,
@@ -863,13 +913,13 @@ impl Renderer {
     pub fn set_font_family(&mut self, name: Option<&str>) {
         let name = name.map(str::trim).filter(|n| !n.is_empty());
         self.font_family = match name {
-            Some(n) if family_installed(&self.font_system, n) => {
-                Some(Box::leak(n.to_string().into_boxed_str()))
-            }
-            Some(n) => {
-                eprintln!("twitty: font_family {n:?} is not installed, using monospace");
-                None
-            }
+            Some(n) => match installed_family(&self.font_system, n) {
+                Some(installed) => Some(Box::leak(installed.into_boxed_str())),
+                None => {
+                    eprintln!("twitty: font_family {n:?} is not installed, using monospace");
+                    None
+                }
+            },
             None => None,
         };
         self.update_metrics();
@@ -1056,8 +1106,14 @@ impl Renderer {
         )
     }
 
-    fn cursor_quads(&self, x: f32, y: f32, shape: CursorShape, focused: bool, out: &mut Vec<Quad>) {
-        let (w, h) = (self.char_width, self.line_height);
+    fn cursor_quads(
+        &self,
+        (x, y, w): (f32, f32, f32),
+        shape: CursorShape,
+        focused: bool,
+        out: &mut Vec<Quad>,
+    ) {
+        let h = self.line_height;
         let color = self.to_target_color(self.palette.cursor);
         let t = (self.scale * 1.5).round().max(1.0);
         let hollow = |out: &mut Vec<Quad>| {
@@ -1177,6 +1233,7 @@ impl Renderer {
                         hash,
                         visual: visual_cell_extents(line, &segments, self.char_width),
                         rtl_cells: line.cells.iter().map(|c| is_rtl_char(c.c)).collect(),
+                        blank_cells: line.cells.iter().map(CellData::is_blank).collect(),
                         segments,
                         quads: row_quads,
                     };
@@ -1211,13 +1268,24 @@ impl Renderer {
                     } else {
                         &mut other_cursor_quads
                     };
-                    self.cursor_quads(x.max(0.0), y, shape, cursor_focused, out);
+                    let w = cursor_cell_width(line, rc.col, self.char_width);
+                    let x = x.max(0.0);
+                    self.cursor_quads((x, y, w), shape, cursor_focused, out);
+                    if let Some(cell) = line.cells.get(rc.col).filter(|_| rc.block) {
+                        let rect = (x, y, w, self.line_height);
+                        out.extend(geometry_under_block_cursor(
+                            &self.palette,
+                            self.is_srgb,
+                            cell,
+                            rect,
+                        ));
+                    }
                 }
             }
             caches.push(rows);
         }
 
-        let preedit_origin = self.prepare_preedit(ime_caret, &mut quads, &mut cursor_quads);
+        let preedit_box = self.prepare_preedit(ime_caret, &mut quads, &mut cursor_quads);
         // The cursor sits above cell backgrounds but below text (its glyph was recolored).
         quads.extend(other_cursor_quads);
         quads.extend(cursor_quads);
@@ -1280,16 +1348,26 @@ impl Renderer {
                     break;
                 }
                 let y = pane.rect.y + self.padding_top + r as f32 * self.line_height;
+                // The row under the preedit is clipped around it, so its text does not show
+                // through the preedit's background.
+                let (parts, n) = match preedit_box {
+                    Some((left, _, width)) if pane.focused && pane.cursor.row == r => {
+                        (crate::ime::bounds_outside(bounds, left, left + width), 2)
+                    }
+                    _ => ([bounds, bounds], 1),
+                };
                 for seg in &cached_row.segments {
-                    text_areas.push(TextArea {
-                        buffer: &seg.buffer,
-                        left: pane.rect.x + self.padding_left + seg.seg_x,
-                        top: y,
-                        scale: 1.0,
-                        bounds,
-                        default_color: self.palette.foreground.to_glyphon(),
-                        custom_glyphs: &[],
-                    });
+                    for &bounds in &parts[..n] {
+                        text_areas.push(TextArea {
+                            buffer: &seg.buffer,
+                            left: pane.rect.x + self.padding_left + seg.seg_x,
+                            top: y,
+                            scale: 1.0,
+                            bounds,
+                            default_color: self.palette.foreground.to_glyphon(),
+                            custom_glyphs: &[],
+                        });
+                    }
                 }
             }
             if let Some((_, buffer, y)) = status {
@@ -1304,7 +1382,7 @@ impl Renderer {
                 });
             }
         }
-        if let Some(origin) = preedit_origin {
+        if let Some((left, top, _)) = preedit_box {
             let bounds = ime_bounds.unwrap_or_else(|| {
                 rect_bounds(Rect::new(
                     0.0,
@@ -1314,7 +1392,7 @@ impl Renderer {
                 ))
             });
             text_areas.extend(self.ime.text_area(
-                origin,
+                (left, top),
                 bounds,
                 self.palette.foreground.to_glyphon(),
             ));

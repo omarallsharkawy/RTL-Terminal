@@ -48,6 +48,21 @@ pub fn preedit_left(caret_x: f32, extends_left: bool, width: f32) -> f32 {
     left.max(0.0)
 }
 
+/// The parts of `bounds` left and right of the horizontal span `left..right`, so text drawn
+/// under the preedit box is clipped away instead of showing through it.
+pub fn bounds_outside(bounds: TextBounds, left: f32, right: f32) -> [TextBounds; 2] {
+    [
+        TextBounds {
+            right: bounds.right.min(left.floor() as i32),
+            ..bounds
+        },
+        TextBounds {
+            left: bounds.left.max(right.ceil() as i32),
+            ..bounds
+        },
+    ]
+}
+
 /// Pixel offset (from the preedit's left edge) of the byte offset `byte` in shaped text.
 fn cursor_offset(buffer: &Buffer, byte: usize, width: f32) -> f32 {
     for run in buffer.layout_runs() {
@@ -101,13 +116,13 @@ impl Renderer {
 
     /// Shape the preedit at `caret` (x, y, extends_left; x includes the padding), push its
     /// background, underline and cursor, and tell the IME where to put its candidate popup.
-    /// Returns the text origin when a preedit is visible.
+    /// Returns the preedit box (left, y, width) when a preedit is visible.
     pub(crate) fn prepare_preedit(
         &mut self,
         caret: Option<(f32, f32, bool)>,
         quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>,
         cursor_quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>,
-    ) -> Option<(f32, f32)> {
+    ) -> Option<(f32, f32, f32)> {
         let (caret_x, y, extends_left) = caret?;
         let (cw, lh) = (self.char_width, self.line_height);
 
@@ -154,7 +169,7 @@ impl Renderer {
             ));
             self.ime.buffer = Some(buffer);
             area = (left, width);
-            origin = Some((left, y));
+            origin = Some((left, y, width));
         }
 
         let rect = (

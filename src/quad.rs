@@ -19,6 +19,8 @@ pub struct QuadRenderer {
     vertex_buffer: Option<wgpu::Buffer>,
     vertex_capacity: usize,
     vertex_count: usize,
+    /// CPU-side vertices, kept between frames so they are not reallocated every frame.
+    vertices: Vec<QuadVertex>,
 }
 
 impl QuadRenderer {
@@ -156,6 +158,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             vertex_buffer: None,
             vertex_capacity: 0,
             vertex_count: 0,
+            vertices: Vec::new(),
         }
     }
 
@@ -178,7 +181,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             return;
         }
 
-        let mut vertices = Vec::with_capacity(quads.len() * 6);
+        let vertices = &mut self.vertices;
+        vertices.clear();
+        vertices.reserve(quads.len() * 6);
         for &(x, y, w, h, color) in quads {
             let x2 = x + w;
             let y2 = y + h;
@@ -222,7 +227,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             self.vertex_capacity = capacity;
         }
         if let Some(ref buffer) = self.vertex_buffer {
-            queue.write_buffer(buffer, 0, bytemuck::cast_slice(&vertices));
+            queue.write_buffer(buffer, 0, bytemuck::cast_slice(vertices));
         }
     }
 
@@ -521,11 +526,16 @@ pub fn try_render_box_or_block(
             rect(x2, y, x3, y1);
             true
         }
+        // Four corners: the channels between the double lines stay open.
         '╬' => {
-            rect(x, y0, xr, y1);
-            rect(x, y2, xr, y3);
-            rect(x0, y, x1, yb);
-            rect(x2, y, x3, yb);
+            rect(x, y0, x1, y1);
+            rect(x0, y, x1, y0);
+            rect(x2, y0, xr, y1);
+            rect(x2, y, x3, y0);
+            rect(x, y2, x1, y3);
+            rect(x0, y3, x1, yb);
+            rect(x2, y2, xr, y3);
+            rect(x2, y3, x3, yb);
             true
         }
         // Down single, right double.
@@ -560,28 +570,28 @@ pub fn try_render_box_or_block(
         '╓' => {
             rect(x0, y1, x1, yb);
             rect(x2, y1, x3, yb);
-            rect(x2, y1, xr, y2);
+            rect(x0, y1, xr, y2);
             true
         }
         // Down double, left single.
         '╖' => {
             rect(x0, y1, x1, yb);
             rect(x2, y1, x3, yb);
-            rect(x, y1, x1, y2);
+            rect(x, y1, x3, y2);
             true
         }
         // Up double, right single.
         '╙' => {
             rect(x0, y, x1, y2);
             rect(x2, y, x3, y2);
-            rect(x2, y1, xr, y2);
+            rect(x0, y1, xr, y2);
             true
         }
         // Up double, left single.
         '╜' => {
             rect(x0, y, x1, y2);
             rect(x2, y, x3, y2);
-            rect(x, y1, x1, y2);
+            rect(x, y1, x3, y2);
             true
         }
         // Vertical single, right double.
