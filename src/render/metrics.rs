@@ -93,11 +93,13 @@ impl CellMetrics {
 
     /// Grid size (cols, rows) of a pane occupying `rect`.
     pub fn grid_size(&self, rect: Rect) -> (usize, usize) {
-        let avail_w = (rect.w - self.padding_left * 2.0).max(10.0);
-        let avail_h = (rect.h - self.padding_top * 2.0).max(10.0);
+        // The grid must fit inside the pane, or a shell in a small split draws past its edge.
+        // Two columns is the floor: alacritty writes out of bounds for a wide character in one.
+        let avail_w = (rect.w - self.padding_left * 2.0).max(0.0);
+        let avail_h = (rect.h - self.padding_top * 2.0).max(0.0);
         let cols = (avail_w / self.char_width).floor() as usize;
         let rows = (avail_h / self.line_height).floor() as usize;
-        (cols.max(10), rows.max(4))
+        (cols.max(2), rows.max(1))
     }
 
     /// Map a physical pixel position to a (col, row) cell of the pane in `rect`, clamped to

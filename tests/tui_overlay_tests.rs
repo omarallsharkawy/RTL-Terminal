@@ -80,3 +80,39 @@ fn highlighted_word_inside_arabic_keeps_sentence_order() {
         "first word must be right of the highlighted one"
     );
 }
+
+#[test]
+fn prompt_arrow_before_arabic_is_not_mirrored() {
+    // Claude Code's prompt: "❯ " then Arabic. A mirrored glyph would turn ❯ into ❮.
+    for finished in [false, true] {
+        let mut term = Terminal::new(60, 3, |_| {});
+        term.process_bytes("❯ خلي بالك من الحاجة 2026 ok".as_bytes());
+        if finished {
+            term.process_bytes(b"\r\n");
+        }
+        let (lines, cursor) = term.snapshot();
+        let mut fs = FontSystem::new();
+        let palette = Palette::default();
+        let mut shaper = RowShaper {
+            font_system: &mut fs,
+            palette: &palette,
+            font_px: 15.0,
+            char_width: CW,
+            line_height: 23.0,
+            family: None,
+        };
+        let row_cursor = (cursor.row == 0).then_some(twitty::render::RowCursor {
+            col: cursor.col,
+            block: false,
+        });
+        let segs = shaper.build_row(&lines[0], row_cursor);
+        let seg = segs.iter().find(|s| s.seg_start == 0).expect("segment at col 0");
+        let byte = seg.cell_bytes[0];
+        let level_rtl = seg
+            .buffer
+            .layout_runs()
+            .find_map(|run| run.glyphs.iter().find(|g| byte >= g.start && byte < g.end).map(|g| g.level.is_rtl()))
+            .expect("glyph");
+        assert!(!level_rtl, "❯ shaped right-to-left (mirrored), finished={finished}");
+    }
+}

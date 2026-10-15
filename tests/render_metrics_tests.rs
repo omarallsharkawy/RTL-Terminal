@@ -23,8 +23,10 @@ fn grid_size_fits_cells_inside_the_padding() {
         6.0 * 2.0 + 22.0 * 24.0 + 3.0,
     );
     assert_eq!(metrics().grid_size(rect), (80, 24));
-    // Tiny panes still get a usable grid.
-    assert_eq!(metrics().grid_size(Rect::new(0.0, 0.0, 1.0, 1.0)), (10, 4));
+    // A tiny pane gets the smallest grid that fits, never one larger than the pane.
+    assert_eq!(metrics().grid_size(Rect::new(0.0, 0.0, 1.0, 1.0)), (2, 1));
+    let small = Rect::new(0.0, 0.0, 8.0 * 2.0 + 9.0 * 5.0, 6.0 * 2.0 + 22.0 * 2.0);
+    assert_eq!(metrics().grid_size(small), (5, 2));
 }
 
 #[test]
