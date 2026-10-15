@@ -5,6 +5,7 @@
 //! mouse state machines.
 
 mod keys;
+pub mod mouse;
 pub mod route;
 
 pub use keys::*;

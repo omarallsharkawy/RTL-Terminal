@@ -3,8 +3,8 @@
 use alacritty_terminal::index::Side;
 use alacritty_terminal::term::TermMode;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
+use crate::input::mouse::{ClickCounter, StepAccumulator};
 use crate::layout::PaneId;
 use crate::pty::Pty;
 use crate::terminal::Terminal;
@@ -30,10 +30,9 @@ pub struct Pane {
     pub link_press: bool,
     /// Bumped on every new selection, so a delayed clear never removes a newer one.
     pub selection_generation: u64,
-    pub last_click: Option<(Instant, usize, usize)>,
-    pub click_count: u8,
+    pub clicks: ClickCounter,
     /// Fractional wheel/trackpad lines not yet applied.
-    pub scroll_accum: f64,
+    pub scroll_steps: StepAccumulator,
     /// Query being typed while scrollback search is open (keys go here, not to the PTY).
     pub search_query: Option<String>,
 }
@@ -58,9 +57,8 @@ impl Pane {
             selecting: false,
             link_press: false,
             selection_generation: 0,
-            last_click: None,
-            click_count: 0,
-            scroll_accum: 0.0,
+            clicks: ClickCounter::default(),
+            scroll_steps: StepAccumulator::default(),
             search_query: None,
         }
     }
