@@ -281,6 +281,7 @@ impl App {
             focused: id,
         });
         self.active = self.tabs.len() - 1;
+        self.release_held_buttons();
         self.capture = None;
         self.drag_divider = None;
         // A second tab shows the tab bar, which shrinks every pane.
@@ -368,6 +369,7 @@ impl App {
         }
         let old = self.focused_id();
         self.active = index;
+        self.release_held_buttons();
         self.capture = None;
         self.drag_divider = None;
         if let Some(new) = self.focused_id() {
@@ -688,13 +690,26 @@ impl App {
                 return;
             }
         }
+        // Shift bypasses mouse reporting, as in xterm and Windows Terminal. A release goes where
+        // its press went, so a Shift+drag selection never leaks drag/release reports.
+        let held = self.panes.get(&id).and_then(|p| p.mouse_button_down);
+        let report = if pressed {
+            mode.intersects(TermMode::MOUSE_MODE) && !self.modifiers.shift_key()
+        } else {
+            held == Some(code)
+        };
         if let Some(p) = self.panes.get_mut(&id) {
-            p.mouse_button_down = if pressed { Some(code) } else { None };
+            if pressed && report {
+                p.mouse_button_down = Some(code);
+            } else if !pressed && held == Some(code) {
+                p.mouse_button_down = None;
+            }
         }
 
-        // Shift bypasses mouse reporting, as in xterm and Windows Terminal.
-        if mode.intersects(TermMode::MOUSE_MODE) && !self.modifiers.shift_key() {
-            self.send_mouse(id, code, pressed);
+        if report {
+            if mode.intersects(TermMode::MOUSE_MODE) {
+                self.send_mouse(id, code, pressed);
+            }
         } else if button == MouseButton::Left {
             if pressed {
                 self.start_selection(id);
@@ -703,6 +718,24 @@ impl App {
             }
         } else if pressed && button == MouseButton::Middle {
             self.paste_clipboard(id);
+        }
+    }
+
+    /// Release every button a program saw pressed, e.g. when the window loses focus mid-drag and
+    /// the real release may never arrive. Otherwise later motion is reported as a drag.
+    fn release_held_buttons(&mut self) {
+        let held: Vec<(PaneId, u8)> = self
+            .panes
+            .values()
+            .filter_map(|p| p.mouse_button_down.map(|b| (p.id, b)))
+            .collect();
+        for (id, button) in held {
+            if self.mode_of(id).intersects(TermMode::MOUSE_MODE) {
+                self.send_mouse(id, button, false);
+            }
+            if let Some(p) = self.panes.get_mut(&id) {
+                p.mouse_button_down = None;
+            }
         }
     }
 
@@ -1114,11 +1147,9 @@ impl ApplicationHandler<AppEvent> for App {
                         .map(|p| p.id)
                         .collect();
                     for id in selecting {
-                        if let Some(p) = self.panes.get_mut(&id) {
-                            p.mouse_button_down = None;
-                        }
                         self.finish_selection(id);
                     }
+                    self.release_held_buttons();
                     self.capture = None;
                     self.drag_divider = None;
                 }
@@ -1196,16 +1227,17 @@ impl ApplicationHandler<AppEvent> for App {
                 }
                 pane.mouse_col = col;
                 pane.mouse_row = row;
-                let down = pane.mouse_button_down;
+                let (down, selecting) = (pane.mouse_button_down, pane.selecting);
                 self.update_link_hover(id);
 
-                // 1003 reports every motion, 1002 only while a button is held.
+                // 1003 reports every motion, 1002 only while a button is held; a Shift+drag
+                // selection is not reported.
                 let mode = self.mode_of(id);
                 let button = match down {
                     Some(b) if mode.intersects(TermMode::MOUSE_DRAG | TermMode::MOUSE_MOTION) => {
                         Some(b)
                     }
-                    None if mode.contains(TermMode::MOUSE_MOTION) => Some(3),
+                    None if mode.contains(TermMode::MOUSE_MOTION) && !selecting => Some(3),
                     _ => None,
                 };
                 if let Some(b) = button {
