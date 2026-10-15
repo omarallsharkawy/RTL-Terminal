@@ -174,7 +174,7 @@ cargo fmt
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for how the pieces fit, [docs/adr/](docs/adr/) for design decisions, and [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
-CI runs fmt, clippy and tests on Linux and Windows, checks the minimum Rust version (1.90) and a macOS build, checks dependency licenses, builds Windows and Linux binaries, and audits dependencies. Pushing a `v*` tag publishes a release whose notes come from the matching section of [`CHANGELOG.md`](CHANGELOG.md).
+CI runs fmt, clippy and tests on Linux and Windows, checks the minimum Rust version (1.90), checks dependency licenses, builds Windows and Linux binaries, and audits dependencies. Pushing a `v*` tag publishes a release whose notes come from the matching section of [`CHANGELOG.md`](CHANGELOG.md).
 
 ## License
 

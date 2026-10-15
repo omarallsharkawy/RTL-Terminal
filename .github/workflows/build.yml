@@ -132,22 +132,6 @@ jobs:
       - name: Check the crate builds on the declared rust-version
         run: cargo check --all-targets
 
-  build-macos:
-    name: Check macOS build
-    runs-on: macos-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Rust stable
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust build output
-        uses: swatinem/rust-cache@v2
-
-      - name: Build and test
-        run: cargo test --release
-
   rust-licenses:
     name: Dependency licenses and sources
     runs-on: ubuntu-latest

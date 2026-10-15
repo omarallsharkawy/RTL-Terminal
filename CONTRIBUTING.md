@@ -24,7 +24,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test --release
 ```
 
-CI runs the same on Linux and Windows, checks the minimum Rust version, builds on macOS, and checks
+CI runs the same on Linux and Windows, checks the minimum Rust version, and checks
 dependency licenses and advisories.
 
 ## How changes are made here

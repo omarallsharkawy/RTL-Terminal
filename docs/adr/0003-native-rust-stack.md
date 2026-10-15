@@ -21,6 +21,6 @@ Rewrite natively:
 
 ## Consequences
 
-- One codebase for Linux (Wayland and X11) and Windows; macOS should work but is not released.
+- One codebase for Linux (Wayland and X11) and Windows; macOS is not supported for now.
 - Arabic shaping quality follows cosmic-text; font fallback order follows fontdb.
 - No plugin or scripting surface, by design for now.
