@@ -1,6 +1,8 @@
+pub mod metrics;
 pub mod row;
 pub mod text;
 
+pub use metrics::CellMetrics;
 pub use row::cache::RowCache;
 pub use row::{visual_cell_extents, CachedRow, RowCursor};
 
@@ -25,11 +27,6 @@ use crate::terminal::{CellData, CursorState, LineData};
 use row::hash_row;
 use text::fonts::{installed_family, new_font_system};
 
-/// Line height as a multiple of the font size (tall enough for Arabic harakat).
-const LINE_HEIGHT_FACTOR: f32 = 1.55;
-/// Logical (DPI-independent) window padding.
-const PADDING_LEFT: f32 = 8.0;
-const PADDING_TOP: f32 = 6.0;
 pub type Quad = (f32, f32, f32, f32, [f32; 4]);
 
 /// Widest a tab in the tab bar gets, in cells.
@@ -354,23 +351,35 @@ impl Renderer {
         Ok(renderer)
     }
 
+    /// The current cell metrics.
+    pub fn metrics(&self) -> CellMetrics {
+        CellMetrics {
+            font_size: self.font_size,
+            scale: self.scale,
+            char_width: self.char_width,
+            line_height: self.line_height,
+            padding_left: self.padding_left,
+            padding_top: self.padding_top,
+        }
+    }
+
     pub(crate) fn font_px(&self) -> f32 {
-        self.font_size * self.scale
+        self.metrics().font_px()
     }
 
     /// Recompute cell metrics from the font size and scale factor.
     fn update_metrics(&mut self) {
-        self.font_size = self.font_size.clamp(8.0, 48.0);
-        let font_px = self.font_px();
-        self.line_height = (font_px * LINE_HEIGHT_FACTOR).round();
-        self.char_width = measure_char_width(
+        let m = CellMetrics::measure(
             &mut self.font_system,
             self.font_family,
-            font_px,
-            self.line_height,
+            self.font_size,
+            self.scale,
         );
-        self.padding_left = (PADDING_LEFT * self.scale).round();
-        self.padding_top = (PADDING_TOP * self.scale).round();
+        self.font_size = m.font_size;
+        self.char_width = m.char_width;
+        self.line_height = m.line_height;
+        self.padding_left = m.padding_left;
+        self.padding_top = m.padding_top;
         self.row_cache.clear();
     }
 
@@ -462,45 +471,29 @@ impl Renderer {
 
     /// Width of the divider between panes.
     pub fn divider_gap(&self) -> f32 {
-        self.scale.round().max(1.0)
+        self.metrics().divider_gap()
     }
 
     /// Height of the tab bar (shown only with two or more tabs).
     pub fn tab_bar_height(&self, tab_count: usize) -> f32 {
-        if tab_count >= 2 {
-            self.line_height
-        } else {
-            0.0
-        }
+        self.metrics().tab_bar_height(tab_count)
     }
 
     /// The window area below the tab bar, where panes are laid out.
     pub fn content_rect(&self, tab_count: usize) -> Rect {
-        let bar = self.tab_bar_height(tab_count);
-        Rect::new(
-            0.0,
-            bar,
-            self.config.width as f32,
-            (self.config.height as f32 - bar).max(1.0),
-        )
+        let size = (self.config.width as f32, self.config.height as f32);
+        self.metrics().content_rect(tab_count, size)
     }
 
     /// Grid size (cols, rows) of a pane occupying `rect`.
     pub fn compute_grid_size(&self, rect: Rect) -> (usize, usize) {
-        let avail_w = (rect.w - self.padding_left * 2.0).max(10.0);
-        let avail_h = (rect.h - self.padding_top * 2.0).max(10.0);
-        let cols = (avail_w / self.char_width).floor() as usize;
-        let rows = (avail_h / self.line_height).floor() as usize;
-        (cols.max(10), rows.max(4))
+        self.metrics().grid_size(rect)
     }
 
     /// Map a physical pixel position to a (col, row) cell of the pane in `rect`, clamped to
     /// its grid.
     pub fn pixel_to_cell(&self, rect: Rect, x: f64, y: f64) -> (usize, usize) {
-        let (cols, rows) = self.compute_grid_size(rect);
-        let col = ((x - (rect.x + self.padding_left) as f64) / self.char_width as f64).max(0.0);
-        let row = ((y - (rect.y + self.padding_top) as f64) / self.line_height as f64).max(0.0);
-        ((col as usize).min(cols - 1), (row as usize).min(rows - 1))
+        self.metrics().pixel_to_cell(rect, x, y)
     }
 
     /// Map a pixel to the cell drawn there and its side. Unlike `pixel_to_cell`, this follows
@@ -527,12 +520,7 @@ impl Renderer {
     /// Which half of its cell the pixel falls in (selections include a cell only when the
     /// pointer passes its middle).
     pub fn pixel_side(&self, rect: Rect, x: f64) -> Side {
-        let rel = (x - (rect.x + self.padding_left) as f64) / self.char_width as f64;
-        if rel.rem_euclid(1.0) < 0.5 {
-            Side::Left
-        } else {
-            Side::Right
-        }
+        self.metrics().pixel_side(rect, x)
     }
 
     fn shaper(&mut self) -> RowShaper<'_> {
