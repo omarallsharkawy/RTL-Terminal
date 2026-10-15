@@ -3,9 +3,9 @@
 
 use alacritty_terminal::index::Side;
 
+use super::style::Quad;
 use super::text::bidi::is_rtl_char;
 use super::text::segment::CachedSegment;
-use super::Quad;
 use crate::terminal::{CellData, LineData};
 
 pub mod cache;

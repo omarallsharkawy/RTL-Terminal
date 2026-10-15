@@ -7,8 +7,9 @@ use super::bidi::{is_rtl_char, trails_rtl_neutrals, LRI, LRM, PDI, RLM};
 use super::fonts::grid_family;
 use super::segment::CachedSegment;
 use crate::color::Palette;
-use crate::quad::try_render_box_or_block;
-use crate::render::{cell_colors, RowCursor};
+use crate::render::row::RowCursor;
+use crate::render::scene::boxdraw::try_render_box_or_block;
+use crate::render::style::cell_colors;
 use crate::terminal::{CellData, LineData};
 
 /// Turns terminal rows into shaped text segments. Kept apart from the GPU state so the

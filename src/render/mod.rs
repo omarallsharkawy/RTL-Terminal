@@ -1,10 +1,15 @@
 pub mod metrics;
 pub mod row;
+pub mod scene;
+pub mod style;
 pub mod text;
 
 pub use metrics::CellMetrics;
 pub use row::cache::RowCache;
 pub use row::{visual_cell_extents, CachedRow, RowCursor};
+pub use scene::boxdraw::try_render_box_or_block;
+pub use scene::row_quads::build_row_quads;
+pub use style::{cell_colors, target_color, Quad};
 
 pub use text::segment::CachedSegment;
 pub use text::shaper::{measure_char_width, shape_label, RowShaper};
@@ -22,12 +27,10 @@ use winit::window::Window;
 
 use crate::color::{Palette, Rgba};
 use crate::layout::{tab_rects, truncate_title, PaneId, Rect};
-use crate::quad::{try_render_box_or_block, QuadRenderer};
+use crate::quad::QuadRenderer;
 use crate::terminal::{CellData, CursorState, LineData};
 use row::hash_row;
 use text::fonts::{installed_family, new_font_system};
-
-pub type Quad = (f32, f32, f32, f32, [f32; 4]);
 
 /// Widest a tab in the tab bar gets, in cells.
 const MAX_TAB_CELLS: f32 = 28.0;
@@ -89,43 +92,6 @@ pub struct Renderer {
     pub ime: crate::ime::PreeditState,
 }
 
-fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {
-    Rgba {
-        r: a.r + (b.r - a.r) * t,
-        g: a.g + (b.g - a.g) * t,
-        b: a.b + (b.b - a.b) * t,
-        a: a.a,
-    }
-}
-
-/// Resolve a cell's effective (foreground, background) honoring INVERSE, DIM and HIDDEN.
-pub fn cell_colors(palette: &Palette, cell: &CellData) -> (Rgba, Rgba) {
-    let mut fg = palette.resolve(cell.fg, false);
-    let mut bg = palette.resolve(cell.bg, true);
-    if cell.flags.contains(CellFlags::INVERSE) {
-        std::mem::swap(&mut fg, &mut bg);
-    }
-    if cell.flags.contains(CellFlags::DIM) {
-        fg = mix(fg, bg, 0.34);
-    }
-    if cell.search_match > 0 {
-        bg = if cell.search_match > 1 {
-            palette.search_focus
-        } else {
-            palette.search_match
-        };
-        fg = palette.background;
-    }
-    if cell.selected {
-        bg = palette.selection;
-    }
-    // Last, so selecting or searching never reveals concealed text (passwords, `\e[8m`).
-    if cell.flags.contains(CellFlags::HIDDEN) {
-        fg = bg;
-    }
-    (fg, bg)
-}
-
 /// Width of the cursor on `col`: two cells on a double-width character, so a block cursor
 /// covers all of the glyph it recolors.
 pub fn cursor_cell_width(line: &LineData, col: usize, cw: f32) -> f32 {
@@ -147,63 +113,8 @@ pub fn geometry_under_block_cursor(
     let mut quads = Vec::new();
     if !cell.flags.contains(CellFlags::HIDDEN) {
         let (_, bg) = cell_colors(palette, cell);
-        let color = if is_srgb {
-            bg.to_linear()
-        } else {
-            bg.to_array()
-        };
+        let color = target_color(bg, is_srgb);
         try_render_box_or_block(cell.c, x, y, w, h, color, &mut quads);
-    }
-    quads
-}
-
-/// Backgrounds, box geometry and decorations of a row. Cells inside RTL segments follow the
-/// glyphs that hold them; everything else sits on the grid. `metrics` is (cell width, line
-/// height, font px).
-pub fn build_row_quads(
-    palette: &Palette,
-    is_srgb: bool,
-    metrics: (f32, f32, f32),
-    line: &LineData,
-    segments: &[CachedSegment],
-) -> Vec<Quad> {
-    let (cw, lh, font_px) = metrics;
-    let target = |rgba: Rgba| {
-        if is_srgb {
-            rgba.to_linear()
-        } else {
-            rgba.to_array()
-        }
-    };
-    let thickness = (font_px / 14.0).round().max(1.0);
-    let underline_y = ((lh + font_px) * 0.5).round().min(lh - thickness);
-    let strike_y = (lh * 0.5).round();
-
-    let visual = visual_cell_extents(line, segments, cw);
-
-    let mut quads = Vec::new();
-    for (c, cell) in line.cells.iter().enumerate() {
-        let (fg, bg) = cell_colors(palette, cell);
-        let (x, w) = visual[c].map_or((c as f32 * cw, cw), |(l, r)| (l, r - l));
-        if bg != palette.background && w > 0.0 {
-            quads.push((x, 0.0, w, lh, target(bg)));
-        }
-        let fg_color = target(fg);
-        if !cell.flags.contains(CellFlags::HIDDEN) {
-            try_render_box_or_block(cell.c, x, 0.0, w, lh, fg_color, &mut quads);
-        }
-        if w <= 0.0 {
-            continue;
-        }
-        if cell.flags.contains(CellFlags::DOUBLE_UNDERLINE) {
-            quads.push((x, underline_y - thickness * 2.0, w, thickness, fg_color));
-            quads.push((x, underline_y, w, thickness, fg_color));
-        } else if cell.link_hover || cell.flags.intersects(CellFlags::ALL_UNDERLINES) {
-            quads.push((x, underline_y, w, thickness, fg_color));
-        }
-        if cell.flags.contains(CellFlags::STRIKEOUT) {
-            quads.push((x, strike_y, w, thickness, fg_color));
-        }
     }
     quads
 }
@@ -426,7 +337,7 @@ impl Renderer {
         text: &str,
     ) -> Option<(Quad, Buffer, f32)> {
         let y = rect.y + self.padding_top + rows.checked_sub(1)? as f32 * self.line_height;
-        let bar = mix(self.palette.background, self.palette.foreground, 0.14);
+        let bar = self.palette.background.mix(self.palette.foreground, 0.14);
         let quad = (
             rect.x,
             y,
@@ -535,11 +446,7 @@ impl Renderer {
     }
 
     pub(crate) fn to_target_color(&self, rgba: Rgba) -> [f32; 4] {
-        if self.is_srgb {
-            rgba.to_linear()
-        } else {
-            rgba.to_array()
-        }
+        target_color(rgba, self.is_srgb)
     }
 
     fn build_row_quads(&self, line: &LineData, segments: &[CachedSegment]) -> Vec<Quad> {
@@ -626,7 +533,7 @@ impl Renderer {
             Vec::new()
         };
         if !tab_geometry.is_empty() {
-            let bar = mix(self.palette.background, self.palette.foreground, 0.08);
+            let bar = self.palette.background.mix(self.palette.foreground, 0.08);
             quads.push((
                 0.0,
                 0.0,
@@ -739,7 +646,7 @@ impl Renderer {
         }
 
         let divider_color =
-            self.to_target_color(mix(self.palette.background, self.palette.foreground, 0.28));
+            self.to_target_color(self.palette.background.mix(self.palette.foreground, 0.28));
         quads.extend(dividers.iter().map(|d| (d.x, d.y, d.w, d.h, divider_color)));
         self.quad_renderer
             .set_rects(&self.device, &self.queue, &quads);
@@ -754,7 +661,7 @@ impl Renderer {
             let color = if tab.active {
                 self.palette.foreground
             } else {
-                mix(self.palette.foreground, self.palette.background, 0.2)
+                self.palette.foreground.mix(self.palette.background, 0.2)
             };
             tab_texts.push((buffer, *rect, color.to_glyphon()));
         }
