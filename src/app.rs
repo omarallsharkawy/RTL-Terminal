@@ -3,7 +3,7 @@ use alacritty_terminal::index::{Direction, Side};
 use alacritty_terminal::term::TermMode;
 use alacritty_terminal::vte::ansi::{Color as AnsiColor, Rgb};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, Ime, KeyEvent, MouseButton, WindowEvent};
@@ -138,12 +138,7 @@ impl App {
                 return None;
             }
         };
-        Some(Pane::new(
-            id,
-            Arc::new(Mutex::new(terminal)),
-            Some(pty),
-            (cols, rows),
-        ))
+        Some(Pane::new(id, terminal, Some(pty), (cols, rows)))
     }
 
     fn focused_id(&self) -> Option<PaneId> {
@@ -151,10 +146,8 @@ impl App {
     }
 
     /// Run `f` on the terminal of pane `id`.
-    fn term<R>(&self, id: PaneId, f: impl FnOnce(&mut Terminal) -> R) -> Option<R> {
-        let pane = self.panes.get(&id)?;
-        let mut term = pane.terminal.lock().ok()?;
-        Some(f(&mut term))
+    fn term<R>(&mut self, id: PaneId, f: impl FnOnce(&mut Terminal) -> R) -> Option<R> {
+        self.panes.get_mut(&id).map(|p| f(&mut p.terminal))
     }
 
     fn mode_of(&self, id: PaneId) -> TermMode {
@@ -542,9 +535,7 @@ impl App {
         let (col, row) = (pane.ui.mouse_col, pane.ui.mouse_row);
         let clicks = pane.ui.clicks.click(now, col, row);
         pane.ui.selection.begin();
-        if let Ok(mut term) = pane.terminal.lock() {
-            term.start_selection(col, row, side, clicks);
-        }
+        pane.terminal.start_selection(col, row, side, clicks);
         self.request_redraw();
     }
 
@@ -772,10 +763,10 @@ impl App {
 impl App {
     /// Text of the search bar for the current query and match position.
     fn search_bar_text(&self, id: PaneId, query: &str) -> String {
-        self.term(id, |t| {
-            search_bar_text(query, t.has_search_match(), || t.search_position())
-        })
-        .unwrap_or_else(|| format!("Find: {query}"))
+        match self.panes.get(&id).map(|p| &p.terminal) {
+            Some(t) => search_bar_text(query, t.has_search_match(), || t.search_position()),
+            None => format!("Find: {query}"),
+        }
     }
 
     fn open_search(&mut self, id: PaneId) {
@@ -865,7 +856,7 @@ impl App {
             .into_iter()
             .filter_map(|(id, rect)| {
                 let pane = self.panes.get(&id)?;
-                let (lines, cursor) = pane.terminal.lock().ok()?.snapshot();
+                let (lines, cursor) = pane.terminal.snapshot();
                 let status = pane
                     .ui
                     .search_query
@@ -946,15 +937,13 @@ impl ApplicationHandler<AppEvent> for App {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
             AppEvent::PtyData(id, data) => {
-                let Some(pane) = self.panes.get(&id) else {
+                let Some(pane) = self.panes.get_mut(&id) else {
                     return;
                 };
-                let mut moved = false;
-                if let Ok(mut term) = pane.terminal.lock() {
-                    let before = term.cursor_position();
-                    term.process_bytes(&data);
-                    moved = term.cursor_position() != before;
-                }
+                let term = &mut pane.terminal;
+                let before = term.cursor_position();
+                term.process_bytes(&data);
+                let moved = term.cursor_position() != before;
                 // Output that moves the cursor keeps it solid while text is appearing.
                 if moved && self.focused_id() == Some(id) {
                     self.cursor_blink.reset(Instant::now());
@@ -1101,9 +1090,7 @@ impl ApplicationHandler<AppEvent> for App {
                 };
                 pane.ui.mouse_side = side;
                 if pane.ui.selection.selecting {
-                    if let Ok(mut term) = pane.terminal.lock() {
-                        term.update_selection(col, row, side);
-                    }
+                    pane.terminal.update_selection(col, row, side);
                     self.request_redraw();
                 }
                 let Some(pane) = self.panes.get_mut(&id) else {

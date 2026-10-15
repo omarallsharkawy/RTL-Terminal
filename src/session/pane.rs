@@ -2,7 +2,6 @@
 
 use alacritty_terminal::index::Side;
 use alacritty_terminal::term::TermMode;
-use std::sync::{Arc, Mutex};
 
 use crate::input::mouse::{ClickCounter, StepAccumulator};
 use crate::layout::PaneId;
@@ -12,7 +11,8 @@ use crate::ui::selection::SelectionState;
 
 pub struct Pane {
     pub id: PaneId,
-    pub terminal: Arc<Mutex<Terminal>>,
+    /// Only touched on the event-loop thread: PTY output arrives as events, so no lock.
+    pub terminal: Terminal,
     pub pty: Option<Pty>,
     /// Grid size last sent to the terminal and the PTY.
     pub size: (usize, usize),
@@ -58,12 +58,7 @@ impl Default for PaneUi {
 }
 
 impl Pane {
-    pub fn new(
-        id: PaneId,
-        terminal: Arc<Mutex<Terminal>>,
-        pty: Option<Pty>,
-        size: (usize, usize),
-    ) -> Self {
+    pub fn new(id: PaneId, terminal: Terminal, pty: Option<Pty>, size: (usize, usize)) -> Self {
         Self {
             id,
             terminal,
@@ -75,10 +70,7 @@ impl Pane {
     }
 
     pub fn mode(&self) -> TermMode {
-        self.terminal
-            .lock()
-            .map(|t| t.mode())
-            .unwrap_or(TermMode::NONE)
+        self.terminal.mode()
     }
 
     pub fn write(&self, bytes: &[u8]) {
@@ -93,9 +85,7 @@ impl Pane {
             return;
         }
         self.size = (cols, rows);
-        if let Ok(mut term) = self.terminal.lock() {
-            term.resize(cols, rows);
-        }
+        self.terminal.resize(cols, rows);
         if let Some(ref pty) = self.pty {
             let _ = pty.resize(cols as u16, rows as u16);
         }
