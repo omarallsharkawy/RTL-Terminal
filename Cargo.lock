@@ -2559,6 +2559,7 @@ dependencies = [
  "bytemuck",
  "cosmic-text",
  "glyphon",
+ "png",
  "pollster",
  "portable-pty",
  "serde",
