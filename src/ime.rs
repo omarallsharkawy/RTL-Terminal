@@ -7,10 +7,11 @@
 //! character and no text de-duplication is needed. As a safety net, keyboard input is dropped
 //! while a preedit is on screen, in case a platform leaks the key that drives composition.
 
-use cosmic_text::{Attrs, Buffer, Metrics, Shaping};
+use cosmic_text::Buffer;
 use glyphon::{TextArea, TextBounds};
 
-use crate::renderer::Renderer;
+use crate::render::text::bidi::LRM;
+use crate::render::{shape_label, Renderer};
 
 /// Whether a `KeyboardInput` event may reach the shell given the IME state.
 pub fn should_forward_key(preedit_active: bool) -> bool {
@@ -129,23 +130,21 @@ impl Renderer {
         let mut area = (caret_x, cw);
         let mut origin = None;
         if self.has_preedit() {
-            let mut buffer = Buffer::new_empty(Metrics::new(self.font_px(), lh));
-            let attrs = Attrs::new().family(crate::fonts::grid_family(self.font_family));
             let rtl = !self.ime.text.is_ascii();
             let shaped = if rtl {
-                format!("\u{200E}{}", self.ime.text)
+                format!("{LRM}{}", self.ime.text)
             } else {
                 self.ime.text.clone()
             };
-            buffer.set_text(&shaped, &attrs, Shaping::Advanced, None);
-            buffer.shape_until_scroll(&mut self.font_system, false);
+            let size = (self.font_px(), lh);
+            let buffer = shape_label(&mut self.font_system, self.font_family, size, &shaped);
             let width = buffer
                 .layout_runs()
                 .map(|r| r.line_w)
                 .fold(0.0_f32, f32::max)
                 .max(cw);
             let left = preedit_left(caret_x, extends_left, width);
-            let prefix = if rtl { "\u{200E}".len() } else { 0 };
+            let prefix = if rtl { LRM.len() } else { 0 };
             let cursor_byte = self.ime.cursor.map_or(self.ime.text.len(), |c| c.0) + prefix;
             let cx = left + cursor_offset(&buffer, cursor_byte, width);
 

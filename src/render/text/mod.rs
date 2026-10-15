@@ -2,3 +2,5 @@
 
 pub mod bidi;
 pub mod fonts;
+pub mod segment;
+pub mod shaper;
