@@ -574,9 +574,6 @@ pub fn cell_colors(palette: &Palette, cell: &CellData) -> (Rgba, Rgba) {
     if cell.flags.contains(CellFlags::DIM) {
         fg = mix(fg, bg, 0.34);
     }
-    if cell.flags.contains(CellFlags::HIDDEN) {
-        fg = bg;
-    }
     if cell.search_match > 0 {
         bg = if cell.search_match > 1 {
             palette.search_focus
@@ -587,6 +584,10 @@ pub fn cell_colors(palette: &Palette, cell: &CellData) -> (Rgba, Rgba) {
     }
     if cell.selected {
         bg = palette.selection;
+    }
+    // Last, so selecting or searching never reveals concealed text (passwords, `\e[8m`).
+    if cell.flags.contains(CellFlags::HIDDEN) {
+        fg = bg;
     }
     (fg, bg)
 }
