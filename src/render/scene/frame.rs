@@ -99,7 +99,8 @@ pub fn build_frame(
     for pane in panes {
         let rect = pane.rect;
         let (origin_x, origin_y) = (rect.x + m.padding_left, rect.y + m.padding_top);
-        let mut rows = cache.take(pane.id, pane.lines.len());
+        let mut previous = cache.take(pane.id);
+        let mut rows = Vec::with_capacity(pane.lines.len());
         let shape = effective_cursor_shape(opts.cursor_style, pane.cursor.shape);
         let cursor_focused = opts.window_focused && pane.focused;
 
@@ -113,12 +114,13 @@ pub fn build_frame(
                     block: cursor_focused && opts.cursor_blink_on && shape == CursorShape::Block,
                 });
 
-            let hash = hash_row(&line.cells, row_cursor);
-            if rows[r].hash != hash {
+            let hash = hash_row(line, row_cursor);
+            let row = previous.take(r, hash).unwrap_or_else(|| {
                 let segments = ctx.shaper().build_row(line, row_cursor);
                 let row_quads = ctx.row_quads(line, &segments);
-                rows[r] = CachedRow::new(hash, line, segments, row_quads, m.char_width);
-            }
+                CachedRow::new(hash, line, segments, row_quads, m.char_width)
+            });
+            rows.push(row);
 
             let cached = &rows[r];
             quads.extend(

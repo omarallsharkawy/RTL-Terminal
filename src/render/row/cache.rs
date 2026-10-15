@@ -27,17 +27,36 @@ impl RowCache {
         self.panes.get(&pane).and_then(|rows| rows.get(row))
     }
 
-    /// Take a pane's rows out of the cache, sized to `rows` (new rows are empty and will be
-    /// rebuilt). Put them back with `put` once drawn.
-    pub fn take(&mut self, pane: PaneId, rows: usize) -> Vec<CachedRow> {
-        let mut cached = self.panes.remove(&pane).unwrap_or_default();
-        if cached.len() != rows {
-            cached.resize(rows, CachedRow::default());
-        }
-        cached
+    /// Take a pane's rows out of the cache, to be looked up by hash while the next frame is
+    /// built. Put the new rows back with `put` once drawn.
+    pub fn take(&mut self, pane: PaneId) -> PreviousRows {
+        let rows = self.panes.remove(&pane).unwrap_or_default();
+        let by_hash = rows.iter().enumerate().map(|(i, r)| (r.hash, i)).collect();
+        PreviousRows { rows, by_hash }
     }
 
     pub fn put(&mut self, pane: PaneId, rows: Vec<CachedRow>) {
         self.panes.insert(pane, rows);
+    }
+}
+
+/// A pane's rows from its previous frame.
+pub struct PreviousRows {
+    rows: Vec<CachedRow>,
+    by_hash: HashMap<u64, usize>,
+}
+
+impl PreviousRows {
+    /// The row drawn from `hash`, preferably the one that was at `index`. Rows are found
+    /// wherever they were, so output that scrolls the screen reuses every row it moved. Each
+    /// row is handed out once.
+    pub fn take(&mut self, index: usize, hash: u64) -> Option<CachedRow> {
+        let at = if self.rows.get(index).is_some_and(|r| r.hash == hash) {
+            index
+        } else {
+            *self.by_hash.get(&hash)?
+        };
+        let row = self.rows.get_mut(at).filter(|r| r.hash == hash)?;
+        Some(std::mem::take(row))
     }
 }

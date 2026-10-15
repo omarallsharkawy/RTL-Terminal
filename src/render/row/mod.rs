@@ -184,30 +184,12 @@ pub fn visual_cell_extents(
     visual
 }
 
-/// Hash of everything that changes how a row is shaped and drawn; the row cache key.
-pub(crate) fn hash_row(cells: &[CellData], cursor: Option<RowCursor>) -> u64 {
+/// Hash of everything that changes how a row is shaped and drawn; the row cache key. The
+/// line's own key already covers its cells and highlights.
+pub(crate) fn hash_row(line: &LineData, cursor: Option<RowCursor>) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    for cell in cells {
-        cell.c.hash(&mut hasher);
-        cell.zerowidth.hash(&mut hasher);
-        hash_color(&cell.fg, &mut hasher);
-        hash_color(&cell.bg, &mut hasher);
-        cell.flags.bits().hash(&mut hasher);
-        cell.selected.hash(&mut hasher);
-        cell.search_match.hash(&mut hasher);
-        cell.link_hover.hash(&mut hasher);
-    }
+    line.hash.hash(&mut hasher);
     cursor.hash(&mut hasher);
     hasher.finish()
-}
-
-fn hash_color<H: std::hash::Hasher>(color: &alacritty_terminal::vte::ansi::Color, hasher: &mut H) {
-    use alacritty_terminal::vte::ansi::Color;
-    use std::hash::Hash;
-    match color {
-        Color::Named(n) => (0u8, *n as u8).hash(hasher),
-        Color::Spec(rgb) => (1u8, rgb.r, rgb.g, rgb.b).hash(hasher),
-        Color::Indexed(idx) => (2u8, *idx).hash(hasher),
-    }
 }
