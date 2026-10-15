@@ -1,8 +1,9 @@
 //! Regressions from the renderer audit: hidden text, text color mode, wide cursor and the
 //! preedit covering the text under it.
 use alacritty_terminal::term::cell::Flags as CellFlags;
-use glyphon::ColorMode;
+use glyphon::{ColorMode, TextBounds};
 use twitty::color::Palette;
+use twitty::ime::bounds_outside;
 use twitty::renderer::{cell_colors, cursor_cell_width, text_color_mode};
 use twitty::terminal::{CellData, Terminal};
 
@@ -48,4 +49,24 @@ fn block_cursor_covers_both_cells_of_a_wide_char() {
     assert_eq!(cursor_cell_width(line, 3, 9.0), 9.0);
     // Past the end of the row.
     assert_eq!(cursor_cell_width(line, 99, 9.0), 9.0);
+}
+
+#[test]
+fn preedit_hides_the_text_under_it() {
+    let pane = TextBounds {
+        left: 0,
+        top: 0,
+        right: 200,
+        bottom: 100,
+    };
+    let [left, right] = bounds_outside(pane, 40.4, 80.6);
+    assert_eq!((left.left, left.right), (0, 40));
+    assert_eq!((right.left, right.right), (81, 200));
+    assert_eq!(
+        (left.top, left.bottom, right.top, right.bottom),
+        (0, 100, 0, 100)
+    );
+    // A hole wider than the pane leaves nothing on either side.
+    let [left, right] = bounds_outside(pane, -10.0, 250.0);
+    assert!(left.right <= left.left && right.right <= right.left);
 }

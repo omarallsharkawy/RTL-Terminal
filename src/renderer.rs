@@ -1247,7 +1247,7 @@ impl Renderer {
             caches.push(rows);
         }
 
-        let preedit_origin = self.prepare_preedit(ime_caret, &mut quads, &mut cursor_quads);
+        let preedit_box = self.prepare_preedit(ime_caret, &mut quads, &mut cursor_quads);
         // The cursor sits above cell backgrounds but below text (its glyph was recolored).
         quads.extend(other_cursor_quads);
         quads.extend(cursor_quads);
@@ -1310,16 +1310,26 @@ impl Renderer {
                     break;
                 }
                 let y = pane.rect.y + self.padding_top + r as f32 * self.line_height;
+                // The row under the preedit is clipped around it, so its text does not show
+                // through the preedit's background.
+                let (parts, n) = match preedit_box {
+                    Some((left, _, width)) if pane.focused && pane.cursor.row == r => {
+                        (crate::ime::bounds_outside(bounds, left, left + width), 2)
+                    }
+                    _ => ([bounds, bounds], 1),
+                };
                 for seg in &cached_row.segments {
-                    text_areas.push(TextArea {
-                        buffer: &seg.buffer,
-                        left: pane.rect.x + self.padding_left + seg.seg_x,
-                        top: y,
-                        scale: 1.0,
-                        bounds,
-                        default_color: self.palette.foreground.to_glyphon(),
-                        custom_glyphs: &[],
-                    });
+                    for &bounds in &parts[..n] {
+                        text_areas.push(TextArea {
+                            buffer: &seg.buffer,
+                            left: pane.rect.x + self.padding_left + seg.seg_x,
+                            top: y,
+                            scale: 1.0,
+                            bounds,
+                            default_color: self.palette.foreground.to_glyphon(),
+                            custom_glyphs: &[],
+                        });
+                    }
                 }
             }
             if let Some((_, buffer, y)) = status {
@@ -1334,7 +1344,7 @@ impl Renderer {
                 });
             }
         }
-        if let Some(origin) = preedit_origin {
+        if let Some((left, top, _)) = preedit_box {
             let bounds = ime_bounds.unwrap_or_else(|| {
                 rect_bounds(Rect::new(
                     0.0,
@@ -1344,7 +1354,7 @@ impl Renderer {
                 ))
             });
             text_areas.extend(self.ime.text_area(
-                origin,
+                (left, top),
                 bounds,
                 self.palette.foreground.to_glyphon(),
             ));
