@@ -11,9 +11,18 @@ use crate::session::workspace::PaneFactory;
 use crate::terminal::Terminal;
 
 pub struct ShellFactory<'a> {
-    pub proxy: &'a EventLoopProxy<AppEvent>,
+    proxy: &'a EventLoopProxy<AppEvent>,
     /// Blink the cursor when the program has not chosen a style.
-    pub cursor_blink: bool,
+    cursor_blink: bool,
+}
+
+impl<'a> ShellFactory<'a> {
+    pub fn new(proxy: &'a EventLoopProxy<AppEvent>, cursor_blink: bool) -> Self {
+        Self {
+            proxy,
+            cursor_blink,
+        }
+    }
 }
 
 impl PaneFactory for ShellFactory<'_> {

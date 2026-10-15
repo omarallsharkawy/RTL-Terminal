@@ -58,21 +58,24 @@ impl App {
                     self.run_search(id, Direction::Left);
                     return;
                 }
-                self.clear_selection(id);
-                self.write_to(id, text.as_bytes());
-                self.scroll_to_bottom(id);
+                self.send_input(id, text.as_bytes());
             }
         }
+    }
+
+    /// Typed input for the shell: it drops the selection and snaps the view to the live screen.
+    fn send_input(&mut self, id: PaneId, bytes: &[u8]) {
+        self.clear_selection(id);
+        self.write_to(id, bytes);
+        self.scroll_to_bottom(id);
     }
 
     /// Run a shortcut action on the focused pane. Returns true when the window should close.
     fn run_action(&mut self, id: PaneId, action: InputAction) -> bool {
         match action {
             InputAction::Bytes(bytes) => {
-                self.clear_selection(id);
-                self.write_to(id, &bytes);
+                self.send_input(id, &bytes);
                 self.cursor_blink.reset(Instant::now());
-                self.scroll_to_bottom(id);
             }
             InputAction::ZoomIn => self.zoom_by(1),
             InputAction::ZoomOut => self.zoom_by(-1),
