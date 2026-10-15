@@ -1,3 +1,6 @@
+// Release builds are GUI apps on Windows: no console window opens next to the terminal.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 use twitty::app::{App, AppEvent};
 use winit::event_loop::EventLoop;
 
