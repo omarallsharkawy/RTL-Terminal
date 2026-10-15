@@ -3,26 +3,13 @@
 use cosmic_text::Buffer;
 
 use super::context::DrawContext;
-use crate::layout::{tab_rects, truncate_title, Rect};
+use crate::layout::{truncate_title, Rect};
 use crate::render::style::Quad;
 use crate::render::TabLabel;
 
-/// Widest a tab in the tab bar gets, in cells.
-const MAX_TAB_CELLS: f32 = 28.0;
-
 /// Where each tab goes in a window `width` wide; empty with fewer than two tabs (no tab bar).
 pub fn tab_geometry(ctx: &DrawContext, tab_count: usize, width: f32) -> Vec<Rect> {
-    if tab_count >= 2 {
-        let m = &ctx.metrics;
-        tab_rects(
-            tab_count,
-            width,
-            m.line_height,
-            MAX_TAB_CELLS * m.char_width,
-        )
-    } else {
-        Vec::new()
-    }
+    ctx.metrics.tab_rects(tab_count, width)
 }
 
 /// The tab bar background and the active tab's highlight and accent line.

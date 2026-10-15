@@ -28,6 +28,7 @@ use crate::terminal::{CursorState, LineData};
 use gpu::Gpu;
 use scene::context::DrawContext;
 use scene::frame::{build_frame, FrameOptions};
+use scene::preedit::PreeditState;
 use text::fonts::{installed_family, new_font_system};
 
 /// Everything the renderer needs to draw one pane.
@@ -49,36 +50,31 @@ pub struct TabLabel {
     pub active: bool,
 }
 
+/// The terminal renderer: lays out each frame on the CPU (`scene`) and draws it on the GPU
+/// (`gpu`). Its state is reached through methods, so the app never depends on its layout.
 pub struct Renderer {
-    pub window: Arc<Window>,
+    window: Arc<Window>,
     /// Surface size and format.
-    pub config: wgpu::SurfaceConfiguration,
+    config: wgpu::SurfaceConfiguration,
     gpu: Gpu,
-    pub font_system: FontSystem,
+    font_system: FontSystem,
     /// Configured terminal font family (leaked once per change; `None` = monospace).
-    pub font_family: Option<&'static str>,
-    pub palette: Palette,
-    /// Font size in logical points (what the user zooms and what is saved).
-    pub font_size: f32,
-    /// Window scale factor (1.0 = 96 DPI).
-    pub scale: f32,
-    /// Cell metrics in physical pixels.
-    pub char_width: f32,
-    pub line_height: f32,
-    pub padding_left: f32,
-    pub padding_top: f32,
-    pub is_srgb: bool,
-    pub focused: bool,
+    font_family: Option<&'static str>,
+    palette: Palette,
+    metrics: CellMetrics,
+    is_srgb: bool,
+    /// Whether the window has keyboard focus.
+    focused: bool,
     /// Window background opacity (1.0 = solid).
-    pub opacity: f32,
+    opacity: f32,
     /// Configured cursor style ("block", "beam"/"bar", "underline").
-    pub cursor_style: String,
+    cursor_style: String,
     /// Blink phase: while false the cursor is not drawn (and its block glyph is not recolored).
-    pub cursor_blink_on: bool,
+    cursor_blink_on: bool,
     /// Shaped rows of every pane, so a pane that did not change is not reshaped.
-    pub row_cache: RowCache,
+    row_cache: RowCache,
     /// Input-method composition drawn at the cursor.
-    pub ime: crate::ime::PreeditState,
+    ime: PreeditState,
 }
 
 impl Renderer {
@@ -94,12 +90,14 @@ impl Renderer {
             font_system: new_font_system(),
             font_family: None,
             palette: Palette::default(),
-            font_size: initial_font_size,
-            scale,
-            char_width: 0.0,
-            line_height: 0.0,
-            padding_left: 0.0,
-            padding_top: 0.0,
+            metrics: CellMetrics {
+                font_size: initial_font_size,
+                scale,
+                char_width: 0.0,
+                line_height: 0.0,
+                padding_left: 0.0,
+                padding_top: 0.0,
+            },
             is_srgb,
             focused: true,
             opacity: 1.0,
@@ -114,29 +112,59 @@ impl Renderer {
 
     /// The current cell metrics.
     pub fn metrics(&self) -> CellMetrics {
-        CellMetrics {
-            font_size: self.font_size,
-            scale: self.scale,
-            char_width: self.char_width,
-            line_height: self.line_height,
-            padding_left: self.padding_left,
-            padding_top: self.padding_top,
-        }
+        self.metrics
+    }
+
+    pub fn window(&self) -> &Arc<Window> {
+        &self.window
+    }
+
+    /// Surface size in physical pixels.
+    pub fn surface_size(&self) -> (u32, u32) {
+        (self.config.width, self.config.height)
+    }
+
+    pub fn palette(&self) -> &Palette {
+        &self.palette
+    }
+
+    /// Use another color theme (cached rows hold colors, so they are rebuilt).
+    pub fn set_palette(&mut self, palette: Palette) {
+        self.palette = palette;
+        self.row_cache.clear();
+    }
+
+    /// The configured cursor style ("block", "beam"/"bar", "underline").
+    pub fn set_cursor_style(&mut self, style: String) {
+        self.cursor_style = style;
+    }
+
+    pub fn is_focused(&self) -> bool {
+        self.focused
+    }
+
+    /// The cursor blink phase drawn by the next `render`.
+    pub fn cursor_blink(&self) -> bool {
+        self.cursor_blink_on
+    }
+
+    pub fn set_cursor_blink(&mut self, on: bool) {
+        self.cursor_blink_on = on;
+    }
+
+    /// Where each tab of the tab bar goes (empty with fewer than two tabs).
+    pub fn tab_rects(&self, tab_count: usize) -> Vec<Rect> {
+        self.metrics.tab_rects(tab_count, self.config.width as f32)
     }
 
     /// Recompute cell metrics from the font size and scale factor.
     fn update_metrics(&mut self) {
-        let m = CellMetrics::measure(
+        self.metrics = CellMetrics::measure(
             &mut self.font_system,
             self.font_family,
-            self.font_size,
-            self.scale,
+            self.metrics.font_size,
+            self.metrics.scale,
         );
-        self.font_size = m.font_size;
-        self.char_width = m.char_width;
-        self.line_height = m.line_height;
-        self.padding_left = m.padding_left;
-        self.padding_top = m.padding_top;
         self.row_cache.clear();
     }
 
@@ -157,12 +185,12 @@ impl Renderer {
     }
 
     pub fn set_font_size(&mut self, new_size: f32) {
-        self.font_size = new_size;
+        self.metrics.font_size = new_size;
         self.update_metrics();
     }
 
     pub fn set_scale_factor(&mut self, scale: f32) {
-        self.scale = scale.max(0.25);
+        self.metrics.scale = scale.max(0.25);
         self.update_metrics();
     }
 
@@ -235,10 +263,10 @@ impl Renderer {
     ) -> (usize, usize, Side) {
         let (col, row) = self.pixel_to_cell(rect, x, y);
         let (cols, _) = self.compute_grid_size(rect);
-        let rel_x = (x - (rect.x + self.padding_left) as f64) as f32;
+        let rel_x = (x - (rect.x + self.metrics.padding_left) as f64) as f32;
         match self.row_cache.row(pane, row) {
             Some(cached) => {
-                let (col, side) = cached.hit_test(rel_x, self.char_width, cols);
+                let (col, side) = cached.hit_test(rel_x, self.metrics.char_width, cols);
                 (col, row, side)
             }
             None => (col, row, self.pixel_side(rect, x)),
@@ -269,7 +297,7 @@ impl Renderer {
             surface: (self.config.width as f32, self.config.height as f32),
         };
         let mut ctx = DrawContext {
-            metrics: self.metrics(),
+            metrics: self.metrics,
             font_system: &mut self.font_system,
             family: self.font_family,
             palette: &self.palette,

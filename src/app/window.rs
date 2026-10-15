@@ -9,7 +9,7 @@ use winit::window::{CursorIcon, UserAttentionType, WindowAttributes};
 
 use super::App;
 use crate::config::TwittyConfig;
-use crate::layout::{tab_rects, PaneId, Rect};
+use crate::layout::{PaneId, Rect};
 use crate::renderer::{PaneFrame, Renderer, TabLabel};
 use crate::session::workspace::{GridGeometry, Workspace};
 use crate::ui::hit::{hit_test, Hit, HitGeometry};
@@ -81,8 +81,8 @@ impl Window {
 
         renderer.set_font_family(config.font_family.as_deref());
         renderer.set_opacity(config.background_opacity);
-        renderer.cursor_style = config.cursor_style.clone();
-        renderer.palette = config.palette();
+        renderer.set_cursor_style(config.cursor_style.clone());
+        renderer.set_palette(config.palette());
         self.renderer = Some(renderer);
         true
     }
@@ -101,7 +101,7 @@ impl Window {
         if let Some(ref r) = self.renderer {
             if !self.needs_redraw {
                 self.needs_redraw = true;
-                r.window.request_redraw();
+                r.window().request_redraw();
             }
         }
     }
@@ -109,7 +109,7 @@ impl Window {
     /// Ask the system for a redraw directly, bypassing the merge.
     pub(super) fn request_redraw_now(&self) {
         if let Some(ref r) = self.renderer {
-            r.window.request_redraw();
+            r.window().request_redraw();
         }
     }
 
@@ -121,20 +121,20 @@ impl Window {
         if self.cursor_icon != icon {
             self.cursor_icon = icon;
             if let Some(ref r) = self.renderer {
-                r.window.set_cursor(icon);
+                r.window().set_cursor(icon);
             }
         }
     }
 
     pub(super) fn set_title(&self, title: &str) {
         if let Some(ref r) = self.renderer {
-            r.window.set_title(title);
+            r.window().set_title(title);
         }
     }
 
     pub(super) fn bell(&self) {
         if let Some(ref r) = self.renderer {
-            r.window
+            r.window()
                 .request_user_attention(Some(UserAttentionType::Informational));
         }
     }
@@ -147,13 +147,13 @@ impl Window {
 
     /// The window has keyboard focus.
     pub(super) fn is_focused(&self) -> bool {
-        self.renderer.as_ref().is_some_and(|r| r.focused)
+        self.renderer.as_ref().is_some_and(Renderer::is_focused)
     }
 
     pub(super) fn set_focused(&mut self, focused: bool) {
         if let Some(ref mut r) = self.renderer {
             r.set_focused(focused);
-            r.window.request_redraw();
+            r.window().request_redraw();
         }
     }
 
@@ -196,10 +196,10 @@ impl Window {
         let n = ws.tabs().len();
         let geometry = HitGeometry {
             tab_bar_height: r.tab_bar_height(n),
-            tabs: tab_rects(n, r.config.width as f32, r.line_height, r.char_width * 28.0),
+            tabs: r.tab_rects(n),
             content: r.content_rect(n),
             gap: r.divider_gap(),
-            slop: (r.scale * 3.0).max(2.0),
+            slop: (r.metrics().scale * 3.0).max(2.0),
         };
         hit_test(&geometry, ws.active_tab().map(|t| &t.root), x, y)
     }
@@ -218,13 +218,16 @@ impl Window {
 
     /// Height of a text line in pixels.
     pub(super) fn line_height(&self) -> Option<f64> {
-        self.renderer.as_ref().map(|r| r.line_height as f64)
+        self.renderer
+            .as_ref()
+            .map(|r| r.metrics().line_height as f64)
     }
 
     /// Cell width and height in pixels.
     pub(super) fn cell_size(&self) -> Option<(u16, u16)> {
         let r = self.renderer.as_ref()?;
-        Some((r.char_width as u16, r.line_height as u16))
+        let m = r.metrics();
+        Some((m.char_width as u16, m.line_height as u16))
     }
 
     /// Divider width, for dragging dividers.
@@ -237,11 +240,11 @@ impl Window {
     pub(super) fn palette_rgb(&self, index: usize) -> Option<Rgb> {
         let r = self.renderer.as_ref()?;
         let rgba = match index {
-            256 => r.palette.foreground,
-            257 => r.palette.background,
-            258 => r.palette.cursor,
-            i if i < 256 => r.palette.resolve(AnsiColor::Indexed(i as u8), false),
-            _ => r.palette.foreground,
+            256 => r.palette().foreground,
+            257 => r.palette().background,
+            258 => r.palette().cursor,
+            i if i < 256 => r.palette().resolve(AnsiColor::Indexed(i as u8), false),
+            _ => r.palette().foreground,
         };
         let to8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
         Some(Rgb {
@@ -255,12 +258,12 @@ impl Window {
     pub(super) fn blink_differs(&self, visible: bool) -> bool {
         self.renderer
             .as_ref()
-            .is_some_and(|r| r.cursor_blink_on != visible)
+            .is_some_and(|r| r.cursor_blink() != visible)
     }
 
     fn render(&mut self, tabs: &[TabLabel], panes: &[PaneFrame], dividers: &[Rect], blink: bool) {
         if let Some(ref mut r) = self.renderer {
-            r.cursor_blink_on = blink;
+            r.set_cursor_blink(blink);
             if let Err(e) = r.render(tabs, panes, dividers) {
                 eprintln!("Render error: {:?}", e);
             }

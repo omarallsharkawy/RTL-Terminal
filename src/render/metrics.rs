@@ -5,10 +5,12 @@ use alacritty_terminal::index::Side;
 use cosmic_text::FontSystem;
 
 use super::text::shaper::measure_char_width;
-use crate::layout::Rect;
+use crate::layout::{tab_rects, Rect};
 
 /// Line height as a multiple of the font size (tall enough for Arabic harakat).
 const LINE_HEIGHT_FACTOR: f32 = 1.55;
+/// Widest a tab in the tab bar gets, in cells.
+const MAX_TAB_CELLS: f32 = 28.0;
 /// Logical (DPI-independent) window padding.
 const PADDING_LEFT: f32 = 8.0;
 const PADDING_TOP: f32 = 6.0;
@@ -69,6 +71,17 @@ impl CellMetrics {
             self.line_height
         } else {
             0.0
+        }
+    }
+
+    /// Where each tab goes in a window `width` wide; empty with fewer than two tabs (no tab
+    /// bar).
+    pub fn tab_rects(&self, tab_count: usize, width: f32) -> Vec<Rect> {
+        if tab_count >= 2 {
+            let max_tab = MAX_TAB_CELLS * self.char_width;
+            tab_rects(tab_count, width, self.line_height, max_tab)
+        } else {
+            Vec::new()
         }
     }
 
