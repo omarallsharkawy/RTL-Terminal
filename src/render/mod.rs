@@ -8,6 +8,7 @@ pub use metrics::CellMetrics;
 pub use row::cache::RowCache;
 pub use row::{visual_cell_extents, CachedRow, RowCursor};
 pub use scene::boxdraw::try_render_box_or_block;
+pub use scene::cursor::{cursor_cell_width, geometry_under_block_cursor};
 pub use scene::row_quads::build_row_quads;
 pub use style::{cell_colors, target_color, Quad};
 
@@ -15,7 +16,6 @@ pub use text::segment::CachedSegment;
 pub use text::shaper::{measure_char_width, shape_label, RowShaper};
 
 use alacritty_terminal::index::Side;
-use alacritty_terminal::term::cell::Flags as CellFlags;
 use alacritty_terminal::vte::ansi::CursorShape;
 use cosmic_text::{Buffer, FontSystem};
 use glyphon::{
@@ -25,15 +25,16 @@ use glyphon::{
 use std::sync::Arc;
 use winit::window::Window;
 
-use crate::color::{Palette, Rgba};
-use crate::layout::{tab_rects, truncate_title, PaneId, Rect};
+use crate::color::Palette;
+use crate::layout::{PaneId, Rect};
 use crate::quad::QuadRenderer;
-use crate::terminal::{CellData, CursorState, LineData};
+use crate::terminal::{CursorState, LineData};
 use row::hash_row;
+use scene::chrome;
+use scene::context::DrawContext;
+use scene::cursor::{cursor_left, cursor_quads, effective_cursor_shape};
+use scene::preedit::bounds_outside;
 use text::fonts::{installed_family, new_font_system};
-
-/// Widest a tab in the tab bar gets, in cells.
-const MAX_TAB_CELLS: f32 = 28.0;
 
 /// Everything the renderer needs to draw one pane.
 pub struct PaneFrame {
@@ -90,33 +91,6 @@ pub struct Renderer {
     pub row_cache: RowCache,
     /// Input-method composition drawn at the cursor.
     pub ime: crate::ime::PreeditState,
-}
-
-/// Width of the cursor on `col`: two cells on a double-width character, so a block cursor
-/// covers all of the glyph it recolors.
-pub fn cursor_cell_width(line: &LineData, col: usize, cw: f32) -> f32 {
-    match line.cells.get(col) {
-        Some(cell) if cell.flags.contains(CellFlags::WIDE_CHAR) => cw * 2.0,
-        _ => cw,
-    }
-}
-
-/// Box drawing or block element of `cell` in its background color, for drawing on top of a
-/// block cursor at `rect` (x, y, w, h). Text under the cursor gets the same recolor when shaped;
-/// without this, geometry would vanish beneath the cursor.
-pub fn geometry_under_block_cursor(
-    palette: &Palette,
-    is_srgb: bool,
-    cell: &CellData,
-    (x, y, w, h): (f32, f32, f32, f32),
-) -> Vec<Quad> {
-    let mut quads = Vec::new();
-    if !cell.flags.contains(CellFlags::HIDDEN) {
-        let (_, bg) = cell_colors(palette, cell);
-        let color = target_color(bg, is_srgb);
-        try_render_box_or_block(cell.c, x, y, w, h, color, &mut quads);
-    }
-    quads
 }
 
 /// How glyphon treats text colors. `Accurate` linearizes them for an sRGB surface; on the
@@ -274,10 +248,6 @@ impl Renderer {
         }
     }
 
-    pub(crate) fn font_px(&self) -> f32 {
-        self.metrics().font_px()
-    }
-
     /// Recompute cell metrics from the font size and scale factor.
     fn update_metrics(&mut self) {
         let m = CellMetrics::measure(
@@ -329,42 +299,17 @@ impl Renderer {
         self.row_cache.forget(id);
     }
 
-    /// Background quad and shaped text for a pane's status line, positioned over its last row.
-    fn status_line_parts(
-        &mut self,
-        rect: Rect,
-        rows: usize,
-        text: &str,
-    ) -> Option<(Quad, Buffer, f32)> {
-        let y = rect.y + self.padding_top + rows.checked_sub(1)? as f32 * self.line_height;
-        let bar = self.palette.background.mix(self.palette.foreground, 0.14);
-        let quad = (
-            rect.x,
-            y,
-            rect.w,
-            self.line_height,
-            self.to_target_color(bar),
-        );
-        let size = (self.font_px(), self.line_height);
-        let buffer = shape_label(&mut self.font_system, self.font_family, size, text);
-        Some((quad, buffer, y))
+    /// Set (or clear with `None`) the IME composition drawn inline at the cursor.
+    pub fn set_preedit(&mut self, preedit: Option<(String, Option<(usize, usize)>)>) {
+        self.ime.set(preedit);
+    }
+
+    pub fn has_preedit(&self) -> bool {
+        self.ime.is_active()
     }
 
     pub fn set_opacity(&mut self, opacity: f32) {
         self.opacity = opacity.clamp(0.2, 1.0);
-    }
-
-    /// The configured style replaces the default block; shapes an app asks for (vim insert
-    /// mode's beam, for example) are kept.
-    fn effective_cursor_shape(&self, shape: CursorShape) -> CursorShape {
-        if shape != CursorShape::Block {
-            return shape;
-        }
-        match self.cursor_style.as_str() {
-            "beam" | "bar" => CursorShape::Beam,
-            "underline" => CursorShape::Underline,
-            _ => CursorShape::Block,
-        }
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -434,57 +379,6 @@ impl Renderer {
         self.metrics().pixel_side(rect, x)
     }
 
-    fn shaper(&mut self) -> RowShaper<'_> {
-        RowShaper {
-            font_px: self.font_px(),
-            font_system: &mut self.font_system,
-            palette: &self.palette,
-            char_width: self.char_width,
-            line_height: self.line_height,
-            family: self.font_family,
-        }
-    }
-
-    pub(crate) fn to_target_color(&self, rgba: Rgba) -> [f32; 4] {
-        target_color(rgba, self.is_srgb)
-    }
-
-    fn build_row_quads(&self, line: &LineData, segments: &[CachedSegment]) -> Vec<Quad> {
-        build_row_quads(
-            &self.palette,
-            self.is_srgb,
-            (self.char_width, self.line_height, self.font_px()),
-            line,
-            segments,
-        )
-    }
-
-    fn cursor_quads(
-        &self,
-        (x, y, w): (f32, f32, f32),
-        shape: CursorShape,
-        focused: bool,
-        out: &mut Vec<Quad>,
-    ) {
-        let h = self.line_height;
-        let color = self.to_target_color(self.palette.cursor);
-        let t = (self.scale * 1.5).round().max(1.0);
-        let hollow = |out: &mut Vec<Quad>| {
-            out.push((x, y, w, t, color));
-            out.push((x, y + h - t, w, t, color));
-            out.push((x, y, t, h, color));
-            out.push((x + w - t, y, t, h, color));
-        };
-        match shape {
-            CursorShape::Hidden => {}
-            _ if !focused => hollow(out),
-            CursorShape::Block => out.push((x, y, w, h, color)),
-            CursorShape::HollowBlock => hollow(out),
-            CursorShape::Beam => out.push((x, y, t, h, color)),
-            CursorShape::Underline => out.push((x, y + h - t * 2.0, w, t * 2.0, color)),
-        }
-    }
-
     /// Draw the tab bar (with two or more tabs), every pane and the dividers between them.
     pub fn render(
         &mut self,
@@ -507,11 +401,21 @@ impl Renderer {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let default_bg_color = self.to_target_color(self.palette.background);
+        let (width, height) = (self.config.width as f32, self.config.height as f32);
+        let m = self.metrics();
+        let mut ctx = DrawContext {
+            font_system: &mut self.font_system,
+            family: self.font_family,
+            palette: &self.palette,
+            metrics: m,
+            is_srgb: self.is_srgb,
+        };
+        let default_bg_color = ctx.color(ctx.palette.background);
+        let cursor_color = ctx.color(ctx.palette.cursor);
         let mut quads: Vec<Quad> = Vec::new();
         // The focused pane's cursor is separate: a preedit replaces it.
-        let mut cursor_quads: Vec<Quad> = Vec::new();
-        let mut other_cursor_quads: Vec<Quad> = Vec::new();
+        let mut focused_cursor: Vec<Quad> = Vec::new();
+        let mut other_cursors: Vec<Quad> = Vec::new();
         let mut ime_caret: Option<(f32, f32, bool)> = None;
         let mut ime_bounds: Option<TextBounds> = None;
         let rect_bounds = |r: Rect| TextBounds {
@@ -521,50 +425,20 @@ impl Renderer {
             bottom: r.bottom() as i32,
         };
 
-        let tab_geometry = if tabs.len() >= 2 {
-            let max_tab = MAX_TAB_CELLS * self.char_width;
-            tab_rects(
-                tabs.len(),
-                self.config.width as f32,
-                self.line_height,
-                max_tab,
-            )
-        } else {
-            Vec::new()
-        };
-        if !tab_geometry.is_empty() {
-            let bar = self.palette.background.mix(self.palette.foreground, 0.08);
-            quads.push((
-                0.0,
-                0.0,
-                self.config.width as f32,
-                self.line_height,
-                self.to_target_color(bar),
-            ));
-            let accent = (self.scale * 2.0).round().max(1.0);
-            for (_, rect) in tabs.iter().zip(&tab_geometry).filter(|(t, _)| t.active) {
-                quads.push((rect.x, rect.y, rect.w, rect.h, default_bg_color));
-                quads.push((
-                    rect.x,
-                    rect.y,
-                    rect.w,
-                    accent,
-                    self.to_target_color(self.palette.cursor),
-                ));
-            }
-        }
+        let tab_geometry = chrome::tab_geometry(&ctx, tabs.len(), width);
+        chrome::tab_bar_quads(&ctx, tabs, &tab_geometry, width, &mut quads);
 
         // Row caches are taken out of the map while drawing so shaping can borrow `self`.
         let mut caches: Vec<Vec<CachedRow>> = Vec::with_capacity(panes.len());
         for pane in panes {
             let rect = pane.rect;
-            let (origin_x, origin_y) = (rect.x + self.padding_left, rect.y + self.padding_top);
+            let (origin_x, origin_y) = (rect.x + m.padding_left, rect.y + m.padding_top);
             let mut rows = self.row_cache.take(pane.id, pane.lines.len());
-            let shape = self.effective_cursor_shape(pane.cursor.shape);
+            let shape = effective_cursor_shape(&self.cursor_style, pane.cursor.shape);
             let cursor_focused = self.focused && pane.focused;
 
             for (r, line) in pane.lines.iter().enumerate() {
-                let y = origin_y + r as f32 * self.line_height;
+                let y = origin_y + r as f32 * m.line_height;
                 // The cursor row stays marked during the blink's off phase: shaping depends on it
                 // (an Arabic line being typed keeps its LTR base), only the block recolor turns off.
                 let row_cursor =
@@ -577,9 +451,9 @@ impl Renderer {
 
                 let hash = hash_row(&line.cells, row_cursor);
                 if rows[r].hash != hash {
-                    let segments = self.shaper().build_row(line, row_cursor);
-                    let row_quads = self.build_row_quads(line, &segments);
-                    rows[r] = CachedRow::new(hash, line, segments, row_quads, self.char_width);
+                    let segments = ctx.shaper().build_row(line, row_cursor);
+                    let row_quads = ctx.row_quads(line, &segments);
+                    rows[r] = CachedRow::new(hash, line, segments, row_quads, m.char_width);
                 }
 
                 let cached = &rows[r];
@@ -591,34 +465,27 @@ impl Renderer {
                 );
 
                 if pane.focused && pane.cursor.row == r {
-                    let (x, ext) = cached.cursor_anchor(pane.cursor.col, self.char_width);
+                    let (x, ext) = cached.cursor_anchor(pane.cursor.col, m.char_width);
                     ime_caret = Some((origin_x + x, y, ext));
                     ime_bounds = Some(rect_bounds(rect));
                 }
 
                 // Only the focused pane's cursor blinks.
                 if let Some(rc) = row_cursor.filter(|_| !pane.focused || self.cursor_blink_on) {
-                    let (x, extends_left) = cached.cursor_anchor(rc.col, self.char_width);
-                    let mut x = origin_x + x;
-                    if extends_left {
-                        x -= match shape {
-                            CursorShape::Beam => (self.scale * 1.5).round().max(1.0),
-                            _ => self.char_width,
-                        };
-                    }
+                    let (x, extends_left) = cached.cursor_anchor(rc.col, m.char_width);
+                    let x = cursor_left(origin_x + x, extends_left, shape, &m);
                     let out = if pane.focused {
-                        &mut cursor_quads
+                        &mut focused_cursor
                     } else {
-                        &mut other_cursor_quads
+                        &mut other_cursors
                     };
-                    let w = cursor_cell_width(line, rc.col, self.char_width);
-                    let x = x.max(0.0);
-                    self.cursor_quads((x, y, w), shape, cursor_focused, out);
+                    let w = cursor_cell_width(line, rc.col, m.char_width);
+                    cursor_quads((x, y, w), shape, cursor_focused, &m, cursor_color, out);
                     if let Some(cell) = line.cells.get(rc.col).filter(|_| rc.block) {
-                        let rect = (x, y, w, self.line_height);
+                        let rect = (x, y, w, m.line_height);
                         out.extend(geometry_under_block_cursor(
-                            &self.palette,
-                            self.is_srgb,
+                            ctx.palette,
+                            ctx.is_srgb,
                             cell,
                             rect,
                         ));
@@ -628,15 +495,23 @@ impl Renderer {
             caches.push(rows);
         }
 
-        let preedit_box = self.prepare_preedit(ime_caret, &mut quads, &mut cursor_quads);
+        let (preedit_box, ime_area) =
+            self.ime
+                .layout(&mut ctx, ime_caret, &mut quads, &mut focused_cursor);
+        if let Some((x, y, w, h)) = ime_area {
+            self.window.set_ime_cursor_area(
+                winit::dpi::PhysicalPosition::new(x, y),
+                winit::dpi::PhysicalSize::new(w, h),
+            );
+        }
         // The cursor sits above cell backgrounds but below text (its glyph was recolored).
-        quads.extend(other_cursor_quads);
-        quads.extend(cursor_quads);
+        quads.extend(other_cursors);
+        quads.extend(focused_cursor);
 
         let mut statuses: Vec<Option<(Quad, Buffer, f32)>> = Vec::with_capacity(panes.len());
         for pane in panes {
             let status = match &pane.status {
-                Some(text) => self.status_line_parts(pane.rect, pane.lines.len(), text),
+                Some(text) => chrome::status_line(&mut ctx, pane.rect, pane.lines.len(), text),
                 None => None,
             };
             if let Some((quad, _, _)) = &status {
@@ -645,32 +520,18 @@ impl Renderer {
             statuses.push(status);
         }
 
-        let divider_color =
-            self.to_target_color(self.palette.background.mix(self.palette.foreground, 0.28));
-        quads.extend(dividers.iter().map(|d| (d.x, d.y, d.w, d.h, divider_color)));
+        quads.extend(chrome::divider_quads(&ctx, dividers));
         self.quad_renderer
             .set_rects(&self.device, &self.queue, &quads);
 
-        // Tab titles are shaped with full shaping so Arabic titles render.
-        let mut tab_texts: Vec<(Buffer, Rect, glyphon::Color)> = Vec::new();
-        for (rect, tab) in tab_geometry.iter().zip(tabs) {
-            let cols = ((rect.w / self.char_width).floor() as usize).saturating_sub(2);
-            let title = truncate_title(&tab.title, cols);
-            let size = (self.font_px(), self.line_height);
-            let buffer = shape_label(&mut self.font_system, self.font_family, size, &title);
-            let color = if tab.active {
-                self.palette.foreground
-            } else {
-                self.palette.foreground.mix(self.palette.background, 0.2)
-            };
-            tab_texts.push((buffer, *rect, color.to_glyphon()));
-        }
+        let tab_texts = chrome::tab_titles(&mut ctx, tabs, &tab_geometry);
+        let fg = ctx.palette.foreground.to_glyphon();
 
         let mut text_areas: Vec<TextArea> = Vec::new();
         for (buffer, rect, color) in &tab_texts {
             text_areas.push(TextArea {
                 buffer,
-                left: rect.x + self.char_width,
+                left: rect.x + m.char_width,
                 top: rect.y,
                 scale: 1.0,
                 bounds: rect_bounds(*rect),
@@ -684,12 +545,12 @@ impl Renderer {
                 if status.is_some() && r + 1 == rows.len() {
                     break;
                 }
-                let y = pane.rect.y + self.padding_top + r as f32 * self.line_height;
+                let y = pane.rect.y + m.padding_top + r as f32 * m.line_height;
                 // The row under the preedit is clipped around it, so its text does not show
                 // through the preedit's background.
                 let (parts, n) = match preedit_box {
                     Some((left, _, width)) if pane.focused && pane.cursor.row == r => {
-                        (crate::ime::bounds_outside(bounds, left, left + width), 2)
+                        (bounds_outside(bounds, left, left + width), 2)
                     }
                     _ => ([bounds, bounds], 1),
                 };
@@ -697,11 +558,11 @@ impl Renderer {
                     for &bounds in &parts[..n] {
                         text_areas.push(TextArea {
                             buffer: &seg.buffer,
-                            left: pane.rect.x + self.padding_left + seg.seg_x,
+                            left: pane.rect.x + m.padding_left + seg.seg_x,
                             top: y,
                             scale: 1.0,
                             bounds,
-                            default_color: self.palette.foreground.to_glyphon(),
+                            default_color: fg,
                             custom_glyphs: &[],
                         });
                     }
@@ -710,29 +571,19 @@ impl Renderer {
             if let Some((_, buffer, y)) = status {
                 text_areas.push(TextArea {
                     buffer,
-                    left: pane.rect.x + self.padding_left,
+                    left: pane.rect.x + m.padding_left,
                     top: *y,
                     scale: 1.0,
                     bounds,
-                    default_color: self.palette.foreground.to_glyphon(),
+                    default_color: fg,
                     custom_glyphs: &[],
                 });
             }
         }
         if let Some((left, top, _)) = preedit_box {
-            let bounds = ime_bounds.unwrap_or_else(|| {
-                rect_bounds(Rect::new(
-                    0.0,
-                    0.0,
-                    self.config.width as f32,
-                    self.config.height as f32,
-                ))
-            });
-            text_areas.extend(self.ime.text_area(
-                (left, top),
-                bounds,
-                self.palette.foreground.to_glyphon(),
-            ));
+            let bounds =
+                ime_bounds.unwrap_or_else(|| rect_bounds(Rect::new(0.0, 0.0, width, height)));
+            text_areas.extend(self.ime.text_area((left, top), bounds, fg));
         }
 
         let prepared = self.text_renderer.prepare(
