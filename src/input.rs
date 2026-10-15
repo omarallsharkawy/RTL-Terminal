@@ -654,10 +654,13 @@ pub fn handle_key_mode_raw(
         return None;
     }
 
+    let shortcut = shortcut_key(physical, logical).and_then(|c| app_shortcut(c, modifiers));
+    if !state.is_pressed() && shortcut.is_some() {
+        // Twitty consumed the press; a lone release would confuse the program.
+        return None;
+    }
     if state.is_pressed() {
-        if let Some(action) =
-            shortcut_key(physical, logical).and_then(|c| app_shortcut(c, modifiers))
-        {
+        if let Some(action) = shortcut {
             return Some(action);
         }
         // AltGr arrives as Ctrl+Alt on Windows: plain symbols pass through untouched.
