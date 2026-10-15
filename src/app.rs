@@ -2,7 +2,6 @@ use alacritty_terminal::event::{Event as TermEvent, WindowSize};
 use alacritty_terminal::index::{Direction, Side};
 use alacritty_terminal::term::TermMode;
 use alacritty_terminal::vte::ansi::{Color as AnsiColor, Rgb};
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use winit::application::ApplicationHandler;
@@ -22,13 +21,11 @@ use crate::input::route::{route_key, shortcut_is_idle, KeyRoute};
 use crate::input::{
     encode_mouse, encode_paste, handle_key, key_shortcut, terminal_key, InputAction,
 };
-use crate::layout::{
-    dividers, layout, neighbor, ratio_at, set_ratio, tab_rects, Divider, FocusDir, Node, PaneId,
-    Rect, SplitDir,
-};
-use crate::pty::Pty;
+use crate::layout::{ratio_at, tab_rects, Divider, FocusDir, PaneId, Rect, SplitDir};
 use crate::renderer::{PaneFrame, Renderer, TabLabel};
 use crate::session::pane::Pane;
+use crate::session::spawn::ShellFactory;
+use crate::session::workspace::{GridGeometry, Workspace};
 use crate::terminal::Terminal;
 use crate::ui::clipboard::Clipboard;
 use crate::ui::hit::{hit_test, Hit, HitGeometry};
@@ -37,9 +34,6 @@ use crate::ui::selection::COPIED_HIGHLIGHT;
 use crate::ui::settings::{clamp_font_size, step_opacity, DEFAULT_FONT_SIZE};
 
 const WINDOW_TITLE: &str = "Twitty · RTL Terminal";
-/// A pane is only split when both halves keep at least this many columns / rows.
-const MIN_SPLIT_COLS: usize = 24;
-const MIN_SPLIT_ROWS: usize = 10;
 
 #[derive(Debug)]
 pub enum AppEvent {
@@ -50,18 +44,9 @@ pub enum AppEvent {
     ClearSelection(PaneId, u64),
 }
 
-/// A tab: a tree of split panes and the one that has keyboard focus.
-struct Tab {
-    root: Node,
-    focused: PaneId,
-}
-
 pub struct App {
     proxy: EventLoopProxy<AppEvent>,
-    panes: HashMap<PaneId, Pane>,
-    tabs: Vec<Tab>,
-    active: usize,
-    next_pane_id: u64,
+    ws: Workspace,
     renderer: Option<Renderer>,
     modifiers: ModifiersState,
     pointer: PointerState,
@@ -81,10 +66,7 @@ impl App {
     pub fn new(proxy: EventLoopProxy<AppEvent>) -> Self {
         Self {
             proxy,
-            panes: HashMap::new(),
-            tabs: Vec::new(),
-            active: 0,
-            next_pane_id: 0,
+            ws: Workspace::new(),
             renderer: None,
             modifiers: ModifiersState::empty(),
             pointer: PointerState::default(),
@@ -101,103 +83,42 @@ impl App {
 
     // ---- panes, tabs and layout ----
 
-    fn alloc_pane_id(&mut self) -> PaneId {
-        self.next_pane_id += 1;
-        PaneId(self.next_pane_id)
-    }
-
-    /// A terminal and shell for pane `id` with the given grid size.
-    fn spawn_pane(&self, id: PaneId, cols: usize, rows: usize) -> Option<Pane> {
-        let proxy = self.proxy.clone();
-        let mut terminal = Terminal::with_events(cols, rows, move |event| {
-            let _ = proxy.send_event(AppEvent::Terminal(id, event));
-        });
-        terminal.set_default_cursor_blink(self.config.cursor_blink);
-        let proxy = self.proxy.clone();
-        let proxy_exit = self.proxy.clone();
-        // New tabs and splits open in the directory of the pane that has focus.
-        let cwd = self
-            .focused_id()
-            .and_then(|f| self.panes.get(&f))
-            .and_then(|p| p.pty.as_ref())
-            .and_then(Pty::cwd);
-        let pty = match Pty::spawn_in(
-            cwd.as_deref(),
-            cols as u16,
-            rows as u16,
-            move |data| {
-                let _ = proxy.send_event(AppEvent::PtyData(id, data));
-            },
-            move || {
-                let _ = proxy_exit.send_event(AppEvent::PtyExit(id));
-            },
-        ) {
-            Ok(p) => p,
-            Err(e) => {
-                eprintln!("Failed to spawn PTY: {:?}", e);
-                return None;
-            }
-        };
-        Some(Pane::new(id, terminal, Some(pty), (cols, rows)))
-    }
-
     fn focused_id(&self) -> Option<PaneId> {
-        self.tabs.get(self.active).map(|t| t.focused)
+        self.ws.focused_id()
     }
 
     /// Run `f` on the terminal of pane `id`.
     fn term<R>(&mut self, id: PaneId, f: impl FnOnce(&mut Terminal) -> R) -> Option<R> {
-        self.panes.get_mut(&id).map(|p| f(&mut p.terminal))
+        self.ws.pane_mut(id).map(|p| f(&mut p.terminal))
     }
 
     fn mode_of(&self, id: PaneId) -> TermMode {
-        self.panes.get(&id).map_or(TermMode::NONE, Pane::mode)
+        self.ws.pane(id).map_or(TermMode::NONE, Pane::mode)
     }
 
     fn write_to(&self, id: PaneId, bytes: &[u8]) {
-        if let Some(pane) = self.panes.get(&id) {
+        if let Some(pane) = self.ws.pane(id) {
             pane.write(bytes);
         }
-    }
-
-    fn content_rect(&self, tab_count: usize) -> Option<Rect> {
-        self.renderer.as_ref().map(|r| r.content_rect(tab_count))
     }
 
     fn gap(&self) -> f32 {
         self.renderer.as_ref().map_or(1.0, Renderer::divider_gap)
     }
 
-    /// Where each pane of the active tab goes.
-    fn active_layout(&self) -> Vec<(PaneId, Rect)> {
-        let (Some(tab), Some(rect)) = (
-            self.tabs.get(self.active),
-            self.content_rect(self.tabs.len()),
-        ) else {
-            return Vec::new();
-        };
-        layout(&tab.root, rect, self.gap())
-    }
-
     fn pane_rect(&self, id: PaneId) -> Option<Rect> {
-        self.active_layout()
-            .into_iter()
-            .find(|(p, _)| *p == id)
-            .map(|(_, r)| r)
+        self.ws.pane_rect(self.renderer.as_ref()?, id)
     }
 
     fn pane_at(&self, x: f64, y: f64) -> Option<PaneId> {
-        self.active_layout()
-            .into_iter()
-            .find(|(_, r)| r.contains(x, y))
-            .map(|(id, _)| id)
+        self.ws.pane_at(self.renderer.as_ref()?, x, y)
     }
 
     fn hit_test(&self, x: f64, y: f64) -> Hit {
         let Some(r) = self.renderer.as_ref() else {
             return Hit::Nothing;
         };
-        let n = self.tabs.len();
+        let n = self.ws.tabs().len();
         let geometry = HitGeometry {
             tab_bar_height: r.tab_bar_height(n),
             tabs: tab_rects(n, r.config.width as f32, r.line_height, r.char_width * 28.0),
@@ -205,50 +126,30 @@ impl App {
             gap: r.divider_gap(),
             slop: (r.scale * 3.0).max(2.0),
         };
-        hit_test(&geometry, self.tabs.get(self.active).map(|t| &t.root), x, y)
+        hit_test(&geometry, self.ws.active_tab().map(|t| &t.root), x, y)
     }
 
     /// Give every pane of every tab the grid its rectangle allows.
     fn apply_layout(&mut self) {
-        let Some(content) = self.content_rect(self.tabs.len()) else {
+        let Some(r) = self.renderer.as_ref() else {
             return;
         };
-        let gap = self.gap();
-        let mut sizes = Vec::new();
-        if let Some(r) = self.renderer.as_ref() {
-            for tab in &self.tabs {
-                for (id, rect) in layout(&tab.root, content, gap) {
-                    sizes.push((id, r.compute_grid_size(rect)));
-                }
-            }
-        }
-        for (id, (cols, rows)) in sizes {
-            if let Some(pane) = self.panes.get_mut(&id) {
-                pane.resize(cols, rows);
-            }
-        }
+        self.ws.apply_layout(r);
         self.request_redraw();
     }
 
     fn new_tab(&mut self) {
-        let Some(content) = self.content_rect(self.tabs.len() + 1) else {
-            return;
-        };
-        let Some((cols, rows)) = self.renderer.as_ref().map(|r| r.compute_grid_size(content))
-        else {
-            return;
-        };
-        let id = self.alloc_pane_id();
-        let Some(pane) = self.spawn_pane(id, cols, rows) else {
+        let Some(r) = self.renderer.as_ref() else {
             return;
         };
         let previous = self.focused_id();
-        self.panes.insert(id, pane);
-        self.tabs.push(Tab {
-            root: Node::Leaf(id),
-            focused: id,
-        });
-        self.active = self.tabs.len() - 1;
+        let mut shells = ShellFactory {
+            proxy: &self.proxy,
+            cursor_blink: self.config.cursor_blink,
+        };
+        let Some(id) = self.ws.new_tab(r, &mut shells) else {
+            return;
+        };
         self.release_held_buttons();
         self.pointer.cancel();
         // A second tab shows the tab bar, which shrinks every pane.
@@ -257,44 +158,18 @@ impl App {
     }
 
     fn split_focused(&mut self, dir: SplitDir) {
-        let Some(tab) = self.tabs.get(self.active) else {
+        let Some(r) = self.renderer.as_ref() else {
             return;
         };
-        let focused = tab.focused;
-        let Some((cols, rows)) = self.panes.get(&focused).map(|p| p.size) else {
+        let mut shells = ShellFactory {
+            proxy: &self.proxy,
+            cursor_blink: self.config.cursor_blink,
+        };
+        let Some((old, new)) = self.ws.split_focused(r, &mut shells, dir) else {
             return;
         };
-        let fits = match dir {
-            SplitDir::Horizontal => cols >= MIN_SPLIT_COLS * 2,
-            SplitDir::Vertical => rows >= MIN_SPLIT_ROWS * 2,
-        };
-        if !fits {
-            return;
-        }
-        let mut root = tab.root.clone();
-        let new_id = self.alloc_pane_id();
-        root.split(focused, new_id, dir);
-        let Some(content) = self.content_rect(self.tabs.len()) else {
-            return;
-        };
-        let rect = layout(&root, content, self.gap())
-            .into_iter()
-            .find(|(id, _)| *id == new_id)
-            .map(|(_, r)| r);
-        let Some((cols, rows)) = rect
-            .zip(self.renderer.as_ref())
-            .map(|(rect, r)| r.compute_grid_size(rect))
-        else {
-            return;
-        };
-        let Some(pane) = self.spawn_pane(new_id, cols, rows) else {
-            return;
-        };
-        self.panes.insert(new_id, pane);
-        self.tabs[self.active].root = root;
-        self.tabs[self.active].focused = new_id;
         self.apply_layout();
-        self.focus_changed(Some(focused), new_id);
+        self.focus_changed(Some(old), new);
     }
 
     /// Keyboard focus moved from `old` to `new`: tell the programs, restart the cursor blink and
@@ -322,23 +197,16 @@ impl App {
     }
 
     fn focus_pane(&mut self, id: PaneId) {
-        let Some(tab) = self.tabs.get_mut(self.active) else {
-            return;
-        };
-        if tab.focused == id || !tab.root.contains(id) {
-            return;
+        if let Some(old) = self.ws.focus_pane(id) {
+            self.focus_changed(Some(old), id);
         }
-        let old = tab.focused;
-        tab.focused = id;
-        self.focus_changed(Some(old), id);
     }
 
     fn set_active_tab(&mut self, index: usize) {
-        if index >= self.tabs.len() || index == self.active {
+        let old = self.focused_id();
+        if !self.ws.set_active_tab(index) {
             return;
         }
-        let old = self.focused_id();
-        self.active = index;
         self.release_held_buttons();
         self.pointer.cancel();
         if let Some(new) = self.focused_id() {
@@ -347,80 +215,43 @@ impl App {
     }
 
     fn cycle_tab(&mut self, step: isize) {
-        let n = self.tabs.len() as isize;
-        if n > 1 {
-            self.set_active_tab((self.active as isize + step).rem_euclid(n) as usize);
+        if let Some(index) = self.ws.cycled_tab(step) {
+            self.set_active_tab(index);
         }
     }
 
     fn focus_direction(&mut self, dir: FocusDir) {
-        let Some(from) = self.focused_id() else {
+        let Some(r) = self.renderer.as_ref() else {
             return;
         };
-        if let Some(to) = neighbor(&self.active_layout(), from, dir) {
+        if let Some(to) = self.ws.neighbor(r, dir) {
             self.focus_pane(to);
         }
     }
 
     /// Close one pane. Returns true when it was the last one and the window should close.
     fn close_pane(&mut self, id: PaneId) -> bool {
-        let Some(ti) = self.tabs.iter().position(|t| t.root.contains(id)) else {
+        let Some(closed) = self.ws.close_pane(id) else {
             return false;
         };
-        let previous = self.focused_id();
-        let tab = self.tabs.remove(ti);
-        let leaves = tab.root.leaves();
-        let pos = leaves.iter().position(|l| *l == id).unwrap_or(0);
-        match tab.root.remove(id) {
-            Some(root) => {
-                // Focus the pane that was next to the closed one in reading order.
-                let focused = if tab.focused == id {
-                    let near = if pos > 0 { pos - 1 } else { pos + 1 };
-                    leaves.get(near).copied().unwrap_or(leaves[0])
-                } else {
-                    tab.focused
-                };
-                self.tabs.insert(ti, Tab { root, focused });
-            }
-            None => {
-                if ti < self.active {
-                    self.active -= 1;
-                }
-            }
-        }
-        if self.active >= self.tabs.len() {
-            self.active = self.tabs.len().saturating_sub(1);
-        }
-        // Dropping the pane ends its shell.
-        self.panes.remove(&id);
         if let Some(r) = self.renderer.as_mut() {
             r.forget_pane(id);
         }
         self.pointer.forget(id);
-        let Some(now) = self.focused_id() else {
+        let Some(now) = closed.focused else {
             return true;
         };
         self.apply_layout();
-        self.focus_changed(previous.filter(|p| self.panes.contains_key(p)), now);
+        self.focus_changed(closed.previous, now);
         self.refresh_window_title();
         false
-    }
-
-    fn tab_title(&self, index: usize) -> String {
-        self.tabs
-            .get(index)
-            .and_then(|t| self.panes.get(&t.focused))
-            .and_then(|p| p.title.clone())
-            .filter(|t| !t.is_empty())
-            .unwrap_or_else(|| format!("Tab {}", index + 1))
     }
 
     /// The window title follows the focused pane.
     fn refresh_window_title(&self) {
         let title = self
-            .focused_id()
-            .and_then(|id| self.panes.get(&id))
-            .and_then(|p| p.title.clone())
+            .ws
+            .focused_title()
             .unwrap_or_else(|| WINDOW_TITLE.to_owned());
         if let Some(ref r) = self.renderer {
             r.window.set_title(&title);
@@ -510,7 +341,7 @@ impl App {
                 had
             })
             .unwrap_or(false);
-        if let Some(pane) = self.panes.get_mut(&id) {
+        if let Some(pane) = self.ws.pane_mut(id) {
             pane.ui.selection.end();
         }
         if had {
@@ -528,8 +359,8 @@ impl App {
 
     fn start_selection(&mut self, id: PaneId) {
         let now = Instant::now();
-        let side = self.panes.get(&id).map_or(Side::Left, |p| p.ui.mouse_side);
-        let Some(pane) = self.panes.get_mut(&id) else {
+        let side = self.ws.pane(id).map_or(Side::Left, |p| p.ui.mouse_side);
+        let Some(pane) = self.ws.pane_mut(id) else {
             return;
         };
         let (col, row) = (pane.ui.mouse_col, pane.ui.mouse_row);
@@ -541,14 +372,14 @@ impl App {
 
     /// Mouse released: copy what was selected, flash it briefly, then clear the highlight.
     fn finish_selection(&mut self, id: PaneId) {
-        if let Some(pane) = self.panes.get_mut(&id) {
+        if let Some(pane) = self.ws.pane_mut(id) {
             pane.ui.selection.end();
         }
         if !self.copy_selection(id) {
             self.clear_selection(id);
             return;
         }
-        let Some(generation) = self.panes.get(&id).map(|p| p.ui.selection.generation()) else {
+        let Some(generation) = self.ws.pane(id).map(|p| p.ui.selection.generation()) else {
             return;
         };
         let proxy = self.proxy.clone();
@@ -560,11 +391,7 @@ impl App {
 
     /// Underline the link under the pointer while Ctrl is held, and show a pointer cursor.
     fn update_link_hover(&mut self, id: PaneId) {
-        let Some((col, row)) = self
-            .panes
-            .get(&id)
-            .map(|p| (p.ui.mouse_col, p.ui.mouse_row))
-        else {
+        let Some((col, row)) = self.ws.pane(id).map(|p| (p.ui.mouse_col, p.ui.mouse_row)) else {
             return;
         };
         let ctrl = self.modifiers.control_key();
@@ -591,7 +418,7 @@ impl App {
     }
 
     fn send_mouse(&self, id: PaneId, button: u8, pressed: bool) {
-        let Some(pane) = self.panes.get(&id) else {
+        let Some(pane) = self.ws.pane(id) else {
             return;
         };
         let sgr = pane.mode().contains(TermMode::SGR_MOUSE);
@@ -615,8 +442,8 @@ impl App {
         // Ctrl+Click opens a link and takes priority over mouse reporting.
         if button == MouseButton::Left {
             let Some((col, row, link_press)) = self
-                .panes
-                .get(&id)
+                .ws
+                .pane(id)
                 .map(|p| (p.ui.mouse_col, p.ui.mouse_row, p.ui.link_press))
             else {
                 return;
@@ -625,21 +452,21 @@ impl App {
                 let link = self.term(id, |t| t.link_at(col, row)).flatten();
                 if let Some(link) = link {
                     crate::links::open_url(&link.uri);
-                    if let Some(p) = self.panes.get_mut(&id) {
+                    if let Some(p) = self.ws.pane_mut(id) {
                         p.ui.link_press = true;
                     }
                     return;
                 }
             } else if !pressed && link_press {
-                if let Some(p) = self.panes.get_mut(&id) {
+                if let Some(p) = self.ws.pane_mut(id) {
                     p.ui.link_press = false;
                 }
                 return;
             }
         }
-        let held = self.panes.get(&id).and_then(|p| p.ui.mouse_button_down);
+        let held = self.ws.pane(id).and_then(|p| p.ui.mouse_button_down);
         let (report, held) = button_report(pressed, mode, self.modifiers.shift_key(), held, code);
-        if let Some(p) = self.panes.get_mut(&id) {
+        if let Some(p) = self.ws.pane_mut(id) {
             p.ui.mouse_button_down = held;
         }
 
@@ -650,11 +477,7 @@ impl App {
         } else if button == MouseButton::Left {
             if pressed {
                 self.start_selection(id);
-            } else if self
-                .panes
-                .get(&id)
-                .is_some_and(|p| p.ui.selection.selecting)
-            {
+            } else if self.ws.pane(id).is_some_and(|p| p.ui.selection.selecting) {
                 self.finish_selection(id);
             }
         } else if pressed && button == MouseButton::Middle {
@@ -666,15 +489,15 @@ impl App {
     /// the real release may never arrive. Otherwise later motion is reported as a drag.
     fn release_held_buttons(&mut self) {
         let held: Vec<(PaneId, u8)> = self
-            .panes
-            .values()
+            .ws
+            .panes()
             .filter_map(|p| p.ui.mouse_button_down.map(|b| (p.id, b)))
             .collect();
         for (id, button) in held {
             if self.mode_of(id).intersects(TermMode::MOUSE_MODE) {
                 self.send_mouse(id, button, false);
             }
-            if let Some(p) = self.panes.get_mut(&id) {
+            if let Some(p) = self.ws.pane_mut(id) {
                 p.ui.mouse_button_down = None;
             }
         }
@@ -686,10 +509,8 @@ impl App {
             SplitDir::Vertical => self.pointer.pos.1,
         };
         let ratio = ratio_at(divider, pos, self.gap());
-        if let Some(tab) = self.tabs.get_mut(self.active) {
-            if set_ratio(&mut tab.root, &divider.path, ratio) {
-                self.apply_layout();
-            }
+        if self.ws.set_ratio(&divider.path, ratio) {
+            self.apply_layout();
         }
     }
 
@@ -699,14 +520,14 @@ impl App {
         match event {
             TermEvent::PtyWrite(text) => self.write_to(id, text.as_bytes()),
             TermEvent::Title(title) => {
-                if let Some(pane) = self.panes.get_mut(&id) {
+                if let Some(pane) = self.ws.pane_mut(id) {
                     pane.title = Some(title);
                 }
                 self.refresh_window_title();
                 self.request_redraw();
             }
             TermEvent::ResetTitle => {
-                if let Some(pane) = self.panes.get_mut(&id) {
+                if let Some(pane) = self.ws.pane_mut(id) {
                     pane.title = None;
                 }
                 self.refresh_window_title();
@@ -738,7 +559,7 @@ impl App {
             }
             TermEvent::TextAreaSizeRequest(format) => {
                 let Some(ref r) = self.renderer else { return };
-                let Some((cols, rows)) = self.panes.get(&id).map(|p| p.size) else {
+                let Some((cols, rows)) = self.ws.pane(id).map(|p| p.size) else {
                     return;
                 };
                 let size = WindowSize {
@@ -763,7 +584,7 @@ impl App {
 impl App {
     /// Text of the search bar for the current query and match position.
     fn search_bar_text(&self, id: PaneId, query: &str) -> String {
-        match self.panes.get(&id).map(|p| &p.terminal) {
+        match self.ws.pane(id).map(|p| &p.terminal) {
             Some(t) => search_bar_text(query, t.has_search_match(), || t.search_position()),
             None => format!("Find: {query}"),
         }
@@ -771,14 +592,14 @@ impl App {
 
     fn open_search(&mut self, id: PaneId) {
         self.clear_selection(id);
-        if let Some(pane) = self.panes.get_mut(&id) {
+        if let Some(pane) = self.ws.pane_mut(id) {
             pane.ui.search_query = Some(String::new());
         }
         self.request_redraw();
     }
 
     fn close_search(&mut self, id: PaneId) {
-        if let Some(pane) = self.panes.get_mut(&id) {
+        if let Some(pane) = self.ws.pane_mut(id) {
             pane.ui.search_query = None;
         }
         self.term(id, |t| t.clear_search());
@@ -787,7 +608,7 @@ impl App {
 
     /// Run the search for the current query in `direction` and update the bar.
     fn run_search(&mut self, id: PaneId, direction: Direction) {
-        let Some(query) = self.panes.get(&id).and_then(|p| p.ui.search_query.clone()) else {
+        let Some(query) = self.ws.pane(id).and_then(|p| p.ui.search_query.clone()) else {
             return;
         };
         self.term(id, |t| t.search(&query, direction));
@@ -801,8 +622,8 @@ impl App {
         }
         let modifiers = self.modifiers;
         let Some(query) = self
-            .panes
-            .get_mut(&id)
+            .ws
+            .pane_mut(id)
             .and_then(|p| p.ui.search_query.as_mut())
         else {
             return;
@@ -844,18 +665,22 @@ impl App {
 
     /// Snapshot everything the renderer draws for the active tab.
     fn frame(&self) -> (Vec<TabLabel>, Vec<PaneFrame>, Vec<Rect>) {
-        let tabs = (0..self.tabs.len())
+        let tabs = (0..self.ws.tabs().len())
             .map(|i| TabLabel {
-                title: self.tab_title(i),
-                active: i == self.active,
+                title: self.ws.tab_title(i),
+                active: i == self.ws.active(),
             })
             .collect();
+        let Some(r) = self.renderer.as_ref() else {
+            return (tabs, Vec::new(), Vec::new());
+        };
         let focused = self.focused_id();
         let panes = self
-            .active_layout()
+            .ws
+            .active_layout(r)
             .into_iter()
             .filter_map(|(id, rect)| {
-                let pane = self.panes.get(&id)?;
+                let pane = self.ws.pane(id)?;
                 let (lines, cursor) = pane.terminal.snapshot();
                 let status = pane
                     .ui
@@ -872,16 +697,12 @@ impl App {
                 })
             })
             .collect();
-        let dividers = match (
-            self.tabs.get(self.active),
-            self.content_rect(self.tabs.len()),
-        ) {
-            (Some(tab), Some(content)) => dividers(&tab.root, content, self.gap())
-                .into_iter()
-                .map(|d| d.rect)
-                .collect(),
-            _ => Vec::new(),
-        };
+        let dividers = self
+            .ws
+            .active_dividers(r)
+            .into_iter()
+            .map(|d| d.rect)
+            .collect();
         (tabs, panes, dividers)
     }
 }
@@ -926,7 +747,7 @@ impl ApplicationHandler<AppEvent> for App {
         self.renderer = Some(renderer);
 
         self.new_tab();
-        if self.tabs.is_empty() {
+        if self.ws.is_empty() {
             self.renderer = None;
             event_loop.exit();
             return;
@@ -937,7 +758,7 @@ impl ApplicationHandler<AppEvent> for App {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
             AppEvent::PtyData(id, data) => {
-                let Some(pane) = self.panes.get_mut(&id) else {
+                let Some(pane) = self.ws.pane_mut(id) else {
                     return;
                 };
                 let term = &mut pane.terminal;
@@ -948,11 +769,7 @@ impl ApplicationHandler<AppEvent> for App {
                 if moved && self.focused_id() == Some(id) {
                     self.cursor_blink.reset(Instant::now());
                 }
-                if self
-                    .tabs
-                    .get(self.active)
-                    .is_some_and(|t| t.root.contains(id))
-                {
+                if self.ws.is_visible(id) {
                     self.request_redraw();
                 }
             }
@@ -966,8 +783,8 @@ impl ApplicationHandler<AppEvent> for App {
             }
             AppEvent::ClearSelection(id, generation) => {
                 let current = self
-                    .panes
-                    .get(&id)
+                    .ws
+                    .pane(id)
                     .is_some_and(|p| p.ui.selection.may_clear(generation));
                 if current {
                     self.clear_selection(id);
@@ -1038,8 +855,8 @@ impl ApplicationHandler<AppEvent> for App {
                 // The release of a drag that ends outside the window may never arrive.
                 if !focused {
                     let selecting: Vec<PaneId> = self
-                        .panes
-                        .values()
+                        .ws
+                        .panes()
                         .filter(|p| p.ui.selection.selecting)
                         .map(|p| p.id)
                         .collect();
@@ -1085,7 +902,7 @@ impl ApplicationHandler<AppEvent> for App {
                 };
                 let Some(ref r) = self.renderer else { return };
                 let (col, row, side) = r.pixel_to_visual_cell(id, rect, position.x, position.y);
-                let Some(pane) = self.panes.get_mut(&id) else {
+                let Some(pane) = self.ws.pane_mut(id) else {
                     return;
                 };
                 pane.ui.mouse_side = side;
@@ -1093,7 +910,7 @@ impl ApplicationHandler<AppEvent> for App {
                     pane.terminal.update_selection(col, row, side);
                     self.request_redraw();
                 }
-                let Some(pane) = self.panes.get_mut(&id) else {
+                let Some(pane) = self.ws.pane_mut(id) else {
                     return;
                 };
                 if (col, row) == (pane.ui.mouse_col, pane.ui.mouse_row) {
@@ -1164,7 +981,7 @@ impl ApplicationHandler<AppEvent> for App {
                     return;
                 };
                 // Accumulate so trackpads scroll smoothly instead of 3 lines per tiny event.
-                let Some(pane) = self.panes.get_mut(&id) else {
+                let Some(pane) = self.ws.pane_mut(id) else {
                     return;
                 };
                 let steps = pane.ui.scroll_steps.add(lines);
@@ -1196,8 +1013,8 @@ impl ApplicationHandler<AppEvent> for App {
                     let Some(id) = self.focused_id() else { return };
                     // While searching, composed text belongs to the query, not the shell.
                     if let Some(query) = self
-                        .panes
-                        .get_mut(&id)
+                        .ws
+                        .pane_mut(id)
                         .and_then(|p| p.ui.search_query.as_mut())
                     {
                         query.push_str(&text);
@@ -1215,17 +1032,14 @@ impl ApplicationHandler<AppEvent> for App {
                 let Some(id) = self.focused_id() else { return };
                 let mode = self.mode_of(id);
                 let mut action = handle_key(&event, self.modifiers, mode);
-                let single_pane = self
-                    .tabs
-                    .get(self.active)
-                    .is_some_and(|t| matches!(t.root, Node::Leaf(_)));
+                let single_pane = self.ws.single_pane();
                 let shortcut = key_shortcut(&event, self.modifiers);
-                if shortcut_is_idle(shortcut.as_ref(), single_pane, self.tabs.len()) {
+                if shortcut_is_idle(shortcut.as_ref(), single_pane, self.ws.tabs().len()) {
                     action = terminal_key(&event, self.modifiers, mode).map(InputAction::Bytes);
                 }
                 let search_open = self
-                    .panes
-                    .get(&id)
+                    .ws
+                    .pane(id)
                     .is_some_and(|p| p.ui.search_query.is_some());
                 match route_key(action, search_open) {
                     KeyRoute::SearchBar => self.handle_search_key(id, &event),
@@ -1250,5 +1064,19 @@ impl ApplicationHandler<AppEvent> for App {
             }
             _ => {}
         }
+    }
+}
+
+impl GridGeometry for Renderer {
+    fn content_rect(&self, tab_count: usize) -> Rect {
+        Renderer::content_rect(self, tab_count)
+    }
+
+    fn gap(&self) -> f32 {
+        self.divider_gap()
+    }
+
+    fn grid_size(&self, rect: Rect) -> (usize, usize) {
+        self.compute_grid_size(rect)
     }
 }
