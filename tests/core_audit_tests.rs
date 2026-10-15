@@ -29,3 +29,48 @@ fn search_treats_regex_characters_literally() {
         );
     }
 }
+
+mod config {
+    use std::fs;
+    use twitty::config::TwittyConfig;
+
+    fn dir(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("twitty-cfg-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn broken_config_is_never_overwritten() {
+        let path = dir("broken").join("config.json");
+        let broken = "{ \"font_size\": 16, \"theme\": \"dracula\", }";
+        fs::write(&path, broken).unwrap();
+        let mut config = TwittyConfig::load_from(&path);
+        config.font_size = 20.0;
+        config.save_to(&path).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), broken);
+    }
+
+    #[test]
+    fn out_of_range_values_are_clamped() {
+        let path = dir("range").join("config.json");
+        fs::write(&path, r#"{"font_size": 0.5, "background_opacity": 7}"#).unwrap();
+        let config = TwittyConfig::load_from(&path);
+        assert_eq!(config.font_size, 8.0);
+        assert_eq!(config.background_opacity, 1.0);
+    }
+
+    #[test]
+    fn save_round_trips_and_keeps_unknown_keys() {
+        let path = dir("round").join("nested").join("config.json");
+        let mut config = TwittyConfig::default();
+        config.extra.insert("future_key".into(), 42.into());
+        config.font_size = 18.0;
+        config.save_to(&path).unwrap();
+        let back = TwittyConfig::load_from(&path);
+        assert_eq!(back.font_size, 18.0);
+        assert_eq!(back.extra.get("future_key"), Some(&42.into()));
+        assert!(!path.with_extension("json.tmp").exists());
+    }
+}

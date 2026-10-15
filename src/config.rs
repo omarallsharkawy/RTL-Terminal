@@ -1,7 +1,7 @@
 use crate::color::{parse_hex, Palette, Rgba};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
@@ -24,6 +24,9 @@ pub struct TwittyConfig {
     /// Keys this version does not know about are kept so saving never drops them.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The file exists but could not be parsed: never overwrite it with defaults.
+    #[serde(skip)]
+    keep_file: bool,
 }
 
 impl Default for TwittyConfig {
@@ -37,6 +40,7 @@ impl Default for TwittyConfig {
             font_family: None,
             cursor_blink: true,
             extra: serde_json::Map::new(),
+            keep_file: false,
         }
     }
 }
@@ -121,24 +125,67 @@ impl TwittyConfig {
     }
 
     pub fn load() -> Self {
-        if let Some(path) = Self::config_path() {
-            if let Ok(content) = fs::read_to_string(&path) {
-                if let Ok(config) = serde_json::from_str::<Self>(&content) {
-                    return config;
+        Self::config_path().map_or_else(Self::default, |path| Self::load_from(&path))
+    }
+
+    /// Read `path`; a missing file gives the defaults. A file that fails to parse also gives
+    /// the defaults, with a warning, and is left untouched by later saves.
+    pub fn load_from(path: &Path) -> Self {
+        let Ok(content) = fs::read_to_string(path) else {
+            return Self::default();
+        };
+        let mut config = match serde_json::from_str::<Self>(&content) {
+            Ok(config) => config,
+            Err(err) => {
+                eprintln!(
+                    "twitty: ignoring {} ({err}); it will not be overwritten",
+                    path.display()
+                );
+                Self {
+                    keep_file: true,
+                    ..Self::default()
                 }
             }
-        }
-        Self::default()
+        };
+        config.sanitize();
+        config
+    }
+
+    /// Bring hand-edited values into the ranges the UI allows.
+    fn sanitize(&mut self) {
+        let defaults = Self::default();
+        self.font_size = if self.font_size.is_finite() {
+            self.font_size.clamp(8.0, 48.0)
+        } else {
+            defaults.font_size
+        };
+        self.background_opacity = if self.background_opacity.is_finite() {
+            self.background_opacity.clamp(0.2, 1.0)
+        } else {
+            defaults.background_opacity
+        };
     }
 
     pub fn save(&self) {
         if let Some(path) = Self::config_path() {
-            if let Some(parent) = path.parent() {
-                let _ = fs::create_dir_all(parent);
-            }
-            if let Ok(json) = serde_json::to_string_pretty(self) {
-                let _ = fs::write(&path, json);
+            if let Err(err) = self.save_to(&path) {
+                eprintln!("twitty: could not save {}: {err}", path.display());
             }
         }
+    }
+
+    /// Write the config to `path` through a temporary file, so a crash or a full disk never
+    /// leaves a truncated config behind. Does nothing when the existing file failed to parse.
+    pub fn save_to(&self, path: &Path) -> std::io::Result<()> {
+        if self.keep_file {
+            return Ok(());
+        }
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
+        let tmp = path.with_extension("json.tmp");
+        fs::write(&tmp, json)?;
+        fs::rename(&tmp, path)
     }
 }
