@@ -169,6 +169,7 @@ impl Terminal {
     where
         F: Fn(Event) + Send + Sync + 'static,
     {
+        let (cols, rows) = (cols.max(1), rows.max(1));
         let size = TermSize::new(cols, rows);
         let listener = ForwardListener {
             on_event: Arc::new(on_event),
@@ -205,7 +206,9 @@ impl Terminal {
         (point.line.0, point.column.0)
     }
 
+    /// Resize the grid; a zero dimension is treated as one (alacritty panics on an empty grid).
     pub fn resize(&mut self, cols: usize, rows: usize) {
+        let (cols, rows) = (cols.max(1), rows.max(1));
         self.cols = cols;
         self.rows = rows;
         self.term.resize(TermSize::new(cols, rows));
