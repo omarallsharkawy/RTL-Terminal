@@ -123,3 +123,39 @@ fn layout_keys_can_be_sent_to_the_program() {
         b"\x1b[9;5u"
     );
 }
+
+fn url(text: &str, i: usize) -> Option<String> {
+    twitty::links::find_url_at(text, i).map(|(_, _, u)| u)
+}
+
+#[test]
+fn arabic_punctuation_and_closing_quotes_end_a_url() {
+    // Arabic comma, semicolon, question mark and full stop right after a link.
+    for (text, end) in [
+        ("زر https://example.com/a، ثم", '،'),
+        ("https://example.com/a؛", '؛'),
+        ("هل رأيت https://example.com/a؟", '؟'),
+        ("https://example.com/a۔", '۔'),
+    ] {
+        let i = text.chars().position(|c| c == 'h').unwrap() + 3;
+        assert_eq!(
+            url(text, i).as_deref(),
+            Some("https://example.com/a"),
+            "trailing {end}"
+        );
+    }
+    // Guillemets and curly quotes wrap links in Arabic and European text.
+    assert_eq!(
+        url("«https://example.com/a»", 3).as_deref(),
+        Some("https://example.com/a")
+    );
+    assert_eq!(
+        url("“https://example.com/a”.", 3).as_deref(),
+        Some("https://example.com/a")
+    );
+    // Arabic text inside the path is kept.
+    assert_eq!(
+        url("https://ar.wikipedia.org/wiki/مصر", 3).as_deref(),
+        Some("https://ar.wikipedia.org/wiki/مصر")
+    );
+}
