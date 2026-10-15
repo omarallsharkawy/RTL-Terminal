@@ -141,3 +141,38 @@ fn concealed_text_is_drawn_transparent() {
     }
     assert_eq!(seen, 3);
 }
+
+#[test]
+fn colors_redefined_with_osc4_are_used() {
+    use alacritty_terminal::vte::ansi::{Color, Rgb};
+    let mut term = Terminal::new(20, 2, |_| {});
+    // Redefine palette entry 1 (red) and 200, then print with both and with the default color.
+    term.process_bytes(b"\x1b]4;1;rgb:12/34/56\x07\x1b]4;200;#abcdef\x07");
+    term.process_bytes(b"\x1b[31mA\x1b[38;5;200mB\x1b[32mC\x1b[0mD");
+    let (lines, _) = term.snapshot();
+    let fg = |c: usize| lines[0].cells[c].fg;
+    assert_eq!(
+        fg(0),
+        Color::Spec(Rgb {
+            r: 0x12,
+            g: 0x34,
+            b: 0x56
+        })
+    );
+    assert_eq!(
+        fg(1),
+        Color::Spec(Rgb {
+            r: 0xab,
+            g: 0xcd,
+            b: 0xef
+        })
+    );
+    assert!(
+        !matches!(fg(2), Color::Spec(_)),
+        "untouched colors stay themed"
+    );
+    assert!(
+        !matches!(fg(3), Color::Spec(_)),
+        "default foreground stays themed"
+    );
+}
