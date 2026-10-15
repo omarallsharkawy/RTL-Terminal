@@ -203,6 +203,17 @@ impl Terminal {
         self.parser.advance(&mut self.term, bytes);
     }
 
+    /// The RGB a program gave palette entry `index` (0..256) with OSC 4, if it changed it.
+    pub fn program_palette_color(
+        &self,
+        index: usize,
+    ) -> Option<alacritty_terminal::vte::ansi::Rgb> {
+        if index >= 256 {
+            return None;
+        }
+        self.term.colors()[index]
+    }
+
     /// Default blinking for when the program has not chosen a cursor style.
     pub fn set_default_cursor_blink(&mut self, cursor_blink: bool) {
         self.term.set_options(term_config(cursor_blink));

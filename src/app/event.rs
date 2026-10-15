@@ -66,7 +66,9 @@ impl App {
             TermEvent::Bell => self.window.bell(),
             TermEvent::ColorRequest(index, format) => {
                 // OSC 4/10/11/12 queries (used by vim, fzf, delta to detect dark themes).
-                let Some(rgb) = self.window.palette_rgb(index) else {
+                // A color the program redefined itself (OSC 4) answers with its new value.
+                let redefined = self.term(id, |t| t.program_palette_color(index)).flatten();
+                let Some(rgb) = redefined.or_else(|| self.window.palette_rgb(index)) else {
                     return;
                 };
                 self.write_to(id, format(rgb).as_bytes());

@@ -176,3 +176,14 @@ fn colors_redefined_with_osc4_are_used() {
         "default foreground stays themed"
     );
 }
+
+#[test]
+fn redefined_palette_color_is_reported_back() {
+    let mut term = Terminal::new(10, 2, |_| {});
+    assert_eq!(term.program_palette_color(3), None);
+    term.process_bytes(b"\x1b]4;3;#102030\x07");
+    let rgb = term.program_palette_color(3).unwrap();
+    assert_eq!((rgb.r, rgb.g, rgb.b), (0x10, 0x20, 0x30));
+    term.process_bytes(b"\x1b]104;3\x07");
+    assert_eq!(term.program_palette_color(3), None);
+}
