@@ -4,7 +4,8 @@ use alacritty_terminal::term::cell::Flags as CellFlags;
 use alacritty_terminal::vte::ansi::CursorShape;
 use cosmic_text::{Attrs, Buffer, FontSystem, Metrics, Shaping};
 use glyphon::{
-    Cache, Resolution, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
+    Cache, ColorMode, Resolution, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer,
+    Viewport,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -687,6 +688,17 @@ pub fn build_row_quads(
     quads
 }
 
+/// How glyphon treats text colors. `Accurate` linearizes them for an sRGB surface; on the
+/// non-sRGB surface that is preferred, colors must go out as-is (`Web`), like the quads, or text
+/// is drawn darker than its palette color.
+pub fn text_color_mode(is_srgb: bool) -> ColorMode {
+    if is_srgb {
+        ColorMode::Accurate
+    } else {
+        ColorMode::Web
+    }
+}
+
 /// Measure the advance of one monospace cell at the given pixel size.
 pub fn measure_char_width(
     font_system: &mut FontSystem,
@@ -799,7 +811,8 @@ impl Renderer {
         let mut viewport = Viewport::new(&device, &cache);
         viewport.update(&queue, Resolution { width, height });
 
-        let mut text_atlas = TextAtlas::new(&device, &queue, &cache, format);
+        let mut text_atlas =
+            TextAtlas::with_color_mode(&device, &queue, &cache, format, text_color_mode(is_srgb));
         let text_renderer = TextRenderer::new(
             &mut text_atlas,
             &device,

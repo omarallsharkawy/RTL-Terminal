@@ -1,8 +1,9 @@
 //! Regressions from the renderer audit: hidden text, text color mode, wide cursor and the
 //! preedit covering the text under it.
 use alacritty_terminal::term::cell::Flags as CellFlags;
+use glyphon::ColorMode;
 use twitty::color::Palette;
-use twitty::renderer::cell_colors;
+use twitty::renderer::{cell_colors, text_color_mode};
 use twitty::terminal::CellData;
 
 fn hidden_cell() -> CellData {
@@ -26,4 +27,12 @@ fn hidden_text_stays_hidden_when_selected_or_matched() {
         let (fg, bg) = cell_colors(&palette, &matched);
         assert_eq!(fg, bg, "search-matched hidden text must stay invisible");
     }
+}
+
+#[test]
+fn glyph_colors_match_quad_colors_on_a_non_srgb_surface() {
+    // Quads write sRGB values as-is to a non-sRGB surface; glyphs must not be linearized there,
+    // or text comes out darker than the palette (and than the block cursor it is drawn on).
+    assert_eq!(text_color_mode(false), ColorMode::Web);
+    assert_eq!(text_color_mode(true), ColorMode::Accurate);
 }
