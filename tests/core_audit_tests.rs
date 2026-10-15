@@ -74,3 +74,18 @@ mod config {
         assert!(!path.with_extension("json.tmp").exists());
     }
 }
+
+#[test]
+fn shell_does_not_inherit_another_terminals_identity() {
+    use twitty::pty::INHERITED_TERMINAL_VARS as VARS;
+    for key in [
+        "KITTY_WINDOW_ID",
+        "TMUX",
+        "VTE_VERSION",
+        "WEZTERM_PANE",
+        "TERMINFO",
+    ] {
+        assert!(VARS.contains(&key), "{key}");
+    }
+    assert!(!VARS.contains(&"TERM_PROGRAM"));
+}

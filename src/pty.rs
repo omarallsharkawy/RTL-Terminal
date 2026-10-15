@@ -6,6 +6,41 @@ use std::thread;
 use anyhow::{Context, Result};
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 
+/// Variables a parent terminal (or tmux) sets for its own shells. Inherited by a Twitty
+/// started from inside one of them, they make programs talk that terminal's protocols
+/// (kitty graphics, iTerm2 escapes) or believe they run inside tmux.
+pub const INHERITED_TERMINAL_VARS: &[&str] = &[
+    "ALACRITTY_LOG",
+    "ALACRITTY_SOCKET",
+    "ALACRITTY_WINDOW_ID",
+    "COLUMNS",
+    "GHOSTTY_BIN_DIR",
+    "GHOSTTY_RESOURCES_DIR",
+    "ITERM_PROFILE",
+    "ITERM_SESSION_ID",
+    "KITTY_INSTALLATION_DIR",
+    "KITTY_LISTEN_ON",
+    "KITTY_PID",
+    "KITTY_PUBLIC_KEY",
+    "KITTY_WINDOW_ID",
+    "KONSOLE_DBUS_SERVICE",
+    "KONSOLE_DBUS_SESSION",
+    "KONSOLE_DBUS_WINDOW",
+    "KONSOLE_VERSION",
+    "LC_TERMINAL",
+    "LC_TERMINAL_VERSION",
+    "LINES",
+    "TERMINFO",
+    "TMUX",
+    "TMUX_PANE",
+    "VTE_VERSION",
+    "WEZTERM_EXECUTABLE",
+    "WEZTERM_PANE",
+    "WEZTERM_UNIX_SOCKET",
+    "WT_PROFILE_ID",
+    "WT_SESSION",
+];
+
 pub struct Pty {
     master: Box<dyn MasterPty + Send>,
     /// Writes go through a dedicated thread so a large paste never blocks the UI.
@@ -44,6 +79,10 @@ impl Pty {
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "Twitty");
+        cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
+        for key in INHERITED_TERMINAL_VARS {
+            cmd.env_remove(key);
+        }
         if env::var_os("LANG").is_none() && env::var_os("LC_ALL").is_none() {
             cmd.env("LANG", "en_US.UTF-8");
         }
