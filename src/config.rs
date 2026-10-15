@@ -2,6 +2,7 @@ use crate::color::{parse_hex, Palette, Rgba};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
@@ -61,11 +62,32 @@ pub struct ThemeColors {
     pub ansi: Option<Vec<String>>,
 }
 
+static WARNINGS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Report a configuration problem: printed to stderr and kept for `take_warnings`, so the
+/// app can also show it in the terminal (a Windows GUI app has no visible stderr).
+pub fn warn(message: String) {
+    eprintln!("{message}");
+    if let Ok(mut warnings) = WARNINGS.lock() {
+        warnings.push(message);
+    }
+}
+
+/// Problems reported since the last call, oldest first.
+pub fn take_warnings() -> Vec<String> {
+    WARNINGS
+        .lock()
+        .map(|mut w| std::mem::take(&mut *w))
+        .unwrap_or_default()
+}
+
 /// Parses a color value from the config, warning on stderr and returning `None` if invalid.
 fn parse_config_color(value: &str, key: &str) -> Option<Rgba> {
     let color = parse_hex(value);
     if color.is_none() {
-        eprintln!("twitty: ignoring invalid color {value:?} for {key}");
+        warn(format!(
+            "twitty: ignoring invalid color {value:?} for {key}"
+        ));
     }
     color
 }
@@ -76,7 +98,7 @@ impl TwittyConfig {
         let mut palette = match self.theme.as_deref() {
             None => Palette::default(),
             Some(name) => Palette::named(name).unwrap_or_else(|| {
-                eprintln!("twitty: unknown theme {name:?}, using tokyo-night");
+                warn(format!("twitty: unknown theme {name:?}, using tokyo-night"));
                 Palette::default()
             }),
         };
@@ -96,7 +118,7 @@ impl TwittyConfig {
         }
         if let Some(ansi) = &colors.ansi {
             if ansi.len() > 16 {
-                eprintln!("twitty: ignoring colors.ansi entries after the first 16");
+                warn("twitty: ignoring colors.ansi entries after the first 16".into());
             }
             for (i, value) in ansi.iter().take(16).enumerate() {
                 let key = format!("colors.ansi[{i}]");
@@ -137,10 +159,10 @@ impl TwittyConfig {
         let mut config = match serde_json::from_str::<Self>(&content) {
             Ok(config) => config,
             Err(err) => {
-                eprintln!(
+                warn(format!(
                     "twitty: ignoring {} ({err}); it will not be overwritten",
                     path.display()
-                );
+                ));
                 Self {
                     keep_file: true,
                     ..Self::default()
@@ -169,7 +191,7 @@ impl TwittyConfig {
     pub fn save(&self) {
         if let Some(path) = Self::config_path() {
             if let Err(err) = self.save_to(&path) {
-                eprintln!("twitty: could not save {}: {err}", path.display());
+                warn(format!("twitty: could not save {}: {err}", path.display()));
             }
         }
     }

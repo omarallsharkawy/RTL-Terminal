@@ -185,7 +185,9 @@ impl Renderer {
             Some(n) => match installed_family(&self.font_system, n) {
                 Some(installed) => Some(Box::leak(installed.into_boxed_str())),
                 None => {
-                    eprintln!("twitty: font_family {n:?} is not installed, using monospace");
+                    crate::config::warn(format!(
+                        "twitty: font_family {n:?} is not installed, using monospace"
+                    ));
                     None
                 }
             },

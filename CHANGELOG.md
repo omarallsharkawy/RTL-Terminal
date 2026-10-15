@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- New tabs and splits open in the focused pane's directory (Linux).
+- Colors that programs redefine with OSC 4 (pywal, vim themes) are used for drawing and reported back to color queries.
+- Config problems (invalid JSON, unknown theme, bad color, missing font) are shown in yellow at the top of the first pane, not only on stderr.
+- Fixed: a config.json with a syntax error was silently replaced by the defaults on the next zoom or opacity change. It is now left untouched; saves are atomic, and out-of-range `font_size` / `background_opacity` are clamped.
+- Fixed: concealed text (`\e[8m`, passwords) showed through a see-through background, and was revealed by selection or search.
+- Fixed: text was drawn darker than its theme color on non-sRGB surfaces.
+- Fixed: the block cursor covered only half of a wide (CJK, emoji) character, and box-drawing characters under it vanished.
+- Fixed: `╬` and the `╓╖╙╜` joins were drawn wrong.
+- Fixed: `font_family` is matched case-insensitively (`"jetbrains mono"` works).
+- Fixed: IME composition in the middle of a line no longer shows the text behind it.
+- Fixed: on AZERTY and other layouts, Ctrl+letter sent the control byte of the physical key instead of the typed letter.
+- Fixed: Alt+Arrow with one pane, and Ctrl+Tab / Ctrl+PageUp/PageDown with one tab, now reach the program (fish, vim).
+- Fixed: Shift+drag selections leaked mouse drag reports to programs, and a focus loss mid-drag left a button stuck.
+- Fixed: the release of a key Twitty used as a shortcut was still reported to programs using the kitty keyboard protocol.
+- Fixed: Arabic punctuation (`،` `؛` `؟`) and closing quotes after a URL are no longer part of the link.
+- Fixed: a trackpad Ctrl+swipe zoomed to the minimum or maximum font size at once.
+- Fixed: shells started from inside kitty, tmux or WezTerm inherited that terminal's variables (KITTY_WINDOW_ID, TMUX, TERMINFO…). `TERM_PROGRAM_VERSION` is now set.
+- Fixed: the Windows release opened an extra console window.
+- Internals: the app and the renderer are split into focused modules (`app/`, `session/`, `input/`, `ui/`, `render/`); terminal state no longer sits behind a mutex; per-frame CPU work is separated from the GPU code and tested without a GPU.
 - Tabs and split panes. Ctrl+Shift+T opens a tab, Ctrl+Shift+E / Ctrl+Shift+O split the focused pane side by side or stacked, Ctrl+Shift+W closes a pane (the last pane closes the tab, the last tab closes the window), Ctrl+Tab / Ctrl+PageDown cycle tabs, Alt+Arrow moves focus between panes, and dragging a divider resizes a split. Each pane has its own shell, selection, search and links; the unfocused pane's cursor is hollow. A tab bar (titles from the program's OSC 0/2 title, Arabic included) shows with two or more tabs. Ctrl+Tab no longer reaches programs; Ctrl+Alt+Tab still does.
 - Noto Naskh Arabic is embedded, so Arabic renders on machines without an Arabic font. System fonts still win where they cover the script.
 - `font_family` option picks the terminal font; a family that is not installed falls back to the system monospace font.

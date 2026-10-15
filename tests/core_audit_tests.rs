@@ -187,3 +187,15 @@ fn redefined_palette_color_is_reported_back() {
     term.process_bytes(b"\x1b]104;3\x07");
     assert_eq!(term.program_palette_color(3), None);
 }
+
+#[test]
+fn config_problems_are_kept_for_the_terminal() {
+    let mut config = twitty::config::TwittyConfig::default();
+    config.theme = Some("no-such-theme".into());
+    let _ = config.palette();
+    let warnings = twitty::config::take_warnings();
+    assert!(
+        warnings.iter().any(|w| w.contains("no-such-theme")),
+        "{warnings:?}"
+    );
+}

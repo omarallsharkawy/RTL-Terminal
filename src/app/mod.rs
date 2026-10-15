@@ -119,6 +119,15 @@ impl ApplicationHandler<AppEvent> for App {
             event_loop.exit();
             return;
         }
+        // Config problems found while starting (bad JSON, unknown theme, missing font).
+        let warnings = crate::config::take_warnings();
+        if let Some(id) = self.ws.focused_id().filter(|_| !warnings.is_empty()) {
+            let text: String = warnings
+                .iter()
+                .map(|w| format!("\x1b[33m{w}\x1b[0m\r\n"))
+                .collect();
+            self.term(id, |t| t.process_bytes(text.as_bytes()));
+        }
         self.window.request_redraw_now();
     }
 
