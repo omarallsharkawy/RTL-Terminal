@@ -1,8 +1,8 @@
 //! Regressions found while auditing key, shortcut and link handling.
 use alacritty_terminal::term::TermMode;
-use twitty::input::{handle_key_mode_raw, InputAction};
+use twitty::input::{handle_key_mode_raw, terminal_key_raw, InputAction};
 use winit::event::ElementState;
-use winit::keyboard::{Key, KeyCode, ModifiersState};
+use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey};
 
 const D: TermMode = TermMode::DISAMBIGUATE_ESC_CODES;
 const EV: TermMode = TermMode::REPORT_EVENT_TYPES;
@@ -82,5 +82,44 @@ fn release_of_a_consumed_shortcut_is_not_reported() {
             D | EV
         ),
         bytes(b"\x1b[97;5:3u")
+    );
+}
+
+fn passthrough(physical: KeyCode, logical: Key, m: ModifiersState, mode: TermMode) -> Vec<u8> {
+    terminal_key_raw(
+        Some(physical),
+        &logical,
+        None,
+        None,
+        ElementState::Pressed,
+        false,
+        m,
+        mode,
+    )
+    .expect("key should reach the program")
+}
+
+#[test]
+fn layout_keys_can_be_sent_to_the_program() {
+    let alt = ModifiersState::ALT;
+    let ctrl = ModifiersState::CONTROL;
+    let left = Key::Named(NamedKey::ArrowLeft);
+    assert_eq!(
+        passthrough(KeyCode::ArrowLeft, left.clone(), alt, TermMode::empty()),
+        b"\x1b[1;3D"
+    );
+    assert_eq!(passthrough(KeyCode::ArrowLeft, left, alt, D), b"\x1b[1;3D");
+    assert_eq!(
+        passthrough(
+            KeyCode::PageUp,
+            Key::Named(NamedKey::PageUp),
+            ctrl,
+            TermMode::empty()
+        ),
+        b"\x1b[5;5~"
+    );
+    assert_eq!(
+        passthrough(KeyCode::Tab, Key::Named(NamedKey::Tab), ctrl, D),
+        b"\x1b[9;5u"
     );
 }

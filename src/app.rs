@@ -13,7 +13,9 @@ use winit::window::{CursorIcon, UserAttentionType, WindowAttributes, WindowId};
 
 use crate::blink::{BlinkState, BLINK_INTERVAL};
 use crate::config::TwittyConfig;
-use crate::input::{encode_mouse, encode_paste, handle_key, InputAction};
+use crate::input::{
+    encode_mouse, encode_paste, handle_key, key_shortcut, terminal_key, InputAction,
+};
 use crate::layout::{
     dividers, layout, neighbor, ratio_at, set_ratio, tab_rects, Divider, FocusDir, Node, PaneId,
     Rect, SplitDir,
@@ -1341,7 +1343,22 @@ impl ApplicationHandler<AppEvent> for App {
                 if !crate::ime::should_forward_key(self.preedit_active) => {}
             WindowEvent::KeyboardInput { event, .. } => {
                 let Some(id) = self.focused_id() else { return };
-                let action = handle_key(&event, self.modifiers, self.mode_of(id));
+                let mode = self.mode_of(id);
+                let mut action = handle_key(&event, self.modifiers, mode);
+                // With a single pane / tab these shortcuts have nothing to do, so the key goes
+                // to the program instead (Alt+Left in fish, Ctrl+PageUp in vim...).
+                // Decided from the shortcut itself, so the release follows its press.
+                let idle = match key_shortcut(&event, self.modifiers) {
+                    Some(InputAction::Focus(_)) => self
+                        .tabs
+                        .get(self.active)
+                        .is_some_and(|t| matches!(t.root, Node::Leaf(_))),
+                    Some(InputAction::NextTab | InputAction::PrevTab) => self.tabs.len() < 2,
+                    _ => false,
+                };
+                if idle {
+                    action = terminal_key(&event, self.modifiers, mode).map(InputAction::Bytes);
+                }
                 // Layout shortcuts keep working while the search bar has the keyboard.
                 let layout_action = matches!(
                     action,

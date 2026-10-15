@@ -49,6 +49,39 @@ pub fn handle_key(
     )
 }
 
+/// The Twitty shortcut this key (pressed or released) belongs to, if any.
+pub fn key_shortcut(event: &KeyEvent, modifiers: ModifiersState) -> Option<InputAction> {
+    let physical = match event.physical_key {
+        PhysicalKey::Code(c) => Some(c),
+        _ => None,
+    };
+    shortcut_key(physical, &event.logical_key).and_then(|k| app_shortcut(k, modifiers))
+}
+
+/// The bytes a key sends to the program, ignoring Twitty's own shortcuts. Used when a
+/// shortcut has nothing to act on (Alt+Left with a single pane), so the program gets the key.
+pub fn terminal_key(
+    event: &KeyEvent,
+    modifiers: ModifiersState,
+    mode: TermMode,
+) -> Option<Vec<u8>> {
+    let physical = match event.physical_key {
+        PhysicalKey::Code(c) => Some(c),
+        _ => None,
+    };
+    let unshifted = event.key_without_modifiers();
+    terminal_key_raw(
+        physical,
+        &event.logical_key,
+        Some(&unshifted),
+        event.text.as_deref(),
+        event.state,
+        event.repeat,
+        modifiers,
+        mode,
+    )
+}
+
 /// Shortcuts handled by Twitty itself, independent of the terminal's keyboard mode.
 /// The key a shortcut refers to: the Latin letter or named key that was typed when there is
 /// one (so shortcuts follow the key labels on AZERTY and work with virtual keyboards such as
@@ -242,6 +275,18 @@ pub fn handle_key_raw(
     modifiers: ModifiersState,
     app_cursor: bool,
 ) -> Option<InputAction> {
+    legacy_key(physical, logical, text, state, modifiers, app_cursor, true)
+}
+
+fn legacy_key(
+    physical: Option<KeyCode>,
+    logical: &Key,
+    text: Option<&str>,
+    state: ElementState,
+    modifiers: ModifiersState,
+    app_cursor: bool,
+    shortcuts: bool,
+) -> Option<InputAction> {
     if !state.is_pressed() {
         return None;
     }
@@ -266,7 +311,10 @@ pub fn handle_key_raw(
     // 1. App shortcuts and Ctrl combos: by the typed Latin letter, else the physical key
     //    (so Ctrl+A is ^A on AZERTY, and Ctrl works on Arabic layouts).
     let key_code = shortcut_key(physical, logical);
-    if let Some(action) = key_code.and_then(|k| app_shortcut(k, modifiers)) {
+    if let Some(action) = key_code
+        .filter(|_| shortcuts)
+        .and_then(|k| app_shortcut(k, modifiers))
+    {
         return Some(action);
     }
     if ctrl {
@@ -644,9 +692,49 @@ pub fn handle_key_mode_raw(
     modifiers: ModifiersState,
     mode: TermMode,
 ) -> Option<InputAction> {
+    key_with_mode(
+        physical, logical, unshifted, text, state, repeat, modifiers, mode, true,
+    )
+}
+
+/// Like [`handle_key_mode_raw`], but Twitty's shortcuts are not looked up: the bytes the
+/// program would receive for this key.
+#[allow(clippy::too_many_arguments)]
+pub fn terminal_key_raw(
+    physical: Option<KeyCode>,
+    logical: &Key,
+    unshifted: Option<&Key>,
+    text: Option<&str>,
+    state: ElementState,
+    repeat: bool,
+    modifiers: ModifiersState,
+    mode: TermMode,
+) -> Option<Vec<u8>> {
+    match key_with_mode(
+        physical, logical, unshifted, text, state, repeat, modifiers, mode, false,
+    ) {
+        Some(InputAction::Bytes(bytes)) => Some(bytes),
+        _ => None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn key_with_mode(
+    physical: Option<KeyCode>,
+    logical: &Key,
+    unshifted: Option<&Key>,
+    text: Option<&str>,
+    state: ElementState,
+    repeat: bool,
+    modifiers: ModifiersState,
+    mode: TermMode,
+    shortcuts: bool,
+) -> Option<InputAction> {
     let app_cursor = mode.contains(TermMode::APP_CURSOR);
     if !mode.intersects(TermMode::KITTY_KEYBOARD_PROTOCOL) {
-        return handle_key_raw(physical, logical, text, state, modifiers, app_cursor);
+        return legacy_key(
+            physical, logical, text, state, modifiers, app_cursor, shortcuts,
+        );
     }
 
     // Releases are only reported when the application asked for event types.
@@ -654,7 +742,9 @@ pub fn handle_key_mode_raw(
         return None;
     }
 
-    let shortcut = shortcut_key(physical, logical).and_then(|c| app_shortcut(c, modifiers));
+    let shortcut = shortcut_key(physical, logical)
+        .filter(|_| shortcuts)
+        .and_then(|c| app_shortcut(c, modifiers));
     if !state.is_pressed() && shortcut.is_some() {
         // Twitty consumed the press; a lone release would confuse the program.
         return None;
@@ -680,7 +770,9 @@ pub fn handle_key_mode_raw(
         physical, logical, unshifted, text, state, repeat, modifiers, mode,
     ) {
         Some(bytes) => Some(InputAction::Bytes(bytes)),
-        None => handle_key_raw(physical, logical, text, state, modifiers, app_cursor),
+        None => legacy_key(
+            physical, logical, text, state, modifiers, app_cursor, shortcuts,
+        ),
     }
 }
 
