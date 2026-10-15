@@ -607,6 +607,28 @@ pub fn cursor_cell_width(line: &LineData, col: usize, cw: f32) -> f32 {
     }
 }
 
+/// Box drawing or block element of `cell` in its background color, for drawing on top of a
+/// block cursor at `rect` (x, y, w, h). Text under the cursor gets the same recolor when shaped;
+/// without this, geometry would vanish beneath the cursor.
+pub fn geometry_under_block_cursor(
+    palette: &Palette,
+    is_srgb: bool,
+    cell: &CellData,
+    (x, y, w, h): (f32, f32, f32, f32),
+) -> Vec<Quad> {
+    let mut quads = Vec::new();
+    if !cell.flags.contains(CellFlags::HIDDEN) {
+        let (_, bg) = cell_colors(palette, cell);
+        let color = if is_srgb {
+            bg.to_linear()
+        } else {
+            bg.to_array()
+        };
+        try_render_box_or_block(cell.c, x, y, w, h, color, &mut quads);
+    }
+    quads
+}
+
 /// Where each cell of a row is drawn, relative to the row origin: `Some((left, right))` for
 /// cells inside RTL segments (they follow their glyphs), `None` for cells on the grid.
 pub fn visual_cell_extents(
@@ -1247,7 +1269,17 @@ impl Renderer {
                         &mut other_cursor_quads
                     };
                     let w = cursor_cell_width(line, rc.col, self.char_width);
-                    self.cursor_quads((x.max(0.0), y, w), shape, cursor_focused, out);
+                    let x = x.max(0.0);
+                    self.cursor_quads((x, y, w), shape, cursor_focused, out);
+                    if let Some(cell) = line.cells.get(rc.col).filter(|_| rc.block) {
+                        let rect = (x, y, w, self.line_height);
+                        out.extend(geometry_under_block_cursor(
+                            &self.palette,
+                            self.is_srgb,
+                            cell,
+                            rect,
+                        ));
+                    }
                 }
             }
             caches.push(rows);
