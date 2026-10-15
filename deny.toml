@@ -1,0 +1,31 @@
+# cargo-deny: license and source policy for dependencies (advisories are checked by the
+# rust-security job with cargo-audit).
+
+[graph]
+all-features = true
+
+[licenses]
+# Permissive licenses compatible with distributing Twitty under MIT OR Apache-2.0.
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

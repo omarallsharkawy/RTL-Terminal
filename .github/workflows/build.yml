@@ -116,6 +116,50 @@ jobs:
           if-no-files-found: error
           path: dist/*
 
+  msrv:
+    name: Minimum supported Rust (1.90)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust 1.90
+        uses: dtolnay/rust-toolchain@1.90
+
+      - name: Cache Rust build output
+        uses: swatinem/rust-cache@v2
+
+      - name: Check the crate builds on the declared rust-version
+        run: cargo check --all-targets
+
+  build-macos:
+    name: Check macOS build
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build output
+        uses: swatinem/rust-cache@v2
+
+      - name: Build and test
+        run: cargo test --release
+
+  rust-licenses:
+    name: Dependency licenses and sources
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check licenses, bans and sources
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses bans sources
+
   rust-security:
     name: Audit Rust dependencies
     runs-on: ubuntu-latest
