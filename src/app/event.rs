@@ -4,8 +4,8 @@ use alacritty_terminal::event::{Event as TermEvent, WindowSize};
 use std::time::{Duration, Instant};
 
 use super::App;
-use crate::pty::Pty;
 use crate::layout::PaneId;
+use crate::pty::Pty;
 
 #[derive(Debug)]
 pub enum AppEvent {

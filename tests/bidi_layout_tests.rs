@@ -202,8 +202,14 @@ fn arabic_phrase_after_a_prompt_reads_right_to_left() {
         let world = span(&s.row, 8, 12);
         let last = span(&s.row, 14, 17);
         assert!(prompt.1 <= last.0 + 0.5, "prompt {prompt:?} vs {last:?}");
-        assert!(last.1 <= world.0 + 0.5, "{last:?} {world:?} ({cursor_on_row})");
-        assert!(world.1 <= first.0 + 0.5, "{world:?} {first:?} ({cursor_on_row})");
+        assert!(
+            last.1 <= world.0 + 0.5,
+            "{last:?} {world:?} ({cursor_on_row})"
+        );
+        assert!(
+            world.1 <= first.0 + 0.5,
+            "{world:?} {first:?} ({cursor_on_row})"
+        );
     }
 }
 

@@ -37,7 +37,10 @@ pub fn grid_family(name: Option<&'static str>) -> Family<'static> {
 /// fallback would find, named up front. Fallback tries fonts one by one for every word, which made
 /// an Arabic row ~50x slower to shape than a Latin one. `None` when the grid font covers Arabic
 /// itself (then it is used, as before).
-pub fn arabic_family(font_system: &mut FontSystem, grid: Option<&'static str>) -> Option<&'static str> {
+pub fn arabic_family(
+    font_system: &mut FontSystem,
+    grid: Option<&'static str>,
+) -> Option<&'static str> {
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
     static CACHE: OnceLock<Mutex<HashMap<Option<&'static str>, Option<&'static str>>>> =
