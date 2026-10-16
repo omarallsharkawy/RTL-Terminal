@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fixed: English typed after an Arabic word appeared on its right (before it, for an Arabic reader). An Arabic phrase now reads right to left, also on the line being typed and after a prompt (`❯ مرحبا hello` shows `hello` left of `مرحبا`). English sentences with an Arabic word in program output keep reading left to right.
+- Faster: Arabic rows are shaped ~5x faster (the Arabic font is named up front instead of found by font fallback for every word); a full-screen redraw of Arabic text went from 77 ms to 18 ms, and scrolling Arabic output is ~4x cheaper.
+- More responsive under heavy output: shell output is batched through a bounded queue instead of one event per read, so the screen keeps updating during `cat` of a huge file, keypresses and Ctrl+C are never stuck behind a backlog, and floods finish sooner.
 - New tabs and splits open in the focused pane's directory (Linux).
 - Colors that programs redefine with OSC 4 (pywal, vim themes) are used for drawing and reported back to color queries.
 - Config problems (invalid JSON, unknown theme, bad color, missing font) are shown in yellow at the top of the first pane, not only on stderr.

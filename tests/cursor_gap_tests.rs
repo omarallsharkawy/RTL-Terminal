@@ -55,3 +55,21 @@ fn hidden_cursor_caret_still_follows_spaces_after_arabic() {
     assert!(extends_left);
     assert!(x < 2.0 * CW + 0.5, "caret at {x}");
 }
+
+#[test]
+fn caret_after_english_typed_into_arabic_sits_right_of_it() {
+    // "❯ مرحبا hello": the phrase reads right to left, so "hello" is drawn left of the Arabic
+    // word and the caret follows its last letter, between the two.
+    let (x, extends_left, col) = anchor("❯ مرحبا hello", true);
+    assert_eq!(col, 13);
+    assert!(!extends_left);
+    assert!((x - 7.0 * CW).abs() < 0.5, "caret at {x}");
+}
+
+#[test]
+fn caret_after_a_space_typed_after_arabic_sits_on_the_far_left() {
+    // "❯ مرحبا hello يا ": the next Arabic word goes left of everything typed so far.
+    let (x, extends_left, _) = anchor("❯ مرحبا hello يا ", true);
+    assert!(extends_left);
+    assert!(x < 3.0 * CW + 0.5, "caret at {x}");
+}
