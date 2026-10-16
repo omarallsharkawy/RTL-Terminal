@@ -269,3 +269,10 @@ fn wide_arabic_glyphs_never_push_a_background_onto_the_next_cell() {
         assert!(gap.abs() < 0.01, "gap {gap}");
     }
 }
+
+#[test]
+fn english_status_line_with_one_arabic_word_keeps_its_order() {
+    // "ok تحذير done": as many Latin words as Arabic after an English lead.
+    let s = shaped("ok تحذير done", false);
+    assert!(span(&s.row, 3, 7).1 <= span(&s.row, 9, 12).0 + 0.5);
+}

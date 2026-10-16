@@ -115,7 +115,8 @@ pub struct Pty {
     writer: Sender<Vec<u8>>,
     /// Ends the shell when the pane is closed (the reader thread keeps the PTY open otherwise).
     killer: Box<dyn ChildKiller + Send + Sync>,
-    /// Process id of the shell, to find its working directory.
+    /// Process id of the shell, to find its working directory (Linux only).
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pid: Option<u32>,
 }
 

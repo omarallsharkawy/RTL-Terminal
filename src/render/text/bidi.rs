@@ -40,8 +40,10 @@ pub(crate) fn trails_rtl_neutrals(cells: &[CellData]) -> bool {
 /// as in any Arabic text.
 ///
 /// A segment that starts with Arabic, and the line being typed (`typing`), are always right to
-/// left, so English typed after an Arabic word lands on its left. Elsewhere it is right to left unless Latin words
-/// outnumber the Arabic ones, so `Error: ملف not found` keeps reading left to right.
+/// left, so English typed after an Arabic word lands on its left. In finished output the phrase
+/// is right to left when its Arabic words outnumber its Latin ones, or match them after a lead
+/// with no words (a `❯ ` prompt): `Error: ملف not found` and `ok تحذير done` keep reading left
+/// to right.
 pub(crate) fn arabic_phrase(cells: &[CellData], typing: bool) -> Option<usize> {
     let first = cells.iter().position(|c| is_rtl_char(c.c))?;
     let start = cells[..first]
@@ -59,5 +61,6 @@ pub(crate) fn arabic_phrase(cells: &[CellData], typing: bool) -> Option<usize> {
             latin += 1;
         }
     }
-    (arabic >= latin).then_some(start)
+    let lead_has_words = cells[..start].iter().any(|c| c.c.is_alphabetic());
+    (arabic > latin || (arabic == latin && !lead_has_words)).then_some(start)
 }
