@@ -4,7 +4,7 @@ use alacritty_terminal::term::cell::Flags as CellFlags;
 use alacritty_terminal::vte::ansi::Color as AnsiColor;
 use cosmic_text::{Attrs, Buffer, FontSystem, Metrics, Shaping};
 
-use super::bidi::{is_rtl_char, trails_rtl_neutrals, LRI, LRM, PDI, RLM};
+use super::bidi::{arabic_phrase, is_rtl_char, trails_rtl_neutrals, LRI, LRM, PDI, RLI, RLM};
 use super::fonts::grid_family;
 use super::segment::CachedSegment;
 use crate::color::Palette;
@@ -54,9 +54,13 @@ impl RowShaper<'_> {
         let mut cell_bytes = Vec::with_capacity(end - start);
         let mut byte = 0;
         let mut complex = has_rtl;
-        // Finished output that starts with Arabic reads right to left as a whole; the line being
-        // typed (cursor on this row) keeps an LTR base so editing never flips it.
-        let rtl_base = has_rtl && cursor.is_none() && is_rtl_char(cells[start].c);
+        // Where the Arabic phrase starts and whether it reads right to left (see `arabic_phrase`).
+        let phrase = if has_rtl {
+            arabic_phrase(&cells[start..end], cursor.is_some()).map(|p| start + p)
+        } else {
+            None
+        };
+        let rtl_base = phrase == Some(start);
         if has_rtl {
             let mark = if rtl_base { RLM } else { LRM };
             spans.push((
@@ -65,6 +69,8 @@ impl RowShaper<'_> {
             ));
             byte += mark.len();
         }
+        // A phrase after a left-to-right lead (a prompt, `echo `) is isolated right to left.
+        let phrase_isolate = phrase.filter(|&p| p > start);
 
         // Words (runs of non-blank cells) with Latin letters or digits and no Arabic. Neighbouring
         // ones share one isolate so "world 123" keeps its order inside right-to-left text.
@@ -102,6 +108,10 @@ impl RowShaper<'_> {
         for (col, cell) in cells.iter().enumerate().take(end).skip(start) {
             let (opens, closes) = isolate[col - start];
             let mut text = String::new();
+            if phrase_isolate == Some(col) {
+                text.push_str(RLI);
+                byte += RLI.len();
+            }
             if opens {
                 text.push_str(LRI);
                 byte += LRI.len();
@@ -155,6 +165,11 @@ impl RowShaper<'_> {
         if has_rtl && trails_rtl_neutrals(&cells[start..end]) {
             if let Some((text, _)) = spans.last_mut() {
                 text.push_str(RLM);
+            }
+        }
+        if phrase_isolate.is_some() {
+            if let Some((text, _)) = spans.last_mut() {
+                text.push_str(PDI);
             }
         }
 

@@ -174,7 +174,7 @@ fn leading_symbol_stays_on_the_left() {
 }
 
 #[test]
-fn arabic_led_output_reads_right_to_left_but_typing_does_not() {
+fn arabic_led_text_reads_right_to_left_while_typed_too() {
     let s = shaped("مرحبا world 123", false);
     let arabic = span(&s.row, 0, 4);
     let world = span(&s.row, 6, 10);
@@ -186,8 +186,33 @@ fn arabic_led_output_reads_right_to_left_but_typing_does_not() {
     );
     assert!(s.row.segments[0].seg_x == 0.0);
 
+    // English typed after an Arabic word lands on its left, as in any Arabic text.
     let s = shaped("مرحبا world", true);
-    assert!(span(&s.row, 6, 10).0 >= span(&s.row, 0, 4).1 - 0.5);
+    assert!(span(&s.row, 6, 10).1 <= span(&s.row, 0, 4).0 + 0.5);
+}
+
+#[test]
+fn arabic_phrase_after_a_prompt_reads_right_to_left() {
+    // "$ " + "مرحبا" + " world " + "عالم": the prompt stays on the left, then the phrase reads
+    // right to left: عالم, world, مرحبا from left to right.
+    for cursor_on_row in [true, false] {
+        let s = shaped("$ مرحبا world عالم", cursor_on_row);
+        let prompt = span(&s.row, 0, 0);
+        let first = span(&s.row, 2, 6);
+        let world = span(&s.row, 8, 12);
+        let last = span(&s.row, 14, 17);
+        assert!(prompt.1 <= last.0 + 0.5, "prompt {prompt:?} vs {last:?}");
+        assert!(last.1 <= world.0 + 0.5, "{last:?} {world:?} ({cursor_on_row})");
+        assert!(world.1 <= first.0 + 0.5, "{world:?} {first:?} ({cursor_on_row})");
+    }
+}
+
+#[test]
+fn english_sentence_with_an_arabic_word_keeps_reading_left_to_right() {
+    let s = shaped("Error: ملف not found", false);
+    let arabic = span(&s.row, 7, 9);
+    let not = span(&s.row, 11, 13);
+    assert!(arabic.1 <= not.0 + 0.5, "{arabic:?} {not:?}");
 }
 
 #[test]

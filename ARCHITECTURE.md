@@ -73,9 +73,8 @@ about winit windows or the app.
    at runs of 8+ spaces, so TUI columns never bleed into each other. Short space runs stay inside
    a segment so bidi sees whole phrases.
 2. **Direction marks.** A segment containing Arabic gets a leading LRM so the paragraph stays
-   left-to-right and prompts never jump to the other side; a finished line that starts with
-   Arabic is laid out right to left as a whole (the line being typed keeps the stable LTR
-   layout). Latin words and numbers inside Arabic are wrapped in LRI…PDI so `7abaf40` cannot be
+   left-to-right and prompts never jump to the other side; the Arabic phrase (first Arabic word
+   to the end of the segment) is laid out right to left, isolated with RLI…PDI after a prompt. Latin words and numbers inside Arabic are wrapped in LRI…PDI so `7abaf40` cannot be
    torn into `7 … abaf40`. Neutrals after trailing Arabic get an RLM so `تم ✓` keeps the mark on
    the Arabic side. See [ADR 0002](docs/adr/0002-direction-marks.md).
 3. **Shaping.** cosmic-text applies the Unicode bidi algorithm and Arabic joining.
