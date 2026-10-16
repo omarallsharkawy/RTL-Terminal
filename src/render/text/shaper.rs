@@ -2,10 +2,10 @@
 
 use alacritty_terminal::term::cell::Flags as CellFlags;
 use alacritty_terminal::vte::ansi::Color as AnsiColor;
-use cosmic_text::{Attrs, Buffer, FontSystem, Metrics, Shaping};
+use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping};
 
 use super::bidi::{arabic_phrase, is_rtl_char, trails_rtl_neutrals, LRI, LRM, PDI, RLI, RLM};
-use super::fonts::grid_family;
+use super::fonts::{arabic_family, grid_family, is_arabic_script};
 use super::segment::CachedSegment;
 use crate::color::Palette;
 use crate::render::row::RowCursor;
@@ -54,6 +54,28 @@ impl RowShaper<'_> {
         let mut cell_bytes = Vec::with_capacity(end - start);
         let mut byte = 0;
         let mut complex = has_rtl;
+        let arabic = if has_rtl {
+            arabic_family(self.font_system, self.family).map(Family::Name)
+        } else {
+            None
+        };
+        // Words (runs of non-blank cells) holding an Arabic letter are shaped in the Arabic font
+        // as a whole: cosmic-text misorders the pieces of a right-to-left word whose attributes
+        // change inside it, so "مرحبا!" must not switch fonts before the "!".
+        let mut arabic_word = vec![false; end - start];
+        if arabic.is_some() {
+            let mut c = start;
+            while c < end {
+                let word_start = c;
+                while c < end && !cells[c].is_blank() {
+                    c += 1;
+                }
+                if cells[word_start..c].iter().any(|w| is_arabic_script(w.c)) {
+                    arabic_word[word_start - start..c - start].fill(true);
+                }
+                c += 1;
+            }
+        }
         // Where the Arabic phrase starts and whether it reads right to left (see `arabic_phrase`).
         let phrase = if has_rtl {
             arabic_phrase(&cells[start..end], cursor.is_some()).map(|p| start + p)
@@ -140,7 +162,12 @@ impl RowShaper<'_> {
             } else {
                 fg.to_glyphon()
             };
-            let mut attrs = Attrs::new().family(grid_family(self.family)).color(color);
+            // Arabic letters go straight to the Arabic font instead of through font fallback.
+            let family = match arabic {
+                Some(f) if arabic_word[col - start] => f,
+                _ => grid_family(self.family),
+            };
+            let mut attrs = Attrs::new().family(family).color(color);
             if cell.flags.contains(CellFlags::BOLD) {
                 attrs = attrs.weight(cosmic_text::Weight::BOLD);
             }
@@ -151,6 +178,7 @@ impl RowShaper<'_> {
             match spans.last_mut() {
                 Some((existing, a))
                     if a.color_opt == attrs.color_opt
+                        && a.family == attrs.family
                         && a.weight == attrs.weight
                         && a.style == attrs.style =>
                 {
