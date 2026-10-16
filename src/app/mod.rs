@@ -133,7 +133,7 @@ impl ApplicationHandler<AppEvent> for App {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
-            AppEvent::PtyData(id, data) => self.on_pty_data(id, &data),
+            AppEvent::PtyOutput(id) => self.on_pty_output(id),
             AppEvent::Terminal(id, event) => self.on_terminal_event(id, event),
             // The shell of a pane exited (`exit`, crash, or closed by the OS): close that pane,
             // and the window once nothing is left.

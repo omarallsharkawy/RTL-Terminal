@@ -97,7 +97,7 @@ fn shell_starts_in_the_requested_directory_and_reports_it() {
     use twitty::pty::Pty;
     let dir = std::env::temp_dir().canonicalize().unwrap();
     std::env::set_var("TWITTY_SHELL", "sleep 5");
-    let pty = Pty::spawn_in(Some(&dir), 80, 24, |_| {}, || {}).unwrap();
+    let pty = Pty::spawn_in(Some(&dir), 80, 24, || {}, || {}).unwrap();
     let deadline = Instant::now() + Duration::from_secs(3);
     while pty.cwd().as_deref() != Some(dir.as_path()) && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));

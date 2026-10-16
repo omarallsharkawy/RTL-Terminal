@@ -23,7 +23,7 @@ the cursor, backgrounds, selection, mouse hits and IME follow the text the user 
                     ▼                                              ▼
  winit ──► app/ (route event) ──► input/ (encode bytes) ──► pty.rs ──► shell
                     │                                              │
-                    │                    AppEvent::PtyData ◄───────┘
+                    │                    AppEvent::PtyOutput ◄─────┘
                     ▼                                              
               session/ Pane ──► terminal.rs (alacritty_terminal: parse, grid, scrollback)
                                          │
@@ -91,7 +91,9 @@ or link-hover state change.
 
 - **Main thread:** the winit event loop, all terminal state, all rendering. No locks: each pane
   owns its `Terminal` directly.
-- **PTY reader thread (per pane):** reads the PTY and sends `AppEvent::PtyData` through the
+- **PTY reader thread (per pane):** reads the PTY into the pane's bounded `OutputQueue` and
+  sends `AppEvent::PtyOutput` when the queue was empty, so a flood of output arrives in a few
+  large batches; a full queue (4 MiB) makes the reader wait for the UI. Events go through the
   event-loop proxy; sends `AppEvent::PtyExit` when the shell ends.
 - **PTY writer thread (per pane):** drains a channel of input bytes so a huge paste never blocks
   a frame.

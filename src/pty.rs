@@ -2,6 +2,7 @@ use std::env;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Sender};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
 use anyhow::{Context, Result};
@@ -42,7 +43,73 @@ pub const INHERITED_TERMINAL_VARS: &[&str] = &[
     "WT_SESSION",
 ];
 
+/// Program output waiting for the UI thread, shared with the PTY reader thread.
+///
+/// Reads are appended to one buffer and the UI is woken only when it was empty, so a flood of
+/// output (`cat` of a big log) becomes a few large batches instead of one event per 8 KiB read.
+/// The buffer is bounded: a full one makes the reader wait, so the program is slowed to the
+/// speed the screen keeps up with and Ctrl+C or a keypress is never stuck behind megabytes of
+/// queued output.
+#[derive(Clone, Default)]
+pub struct OutputQueue(Arc<(Mutex<QueueState>, Condvar)>);
+
+#[derive(Default)]
+struct QueueState {
+    data: Vec<u8>,
+    /// The UI went away: drop output instead of waiting for room.
+    closed: bool,
+}
+
+impl OutputQueue {
+    /// Bytes queued before the reader waits for the UI.
+    pub const LIMIT: usize = 4 << 20;
+
+    /// Append output, waiting while the queue is full. True when the queue was empty, so the
+    /// UI must be told there is output to take.
+    pub fn push(&self, bytes: &[u8]) -> bool {
+        let (lock, room) = &*self.0;
+        let Ok(mut state) = lock.lock() else {
+            return false;
+        };
+        while state.data.len() >= Self::LIMIT && !state.closed {
+            state = match room.wait(state) {
+                Ok(s) => s,
+                Err(_) => return false,
+            };
+        }
+        if state.closed {
+            return false;
+        }
+        let was_empty = state.data.is_empty();
+        state.data.extend_from_slice(bytes);
+        was_empty
+    }
+
+    /// Everything queued so far, emptying the queue and waking a waiting reader.
+    pub fn take(&self) -> Vec<u8> {
+        let (lock, room) = &*self.0;
+        let data = lock
+            .lock()
+            .map(|mut s| std::mem::take(&mut s.data))
+            .unwrap_or_default();
+        room.notify_all();
+        data
+    }
+
+    /// Stop queueing (the pane is gone); a waiting reader is released.
+    pub fn close(&self) {
+        let (lock, room) = &*self.0;
+        if let Ok(mut s) = lock.lock() {
+            s.closed = true;
+            s.data = Vec::new();
+        }
+        room.notify_all();
+    }
+}
+
 pub struct Pty {
+    /// Output read from the shell, taken by the UI with `take_output`.
+    output: OutputQueue,
     master: Box<dyn MasterPty + Send>,
     /// Writes go through a dedicated thread so a large paste never blocks the UI.
     writer: Sender<Vec<u8>>,
@@ -54,17 +121,20 @@ pub struct Pty {
 
 impl Drop for Pty {
     fn drop(&mut self) {
+        self.output.close();
         let _ = self.killer.kill();
     }
 }
 
 impl Pty {
-    pub fn spawn<F, E>(cols: u16, rows: u16, on_data: F, on_exit: E) -> Result<Self>
+    /// Start the default shell. `on_output` is called (on the reader thread) when output arrives
+    /// in an empty queue; take it with `take_output`. `on_exit` is called when the shell ends.
+    pub fn spawn<F, E>(cols: u16, rows: u16, on_output: F, on_exit: E) -> Result<Self>
     where
-        F: FnMut(Vec<u8>) + Send + 'static,
+        F: FnMut() + Send + 'static,
         E: FnMut() + Send + 'static,
     {
-        Self::spawn_in(None, cols, rows, on_data, on_exit)
+        Self::spawn_in(None, cols, rows, on_output, on_exit)
     }
 
     /// Like `spawn`, starting the shell in `cwd` when it is an existing directory.
@@ -72,11 +142,11 @@ impl Pty {
         cwd: Option<&Path>,
         cols: u16,
         rows: u16,
-        mut on_data: F,
+        mut on_output: F,
         mut on_exit: E,
     ) -> Result<Self>
     where
-        F: FnMut(Vec<u8>) + Send + 'static,
+        F: FnMut() + Send + 'static,
         E: FnMut() + Send + 'static,
     {
         let pty_system = native_pty_system();
@@ -138,13 +208,17 @@ impl Pty {
             }
         });
 
+        let output = OutputQueue::default();
+        let queue = output.clone();
         thread::spawn(move || {
-            let mut buf = [0u8; 8192];
+            let mut buf = [0u8; 64 * 1024];
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
-                        on_data(buf[..n].to_vec());
+                        if queue.push(&buf[..n]) {
+                            on_output();
+                        }
                     }
                     Err(_) => break,
                 }
@@ -154,6 +228,7 @@ impl Pty {
         });
 
         Ok(Self {
+            output,
             master: pair.master,
             writer,
             killer,
@@ -172,6 +247,11 @@ impl Pty {
         {
             None
         }
+    }
+
+    /// Output read from the shell since the last call.
+    pub fn take_output(&self) -> Vec<u8> {
+        self.output.take()
     }
 
     pub fn write(&self, data: &[u8]) -> Result<()> {

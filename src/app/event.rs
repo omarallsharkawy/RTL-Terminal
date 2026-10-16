@@ -1,29 +1,51 @@
 //! Events the event loop receives from shells and terminals (through the event proxy).
 
 use alacritty_terminal::event::{Event as TermEvent, WindowSize};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::App;
+use crate::pty::Pty;
 use crate::layout::PaneId;
 
 #[derive(Debug)]
 pub enum AppEvent {
-    PtyData(PaneId, Vec<u8>),
+    /// The shell of a pane wrote output; it is waiting in the pane's queue.
+    PtyOutput(PaneId),
     Terminal(PaneId, TermEvent),
     PtyExit(PaneId),
     /// Clear the highlight of a copied selection, unless a newer selection was started.
     ClearSelection(PaneId, u64),
 }
 
+/// Longest stretch spent parsing output before the screen is redrawn.
+const OUTPUT_BUDGET: Duration = Duration::from_millis(12);
+
 impl App {
-    /// Output from the shell of pane `id`.
-    pub(super) fn on_pty_data(&mut self, id: PaneId, data: &[u8]) {
+    /// Output from the shell of pane `id`: everything queued since the last event, in one go.
+    pub(super) fn on_pty_output(&mut self, id: PaneId) {
         let Some(pane) = self.ws.pane_mut(id) else {
             return;
         };
         let term = &mut pane.terminal;
         let before = term.cursor_position();
-        term.process_bytes(data);
+        // Keep taking output that arrives meanwhile, but leave time for a frame: a flood never
+        // freezes the screen, and an idle shell is drawn as soon as its output is parsed.
+        let start = Instant::now();
+        let mut any = false;
+        loop {
+            let data = pane.pty.as_ref().map(Pty::take_output).unwrap_or_default();
+            if data.is_empty() {
+                break;
+            }
+            any = true;
+            term.process_bytes(&data);
+            if start.elapsed() >= OUTPUT_BUDGET {
+                break;
+            }
+        }
+        if !any {
+            return;
+        }
         let moved = term.cursor_position() != before;
         // Output that moves the cursor keeps it solid while text is appearing.
         if moved && self.focused_id() == Some(id) {

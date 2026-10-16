@@ -45,8 +45,8 @@ impl PaneFactory for ShellFactory<'_> {
             cwd.as_deref(),
             cols as u16,
             rows as u16,
-            move |data| {
-                let _ = proxy.send_event(AppEvent::PtyData(id, data));
+            move || {
+                let _ = proxy.send_event(AppEvent::PtyOutput(id));
             },
             move || {
                 let _ = proxy_exit.send_event(AppEvent::PtyExit(id));
