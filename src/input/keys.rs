@@ -812,12 +812,20 @@ fn kitty_text_key(
     };
     let lower = |c: char| c.to_lowercase().next().unwrap_or(c);
     let base_char = key.physical.and_then(physical_base_char);
-    let code_char = key
+    let layout_char = key
         .unshifted
         .and_then(first_char)
         .or_else(|| first_char(key.logical))
-        .map(lower)
-        .or(base_char)?;
+        .map(lower);
+    // With Ctrl, Alt or Super on a non-Latin layout (Arabic, Russian…) the key is reported by
+    // its Latin letter, as in the legacy encoding: programs bind Ctrl+C, not Ctrl+ؤ, and would
+    // otherwise ignore the key.
+    let chorded = m.control_key() || m.alt_key() || m.super_key();
+    let code_char = match layout_char {
+        Some(c) if chorded && !c.is_ascii() => base_char.or(Some(c)),
+        Some(c) => Some(c),
+        None => base_char,
+    }?;
     let code = code_char as u32;
 
     let (mut shifted, mut base) = (None, None);

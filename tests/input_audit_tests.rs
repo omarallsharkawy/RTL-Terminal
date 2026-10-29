@@ -159,3 +159,54 @@ fn arabic_punctuation_and_closing_quotes_end_a_url() {
         Some("https://ar.wikipedia.org/wiki/مصر")
     );
 }
+
+#[test]
+fn ctrl_keys_on_an_arabic_layout_reach_kitty_protocol_programs_as_latin() {
+    use twitty::input::terminal_key_raw;
+    let send = |code, ch: &str, mods, mode| {
+        let logical = Key::Character(ch.into());
+        terminal_key_raw(
+            Some(code),
+            &logical,
+            Some(&logical),
+            Some(ch),
+            ElementState::Pressed,
+            false,
+            mods,
+            mode,
+        )
+    };
+    let ctrl = ModifiersState::CONTROL;
+    for mode in [
+        TermMode::DISAMBIGUATE_ESC_CODES,
+        TermMode::KITTY_KEYBOARD_PROTOCOL,
+    ] {
+        // Ctrl+C on the Arabic layout types "ؤ": programs must see Ctrl+c (99), or they ignore it.
+        assert_eq!(
+            send(KeyCode::KeyC, "ؤ", ctrl, mode),
+            Some(b"\x1b[99;5u".to_vec()),
+            "{mode:?}"
+        );
+        assert_eq!(
+            send(KeyCode::KeyD, "ي", ctrl, mode),
+            Some(b"\x1b[100;5u".to_vec()),
+            "{mode:?}"
+        );
+        // Alt may also carry the typed text; the key itself must be "b" (98).
+        let alt_b = send(KeyCode::KeyB, "لا", ModifiersState::ALT, mode).unwrap();
+        assert!(
+            alt_b.starts_with(b"\x1b[98;3"),
+            "{mode:?}: {:?}",
+            String::from_utf8_lossy(&alt_b)
+        );
+    }
+    // Without Ctrl/Alt an Arabic letter is still reported as itself.
+    let plain = send(
+        KeyCode::KeyC,
+        "ؤ",
+        ModifiersState::empty(),
+        TermMode::KITTY_KEYBOARD_PROTOCOL,
+    )
+    .unwrap();
+    assert!(String::from_utf8(plain).unwrap().starts_with("\x1b[1572"));
+}
