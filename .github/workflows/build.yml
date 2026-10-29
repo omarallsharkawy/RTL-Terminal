@@ -124,7 +124,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Rust 1.90
-        uses: dtolnay/rust-toolchain@1.90
+        uses: dtolnay/rust-toolchain@1.120
 
       - name: Cache Rust build output
         uses: swatinem/rust-cache@v2
