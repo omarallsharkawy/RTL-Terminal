@@ -148,3 +148,14 @@ fn mailto_links_cannot_attach_files() {
         "mailto:x@example.com?ATTACHMENT=%2Fetc%2Fpasswd"
     ));
 }
+
+#[test]
+fn a_wide_character_in_the_narrowest_grid_does_not_crash() {
+    for (cols, rows) in [(0, 0), (1, 1), (1, 3)] {
+        let mut term = Terminal::new(cols, rows, |_| {});
+        term.process_bytes("你好😀".as_bytes());
+        term.resize(1, 1);
+        term.process_bytes("世".as_bytes());
+        let _ = term.snapshot();
+    }
+}

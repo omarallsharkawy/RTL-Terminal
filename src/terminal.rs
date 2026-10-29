@@ -99,6 +99,9 @@ pub fn is_bidi_control(c: char) -> bool {
     matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
 }
 
+/// Narrowest grid: a double-width character needs two columns.
+pub const MIN_COLS: usize = 2;
+
 /// Combining marks of one cell that are drawn. Real text needs a few (Arabic harakat, accents,
 /// emoji sequences); a program can attach millions to one cell, which would make every frame
 /// hash and shape them all.
@@ -264,7 +267,7 @@ impl Terminal {
     where
         F: Fn(Event) + Send + Sync + 'static,
     {
-        let (cols, rows) = (cols.max(1), rows.max(1));
+        let (cols, rows) = (cols.max(MIN_COLS), rows.max(1));
         let size = TermSize::new(cols, rows);
         let listener = ForwardListener {
             on_event: Arc::new(on_event),
@@ -338,9 +341,10 @@ impl Terminal {
         (point.line.0, point.column.0)
     }
 
-    /// Resize the grid; a zero dimension is treated as one (alacritty panics on an empty grid).
+    /// Resize the grid; it never gets smaller than `MIN_COLS` x 1 (alacritty panics on an empty
+    /// grid, and on a wide character in a one-column one).
     pub fn resize(&mut self, cols: usize, rows: usize) {
-        let (cols, rows) = (cols.max(1), rows.max(1));
+        let (cols, rows) = (cols.max(MIN_COLS), rows.max(1));
         self.cols = cols;
         self.rows = rows;
         self.term.resize(TermSize::new(cols, rows));
