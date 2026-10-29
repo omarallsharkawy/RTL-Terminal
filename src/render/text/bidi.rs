@@ -48,13 +48,13 @@ pub(crate) fn arabic_phrase(cells: &[CellData], typing: bool) -> Option<usize> {
     let first = cells.iter().position(|c| is_rtl_char(c.c))?;
     let start = cells[..first]
         .iter()
-        .rposition(CellData::is_blank)
+        .rposition(CellData::is_word_break)
         .map_or(0, |b| b + 1);
     if typing || start == 0 {
         return Some(start);
     }
     let (mut arabic, mut latin) = (0, 0);
-    for word in cells[start..].split(CellData::is_blank) {
+    for word in cells[start..].split(CellData::is_word_break) {
         if word.iter().any(|c| is_rtl_char(c.c)) {
             arabic += 1;
         } else if word.iter().any(|c| c.c.is_alphabetic()) {

@@ -67,7 +67,7 @@ impl RowShaper<'_> {
             let mut c = start;
             while c < end {
                 let word_start = c;
-                while c < end && !cells[c].is_blank() {
+                while c < end && !cells[c].is_word_break() {
                     c += 1;
                 }
                 if cells[word_start..c].iter().any(|w| is_arabic_script(w.c)) {
@@ -102,12 +102,12 @@ impl RowShaper<'_> {
             let mut last_end = start;
             let mut c = start;
             while c < end {
-                if cells[c].is_blank() {
+                if cells[c].is_word_break() {
                     c += 1;
                     continue;
                 }
                 let word_start = c;
-                while c < end && !cells[c].is_blank() {
+                while c < end && !cells[c].is_word_break() {
                     c += 1;
                 }
                 let word = &cells[word_start..c];

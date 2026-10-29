@@ -118,3 +118,22 @@ fn caret_after_a_space_typed_after_arabic_sits_on_the_far_left() {
         "caret at {x}, text starts at {leftmost_text}"
     );
 }
+
+#[test]
+fn prompt_followed_by_a_no_break_space_stays_left_of_typed_arabic() {
+    // Claude Code writes "❯" + U+00A0 before the input; the no-break space separates words like
+    // a space, or "❯" would count as part of the Arabic word and the prompt would flip right.
+    let (row, col) = shaped("❯\u{a0}هلا وسهلا ", true);
+    let prompt = glyph_span(&row, 0);
+    let text_left = (2..11)
+        .filter(|&c| c != 5)
+        .map(|c| glyph_span(&row, c).0)
+        .fold(f32::MAX, f32::min);
+    assert!(
+        prompt.1 <= text_left + 0.5,
+        "prompt {prompt:?}, text starts at {text_left}"
+    );
+    let (x, extends_left) = row.cursor_anchor(col, CW);
+    assert!(extends_left);
+    assert!(x >= prompt.1 - 0.5 && x <= text_left + 0.5, "caret at {x}");
+}

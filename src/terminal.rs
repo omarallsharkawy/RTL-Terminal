@@ -78,6 +78,12 @@ impl CellData {
             .filter(|&c| !is_bidi_control(c))
     }
 
+    /// Separates words for bidi: any space, including the no-break space programs put after a
+    /// prompt (Claude Code writes `❯` + U+00A0).
+    pub fn is_word_break(&self) -> bool {
+        !self.is_spacer() && self.zerowidth.is_empty() && self.c.is_whitespace()
+    }
+
     /// Text this cell contributes to a shaped run (empty for spacers).
     pub fn push_text(&self, out: &mut String) {
         out.extend(self.shaped_chars());
