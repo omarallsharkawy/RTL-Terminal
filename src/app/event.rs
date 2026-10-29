@@ -67,6 +67,10 @@ impl App {
         if self.ws.is_visible(id) {
             self.window.request_redraw();
         }
+        // The output may have replaced the link under a Ctrl-hovering pointer.
+        if self.modifiers.control_key() {
+            self.update_link_hover(id);
+        }
     }
 
     /// The delayed clear of a copied selection.

@@ -138,8 +138,9 @@ impl App {
         }
     }
 
-    /// Underline the link under the pointer while Ctrl is held, and show a pointer cursor.
-    fn update_link_hover(&mut self, id: PaneId) {
+    /// Underline the link under the pointer while Ctrl is held, show a pointer cursor and the
+    /// link's target. Also called after output, which can change the link under a still pointer.
+    pub(super) fn update_link_hover(&mut self, id: PaneId) {
         let Some((col, row)) = self.ws.pane(id).map(|p| (p.ui.mouse_col, p.ui.mouse_row)) else {
             return;
         };
@@ -149,11 +150,16 @@ impl App {
             let hover = link.as_ref().map(|l| (l.row, l.cols.clone()));
             (t.set_link_hover(hover), link)
         });
-        if let Some((true, link)) = result {
-            let over_link = link.is_some();
-            if let Some(p) = self.ws.pane_mut(id) {
-                p.ui.hover_target = link.map(|l| crate::links::display_target(&l.uri));
-            }
+        let Some((cells_changed, link)) = result else {
+            return;
+        };
+        let over_link = link.is_some();
+        let target = link.map(|l| crate::links::display_target(&l.uri));
+        let target_changed = self
+            .ws
+            .pane_mut(id)
+            .is_some_and(|p| std::mem::replace(&mut p.ui.hover_target, target.clone()) != target);
+        if cells_changed || target_changed {
             self.window.set_cursor_icon(if over_link {
                 CursorIcon::Pointer
             } else {
@@ -206,7 +212,14 @@ impl App {
             if pressed && self.modifiers.control_key() {
                 let link = self.term(id, |t| t.link_at(col, row)).flatten();
                 if let Some(link) = link {
-                    crate::links::open_url(&link.uri);
+                    // Open only the target the status line shows; if output changed the link
+                    // since, show the new one and wait for another click.
+                    let shown = self.ws.pane(id).and_then(|p| p.ui.hover_target.clone());
+                    if shown.as_deref() == Some(&*crate::links::display_target(&link.uri)) {
+                        crate::links::open_url(&link.uri);
+                    } else {
+                        self.update_link_hover(id);
+                    }
                     if let Some(p) = self.ws.pane_mut(id) {
                         p.ui.link_press = true;
                     }
