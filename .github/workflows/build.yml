@@ -168,8 +168,9 @@ jobs:
 
       - name: Fuzz each target for 60 seconds
         run: |
-          cargo fuzz run terminal_bytes -- -max_total_time=60
-          cargo fuzz run shape_rows -- -max_total_time=60
+          # The prebuilt cargo-fuzz defaults to its own (musl) target.
+          cargo fuzz run --target x86_64-unknown-linux-gnu terminal_bytes -- -max_total_time=60
+          cargo fuzz run --target x86_64-unknown-linux-gnu shape_rows -- -max_total_time=60
 
   golden:
     name: Golden-image rendering tests

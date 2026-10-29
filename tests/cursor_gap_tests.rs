@@ -8,6 +8,31 @@ use twitty::terminal::Terminal;
 const CW: f32 = 9.0;
 
 fn anchor(text: &str, cursor_visible: bool) -> (f32, bool, usize) {
+    let (row, col) = shaped(text, cursor_visible);
+    let (x, extends_left) = row.cursor_anchor(col, CW);
+    (x, extends_left, col)
+}
+
+/// Visual x-range of the glyph drawn for cell `col`.
+fn glyph_span(row: &CachedRow, col: usize) -> (f32, f32) {
+    let seg = row
+        .segments
+        .iter()
+        .find(|s| col >= s.seg_start && col < s.seg_end)
+        .expect("segment");
+    let target = seg.cell_bytes[col - seg.seg_start];
+    seg.buffer
+        .layout_runs()
+        .find_map(|run| {
+            run.glyphs
+                .iter()
+                .find(|g| target >= g.start && target < g.end)
+                .map(|g| (seg.seg_x + g.x, seg.seg_x + g.x + g.w))
+        })
+        .expect("glyph")
+}
+
+fn shaped(text: &str, cursor_visible: bool) -> (CachedRow, usize) {
     let mut term = Terminal::new(30, 3, |_| {});
     term.process_bytes(text.as_bytes());
     let (lines, cursor) = term.snapshot();
@@ -31,8 +56,7 @@ fn anchor(text: &str, cursor_visible: bool) -> (f32, bool, usize) {
         segments,
         ..Default::default()
     };
-    let (x, extends_left) = row.cursor_anchor(cursor.col, CW);
-    (x, extends_left, cursor.col)
+    (row, cursor.col)
 }
 
 #[test]
@@ -60,16 +84,37 @@ fn hidden_cursor_caret_still_follows_spaces_after_arabic() {
 fn caret_after_english_typed_into_arabic_sits_right_of_it() {
     // "❯ مرحبا hello": the phrase reads right to left, so "hello" is drawn left of the Arabic
     // word and the caret follows its last letter, between the two.
-    let (x, extends_left, col) = anchor("❯ مرحبا hello", true);
+    let (row, col) = shaped("❯ مرحبا hello", true);
     assert_eq!(col, 13);
+    let (x, extends_left) = row.cursor_anchor(col, CW);
     assert!(!extends_left);
-    assert!((x - 7.0 * CW).abs() < 0.5, "caret at {x}");
+    // Glyph widths depend on the platform's fonts: compare with the glyphs, not the grid.
+    let last_letter = glyph_span(&row, 12);
+    let arabic_left = (2..7)
+        .map(|c| glyph_span(&row, c).0)
+        .fold(f32::MAX, f32::min);
+    assert!(
+        (x - last_letter.1).abs() < 0.5,
+        "caret at {x}, \"hello\" ends at {last_letter:?}"
+    );
+    assert!(
+        x <= arabic_left + 0.5,
+        "caret at {x}, Arabic starts at {arabic_left}"
+    );
 }
 
 #[test]
 fn caret_after_a_space_typed_after_arabic_sits_on_the_far_left() {
     // "❯ مرحبا hello يا ": the next Arabic word goes left of everything typed so far.
-    let (x, extends_left, _) = anchor("❯ مرحبا hello يا ", true);
+    let (row, col) = shaped("❯ مرحبا hello يا ", true);
+    let (x, extends_left) = row.cursor_anchor(col, CW);
     assert!(extends_left);
-    assert!(x < 3.0 * CW + 0.5, "caret at {x}");
+    let leftmost_text = (2..17)
+        .filter(|&c| c != 7 && c != 13)
+        .map(|c| glyph_span(&row, c).0)
+        .fold(f32::MAX, f32::min);
+    assert!(
+        x <= leftmost_text + 0.5,
+        "caret at {x}, text starts at {leftmost_text}"
+    );
 }
