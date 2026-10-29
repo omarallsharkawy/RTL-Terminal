@@ -273,6 +273,14 @@ impl RowShaper<'_> {
                     end = c.col;
                 }
             }
+            // Many TUIs hide the cursor and draw their own: an inverse-video blank right after
+            // the text (pi, omp). After Arabic it belongs to the text too, so it is laid out at
+            // the text's end, on its left, instead of staying at the far right of the grid.
+            if let Some(block) = program_cursor_after(cells, end) {
+                if is_rtl_char(cells[end - 1].c) || trails_rtl_neutrals(&cells[start..end]) {
+                    end = block + 1;
+                }
+            }
             col = end;
 
             let has_rtl = cells[start..end].iter().any(|c| is_rtl_char(c.c));
@@ -308,6 +316,19 @@ impl RowShaper<'_> {
         }
         segments
     }
+}
+
+/// A cursor a program draws itself after text ending at `end`: a single inverse-video blank,
+/// separated from the text by at most two spaces. Returns its column.
+fn program_cursor_after(cells: &[CellData], end: usize) -> Option<usize> {
+    let inverse_blank =
+        |c: &CellData| c.is_blank() && c.flags.contains(CellFlags::INVERSE) && !c.selected;
+    let block = (end..cells.len().min(end + 3))
+        .find(|&c| !cells[c].is_blank() || inverse_blank(&cells[c]))?;
+    let single = cells
+        .get(block + 1)
+        .is_none_or(|next| !next.flags.contains(CellFlags::INVERSE));
+    (inverse_blank(&cells[block]) && single).then_some(block)
 }
 
 /// Background of a cell as drawn, ignoring selection and search (which must never reorder text).

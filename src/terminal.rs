@@ -76,6 +76,7 @@ impl CellData {
         cell.into_iter()
             .chain(self.zerowidth.iter().copied().filter(|_| !self.is_spacer()))
             .filter(|&c| !is_bidi_control(c))
+            .flat_map(base_letters)
     }
 
     /// Separates words for bidi: any space, including the no-break space programs put after a
@@ -91,6 +92,56 @@ impl CellData {
 
     pub(crate) fn text_len(&self) -> usize {
         self.shaped_chars().map(char::len_utf8).sum()
+    }
+}
+
+/// Arabic presentation forms (`U+FB50–FDFF`, `U+FE70–FEFF`) as the plain letters they stand
+/// for; any other character as itself.
+///
+/// vim and nvim shape Arabic themselves by default ('arabicshape'): they send each letter
+/// already in its joined form, in logical order. Twitty shapes and reorders Arabic itself, so
+/// pre-shaped letters came out unjoined and reversed. Turned back into plain letters they are
+/// joined and laid out like any other Arabic text (lam-alef ligatures become lam + alef).
+fn base_letters(c: char) -> impl Iterator<Item = char> {
+    use unicode_normalization::char::decompose_compatible;
+    let mut out = smallvec_like::Chars::default();
+    if matches!(c, '\u{FB50}'..='\u{FDFF}' | '\u{FE70}'..='\u{FEFF}') {
+        decompose_compatible(c, |d| out.push(d));
+    }
+    if out.is_empty() {
+        out.push(c);
+    }
+    out.into_iter()
+}
+
+/// A few chars without allocating (a presentation form decomposes to at most a handful).
+mod smallvec_like {
+    #[derive(Default)]
+    pub struct Chars {
+        buf: [char; 8],
+        len: usize,
+    }
+
+    impl Chars {
+        pub fn push(&mut self, c: char) {
+            if self.len < self.buf.len() {
+                self.buf[self.len] = c;
+                self.len += 1;
+            }
+        }
+
+        pub fn is_empty(&self) -> bool {
+            self.len == 0
+        }
+    }
+
+    impl IntoIterator for Chars {
+        type Item = char;
+        type IntoIter = std::iter::Take<std::array::IntoIter<char, 8>>;
+
+        fn into_iter(self) -> Self::IntoIter {
+            self.buf.into_iter().take(self.len)
+        }
     }
 }
 

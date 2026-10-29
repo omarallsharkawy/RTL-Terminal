@@ -127,3 +127,34 @@ fn prompt_arrow_before_arabic_is_not_mirrored() {
         );
     }
 }
+
+#[test]
+fn a_cursor_the_program_draws_after_arabic_sits_at_the_text_end() {
+    use twitty::render::{CachedRow, RowShaper};
+    // pi and omp hide the cursor and draw an inverse blank after the input.
+    let mut term = twitty::terminal::Terminal::new(40, 3, |_| {});
+    term.process_bytes("هلا وسهلا \x1b[7m \x1b[27m\x1b[?25l\r\n".as_bytes());
+    let (lines, _) = term.snapshot();
+    let mut fs = twitty::render::text::fonts::new_font_system();
+    let palette = twitty::color::Palette::default();
+    let mut shaper = RowShaper {
+        font_system: &mut fs,
+        palette: &palette,
+        font_px: 15.0,
+        char_width: 9.0,
+        line_height: 23.0,
+        family: None,
+    };
+    let segments = shaper.build_row(&lines[0], None);
+    let row = CachedRow::new(0, &lines[0], segments, Vec::new(), 9.0);
+    let block = row.visual[10].expect("the block is laid out with the text");
+    let text_left = (0..9)
+        .filter(|&c| c != 3)
+        .filter_map(|c| row.visual[c])
+        .map(|(l, _)| l)
+        .fold(f32::MAX, f32::min);
+    assert!(
+        block.1 <= text_left + 0.5,
+        "block {block:?} must be left of the text at {text_left}"
+    );
+}

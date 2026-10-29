@@ -159,3 +159,15 @@ fn a_wide_character_in_the_narrowest_grid_does_not_crash() {
         let _ = term.snapshot();
     }
 }
+
+#[test]
+fn letters_vim_shaped_itself_are_shaped_again_as_plain_arabic() {
+    // nvim's default 'arabicshape' sends "يا عالم" as presentation forms, in logical order.
+    let mut term = Terminal::new(40, 4, |_| {});
+    term.process_bytes("\u{FEF1}\u{FE8E} \u{FEC9}\u{FE8E}\u{FEE0}\u{FEE3}".as_bytes());
+    assert_eq!(row_text(&term, 0), "يا عالم");
+    // A lam-alef ligature (one cell) becomes lam + alef, which shaping joins again.
+    let mut term = Terminal::new(40, 4, |_| {});
+    term.process_bytes("\u{FEFB}".as_bytes());
+    assert_eq!(row_text(&term, 0), "لا");
+}
