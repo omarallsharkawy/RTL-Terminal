@@ -90,6 +90,10 @@ pub fn is_allowed_scheme(url: &str) -> bool {
     let Some((scheme, rest)) = url.split_once(':') else {
         return false;
     };
+    if scheme.eq_ignore_ascii_case("mailto") && rest.to_ascii_lowercase().contains("attach") {
+        // Some mail clients attach the named local file (`?attach=~/.ssh/id_rsa`).
+        return false;
+    }
     ALLOWED.iter().any(|s| scheme.eq_ignore_ascii_case(s)) && !rest.is_empty()
 }
 

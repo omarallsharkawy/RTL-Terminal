@@ -115,3 +115,36 @@ fn hovered_link_targets_are_shown_without_bidi_tricks() {
     let long = format!("https://x.example/{}", "a".repeat(500));
     assert!(display_target(&long).ends_with('…'));
 }
+
+#[test]
+fn program_titles_are_capped_and_have_no_controls() {
+    use twitty::app::clean_title;
+    assert_eq!(clean_title("vim\x07 \x1b[31mfile"), "vim [31mfile");
+    assert_eq!(clean_title(&"x".repeat(100_000)).chars().count(), 256);
+}
+
+#[test]
+fn a_cell_drowning_in_combining_marks_draws_only_a_few() {
+    use twitty::terminal::MAX_DRAWN_MARKS;
+    let mut term = Terminal::new(40, 4, |_| {});
+    let zalgo: String = std::iter::once('a')
+        .chain(std::iter::repeat_n('\u{0301}', 100_000))
+        .collect();
+    term.process_bytes(zalgo.as_bytes());
+    term.process_bytes("b".as_bytes());
+    let (lines, _) = term.snapshot();
+    assert_eq!(lines[0].cells[0].zerowidth.len(), MAX_DRAWN_MARKS);
+    assert_eq!(lines[0].cells[1].c, 'b');
+}
+
+#[test]
+fn mailto_links_cannot_attach_files() {
+    use twitty::links::is_allowed_scheme;
+    assert!(is_allowed_scheme("mailto:me@example.com?subject=hi"));
+    assert!(!is_allowed_scheme(
+        "mailto:x@example.com?attach=/home/u/.ssh/id_rsa"
+    ));
+    assert!(!is_allowed_scheme(
+        "mailto:x@example.com?ATTACHMENT=%2Fetc%2Fpasswd"
+    ));
+}

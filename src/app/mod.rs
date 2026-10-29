@@ -15,7 +15,7 @@ mod panes;
 mod selection;
 mod window;
 
-pub use event::AppEvent;
+pub use event::{clean_title, AppEvent};
 
 use alacritty_terminal::term::TermMode;
 use std::time::Instant;

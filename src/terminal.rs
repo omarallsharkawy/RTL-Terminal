@@ -99,6 +99,17 @@ pub fn is_bidi_control(c: char) -> bool {
     matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
 }
 
+/// Combining marks of one cell that are drawn. Real text needs a few (Arabic harakat, accents,
+/// emoji sequences); a program can attach millions to one cell, which would make every frame
+/// hash and shape them all.
+pub const MAX_DRAWN_MARKS: usize = 16;
+
+/// The combining marks of a grid cell that are drawn and hashed.
+fn drawn_marks(cell: &Cell) -> &[char] {
+    let marks = cell.zerowidth().unwrap_or(&[]);
+    &marks[..marks.len().min(MAX_DRAWN_MARKS)]
+}
+
 /// A link under a viewport cell: its target and the cells it covers on that row.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Link {
@@ -505,7 +516,7 @@ impl Terminal {
             let before = char_cols.len();
             text.push(cell.c);
             char_cols.push(c);
-            for z in cell.zerowidth().unwrap_or(&[]) {
+            for z in drawn_marks(cell) {
                 text.push(*z);
                 char_cols.push(c);
             }
@@ -764,7 +775,8 @@ fn row_key(cells: &Row<Cell>, cols: usize, palette: u64, overlay: &RowOverlay) -
     for cell in &cells[..Column(cols)] {
         hasher.write(cell.c as u64 | (cell.flags.bits() as u64) << 32);
         hasher.write(color_bits(cell.fg) << 28 | color_bits(cell.bg));
-        if let Some(marks) = cell.zerowidth().filter(|z| !z.is_empty()) {
+        let marks = drawn_marks(cell);
+        if !marks.is_empty() {
             hasher.write(u64::MAX - marks.len() as u64);
             for &mark in marks {
                 hasher.write(mark as u64);
@@ -813,7 +825,7 @@ fn build_line(
             }
             CellData {
                 c,
-                zerowidth: cell.zerowidth().map(<[char]>::to_vec).unwrap_or_default(),
+                zerowidth: drawn_marks(cell).to_vec(),
                 fg: program_color(cell.fg, colors),
                 bg: program_color(cell.bg, colors),
                 flags: cell.flags,

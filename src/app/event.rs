@@ -17,6 +17,19 @@ pub enum AppEvent {
     ClearSelection(PaneId, u64),
 }
 
+/// Longest title kept from a program, in characters.
+const MAX_TITLE_CHARS: usize = 256;
+
+/// A program-set title as stored: no control characters, at most `MAX_TITLE_CHARS`. It is shaped
+/// for the tab bar on every frame, so a multi-megabyte one would freeze drawing.
+pub fn clean_title(title: &str) -> String {
+    title
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_TITLE_CHARS)
+        .collect()
+}
+
 /// Longest stretch spent parsing output before the screen is redrawn.
 const OUTPUT_BUDGET: Duration = Duration::from_millis(12);
 
@@ -73,7 +86,7 @@ impl App {
             TermEvent::PtyWrite(text) => self.write_to(id, text.as_bytes()),
             TermEvent::Title(title) => {
                 if let Some(pane) = self.ws.pane_mut(id) {
-                    pane.title = Some(title);
+                    pane.title = Some(clean_title(&title));
                 }
                 self.refresh_window_title();
                 self.window.request_redraw();
