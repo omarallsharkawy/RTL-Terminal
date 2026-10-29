@@ -198,10 +198,13 @@ impl TwittyConfig {
 
     /// Write the config to `path` through a temporary file, so a crash or a full disk never
     /// leaves a truncated config behind. Does nothing when the existing file failed to parse.
+    /// A symlinked config (dotfiles) is written through the link, which stays a link.
     pub fn save_to(&self, path: &Path) -> std::io::Result<()> {
         if self.keep_file {
             return Ok(());
         }
+        let resolved = fs::canonicalize(path).ok();
+        let path = resolved.as_deref().unwrap_or(path);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }

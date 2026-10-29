@@ -199,3 +199,24 @@ fn config_problems_are_kept_for_the_terminal() {
         "{warnings:?}"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn saving_a_symlinked_config_keeps_the_link() {
+    let dir = std::env::temp_dir().join(format!("twitty-cfg-link-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("dotfiles")).unwrap();
+    let real = dir.join("dotfiles/config.json");
+    std::fs::write(&real, "{}").unwrap();
+    let link = dir.join("config.json");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let mut config = twitty::config::TwittyConfig::load_from(&link);
+    config.font_size = 20.0;
+    config.save_to(&link).unwrap();
+    assert!(std::fs::symlink_metadata(&link)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert!(std::fs::read_to_string(&real).unwrap().contains("20"));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
