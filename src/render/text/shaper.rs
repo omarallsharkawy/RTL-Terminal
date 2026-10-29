@@ -363,7 +363,7 @@ pub fn measure_char_width(
 /// Shape a one-line label (status line, tab title, preedit) in the grid font with full
 /// shaping, so Arabic in it joins and reorders. Bidi embeddings, overrides and isolates in a
 /// program-set title are dropped, as in terminal cells.
-pub fn shape_label(
+pub(crate) fn shape_label(
     font_system: &mut FontSystem,
     family: Option<&'static str>,
     (font_px, line_height): (f32, f32),

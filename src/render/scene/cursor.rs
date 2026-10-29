@@ -11,7 +11,7 @@ use crate::terminal::{CellData, LineData};
 
 /// The configured style ("block", "beam"/"bar", "underline") replaces the default block; shapes
 /// an app asks for (vim insert mode's beam, for example) are kept.
-pub fn effective_cursor_shape(style: &str, shape: CursorShape) -> CursorShape {
+pub(crate) fn effective_cursor_shape(style: &str, shape: CursorShape) -> CursorShape {
     if shape != CursorShape::Block {
         return shape;
     }
@@ -24,7 +24,7 @@ pub fn effective_cursor_shape(style: &str, shape: CursorShape) -> CursorShape {
 
 /// Left edge of a cursor anchored at `x`. A caret that extends left (after Arabic) sits left
 /// of the anchor by its own width.
-pub fn cursor_left(x: f32, extends_left: bool, shape: CursorShape, m: &CellMetrics) -> f32 {
+pub(crate) fn cursor_left(x: f32, extends_left: bool, shape: CursorShape, m: &CellMetrics) -> f32 {
     let mut x = x;
     if extends_left {
         x -= match shape {
@@ -36,7 +36,7 @@ pub fn cursor_left(x: f32, extends_left: bool, shape: CursorShape, m: &CellMetri
 }
 
 /// Quads of a cursor at (x, y) that is `w` wide; unfocused cursors are hollow.
-pub fn cursor_quads(
+pub(crate) fn cursor_quads(
     (x, y, w): (f32, f32, f32),
     shape: CursorShape,
     focused: bool,

@@ -220,7 +220,7 @@ fn is_launchable(path: &std::path::Path) -> bool {
 }
 
 /// Open `url` with the system handler, detached. Returns false if rejected or not spawned.
-pub fn open_url(url: &str) -> bool {
+pub(crate) fn open_url(url: &str) -> bool {
     if !is_allowed_scheme(url) {
         return false;
     }

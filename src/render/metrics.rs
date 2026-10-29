@@ -61,7 +61,7 @@ impl CellMetrics {
     }
 
     /// Width of the divider between panes.
-    pub fn divider_gap(&self) -> f32 {
+    pub(crate) fn divider_gap(&self) -> f32 {
         self.scale.round().max(1.0)
     }
 

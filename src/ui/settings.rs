@@ -1,18 +1,18 @@
 //! Font size and background opacity steps (zoom shortcuts, Ctrl/Ctrl+Shift+wheel).
 
-pub const DEFAULT_FONT_SIZE: f32 = 14.5;
-pub const MIN_FONT_SIZE: f32 = 8.0;
-pub const MAX_FONT_SIZE: f32 = 48.0;
+pub(crate) const DEFAULT_FONT_SIZE: f32 = 14.5;
+pub(crate) const MIN_FONT_SIZE: f32 = 8.0;
+pub(crate) const MAX_FONT_SIZE: f32 = 48.0;
 /// Opacity change per wheel notch.
-pub const OPACITY_STEP: f32 = 0.05;
-pub const MIN_OPACITY: f32 = 0.2;
+pub(crate) const OPACITY_STEP: f32 = 0.05;
+pub(crate) const MIN_OPACITY: f32 = 0.2;
 
-pub fn clamp_font_size(size: f32) -> f32 {
+pub(crate) fn clamp_font_size(size: f32) -> f32 {
     size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE)
 }
 
 /// Background opacity after `steps` wheel notches (positive is more opaque).
-pub fn step_opacity(opacity: f32, steps: i32) -> f32 {
+pub(crate) fn step_opacity(opacity: f32, steps: i32) -> f32 {
     (opacity + OPACITY_STEP * steps as f32).clamp(MIN_OPACITY, 1.0)
 }
 

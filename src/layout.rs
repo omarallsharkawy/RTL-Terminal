@@ -68,7 +68,7 @@ pub enum Node {
 }
 
 /// Smallest and largest share a dragged divider can give to `a`.
-pub const MIN_RATIO: f32 = 0.1;
+pub(crate) const MIN_RATIO: f32 = 0.1;
 
 impl Node {
     /// Panes in reading order (left/top first).

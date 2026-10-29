@@ -21,7 +21,7 @@ impl CachedSegment {
     /// that hold it so backgrounds follow reordered RTL text. A glyph shared by several cells
     /// (ligature, cluster) is split between them; cells without a glyph are `None`, spacers are
     /// empty.
-    pub fn cell_extents(&self, cells: &[CellData]) -> Vec<Option<(f32, f32)>> {
+    pub(crate) fn cell_extents(&self, cells: &[CellData]) -> Vec<Option<(f32, f32)>> {
         let mut out: Vec<Option<(f32, f32)>> = vec![None; self.seg_end - self.seg_start];
         let mut real = Vec::new();
         let mut real_bytes = Vec::new();

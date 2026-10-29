@@ -7,7 +7,7 @@ use crate::layout::{Divider, PaneId, SplitDir};
 use crate::ui::hit::Hit;
 
 #[derive(Debug, Default)]
-pub struct PointerState {
+pub(crate) struct PointerState {
     /// Last pointer position in physical pixels.
     pub pos: (f64, f64),
     /// The pane a pressed mouse button belongs to until it is released.
@@ -20,7 +20,7 @@ pub struct PointerState {
 
 /// What a button press lands on.
 #[derive(Debug, PartialEq, Eq)]
-pub enum PressTarget {
+pub(crate) enum PressTarget {
     /// Activate this tab.
     Tab(usize),
     /// The press belongs to this pane, which now captures the pointer.
@@ -58,13 +58,13 @@ impl PointerState {
     }
 
     /// Drop the capture and any divider drag (tab switch, focus loss...).
-    pub fn cancel(&mut self) {
+    pub(crate) fn cancel(&mut self) {
         self.capture = None;
         self.drag = None;
     }
 
     /// Pane `id` was closed.
-    pub fn forget(&mut self, id: PaneId) {
+    pub(crate) fn forget(&mut self, id: PaneId) {
         if self.capture == Some(id) {
             self.capture = None;
         }
@@ -76,7 +76,7 @@ impl PointerState {
 
     /// The pointer moved over `hit`. Returns the pane that gets the motion (the captured one,
     /// else the one under the pointer) and the pane it just left, if it left one.
-    pub fn moved(&mut self, hit: &Hit) -> (Option<PaneId>, Option<PaneId>) {
+    pub(crate) fn moved(&mut self, hit: &Hit) -> (Option<PaneId>, Option<PaneId>) {
         let target = self.capture.or(match hit {
             Hit::Pane(id) => Some(*id),
             _ => None,
@@ -92,7 +92,11 @@ impl PointerState {
 
 /// The cursor icon to switch to over `hit`, if it changes: a resize arrow over a divider (not
 /// while a button is captured), back to the default arrow when leaving one.
-pub fn cursor_icon_for(hit: &Hit, captured: bool, current: CursorIcon) -> Option<CursorIcon> {
+pub(crate) fn cursor_icon_for(
+    hit: &Hit,
+    captured: bool,
+    current: CursorIcon,
+) -> Option<CursorIcon> {
     match hit {
         Hit::Divider(d) if !captured => Some(match d.dir {
             SplitDir::Horizontal => CursorIcon::ColResize,

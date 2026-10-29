@@ -9,7 +9,7 @@ use crate::terminal::CellData;
 pub type Quad = (f32, f32, f32, f32, [f32; 4]);
 
 /// `rgba` as the surface expects it: linear on an sRGB surface, as-is otherwise.
-pub fn target_color(rgba: Rgba, is_srgb: bool) -> [f32; 4] {
+pub(crate) fn target_color(rgba: Rgba, is_srgb: bool) -> [f32; 4] {
     if is_srgb {
         rgba.to_linear()
     } else {

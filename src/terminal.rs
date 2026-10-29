@@ -83,7 +83,7 @@ impl CellData {
         out.extend(self.shaped_chars());
     }
 
-    pub fn text_len(&self) -> usize {
+    pub(crate) fn text_len(&self) -> usize {
         self.shaped_chars().map(char::len_utf8).sum()
     }
 }
@@ -95,12 +95,12 @@ impl CellData {
 /// read differently from what it says, as in "Trojan Source") or unbalance Twitty's isolates.
 /// They are invisible, so they are simply not shaped. Direction marks (LRM, RLM, ALM) only
 /// settle neutrals and stay.
-pub fn is_bidi_control(c: char) -> bool {
+pub(crate) fn is_bidi_control(c: char) -> bool {
     matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
 }
 
 /// Narrowest grid: a double-width character needs two columns.
-pub const MIN_COLS: usize = 2;
+pub(crate) const MIN_COLS: usize = 2;
 
 /// Combining marks of one cell that are drawn. Real text needs a few (Arabic harakat, accents,
 /// emoji sequences); a program can attach millions to one cell, which would make every frame
@@ -352,10 +352,6 @@ impl Terminal {
 
     pub fn size(&self) -> (usize, usize) {
         (self.cols, self.rows)
-    }
-
-    pub fn is_app_cursor(&self) -> bool {
-        self.term.mode().contains(TermMode::APP_CURSOR)
     }
 
     pub fn mode(&self) -> TermMode {

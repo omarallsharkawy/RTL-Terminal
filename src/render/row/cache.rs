@@ -18,7 +18,7 @@ impl RowCache {
     }
 
     /// Forget the rows of a closed pane.
-    pub fn forget(&mut self, pane: PaneId) {
+    pub(crate) fn forget(&mut self, pane: PaneId) {
         self.panes.remove(&pane);
     }
 
@@ -35,7 +35,7 @@ impl RowCache {
         PreviousRows { rows, by_hash }
     }
 
-    pub fn put(&mut self, pane: PaneId, rows: Vec<CachedRow>) {
+    pub(crate) fn put(&mut self, pane: PaneId, rows: Vec<CachedRow>) {
         self.panes.insert(pane, rows);
     }
 }

@@ -5,7 +5,7 @@ use super::InputAction;
 
 impl InputAction {
     /// Tab and pane shortcuts. They keep working while the search bar has the keyboard.
-    pub fn is_layout(&self) -> bool {
+    pub(crate) fn is_layout(&self) -> bool {
         matches!(
             self,
             InputAction::NewTab
@@ -22,7 +22,7 @@ impl InputAction {
 /// A pane or tab shortcut with nothing to switch to (focus moves with a single pane, tab
 /// cycling with a single tab). Its key then goes to the program instead (Alt+Left in fish,
 /// Ctrl+PageUp in vim...). Decided from the shortcut itself, so the release follows its press.
-pub fn shortcut_is_idle(
+pub(crate) fn shortcut_is_idle(
     shortcut: Option<&InputAction>,
     single_pane: bool,
     tab_count: usize,
@@ -35,7 +35,7 @@ pub fn shortcut_is_idle(
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum KeyRoute {
+pub(crate) enum KeyRoute {
     /// The search bar is open and takes the key; nothing reaches the PTY.
     SearchBar,
     /// Run this action on the focused pane.
@@ -46,7 +46,7 @@ pub enum KeyRoute {
 
 /// Route a decoded key: layout shortcuts always run, everything else goes to the search bar
 /// while it is open.
-pub fn route_key(action: Option<InputAction>, search_open: bool) -> KeyRoute {
+pub(crate) fn route_key(action: Option<InputAction>, search_open: bool) -> KeyRoute {
     match action {
         Some(a) if a.is_layout() => KeyRoute::Action(a),
         _ if search_open => KeyRoute::SearchBar,

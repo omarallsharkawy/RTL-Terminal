@@ -44,7 +44,7 @@ impl DrawContext<'_> {
         }
     }
 
-    pub fn row_quads(&self, line: &LineData, segments: &[CachedSegment]) -> Vec<Quad> {
+    pub(crate) fn row_quads(&self, line: &LineData, segments: &[CachedSegment]) -> Vec<Quad> {
         let m = &self.metrics;
         build_row_quads(
             self.palette,

@@ -3,7 +3,7 @@
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct QuadVertex {
+pub(crate) struct QuadVertex {
     pub position: [f32; 2],
     pub color: [f32; 4],
 }
@@ -15,7 +15,7 @@ struct ScreenUniform {
     _padding: [f32; 2],
 }
 
-pub struct QuadRenderer {
+pub(crate) struct QuadRenderer {
     pipeline: wgpu::RenderPipeline,
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
@@ -129,7 +129,7 @@ impl QuadRenderer {
         }
     }
 
-    pub fn update_screen_size(&self, queue: &wgpu::Queue, width: f32, height: f32) {
+    pub(crate) fn update_screen_size(&self, queue: &wgpu::Queue, width: f32, height: f32) {
         let uniform = ScreenUniform {
             screen_size: [width.max(1.0), height.max(1.0)],
             _padding: [0.0, 0.0],
@@ -137,7 +137,7 @@ impl QuadRenderer {
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniform));
     }
 
-    pub fn set_rects(
+    pub(crate) fn set_rects(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,

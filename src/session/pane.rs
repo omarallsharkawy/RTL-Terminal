@@ -9,7 +9,7 @@ use crate::pty::Pty;
 use crate::terminal::Terminal;
 use crate::ui::selection::SelectionState;
 
-pub struct Pane {
+pub(crate) struct Pane {
     pub id: PaneId,
     /// Only touched on the event-loop thread: PTY output arrives as events, so no lock.
     pub terminal: Terminal,
@@ -23,7 +23,7 @@ pub struct Pane {
 
 /// Pointer, selection and search state of one pane.
 #[derive(Debug)]
-pub struct PaneUi {
+pub(crate) struct PaneUi {
     pub mouse_col: usize,
     pub mouse_row: usize,
     /// Button whose press was reported to the program (xterm codes 0-2), for drag and release

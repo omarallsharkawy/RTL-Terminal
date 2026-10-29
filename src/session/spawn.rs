@@ -10,7 +10,7 @@ use crate::session::pane::Pane;
 use crate::session::workspace::PaneFactory;
 use crate::terminal::Terminal;
 
-pub struct ShellFactory<'a> {
+pub(crate) struct ShellFactory<'a> {
     proxy: &'a EventLoopProxy<AppEvent>,
     /// Blink the cursor when the program has not chosen a style.
     cursor_blink: bool,

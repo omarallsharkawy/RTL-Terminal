@@ -5,7 +5,7 @@ use winit::keyboard::{Key, ModifiersState, NamedKey};
 
 /// What a key press in the search bar asks for.
 #[derive(Debug, PartialEq, Eq)]
-pub enum SearchCmd {
+pub(crate) enum SearchCmd {
     /// Close the bar and clear the search.
     Close,
     /// Search again for the (possibly edited) query in this direction.
@@ -16,7 +16,7 @@ pub enum SearchCmd {
 
 /// Apply a pressed key to `query`. Enter searches older matches (Shift+Enter newer ones),
 /// Backspace and typed text edit the query; nothing ever reaches the PTY.
-pub fn search_key(
+pub(crate) fn search_key(
     query: &mut String,
     key: &Key,
     text: Option<&str>,
@@ -52,7 +52,7 @@ pub fn search_key(
 
 /// The bar's text: the query, then "no matches" or the current match position.
 /// `position` is only asked for when there is a match.
-pub fn search_bar_text(
+pub(crate) fn search_bar_text(
     query: &str,
     has_match: bool,
     position: impl FnOnce() -> Option<(usize, usize)>,

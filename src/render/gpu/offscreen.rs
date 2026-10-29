@@ -16,13 +16,12 @@ use crate::render::style::Quad;
 
 /// Format of the offscreen target. Non-sRGB, like the window surface the app prefers, so
 /// colors go out exactly as the frame computed them.
-pub const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+pub(crate) const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 /// A texture to draw frames into, with the device and pipelines that draw them.
 pub struct Offscreen {
     device: wgpu::Device,
     queue: wgpu::Queue,
-    info: wgpu::AdapterInfo,
     quads: QuadRenderer,
     text: TextPipeline,
     texture: wgpu::Texture,
@@ -85,7 +84,6 @@ impl Offscreen {
         let instance =
             wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
         let adapter = pick_adapter(&instance).await?;
-        let info = adapter.get_info();
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("twitty offscreen device"),
@@ -118,18 +116,12 @@ impl Offscreen {
         Ok(Offscreen {
             device,
             queue,
-            info,
             quads,
             text,
             texture,
             width,
             height,
         })
-    }
-
-    /// The adapter frames are drawn with.
-    pub fn adapter_info(&self) -> &wgpu::AdapterInfo {
-        &self.info
     }
 
     /// Target size in pixels.

@@ -251,7 +251,7 @@ impl Pty {
     }
 
     /// Output read from the shell since the last call.
-    pub fn take_output(&self) -> Vec<u8> {
+    pub(crate) fn take_output(&self) -> Vec<u8> {
         self.output.take()
     }
 

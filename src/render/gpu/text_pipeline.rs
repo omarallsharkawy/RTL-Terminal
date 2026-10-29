@@ -18,7 +18,7 @@ pub fn text_color_mode(is_srgb: bool) -> ColorMode {
     }
 }
 
-pub struct TextPipeline {
+pub(crate) struct TextPipeline {
     swash_cache: SwashCache,
     atlas: TextAtlas,
     renderer: TextRenderer,
@@ -59,7 +59,7 @@ impl TextPipeline {
     }
 
     /// Rasterize and upload the glyphs of `runs` for the next `render`.
-    pub fn prepare<'a>(
+    pub(crate) fn prepare<'a>(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -95,7 +95,7 @@ impl TextPipeline {
     }
 
     /// Free atlas space taken by glyphs not used this frame.
-    pub fn trim(&mut self) {
+    pub(crate) fn trim(&mut self) {
         self.atlas.trim();
     }
 }

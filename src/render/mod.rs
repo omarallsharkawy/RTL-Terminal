@@ -22,10 +22,10 @@ pub use row::{visual_cell_extents, CachedRow, RowCursor};
 pub use scene::boxdraw::try_render_box_or_block;
 pub use scene::cursor::{cursor_cell_width, geometry_under_block_cursor};
 pub use scene::row_quads::build_row_quads;
-pub use style::{cell_colors, target_color, Quad};
+pub use style::{cell_colors, Quad};
 
 pub use text::segment::CachedSegment;
-pub use text::shaper::{measure_char_width, shape_label, RowShaper};
+pub use text::shaper::{measure_char_width, RowShaper};
 
 use alacritty_terminal::index::Side;
 use cosmic_text::FontSystem;
@@ -62,7 +62,7 @@ pub struct TabLabel {
 
 /// The terminal renderer: lays out each frame on the CPU (`scene`) and draws it on the GPU
 /// (`gpu`). Its state is reached through methods, so the app never depends on its layout.
-pub struct Renderer {
+pub(crate) struct Renderer {
     window: Arc<Window>,
     /// Surface size and format.
     config: wgpu::SurfaceConfiguration,
@@ -129,27 +129,22 @@ impl Renderer {
         &self.window
     }
 
-    /// Surface size in physical pixels.
-    pub fn surface_size(&self) -> (u32, u32) {
-        (self.config.width, self.config.height)
-    }
-
     pub fn palette(&self) -> &Palette {
         &self.palette
     }
 
     /// Use another color theme (cached rows hold colors, so they are rebuilt).
-    pub fn set_palette(&mut self, palette: Palette) {
+    pub(crate) fn set_palette(&mut self, palette: Palette) {
         self.palette = palette;
         self.row_cache.clear();
     }
 
     /// The configured cursor style ("block", "beam"/"bar", "underline").
-    pub fn set_cursor_style(&mut self, style: String) {
+    pub(crate) fn set_cursor_style(&mut self, style: String) {
         self.cursor_style = style;
     }
 
-    pub fn is_focused(&self) -> bool {
+    pub(crate) fn is_focused(&self) -> bool {
         self.focused
     }
 
@@ -158,7 +153,7 @@ impl Renderer {
         self.cursor_blink_on
     }
 
-    pub fn set_cursor_blink(&mut self, on: bool) {
+    pub(crate) fn set_cursor_blink(&mut self, on: bool) {
         self.cursor_blink_on = on;
     }
 
@@ -179,7 +174,7 @@ impl Renderer {
     }
 
     /// Use `name` for the terminal grid. An uninstalled family falls back to monospace.
-    pub fn set_font_family(&mut self, name: Option<&str>) {
+    pub(crate) fn set_font_family(&mut self, name: Option<&str>) {
         let name = name.map(str::trim).filter(|n| !n.is_empty());
         self.font_family = match name {
             Some(n) => match installed_family(&self.font_system, n) {
@@ -196,12 +191,12 @@ impl Renderer {
         self.update_metrics();
     }
 
-    pub fn set_font_size(&mut self, new_size: f32) {
+    pub(crate) fn set_font_size(&mut self, new_size: f32) {
         self.metrics.font_size = new_size;
         self.update_metrics();
     }
 
-    pub fn set_scale_factor(&mut self, scale: f32) {
+    pub(crate) fn set_scale_factor(&mut self, scale: f32) {
         self.metrics.scale = scale.max(0.25);
         self.update_metrics();
     }
@@ -211,20 +206,16 @@ impl Renderer {
     }
 
     /// Forget the cached rows of a closed pane.
-    pub fn forget_pane(&mut self, id: PaneId) {
+    pub(crate) fn forget_pane(&mut self, id: PaneId) {
         self.row_cache.forget(id);
     }
 
     /// Set (or clear with `None`) the IME composition drawn inline at the cursor.
-    pub fn set_preedit(&mut self, preedit: Option<(String, Option<(usize, usize)>)>) {
+    pub(crate) fn set_preedit(&mut self, preedit: Option<(String, Option<(usize, usize)>)>) {
         self.ime.set(preedit);
     }
 
-    pub fn has_preedit(&self) -> bool {
-        self.ime.is_active()
-    }
-
-    pub fn set_opacity(&mut self, opacity: f32) {
+    pub(crate) fn set_opacity(&mut self, opacity: f32) {
         self.opacity = opacity.clamp(0.2, 1.0);
     }
 
@@ -238,7 +229,7 @@ impl Renderer {
     }
 
     /// Width of the divider between panes.
-    pub fn divider_gap(&self) -> f32 {
+    pub(crate) fn divider_gap(&self) -> f32 {
         self.metrics().divider_gap()
     }
 
@@ -254,7 +245,7 @@ impl Renderer {
     }
 
     /// Grid size (cols, rows) of a pane occupying `rect`.
-    pub fn compute_grid_size(&self, rect: Rect) -> (usize, usize) {
+    pub(crate) fn compute_grid_size(&self, rect: Rect) -> (usize, usize) {
         self.metrics().grid_size(rect)
     }
 
@@ -266,7 +257,7 @@ impl Renderer {
 
     /// Map a pixel to the cell drawn there and its side. Unlike `pixel_to_cell`, this follows
     /// reordered Arabic glyphs, so selections and mouse reports match what is on screen.
-    pub fn pixel_to_visual_cell(
+    pub(crate) fn pixel_to_visual_cell(
         &self,
         pane: PaneId,
         rect: Rect,

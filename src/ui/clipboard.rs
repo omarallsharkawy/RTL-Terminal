@@ -3,7 +3,7 @@
 //! copying.
 
 #[derive(Default)]
-pub struct Clipboard {
+pub(crate) struct Clipboard {
     inner: Option<arboard::Clipboard>,
 }
 

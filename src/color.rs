@@ -24,7 +24,7 @@ impl Rgba {
     }
 
     /// Linear blend towards `other` (`t` = 0 keeps `self`).
-    pub fn mix(self, other: Rgba, t: f32) -> Rgba {
+    pub(crate) fn mix(self, other: Rgba, t: f32) -> Rgba {
         Rgba {
             r: self.r + (other.r - self.r) * t,
             g: self.g + (other.g - self.g) * t,
@@ -33,7 +33,7 @@ impl Rgba {
         }
     }
 
-    pub fn to_linear(self) -> [f32; 4] {
+    pub(crate) fn to_linear(self) -> [f32; 4] {
         let conv = |c: f32| {
             if c <= 0.04045 {
                 c / 12.92
@@ -48,7 +48,7 @@ impl Rgba {
         [self.r, self.g, self.b, self.a]
     }
 
-    pub fn to_glyphon(self) -> glyphon::Color {
+    pub(crate) fn to_glyphon(self) -> glyphon::Color {
         glyphon::Color::rgba(
             (self.r * 255.0) as u8,
             (self.g * 255.0) as u8,
@@ -85,7 +85,7 @@ pub fn theme_names() -> &'static [&'static str] {
 }
 
 /// Parses `#rgb` or `#rrggbb` (the leading `#` is optional).
-pub fn parse_hex(s: &str) -> Option<Rgba> {
+pub(crate) fn parse_hex(s: &str) -> Option<Rgba> {
     let digits = s.trim().strip_prefix('#').unwrap_or(s.trim());
     if !digits.chars().all(|c| c.is_ascii_hexdigit()) {
         return None;

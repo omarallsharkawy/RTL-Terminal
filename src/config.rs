@@ -66,7 +66,7 @@ static WARNINGS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 /// Report a configuration problem: printed to stderr and kept for `take_warnings`, so the
 /// app can also show it in the terminal (a Windows GUI app has no visible stderr).
-pub fn warn(message: String) {
+pub(crate) fn warn(message: String) {
     tracing::warn!("{message}");
     if let Ok(mut warnings) = WARNINGS.lock() {
         warnings.push(message);
@@ -146,7 +146,7 @@ impl TwittyConfig {
         Some(path)
     }
 
-    pub fn load() -> Self {
+    pub(crate) fn load() -> Self {
         Self::config_path().map_or_else(Self::default, |path| Self::load_from(&path))
     }
 
@@ -188,7 +188,7 @@ impl TwittyConfig {
         };
     }
 
-    pub fn save(&self) {
+    pub(crate) fn save(&self) {
         if let Some(path) = Self::config_path() {
             if let Err(err) = self.save_to(&path) {
                 warn(format!("twitty: could not save {}: {err}", path.display()));

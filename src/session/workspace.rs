@@ -11,11 +11,11 @@ use crate::pty::Pty;
 use crate::session::pane::Pane;
 
 /// A pane is only split when both halves keep at least this many columns / rows.
-pub const MIN_SPLIT_COLS: usize = 24;
-pub const MIN_SPLIT_ROWS: usize = 10;
+pub(crate) const MIN_SPLIT_COLS: usize = 24;
+pub(crate) const MIN_SPLIT_ROWS: usize = 10;
 
 /// Where panes go on screen and how many cells fit in a rectangle (the renderer).
-pub trait GridGeometry {
+pub(crate) trait GridGeometry {
     /// Area the panes of the active tab share when there are `tab_count` tabs.
     fn content_rect(&self, tab_count: usize) -> Rect;
     /// Width of the divider between two panes.
@@ -25,7 +25,7 @@ pub trait GridGeometry {
 }
 
 /// Creates the terminal and shell of a new pane.
-pub trait PaneFactory {
+pub(crate) trait PaneFactory {
     /// A pane `id` with a `cols` x `rows` grid, its shell started in `cwd` when given.
     /// `None` when the shell could not be started.
     fn spawn(&mut self, id: PaneId, cols: usize, rows: usize, cwd: Option<PathBuf>)
@@ -41,7 +41,7 @@ pub struct Tab {
 
 /// The outcome of closing a pane.
 #[derive(Debug, PartialEq, Eq)]
-pub struct Closed {
+pub(crate) struct Closed {
     /// The focused pane before the close, if it still exists.
     pub previous: Option<PaneId>,
     /// The focused pane now; `None` when the last pane was closed.
@@ -49,7 +49,7 @@ pub struct Closed {
 }
 
 #[derive(Default)]
-pub struct Workspace {
+pub(crate) struct Workspace {
     panes: HashMap<PaneId, Pane>,
     tabs: Vec<Tab>,
     active: usize,
@@ -67,7 +67,7 @@ impl Workspace {
         self.panes.get(&id)
     }
 
-    pub fn pane_mut(&mut self, id: PaneId) -> Option<&mut Pane> {
+    pub(crate) fn pane_mut(&mut self, id: PaneId) -> Option<&mut Pane> {
         self.panes.get_mut(&id)
     }
 
@@ -87,17 +87,17 @@ impl Workspace {
         self.active
     }
 
-    pub fn active_tab(&self) -> Option<&Tab> {
+    pub(crate) fn active_tab(&self) -> Option<&Tab> {
         self.tabs.get(self.active)
     }
 
     /// The pane with keyboard focus.
-    pub fn focused_id(&self) -> Option<PaneId> {
+    pub(crate) fn focused_id(&self) -> Option<PaneId> {
         self.active_tab().map(|t| t.focused)
     }
 
     /// The active tab holds a single pane.
-    pub fn single_pane(&self) -> bool {
+    pub(crate) fn single_pane(&self) -> bool {
         self.active_tab()
             .is_some_and(|t| matches!(t.root, Node::Leaf(_)))
     }
@@ -108,7 +108,7 @@ impl Workspace {
     }
 
     /// The label of tab `index`: its focused pane's title, else "Tab N".
-    pub fn tab_title(&self, index: usize) -> String {
+    pub(crate) fn tab_title(&self, index: usize) -> String {
         self.tabs
             .get(index)
             .and_then(|t| self.panes.get(&t.focused))
@@ -118,7 +118,7 @@ impl Workspace {
     }
 
     /// The title of the focused pane, if its program set one.
-    pub fn focused_title(&self) -> Option<String> {
+    pub(crate) fn focused_title(&self) -> Option<String> {
         self.focused_id()
             .and_then(|id| self.panes.get(&id))
             .and_then(|p| p.title.clone())
@@ -127,7 +127,7 @@ impl Workspace {
     // ---- geometry ----
 
     /// Where each pane of the active tab goes.
-    pub fn active_layout(&self, geo: &impl GridGeometry) -> Vec<(PaneId, Rect)> {
+    pub(crate) fn active_layout(&self, geo: &impl GridGeometry) -> Vec<(PaneId, Rect)> {
         match self.active_tab() {
             Some(tab) => layout(&tab.root, geo.content_rect(self.tabs.len()), geo.gap()),
             None => Vec::new(),
@@ -135,21 +135,21 @@ impl Workspace {
     }
 
     /// The dividers between the panes of the active tab.
-    pub fn active_dividers(&self, geo: &impl GridGeometry) -> Vec<Divider> {
+    pub(crate) fn active_dividers(&self, geo: &impl GridGeometry) -> Vec<Divider> {
         match self.active_tab() {
             Some(tab) => dividers(&tab.root, geo.content_rect(self.tabs.len()), geo.gap()),
             None => Vec::new(),
         }
     }
 
-    pub fn pane_rect(&self, geo: &impl GridGeometry, id: PaneId) -> Option<Rect> {
+    pub(crate) fn pane_rect(&self, geo: &impl GridGeometry, id: PaneId) -> Option<Rect> {
         self.active_layout(geo)
             .into_iter()
             .find(|(p, _)| *p == id)
             .map(|(_, r)| r)
     }
 
-    pub fn pane_at(&self, geo: &impl GridGeometry, x: f64, y: f64) -> Option<PaneId> {
+    pub(crate) fn pane_at(&self, geo: &impl GridGeometry, x: f64, y: f64) -> Option<PaneId> {
         self.active_layout(geo)
             .into_iter()
             .find(|(_, r)| r.contains(x, y))
@@ -157,7 +157,7 @@ impl Workspace {
     }
 
     /// Give every pane of every tab the grid its rectangle allows.
-    pub fn apply_layout(&mut self, geo: &impl GridGeometry) {
+    pub(crate) fn apply_layout(&mut self, geo: &impl GridGeometry) {
         let content = geo.content_rect(self.tabs.len());
         let gap = geo.gap();
         let mut sizes = Vec::new();
@@ -197,7 +197,7 @@ impl Workspace {
     }
 
     /// Open a new tab with one pane and make it active. Returns the new pane.
-    pub fn new_tab(
+    pub(crate) fn new_tab(
         &mut self,
         geo: &impl GridGeometry,
         factory: &mut impl PaneFactory,
@@ -216,7 +216,7 @@ impl Workspace {
 
     /// Split the focused pane and focus the new one. Returns `(old, new)` focused panes, or
     /// `None` when the pane is too small to split or no shell could be started.
-    pub fn split_focused(
+    pub(crate) fn split_focused(
         &mut self,
         geo: &impl GridGeometry,
         factory: &mut impl PaneFactory,
@@ -249,7 +249,7 @@ impl Workspace {
     }
 
     /// Focus pane `id` of the active tab. Returns the previously focused pane when focus moved.
-    pub fn focus_pane(&mut self, id: PaneId) -> Option<PaneId> {
+    pub(crate) fn focus_pane(&mut self, id: PaneId) -> Option<PaneId> {
         let tab = self.tabs.get_mut(self.active)?;
         if tab.focused == id || !tab.root.contains(id) {
             return None;
@@ -266,7 +266,7 @@ impl Workspace {
     }
 
     /// Make tab `index` active. False when it does not exist or is already active.
-    pub fn set_active_tab(&mut self, index: usize) -> bool {
+    pub(crate) fn set_active_tab(&mut self, index: usize) -> bool {
         if index >= self.tabs.len() || index == self.active {
             return false;
         }
@@ -275,14 +275,14 @@ impl Workspace {
     }
 
     /// The tab `step` tabs away from the active one, wrapping around; `None` with one tab.
-    pub fn cycled_tab(&self, step: isize) -> Option<usize> {
+    pub(crate) fn cycled_tab(&self, step: isize) -> Option<usize> {
         let n = self.tabs.len() as isize;
         (n > 1).then(|| (self.active as isize + step).rem_euclid(n) as usize)
     }
 
     /// Close pane `id`, and its tab when it was the tab's last pane. Dropping the pane ends its
     /// shell. `None` when no tab holds `id`.
-    pub fn close_pane(&mut self, id: PaneId) -> Option<Closed> {
+    pub(crate) fn close_pane(&mut self, id: PaneId) -> Option<Closed> {
         let ti = self.tabs.iter().position(|t| t.root.contains(id))?;
         let previous = self.focused_id();
         let tab = self.tabs.remove(ti);

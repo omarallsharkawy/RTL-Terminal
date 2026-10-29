@@ -4,7 +4,7 @@ use std::sync::Arc;
 use winit::window::Window;
 
 /// Device, queue and the surface frames are presented to.
-pub struct GpuContext {
+pub(crate) struct GpuContext {
     pub surface: wgpu::Surface<'static>,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
@@ -106,7 +106,7 @@ impl GpuContext {
     /// The next surface texture, or `None` when no frame can be drawn now. A surface that no
     /// longer matches the window (resize, display change, GPU reset) is reconfigured and a
     /// redraw requested.
-    pub fn acquire(
+    pub(crate) fn acquire(
         &self,
         config: &wgpu::SurfaceConfiguration,
         window: &Window,

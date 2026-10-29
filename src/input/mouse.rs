@@ -6,12 +6,12 @@ use std::time::{Duration, Instant};
 use winit::event::{MouseButton, MouseScrollDelta};
 
 /// Clicks closer together than this (on the same cell) count as double/triple clicks.
-pub const MULTI_CLICK: Duration = Duration::from_millis(400);
+pub(crate) const MULTI_CLICK: Duration = Duration::from_millis(400);
 /// Lines scrolled by one notch of a mouse wheel.
-pub const LINES_PER_WHEEL_NOTCH: f64 = 3.0;
+pub(crate) const LINES_PER_WHEEL_NOTCH: f64 = 3.0;
 
 /// xterm button code of a mouse button (0 left, 1 middle, 2 right).
-pub fn button_code(button: MouseButton) -> Option<u8> {
+pub(crate) fn button_code(button: MouseButton) -> Option<u8> {
     match button {
         MouseButton::Left => Some(0),
         MouseButton::Middle => Some(1),
@@ -22,14 +22,14 @@ pub fn button_code(button: MouseButton) -> Option<u8> {
 
 /// Counts single, double and triple clicks on one cell.
 #[derive(Debug, Default)]
-pub struct ClickCounter {
+pub(crate) struct ClickCounter {
     last: Option<(Instant, usize, usize)>,
     count: u8,
 }
 
 impl ClickCounter {
     /// A press at `(col, row)`: returns 1, 2 or 3, cycling back to 1 after a triple click.
-    pub fn click(&mut self, now: Instant, col: usize, row: usize) -> u8 {
+    pub(crate) fn click(&mut self, now: Instant, col: usize, row: usize) -> u8 {
         self.count = match self.last {
             Some((t, c, r)) if now - t < MULTI_CLICK && (c, r) == (col, row) => self.count % 3 + 1,
             _ => 1,
@@ -41,7 +41,7 @@ impl ClickCounter {
 
 /// Sums fractional wheel or trackpad deltas into whole steps.
 #[derive(Debug, Default)]
-pub struct StepAccumulator {
+pub(crate) struct StepAccumulator {
     accum: f64,
 }
 
@@ -58,7 +58,7 @@ impl StepAccumulator {
 }
 
 /// Lines a wheel event scrolls (positive is up).
-pub fn wheel_lines(delta: MouseScrollDelta, line_height: f64) -> f64 {
+pub(crate) fn wheel_lines(delta: MouseScrollDelta, line_height: f64) -> f64 {
     match delta {
         MouseScrollDelta::LineDelta(_, y) => y as f64 * LINES_PER_WHEEL_NOTCH,
         MouseScrollDelta::PixelDelta(p) => p.y / line_height,
@@ -67,7 +67,7 @@ pub fn wheel_lines(delta: MouseScrollDelta, line_height: f64) -> f64 {
 
 /// What `steps` whole wheel lines do in a pane with terminal mode `mode`.
 #[derive(Debug, PartialEq, Eq)]
-pub enum WheelAction {
+pub(crate) enum WheelAction {
     /// Report wheel button `button` (64 up, 65 down) `count` times.
     Report {
         button: u8,
@@ -80,7 +80,7 @@ pub enum WheelAction {
     None,
 }
 
-pub fn wheel_action(mode: TermMode, steps: i32) -> WheelAction {
+pub(crate) fn wheel_action(mode: TermMode, steps: i32) -> WheelAction {
     if steps == 0 {
         return WheelAction::None;
     }
@@ -110,7 +110,7 @@ pub fn wheel_action(mode: TermMode, steps: i32) -> WheelAction {
 ///
 /// Shift bypasses mouse reporting, as in xterm and Windows Terminal. A release goes where
 /// its press went, so a Shift+drag selection never leaks drag/release reports.
-pub fn button_report(
+pub(crate) fn button_report(
     pressed: bool,
     mode: TermMode,
     shift: bool,
@@ -135,7 +135,7 @@ pub fn button_report(
 /// The motion report (button code + 32) for a pointer move onto a new cell, if any:
 /// 1003 reports every motion, 1002 only while a button is held, and a Shift+drag selection
 /// is not reported.
-pub fn motion_report(mode: TermMode, held: Option<u8>, selecting: bool) -> Option<u8> {
+pub(crate) fn motion_report(mode: TermMode, held: Option<u8>, selecting: bool) -> Option<u8> {
     let button = match held {
         Some(b) if mode.intersects(TermMode::MOUSE_DRAG | TermMode::MOUSE_MOTION) => Some(b),
         None if mode.contains(TermMode::MOUSE_MOTION) && !selecting => Some(3),

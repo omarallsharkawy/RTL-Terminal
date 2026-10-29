@@ -17,7 +17,7 @@ use cosmic_text::FontSystem;
 use quad_pipeline::QuadRenderer;
 use text_pipeline::TextPipeline;
 
-pub struct Gpu {
+pub(crate) struct Gpu {
     pub ctx: GpuContext,
     quads: QuadRenderer,
     text: TextPipeline,
@@ -44,7 +44,7 @@ impl Gpu {
     }
 
     /// See `GpuContext::acquire`.
-    pub fn acquire(
+    pub(crate) fn acquire(
         &self,
         config: &wgpu::SurfaceConfiguration,
         window: &Window,

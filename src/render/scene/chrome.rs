@@ -8,12 +8,12 @@ use crate::render::style::Quad;
 use crate::render::TabLabel;
 
 /// Where each tab goes in a window `width` wide; empty with fewer than two tabs (no tab bar).
-pub fn tab_geometry(ctx: &DrawContext, tab_count: usize, width: f32) -> Vec<Rect> {
+pub(crate) fn tab_geometry(ctx: &DrawContext, tab_count: usize, width: f32) -> Vec<Rect> {
     ctx.metrics.tab_rects(tab_count, width)
 }
 
 /// The tab bar background and the active tab's highlight and accent line.
-pub fn tab_bar_quads(
+pub(crate) fn tab_bar_quads(
     ctx: &DrawContext,
     tabs: &[TabLabel],
     geometry: &[Rect],
@@ -40,7 +40,7 @@ pub fn tab_bar_quads(
 }
 
 /// Tab titles, shaped with full shaping so Arabic titles render, and their colors.
-pub fn tab_titles(
+pub(crate) fn tab_titles(
     ctx: &mut DrawContext,
     tabs: &[TabLabel],
     geometry: &[Rect],
@@ -62,7 +62,7 @@ pub fn tab_titles(
 
 /// Background quad, shaped text and top y of a pane's status line, over the last of its
 /// `rows` rows.
-pub fn status_line(
+pub(crate) fn status_line(
     ctx: &mut DrawContext,
     rect: Rect,
     rows: usize,
@@ -76,7 +76,7 @@ pub fn status_line(
 }
 
 /// The dividers between panes.
-pub fn divider_quads<'a>(
+pub(crate) fn divider_quads<'a>(
     ctx: &DrawContext,
     dividers: &'a [Rect],
 ) -> impl Iterator<Item = Quad> + 'a {

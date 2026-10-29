@@ -67,7 +67,7 @@ pub struct PreeditState {
 }
 
 /// Where the IME should put its candidate popup: x, y, width, height in physical pixels.
-pub type ImeArea = (i32, i32, u32, u32);
+pub(crate) type ImeArea = (i32, i32, u32, u32);
 
 impl PreeditState {
     /// Set (or clear with `None`) the composition.
@@ -85,7 +85,7 @@ impl PreeditState {
         }
     }
 
-    pub fn is_active(&self) -> bool {
+    pub(crate) fn is_active(&self) -> bool {
         !self.text.is_empty()
     }
 

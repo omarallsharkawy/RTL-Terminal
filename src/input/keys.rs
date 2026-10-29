@@ -82,7 +82,7 @@ impl<'a> KeyInput<'a> {
 
 /// What a key event does in a terminal with keyboard mode `mode`: a Twitty shortcut, or the
 /// bytes to send. `None` when the key sends nothing (a release, a lone modifier...).
-pub fn handle_key(
+pub(crate) fn handle_key(
     event: &KeyEvent,
     modifiers: ModifiersState,
     mode: TermMode,
@@ -96,7 +96,7 @@ pub fn handle_key(
 }
 
 /// The Twitty shortcut this key (pressed or released) belongs to, if any.
-pub fn key_shortcut(event: &KeyEvent, modifiers: ModifiersState) -> Option<InputAction> {
+pub(crate) fn key_shortcut(event: &KeyEvent, modifiers: ModifiersState) -> Option<InputAction> {
     let physical = match event.physical_key {
         PhysicalKey::Code(c) => Some(c),
         _ => None,
@@ -106,7 +106,7 @@ pub fn key_shortcut(event: &KeyEvent, modifiers: ModifiersState) -> Option<Input
 
 /// The bytes a key sends to the program, ignoring Twitty's own shortcuts. Used when a
 /// shortcut has nothing to act on (Alt+Left with a single pane), so the program gets the key.
-pub fn terminal_key(
+pub(crate) fn terminal_key(
     event: &KeyEvent,
     modifiers: ModifiersState,
     mode: TermMode,
