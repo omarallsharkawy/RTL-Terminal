@@ -361,16 +361,21 @@ pub fn measure_char_width(
 }
 
 /// Shape a one-line label (status line, tab title, preedit) in the grid font with full
-/// shaping, so Arabic in it joins and reorders.
+/// shaping, so Arabic in it joins and reorders. Bidi embeddings, overrides and isolates in a
+/// program-set title are dropped, as in terminal cells.
 pub fn shape_label(
     font_system: &mut FontSystem,
     family: Option<&'static str>,
     (font_px, line_height): (f32, f32),
     text: &str,
 ) -> Buffer {
+    let text: String = text
+        .chars()
+        .filter(|&c| !crate::terminal::is_bidi_control(c))
+        .collect();
     let mut buffer = Buffer::new_empty(Metrics::new(font_px, line_height));
     buffer.set_text(
-        text,
+        &text,
         &Attrs::new().family(grid_family(family)),
         Shaping::Advanced,
         None,

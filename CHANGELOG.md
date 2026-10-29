@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Security: Ctrl+Click on a `file://` link never runs a program. Links to executables, scripts and launchers (`.desktop`, `.exe`, `.bat`, `.AppImage`…, or any file with an execute bit) open their folder instead, and `file://` links to other hosts are refused (on Windows they would send the user's credentials to that host).
+- Security: while Ctrl is held over a link, its real target is shown in the status line, so a hyperlink (OSC 8) whose text names one site can't silently open another. Bidi and control characters in the shown target are replaced with `�`.
+- Security: bidi embeddings, overrides and isolates (U+202A–202E, U+2066–2069) in program output and window titles are no longer applied, so `cat` of a file can't make a line read differently from what it contains ("Trojan Source"). Direction marks still work.
+- Security: an OSC string (title, link, clipboard copy) longer than 8 MiB is cut and ignored. Before, an unterminated one grew the terminal's memory without limit.
+- Security: row cache keys use a per-process random seed, so output can't be crafted to collide with an earlier line and be drawn as that line.
+- Dependencies updated (clipboard-win 5.4.1 was yanked).
 - Fixed: English typed after an Arabic word appeared on its right (before it, for an Arabic reader). An Arabic phrase now reads right to left, also on the line being typed and after a prompt (`❯ مرحبا hello` shows `hello` left of `مرحبا`). English sentences with an Arabic word in program output keep reading left to right.
 - Faster: Arabic rows are shaped ~5x faster (the Arabic font is named up front instead of found by font fallback for every word); a full-screen redraw of Arabic text went from 77 ms to 18 ms, and scrolling Arabic output is ~4x cheaper.
 - More responsive under heavy output: shell output is batched through a bounded queue instead of one event per read, so the screen keeps updating during `cat` of a huge file, keypresses and Ctrl+C are never stuck behind a backlog, and floods finish sooner.

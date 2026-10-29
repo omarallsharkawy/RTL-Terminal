@@ -147,9 +147,13 @@ impl App {
         let result = self.term(id, |t| {
             let link = if ctrl { t.link_at(col, row) } else { None };
             let hover = link.as_ref().map(|l| (l.row, l.cols.clone()));
-            (t.set_link_hover(hover), link.is_some())
+            (t.set_link_hover(hover), link)
         });
-        if let Some((true, over_link)) = result {
+        if let Some((true, link)) = result {
+            let over_link = link.is_some();
+            if let Some(p) = self.ws.pane_mut(id) {
+                p.ui.hover_target = link.map(|l| crate::links::display_target(&l.uri));
+            }
             self.window.set_cursor_icon(if over_link {
                 CursorIcon::Pointer
             } else {
@@ -161,6 +165,9 @@ impl App {
 
     /// The pointer left a pane: its link underline goes away.
     fn clear_link_hover(&mut self, id: PaneId) {
+        if let Some(p) = self.ws.pane_mut(id) {
+            p.ui.hover_target = None;
+        }
         if self.term(id, |t| t.set_link_hover(None)) == Some(true) {
             self.window.request_redraw();
         }

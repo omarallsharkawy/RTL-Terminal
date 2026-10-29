@@ -19,6 +19,7 @@ pollster = "0.4.0"
 unicode-bidi = "0.3.17"
 unicode-width = "0.2.0"
 anyhow = "1.0.95"
+memchr = "2.7"
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
 bytemuck = { version = "1.21.0", features = ["derive"] }

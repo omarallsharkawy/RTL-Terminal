@@ -303,7 +303,8 @@ impl App {
                     .ui
                     .search_query
                     .as_deref()
-                    .map(|q| self.search_bar_text(id, q));
+                    .map(|q| self.search_bar_text(id, q))
+                    .or_else(|| pane.ui.hover_target.as_ref().map(|t| format!("→ {t}")));
                 Some(PaneFrame {
                     id,
                     rect,

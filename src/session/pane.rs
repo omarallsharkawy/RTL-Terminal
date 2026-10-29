@@ -39,6 +39,9 @@ pub struct PaneUi {
     pub scroll_steps: StepAccumulator,
     /// Query being typed while scrollback search is open (keys go here, not to the PTY).
     pub search_query: Option<String>,
+    /// Target of the link under the pointer while Ctrl is held, shown in the status line: a
+    /// hyperlink's text can say anything, so the address it opens must be visible.
+    pub hover_target: Option<String>,
 }
 
 impl Default for PaneUi {
@@ -53,6 +56,7 @@ impl Default for PaneUi {
             clicks: ClickCounter::default(),
             scroll_steps: StepAccumulator::default(),
             search_query: None,
+            hover_target: None,
         }
     }
 }

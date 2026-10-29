@@ -69,21 +69,34 @@ impl CellData {
         self.c == ' ' && self.zerowidth.is_empty() && !self.is_spacer()
     }
 
+    /// The characters this cell contributes to a shaped run: none for spacers, and never a
+    /// bidi embedding, override or isolate (see `is_bidi_control`).
+    fn shaped_chars(&self) -> impl Iterator<Item = char> + '_ {
+        let cell = (!self.is_spacer()).then_some(self.c);
+        cell.into_iter()
+            .chain(self.zerowidth.iter().copied().filter(|_| !self.is_spacer()))
+            .filter(|&c| !is_bidi_control(c))
+    }
+
     /// Text this cell contributes to a shaped run (empty for spacers).
     pub fn push_text(&self, out: &mut String) {
-        if self.is_spacer() {
-            return;
-        }
-        out.push(self.c);
-        out.extend(self.zerowidth.iter());
+        out.extend(self.shaped_chars());
     }
 
     pub fn text_len(&self) -> usize {
-        if self.is_spacer() {
-            return 0;
-        }
-        self.c.len_utf8() + self.zerowidth.iter().map(|c| c.len_utf8()).sum::<usize>()
+        self.shaped_chars().map(char::len_utf8).sum()
     }
+}
+
+/// Bidi embeddings, overrides and isolates (LRE, RLE, PDF, LRO, RLO, LRI, RLI, FSI, PDI).
+///
+/// Twitty lays out right-to-left text itself and wraps it in its own isolates; these controls
+/// from a program's output would reorder a line arbitrarily (`cat` of a file could make text
+/// read differently from what it says, as in "Trojan Source") or unbalance Twitty's isolates.
+/// They are invisible, so they are simply not shaped. Direction marks (LRM, RLM, ALM) only
+/// settle neutrals and stay.
+pub fn is_bidi_control(c: char) -> bool {
+    matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
 }
 
 /// A link under a viewport cell: its target and the cells it covers on that row.
@@ -112,9 +125,60 @@ pub struct CursorState {
     pub shape: CursorShape,
 }
 
+/// Longest OSC string (title, hyperlink, clipboard copy…) passed to the parser. vte buffers an
+/// OSC until its terminator with no limit, so an unterminated one (`\e]52;c;` followed by
+/// endless data) would grow the terminal's memory until it is killed.
+pub const MAX_OSC_LEN: usize = 8 << 20;
+
+/// Tracks OSC strings in the byte stream and cuts the ones longer than `MAX_OSC_LEN`.
+#[derive(Default)]
+struct OscGuard {
+    state: OscState,
+}
+
+#[derive(Default, Clone, Copy, PartialEq)]
+enum OscState {
+    #[default]
+    Other,
+    Escape,
+    Osc(usize),
+    /// Past the limit: bytes are dropped until the terminator.
+    Overflow,
+}
+
+/// What to do with one byte.
+#[derive(PartialEq)]
+enum OscStep {
+    Keep,
+    Drop,
+    /// The OSC just went over the limit: replace this byte with one that spoils the payload, so
+    /// a cut clipboard copy (invalid base64) or link is ignored instead of applied half.
+    Spoil,
+}
+
+impl OscGuard {
+    fn step(&mut self, byte: u8) -> OscStep {
+        use OscState::*;
+        let (next, step) = match (self.state, byte) {
+            // BEL, CAN and SUB end an OSC; ESC ends it and starts an escape (ST is ESC \).
+            (Osc(_) | Overflow, 0x07 | 0x18 | 0x1A) => (Other, OscStep::Keep),
+            (_, 0x1B) => (Escape, OscStep::Keep),
+            (Escape, b']') => (Osc(0), OscStep::Keep),
+            (Escape, _) => (Other, OscStep::Keep),
+            (Osc(n), _) if n >= MAX_OSC_LEN => (Overflow, OscStep::Spoil),
+            (Osc(n), _) => (Osc(n + 1), OscStep::Keep),
+            (Overflow, _) => (Overflow, OscStep::Drop),
+            (Other, _) => (Other, OscStep::Keep),
+        };
+        self.state = next;
+        step
+    }
+}
+
 pub struct Terminal {
     term: Term<ForwardListener>,
     parser: Processor<StdSyncHandler>,
+    osc_guard: OscGuard,
     cols: usize,
     rows: usize,
     search: Option<SearchState>,
@@ -199,6 +263,7 @@ impl Terminal {
         Self {
             term,
             parser,
+            osc_guard: OscGuard::default(),
             cols,
             rows,
             search: None,
@@ -208,7 +273,31 @@ impl Terminal {
     }
 
     pub fn process_bytes(&mut self, bytes: &[u8]) {
-        self.parser.advance(&mut self.term, bytes);
+        let mut from = 0;
+        let mut i = 0;
+        while i < bytes.len() {
+            // Outside an OSC only its opener matters: skip to the next `ESC ]`, or to a
+            // trailing ESC whose `]` may come in the next read.
+            if self.osc_guard.state == OscState::Other {
+                static OSC_START: std::sync::LazyLock<memchr::memmem::Finder<'static>> =
+                    std::sync::LazyLock::new(|| memchr::memmem::Finder::new(b"\x1b]"));
+                match OSC_START.find(&bytes[i..]) {
+                    Some(at) => i += at,
+                    None if bytes.last() == Some(&0x1B) => i = bytes.len() - 1,
+                    None => break,
+                }
+            }
+            let step = self.osc_guard.step(bytes[i]);
+            if step != OscStep::Keep {
+                self.parser.advance(&mut self.term, &bytes[from..i]);
+                if step == OscStep::Spoil {
+                    self.parser.advance(&mut self.term, b"!");
+                }
+                from = i + 1;
+            }
+            i += 1;
+        }
+        self.parser.advance(&mut self.term, &bytes[from..]);
     }
 
     /// The RGB a program gave palette entry `index` (0..256) with OSC 4, if it changed it.
@@ -614,14 +703,25 @@ fn selected_span(range: &SelectionRange, line: Line) -> Option<(usize, usize)> {
 }
 
 /// Fast 64-bit hash (a folded multiply per word, as in foldhash) for row keys.
+///
+/// Rows with equal keys are drawn from the cache, so a collision shows one row's content in
+/// place of another's. The seed is random per process: with a fixed one, output could be crafted
+/// offline so that a line on screen looks like a different line seen earlier.
 struct KeyHasher(u64);
 
 impl KeyHasher {
     const MUL: u64 = 0x9E37_79B9_7F4A_7C15;
-    const SEED: u64 = 0xD6E8_FEB8_6659_FD93;
+
+    fn seed() -> u64 {
+        use std::hash::BuildHasher;
+        static SEED: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+        *SEED.get_or_init(|| {
+            std::collections::hash_map::RandomState::new().hash_one(0x7477_6974_7479_u64)
+        })
+    }
 
     fn new() -> Self {
-        Self(Self::SEED)
+        Self(Self::seed())
     }
 
     #[inline]
@@ -631,7 +731,7 @@ impl KeyHasher {
     }
 
     fn finish(mut self) -> u64 {
-        self.write(Self::SEED);
+        self.write(Self::seed());
         self.0
     }
 }
