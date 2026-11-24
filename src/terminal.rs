@@ -1,5 +1,9 @@
+use crate::blocks::anchor::{AbsLine, LineRemap, LineTracker};
 use crate::links::find_url_at;
-use crate::shell_integration::{parse_osc, ShellEvent, Signal, MAX_PENDING_EVENTS, MAX_SIGNAL_LEN};
+use crate::shell_integration::{
+    clean_text, parse_osc, MarkKind, ShellEvent, Signal, MAX_COMMAND_CHARS, MAX_PENDING_EVENTS,
+    MAX_SIGNAL_LEN,
+};
 use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::{Dimensions, Row, Scroll};
 use alacritty_terminal::index::{Boundary, Column, Direction, Line, Point, Side};
@@ -189,6 +193,24 @@ pub struct LineData {
     pub hash: u64,
 }
 
+/// Where the main screen is in absolute lines (see `blocks::anchor`), for drawing and
+/// navigating command blocks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LineView {
+    /// Absolute line of the top viewport row.
+    pub viewport_top: AbsLine,
+    pub rows: usize,
+    pub cols: usize,
+    /// Oldest line still in the scrollback.
+    pub oldest: AbsLine,
+    /// The cursor: absolute line and column.
+    pub cursor: (AbsLine, usize),
+    /// Changes when earlier absolute lines lost their meaning (cleared scrollback, a flood).
+    pub epoch: u64,
+    /// Sequence number of the newest reflow remap (`Terminal::line_remaps_since`).
+    pub remap_seq: u64,
+}
+
 #[derive(Clone, Debug)]
 pub struct CursorState {
     pub col: usize,
@@ -279,6 +301,12 @@ pub struct Terminal {
     snapshot_rows: RefCell<HashMap<u64, LineData>>,
     /// Shell signals (OSC 7, 9, 99, 133, 633, 777) not yet taken by the app.
     shell_events: VecDeque<ShellEvent>,
+    /// Absolute line numbers for command blocks (see `blocks::anchor`).
+    lines: LineTracker,
+    /// Where the last OSC 133 B mark was, until its C mark: the command line is read from there
+    /// when the shell sent no OSC 633 E.
+    command_start: Option<(AbsLine, usize)>,
+    scrollback: usize,
 }
 
 struct SearchState {
@@ -318,16 +346,23 @@ fn program_color(color: AnsiColor, colors: &Colors) -> AnsiColor {
 
 /// Terminal config whose default cursor blinks as `cursor_blink` says. DECSCUSR (`CSI n SP q`)
 /// overrides it, and `CSI 0 SP q` falls back to it.
-fn term_config(cursor_blink: bool) -> Config {
+fn term_config(cursor_blink: bool, scrollback: usize) -> Config {
     Config {
         default_cursor_style: CursorStyle {
             shape: CursorShape::Block,
             blinking: cursor_blink,
         },
         kitty_keyboard: true,
+        scrolling_history: scrollback,
         ..Config::default()
     }
 }
+
+/// Lines of scrollback a terminal keeps.
+pub const SCROLLBACK_LINES: usize = 10_000;
+
+/// Most rows a typed command line is read from (OSC 133 B to C) when no OSC 633 E came.
+const MAX_TYPED_COMMAND_LINES: AbsLine = 64;
 
 impl Terminal {
     /// Terminal that only forwards replies destined for the PTY (used by tests).
@@ -347,12 +382,25 @@ impl Terminal {
     where
         F: Fn(Event) + Send + Sync + 'static,
     {
+        Self::build(cols, rows, SCROLLBACK_LINES, on_event)
+    }
+
+    /// Terminal with `scrollback` lines of history that ignores its events (tests of what happens
+    /// when the scrollback is full).
+    pub fn with_scrollback(cols: usize, rows: usize, scrollback: usize) -> Self {
+        Self::build(cols, rows, scrollback, |_| {})
+    }
+
+    fn build<F>(cols: usize, rows: usize, scrollback: usize, on_event: F) -> Self
+    where
+        F: Fn(Event) + Send + Sync + 'static,
+    {
         let (cols, rows) = (cols.max(MIN_COLS), rows.max(1));
         let size = TermSize::new(cols, rows);
         let listener = ForwardListener {
             on_event: Arc::new(on_event),
         };
-        let term = Term::new(term_config(true), &size, listener);
+        let term = Term::new(term_config(true, scrollback), &size, listener);
         let parser = Processor::<StdSyncHandler>::new();
         Self {
             term,
@@ -364,6 +412,9 @@ impl Terminal {
             link_hover: None,
             snapshot_rows: RefCell::default(),
             shell_events: VecDeque::new(),
+            lines: LineTracker::new(scrollback),
+            command_start: None,
+            scrollback,
         }
     }
 
@@ -404,6 +455,18 @@ impl Terminal {
             i += 1;
         }
         self.parser.advance(&mut self.term, &bytes[from..]);
+        if self.lines.enabled() {
+            self.sync_lines();
+        }
+    }
+
+    fn is_alt_screen(&self) -> bool {
+        self.term.mode().contains(TermMode::ALT_SCREEN)
+    }
+
+    fn sync_lines(&mut self) {
+        let alt = self.is_alt_screen();
+        self.lines.sync(self.term.grid(), alt);
     }
 
     /// The RGB a program gave palette entry `index` (0..256) with OSC 4, if it changed it.
@@ -419,7 +482,8 @@ impl Terminal {
 
     /// Default blinking for when the program has not chosen a cursor style.
     pub fn set_default_cursor_blink(&mut self, cursor_blink: bool) {
-        self.term.set_options(term_config(cursor_blink));
+        self.term
+            .set_options(term_config(cursor_blink, self.scrollback));
     }
 
     /// Whether the cursor should blink: the program's DECSCUSR choice, else the default.
@@ -433,16 +497,132 @@ impl Terminal {
     }
 
     fn push_shell_event(&mut self, signal: Signal) {
-        if self.shell_events.len() >= MAX_PENDING_EVENTS {
-            self.shell_events.pop_front();
-        }
         let point = self.term.grid().cursor.point;
-        self.shell_events.push_back(ShellEvent {
+        let alt = self.is_alt_screen();
+        let mut abs_line = None;
+        if let Signal::Mark(kind) = signal {
+            self.lines.enable(self.term.grid(), alt);
+            self.lines.sync(self.term.grid(), alt);
+            abs_line = (!alt).then(|| self.lines.top() + AbsLine::from(point.line.0));
+            match kind {
+                MarkKind::CommandStart => {
+                    self.command_start = abs_line.map(|line| (line, point.column.0));
+                }
+                MarkKind::OutputStart => {
+                    // No OSC 633 E: the command line is what was typed after the prompt.
+                    // Bounded: a program can send B, a flood, then C.
+                    let typed = self
+                        .command_start
+                        .take()
+                        .zip(abs_line)
+                        .filter(|((b, _), c)| c - b <= MAX_TYPED_COMMAND_LINES)
+                        .and_then(|(b, c)| self.text_between(b, (c, point.column.0)));
+                    let typed = typed.map(|t| clean_text(&t.replace('\n', " "), MAX_COMMAND_CHARS));
+                    if let Some(text) = typed.filter(|t| !t.is_empty()) {
+                        self.push_event(ShellEvent {
+                            signal: Signal::CommandLine(text),
+                            line: point.line.0,
+                            column: point.column.0,
+                            history: self.term.grid().history_size(),
+                            abs_line: None,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        } else if let Signal::CommandLine(_) = signal {
+            self.command_start = None;
+        }
+        self.push_event(ShellEvent {
             signal,
             line: point.line.0,
             column: point.column.0,
             history: self.term.grid().history_size(),
+            abs_line,
         });
+    }
+
+    fn push_event(&mut self, event: ShellEvent) {
+        if self.shell_events.len() >= MAX_PENDING_EVENTS {
+            self.shell_events.pop_front();
+        }
+        self.shell_events.push_back(event);
+    }
+
+    /// Absolute-line bookkeeping of the main screen, for command blocks. `None` until the shell
+    /// sent its first OSC 133 mark, and while the alternate screen is shown.
+    pub fn line_view(&self) -> Option<LineView> {
+        if !self.lines.enabled() || self.is_alt_screen() {
+            return None;
+        }
+        let grid = self.term.grid();
+        let top = self.lines.top();
+        let cursor = grid.cursor.point;
+        Some(LineView {
+            viewport_top: top - grid.display_offset() as AbsLine,
+            rows: self.rows,
+            cols: self.cols,
+            oldest: top - grid.history_size() as AbsLine,
+            cursor: (top + AbsLine::from(cursor.line.0), cursor.column.0),
+            epoch: self.lines.epoch(),
+            remap_seq: self.lines.remap_seq(),
+        })
+    }
+
+    /// Oldest absolute line of the main screen's scrollback, also while the alternate screen is
+    /// shown. `None` until the first OSC 133 mark.
+    pub fn oldest_line(&self) -> Option<AbsLine> {
+        self.lines.enabled().then(|| self.lines.oldest())
+    }
+
+    /// Reflow remaps after sequence number `seen` (see `LineView::remap_seq`), or `None` when
+    /// some of them are no longer kept.
+    pub fn line_remaps_since(&self, seen: u64) -> Option<&[LineRemap]> {
+        self.lines.remaps_since(seen)
+    }
+
+    /// Grid point of an absolute line and column, if the line is still kept.
+    fn abs_point(&self, (line, column): (AbsLine, usize)) -> Option<Point> {
+        let view = self.line_view()?;
+        let grid_line = line - self.lines.top();
+        if line < view.oldest || grid_line >= self.rows as AbsLine {
+            return None;
+        }
+        let grid_line = i32::try_from(grid_line).ok()?;
+        Some(Point::new(
+            Line(grid_line),
+            Column(column.min(self.cols - 1)),
+        ))
+    }
+
+    /// Text from `start` up to (not including) `end`, both absolute (line, column): logical
+    /// order, soft-wrapped rows joined, hard line ends as `\n`, trailing blanks of each line
+    /// dropped. `None` when a line left the scrollback or the alternate screen is shown.
+    pub fn text_between(&self, start: (AbsLine, usize), end: (AbsLine, usize)) -> Option<String> {
+        let from = self.abs_point(start)?;
+        let (end_line, end_col) = end;
+        // The cell before `end`.
+        let to = if end_col == 0 {
+            let to = self.abs_point((end_line - 1, 0))?;
+            Point::new(to.line, Column(self.cols - 1))
+        } else {
+            self.abs_point((end_line, end_col - 1))?
+        };
+        if to < from {
+            return Some(String::new());
+        }
+        Some(self.term.bounds_to_string(from, to))
+    }
+
+    /// Scroll so absolute line `line` is the top row (as far as the scrollback allows).
+    pub fn scroll_to_line(&mut self, line: AbsLine) {
+        if self.line_view().is_none() {
+            return;
+        }
+        let grid_line = line - self.lines.top();
+        let offset = (-grid_line).clamp(0, self.term.grid().history_size() as AbsLine);
+        let delta = offset - self.display_offset() as AbsLine;
+        self.term.scroll_display(Scroll::Delta(delta as i32));
     }
 
     /// Grid position of the cursor, to tell whether output moved it.
@@ -457,7 +637,10 @@ impl Terminal {
         let (cols, rows) = (cols.max(MIN_COLS), rows.max(1));
         self.cols = cols;
         self.rows = rows;
+        let alt = self.is_alt_screen();
+        let prep = self.lines.before_resize(self.term.grid(), alt, cols, rows);
         self.term.resize(TermSize::new(cols, rows));
+        self.lines.after_resize(self.term.grid(), alt, prep);
     }
 
     pub fn size(&self) -> (usize, usize) {

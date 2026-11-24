@@ -2,6 +2,7 @@
 pub mod agent;
 pub mod app;
 pub mod blink;
+pub mod blocks;
 pub mod color;
 pub mod commands;
 pub mod config;

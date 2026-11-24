@@ -32,6 +32,7 @@ fn pane(id: u64, rect: Rect, text: &str, focused: bool, status: Option<&str>) ->
         cursor,
         focused,
         status: status.map(str::to_string),
+        blocks: Vec::new(),
     }
 }
 

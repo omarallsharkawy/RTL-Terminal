@@ -3,13 +3,22 @@
 use alacritty_terminal::index::Direction;
 use std::time::Instant;
 use winit::event::{Ime, KeyEvent};
+use winit::keyboard::{Key, ModifiersState, NamedKey};
 
 use super::App;
+use crate::blocks::{BlockList, BlockNav};
 use crate::input::route::{route_key, shortcut_is_idle, KeyRoute};
 use crate::input::{handle_key, key_shortcut, terminal_key, InputAction};
 use crate::layout::{PaneId, SplitDir};
 use crate::ui::search::{search_bar_text, search_key, SearchCmd};
 use crate::ui::settings::DEFAULT_FONT_SIZE;
+
+/// Esc pressed without modifiers.
+fn is_plain_escape(event: &KeyEvent, modifiers: ModifiersState) -> bool {
+    event.state.is_pressed()
+        && event.logical_key == Key::Named(NamedKey::Escape)
+        && modifiers.is_empty()
+}
 
 impl App {
     /// A key press or release. Returns true when the window should close.
@@ -24,13 +33,22 @@ impl App {
         let mut action = handle_key(event, self.modifiers, mode);
         let single_pane = self.ws.single_pane();
         let shortcut = key_shortcut(event, self.modifiers);
-        if shortcut_is_idle(shortcut.as_ref(), single_pane, self.ws.tabs().len()) {
+        let blocks = self
+            .ws
+            .pane(id)
+            .is_some_and(|p| p.blocks.navigable(&p.terminal));
+        if shortcut_is_idle(shortcut.as_ref(), single_pane, self.ws.tabs().len(), blocks) {
             action = terminal_key(event, self.modifiers, mode).map(InputAction::Bytes);
         }
         let search_open = self
             .ws
             .pane(id)
             .is_some_and(|p| p.ui.search_query.is_some());
+        // Esc clears a selected block instead of reaching the shell.
+        if !search_open && is_plain_escape(event, self.modifiers) && self.clear_block_selection(id)
+        {
+            return false;
+        }
         match route_key(action, search_open) {
             KeyRoute::SearchBar => {
                 self.handle_search_key(id, event);
@@ -73,6 +91,7 @@ impl App {
     /// Typed input for the shell: it drops the selection and snaps the view to the live screen.
     pub(super) fn send_input(&mut self, id: PaneId, bytes: &[u8]) {
         self.clear_selection(id);
+        self.clear_block_selection(id);
         self.write_to(id, bytes);
         self.scroll_to_bottom(id);
     }
@@ -104,10 +123,53 @@ impl App {
             InputAction::ToggleSidebar => self.toggle_sidebar(),
             InputAction::CommandPalette => self.toggle_palette(),
             InputAction::AskAgent => self.ask_agent(id),
-            // Lane O (blocks, docs/bundle/PLAN.md) fills these in.
-            InputAction::PrevBlock | InputAction::NextBlock | InputAction::CopyBlockOutput => {}
+            InputAction::PrevBlock => self.navigate_blocks(id, BlockList::select_prev),
+            InputAction::NextBlock => self.navigate_blocks(id, BlockList::select_next),
+            InputAction::CopyBlockOutput => self.copy_block_output(id),
         }
         false
+    }
+
+    // ---- command blocks ----
+
+    /// Select another block and scroll its prompt to the top (or back to the live screen).
+    fn navigate_blocks(&mut self, id: PaneId, step: fn(&mut BlockList) -> BlockNav) {
+        let Some(pane) = self.ws.pane_mut(id) else {
+            return;
+        };
+        pane.blocks.refresh(&pane.terminal);
+        if !pane.blocks.navigable(&pane.terminal) {
+            return;
+        }
+        match step(&mut pane.blocks) {
+            BlockNav::ScrollTo(line) => pane.terminal.scroll_to_line(line),
+            BlockNav::Bottom => pane.terminal.scroll_to_bottom(),
+            BlockNav::None => {}
+        }
+        self.window.request_redraw();
+    }
+
+    /// Copy the output of the selected block (else the newest finished one) as plain text.
+    fn copy_block_output(&mut self, id: PaneId) {
+        let text = self
+            .ws
+            .pane(id)
+            .and_then(|p| p.blocks.target_text(&p.terminal));
+        if let Some(text) = text {
+            self.clipboard.set_text(text.output);
+        }
+    }
+
+    /// Clear the selected block of pane `id`. Returns true when one was selected.
+    pub(super) fn clear_block_selection(&mut self, id: PaneId) -> bool {
+        let cleared = self
+            .ws
+            .pane_mut(id)
+            .is_some_and(|p| p.blocks.clear_selection());
+        if cleared {
+            self.window.request_redraw();
+        }
+        cleared
     }
 
     // ---- search bar ----

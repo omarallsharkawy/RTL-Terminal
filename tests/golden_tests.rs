@@ -115,6 +115,7 @@ fn render(scene: &Scene) -> Option<(u32, u32, Vec<u8>)> {
         cursor,
         focused: true,
         status: None,
+        blocks: Vec::new(),
     }];
 
     let mut cache = RowCache::default();

@@ -160,6 +160,7 @@ fn overlay_draws_above_panes_with_arabic_on_the_right() {
         cursor,
         focused: true,
         status: None,
+        blocks: Vec::new(),
     }];
     let mut cache = RowCache::default();
     let mut ime = PreeditState::default();

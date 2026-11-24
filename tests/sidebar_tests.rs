@@ -728,6 +728,7 @@ fn ime_candidate_and_attention_follow_panes_on_both_sides() {
             cursor,
             focused: true,
             status: None,
+            blocks: Vec::new(),
         }];
         ime.set(None);
         let plain = build_frame(&mut ctx, &options, &mut cache, &mut ime, &[], &panes, &[]);

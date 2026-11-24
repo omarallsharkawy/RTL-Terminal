@@ -208,6 +208,7 @@ fn bench_frame(c: &mut Criterion) {
             cursor,
             focused: true,
             status: None,
+            blocks: Vec::new(),
         }
     };
     let mut ime = PreeditState::default();

@@ -11,18 +11,26 @@ impl App {
         let Some(pane) = self.ws.pane(id) else {
             return;
         };
+        // What to ask about: the selection, else the selected (or last) command block, else
+        // the visible screen with the last command the shell reported.
         let selection = pane
             .terminal
             .selection_text()
             .filter(|s| !s.trim().is_empty());
-        let from_selection = selection.is_some();
-        let context = selection.unwrap_or_else(|| screen_text(&pane.terminal));
+        let block = selection
+            .is_none()
+            .then(|| pane.blocks.selected_or_last_text(&pane.terminal))
+            .flatten()
+            .filter(|b| !b.output.trim().is_empty() || b.command.is_some());
         let meta = &pane.meta;
-        // The last command only describes the screen, not an arbitrary selection.
-        let (command, exit) = if from_selection {
-            (None, None)
-        } else {
-            (meta.last_command.clone(), meta.last_exit)
+        let (context, command, exit) = match (selection, block) {
+            (Some(text), _) => (text, None, None),
+            (None, Some(b)) => (b.output, b.command, b.exit),
+            (None, None) => (
+                screen_text(&pane.terminal),
+                meta.last_command.clone(),
+                meta.last_exit,
+            ),
         };
         let cwd = meta.cwd.clone();
         let path = std::env::var_os("PATH");

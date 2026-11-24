@@ -35,7 +35,8 @@ impl App {
         let r = self.window.grid()?;
         let previous = self.focused_id();
         self.attach_control_env(&mut options);
-        let mut shells = ShellFactory::new(&self.proxy, self.config.cursor_blink);
+        let mut shells = ShellFactory::new(&self.proxy, self.config.cursor_blink)
+            .with_shell_integration(self.config.shell_integration);
         shells.options = options;
         let id = self.ws.new_tab(r, &mut shells)?;
         self.release_held_buttons();
@@ -58,7 +59,8 @@ impl App {
     ) -> Option<PaneId> {
         let r = self.window.grid()?;
         self.attach_control_env(&mut options);
-        let mut shells = ShellFactory::new(&self.proxy, self.config.cursor_blink);
+        let mut shells = ShellFactory::new(&self.proxy, self.config.cursor_blink)
+            .with_shell_integration(self.config.shell_integration);
         shells.options = options;
         let (old, new) = self.ws.split_focused(r, &mut shells, dir)?;
         self.apply_layout();

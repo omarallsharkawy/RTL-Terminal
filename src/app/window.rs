@@ -106,6 +106,11 @@ impl Window {
         self.renderer = None;
     }
 
+    /// Cell metrics, once the window is open.
+    pub(super) fn metrics(&self) -> Option<crate::render::CellMetrics> {
+        self.renderer.as_ref().map(Renderer::metrics)
+    }
+
     /// Pane geometry, once the window is open.
     pub(super) fn grid(&self) -> Option<&Self> {
         self.renderer.as_ref().map(|_| self)
@@ -477,6 +482,7 @@ impl App {
                     cursor,
                     focused: focused == Some(id),
                     status,
+                    blocks: pane.blocks.decor(&pane.terminal),
                 })
             })
             .collect();
