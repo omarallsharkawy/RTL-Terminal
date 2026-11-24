@@ -5,7 +5,8 @@
 //! - `window`: the window and renderer (every renderer call lives there).
 //! - `panes`: opening, splitting, focusing and closing tabs and panes.
 //! - `keyboard`: keys, input-method text, the search bar and shortcut actions.
-//! - `palette`: the command palette.
+//! - `palette`: the command palette and its notifications mode.
+//! - `ports`: the listening-ports scanner behind the sidebar.
 //! - `agent`: "Ask an agent" about the output.
 //! - `mouse`: pointer, mouse reporting, divider dragging and the wheel.
 //! - `selection`: mouse selection and the clipboard.
@@ -17,6 +18,7 @@ mod keyboard;
 mod mouse;
 mod palette;
 mod panes;
+mod ports;
 mod selection;
 mod window;
 
@@ -62,6 +64,10 @@ pub struct App {
     palette: Option<crate::ui::palette::PaletteState>,
     /// Local control socket server (`twitty ctl`), when enabled.
     control: Option<ControlServer>,
+    /// The last notifications of this window, for the palette's notifications mode.
+    notification_history: crate::ui::notifications::NotificationHistory,
+    /// The thread scanning listening ports while the sidebar is shown.
+    ports: ports::PortWatch,
 }
 
 impl App {
@@ -82,6 +88,8 @@ impl App {
             window_focused: false,
             palette: None,
             control: None,
+            notification_history: Default::default(),
+            ports: ports::PortWatch::default(),
         }
     }
 
@@ -165,6 +173,7 @@ impl ApplicationHandler<AppEvent> for App {
                     event_loop.exit();
                 }
             }
+            AppEvent::Ports(ports) => self.on_ports(ports),
         }
     }
 

@@ -50,6 +50,7 @@ commands! {
     "focus.down", "Focus pane below", "روح للوحة اللي تحت", Some("Alt+Down") => InputAction::Focus(FocusDir::Down);
     "sidebar.toggle", "Toggle sidebar", "إظهار/إخفاء الشريط الجانبي", Some("Ctrl+Shift+B") => InputAction::ToggleSidebar;
     "attention.next", "Go to next notification", "روح للإشعار اللي بعده", Some("Ctrl+Shift+U") => InputAction::NextAttention;
+    "notifications.list", "Notifications", "الإشعارات", Some("Ctrl+Shift+I") => InputAction::NotificationList;
     "block.prev", "Previous command block", "البلوك اللي قبله", Some("Ctrl+Shift+Up") => InputAction::PrevBlock;
     "block.next", "Next command block", "البلوك اللي بعده", Some("Ctrl+Shift+Down") => InputAction::NextBlock;
     "block.copy-output", "Copy command output", "انسخ ناتج الأمر", Some("Ctrl+Shift+Y") => InputAction::CopyBlockOutput;

@@ -79,6 +79,8 @@ pub struct Entry {
     pub last_exit: Option<i32>,
     pub attention_count: usize,
     pub notification: Option<Notice>,
+    /// Listening TCP ports of the tab's processes, sorted.
+    pub ports: Vec<u16>,
 }
 
 impl Entry {
@@ -100,16 +102,21 @@ impl Entry {
             last_exit,
             attention_count,
             notification,
+            ports: Vec::new(),
         }
     }
 
+    /// The entry with these listening ports (shown on their own line when there are any).
+    pub fn with_ports(mut self, ports: Vec<u16>) -> Self {
+        self.ports = ports;
+        self
+    }
+
     pub fn height(&self, line_height: f32) -> f32 {
-        line_height
-            * if self.notification.is_some() {
-                4.5
-            } else {
-                3.5
-            }
+        let lines = 3.5
+            + f32::from(u8::from(self.notification.is_some()))
+            + f32::from(u8::from(!self.ports.is_empty()));
+        line_height * lines
     }
 }
 

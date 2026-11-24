@@ -122,6 +122,7 @@ impl App {
             InputAction::NextAttention => self.focus_next_attention(),
             InputAction::ToggleSidebar => self.toggle_sidebar(),
             InputAction::CommandPalette => self.toggle_palette(),
+            InputAction::NotificationList => self.toggle_notification_list(),
             InputAction::AskAgent => self.ask_agent(id),
             InputAction::PrevBlock => self.navigate_blocks(id, BlockList::select_prev),
             InputAction::NextBlock => self.navigate_blocks(id, BlockList::select_next),

@@ -61,6 +61,7 @@ Everything above `render/gpu` runs without a GPU and is covered by tests in `tes
 | `render/gpu/` | wgpu device and surface, the quad pipeline (`quad.wgsl`) and glyphon's text pipeline. | `wgpu`, `glyphon` |
 | `color.rs`, `config.rs` | Themes and palette resolution; `config.json` loading, clamping and atomic saving. | — |
 | `links.rs`, `blink.rs`, `ime.rs` | URL detection and opening, cursor blink timing, IME helpers. | — |
+| `ports.rs` | Listening TCP ports per pane for the sidebar: pure `/proc` parsing and a scanner thread. | — |
 
 Dependencies point downwards only: nothing in `render/`, `terminal.rs`, `input/` or `ui/` knows
 about winit windows or the app.
@@ -97,6 +98,9 @@ or link-hover state change.
   event-loop proxy; sends `AppEvent::PtyExit` when the shell ends.
 - **PTY writer thread (per pane):** drains a channel of input bytes so a huge paste never blocks
   a frame.
+- **Port scanner thread (one, Linux):** while the sidebar is shown, every 2 s, reads `/proc` for
+  the TCP ports the panes' processes listen on and sends `AppEvent::Ports` when they change.
+  It sleeps on its channel while the sidebar is hidden.
 
 ## Testing
 

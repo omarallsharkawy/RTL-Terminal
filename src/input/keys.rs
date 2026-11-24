@@ -50,6 +50,8 @@ pub enum InputAction {
     NextAttention,
     /// Open the command palette.
     CommandPalette,
+    /// List the notification history in the palette.
+    NotificationList,
     /// Scroll to the previous command block (OSC 133).
     PrevBlock,
     /// Scroll to the next command block.
@@ -319,6 +321,7 @@ fn ctrl_shift_shortcut(key_code: KeyCode) -> Option<InputAction> {
         KeyCode::KeyE => InputAction::SplitRight,
         KeyCode::KeyO => InputAction::SplitDown,
         KeyCode::KeyP => InputAction::CommandPalette,
+        KeyCode::KeyI => InputAction::NotificationList,
         KeyCode::KeyB => InputAction::ToggleSidebar,
         KeyCode::KeyU => InputAction::NextAttention,
         KeyCode::KeyY => InputAction::CopyBlockOutput,

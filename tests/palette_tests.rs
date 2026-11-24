@@ -173,14 +173,17 @@ fn overlay_draws_above_panes_with_arabic_on_the_right() {
                 title_en: "Split right".into(),
                 title_ar: "قسّم يمين".into(),
                 shortcut: Some("Ctrl+Shift+E".into()),
+                ..Default::default()
             },
             PaletteItem {
                 title_en: "Split down".into(),
                 title_ar: "قسّم تحت".into(),
                 shortcut: None,
+                ..Default::default()
             },
         ],
         selected: 0,
+        ..Default::default()
     };
     frame.add_palette(&mut ctx, &view);
     let panel = panel_rect(9.0, 23.0, surface, 2);
@@ -278,8 +281,10 @@ fn no_pane_text_is_drawn_under_the_palette() {
             title_en: "New tab".into(),
             title_ar: "تاب جديد".into(),
             shortcut: None,
+            ..Default::default()
         }],
         selected: 0,
+        ..Default::default()
     };
     frame.add_palette(&mut ctx, &view);
     let panel = panel_rect(9.0, 23.0, surface, 1);
