@@ -2,6 +2,7 @@
 
 use alacritty_terminal::index::Side;
 use alacritty_terminal::vte::ansi::{Color as AnsiColor, Rgb};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use winit::event_loop::ActiveEventLoop;
@@ -44,6 +45,8 @@ pub(super) struct Window {
     sidebar_scroll: ScrollState,
     branches: BranchCache,
     notifications: crate::notify::DesktopNotifier,
+    /// Listening TCP ports per pane, from the last port scan.
+    ports: HashMap<PaneId, Vec<u16>>,
 }
 
 impl Window {
@@ -57,6 +60,7 @@ impl Window {
             sidebar_scroll: ScrollState::default(),
             branches: BranchCache::default(),
             notifications: crate::notify::DesktopNotifier::default(),
+            ports: HashMap::new(),
         }
     }
 
@@ -139,6 +143,18 @@ impl Window {
         )
     }
 
+    /// The sidebar is on screen.
+    pub(super) fn sidebar_shown(&self, ws: &Workspace) -> bool {
+        self.layout(ws.tabs().len()).1.is_some()
+    }
+
+    /// New port scan results; true when they differ from what is shown.
+    pub(super) fn set_ports(&mut self, ports: HashMap<PaneId, Vec<u16>>) -> bool {
+        let changed = ports != self.ports;
+        self.ports = ports;
+        changed
+    }
+
     pub(super) fn sidebar_contains(&self, ws: &Workspace, x: f64, y: f64) -> bool {
         self.layout(ws.tabs().len())
             .1
@@ -165,7 +181,7 @@ impl Window {
             .map_or(20.0, |r| r.metrics().line_height);
         self.sidebar_scroll.scroll(
             -lines as f32 * line_height,
-            &sidebar_entries(ws),
+            &sidebar_entries(ws, &self.ports),
             area,
             line_height,
         );
@@ -297,7 +313,7 @@ impl Window {
         if let Some(area) = sidebar {
             if area.contains(x, y) {
                 let view = self.sidebar_scroll.view(
-                    &sidebar_entries(ws),
+                    &sidebar_entries(ws, &self.ports),
                     ws.active(),
                     area,
                     r.metrics().line_height,
@@ -387,7 +403,7 @@ impl Window {
                 .renderer
                 .as_ref()
                 .map_or(20.0, |r| r.metrics().line_height);
-            let mut entries = sidebar_entries(ws);
+            let mut entries = sidebar_entries(ws, &self.ports);
             let directories = entries.iter().filter_map(|e| e.cwd.clone()).collect();
             self.branches.retain(&directories);
             let now = Instant::now();
@@ -421,12 +437,22 @@ impl Window {
     }
 }
 
-fn sidebar_entries(ws: &Workspace) -> Vec<Entry> {
+fn sidebar_entries(ws: &Workspace, ports: &HashMap<PaneId, Vec<u16>>) -> Vec<Entry> {
     ws.tabs()
         .iter()
         .enumerate()
         .map(|(index, tab)| {
             let focused = ws.pane(tab.focused);
+            let mut tab_ports: Vec<u16> = tab
+                .root
+                .leaves()
+                .into_iter()
+                .filter_map(|id| ports.get(&id))
+                .flatten()
+                .copied()
+                .collect();
+            tab_ports.sort_unstable();
+            tab_ports.dedup();
             let mut notifications: Vec<_> = tab
                 .root
                 .leaves()
@@ -443,6 +469,7 @@ fn sidebar_entries(ws: &Workspace) -> Vec<Entry> {
                     .into_iter()
                     .map(|n| Notice::new(n.title.as_deref(), &n.body)),
             )
+            .with_ports(tab_ports)
         })
         .collect()
 }
@@ -467,8 +494,10 @@ impl App {
         if self.window_focused {
             if let Some(pane) = self.focused_id().and_then(|id| self.ws.pane_mut(id)) {
                 pane.meta.attention = None;
+                self.notification_history.mark_seen(pane.id);
             }
         }
+        self.sync_port_watch();
         let (tabs, panes, dividers) = self.frame();
         let visible = self.cursor_blink.visible();
         self.window

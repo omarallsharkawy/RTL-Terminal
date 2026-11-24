@@ -1,6 +1,7 @@
 //! The command palette overlay: a panel near the top of the window with the query and the
-//! matching commands. Each row shows the English title and shortcut on the left and the
-//! Arabic title on the right, each shaped on its own so neither language reorders the other.
+//! matching items (commands, or notifications). Each row shows the English title and shortcut
+//! on the left and the Arabic title on the right, each shaped on its own so neither language
+//! reorders the other. When both do not fit, the wider one is cut with `…`.
 
 use cosmic_text::Buffer;
 use glyphon::TextBounds;
@@ -17,13 +18,17 @@ pub struct PaletteView {
     pub items: Vec<PaletteItem>,
     /// Index into `items`.
     pub selected: usize,
+    /// Shown while the query is empty; `None` for the commands' hint.
+    pub placeholder: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct PaletteItem {
     pub title_en: String,
     pub title_ar: String,
     pub shortcut: Option<String>,
+    /// Listed but cannot be chosen (a notification from a closed pane).
+    pub dimmed: bool,
 }
 
 /// One shaped label of the overlay and where it goes.
@@ -125,6 +130,7 @@ pub(crate) fn palette_overlay(
 
     let fg = palette.foreground;
     let dim = palette.foreground.mix(palette.background, 0.45);
+    let faint = palette.foreground.mix(palette.background, 0.65);
     let bounds = TextBounds {
         left: panel.x.ceil() as i32,
         top: panel.y.ceil() as i32,
@@ -137,7 +143,11 @@ pub(crate) fn palette_overlay(
     // Query line, with a prompt and a hint when empty.
     let query_y = panel.y + lh * 0.25;
     let (query, query_color) = if view.query.is_empty() {
-        ("› Type a command… / اكتب أمر…".to_string(), dim)
+        let hint = view
+            .placeholder
+            .as_deref()
+            .unwrap_or("Type a command… / اكتب أمر…");
+        (format!("› {hint}"), dim)
     } else {
         (format!("› {}", view.query), fg)
     };
@@ -175,24 +185,62 @@ pub(crate) fn palette_overlay(
             Some(keys) => format!("{}   {}", item.title_en, keys),
             None => item.title_en.clone(),
         };
+        let mut english = ctx.label(&left);
+        let mut arabic = ctx.label(&item.title_ar);
+        // Long items (notification text) are cut so the two sides never overlap.
+        let room = panel.w - 2.0 * pad - 2.0 * cw;
+        let (en_w, ar_w) = (label_width(&english), label_width(&arabic));
+        if en_w + ar_w > room {
+            if en_w >= ar_w {
+                english = fit(ctx, &left, (room - ar_w).max(room / 2.0));
+            } else {
+                arabic = fit(ctx, &item.title_ar, (room - en_w).max(room / 2.0));
+            }
+        }
+        let (en_color, ar_color) = if item.dimmed {
+            (faint, faint)
+        } else if i == view.selected {
+            (fg, fg)
+        } else {
+            (dim, fg)
+        };
         texts.push(OverlayText {
-            buffer: ctx.label(&left),
+            buffer: english,
             left: panel.x + pad,
             top,
             bounds,
-            color: if i == view.selected { fg } else { dim }.to_glyphon(),
+            color: en_color.to_glyphon(),
         });
-        let arabic = ctx.label(&item.title_ar);
         let width = label_width(&arabic);
         texts.push(OverlayText {
             buffer: arabic,
             left: (panel.right() - pad - width).max(panel.x + pad),
             top,
             bounds,
-            color: fg.to_glyphon(),
+            color: ar_color.to_glyphon(),
         });
     }
     (Some(outer), texts)
+}
+
+/// `text` shaped and cut at its end (by grapheme, with `…`) to at most `width`.
+fn fit(ctx: &mut DrawContext, text: &str, width: f32) -> Buffer {
+    use unicode_segmentation::UnicodeSegmentation;
+    let mut cuts: Vec<usize> = text.grapheme_indices(true).map(|(i, _)| i).collect();
+    cuts.push(text.len());
+    let (mut low, mut high) = (0, cuts.len() - 1);
+    let mut best = ctx.label("…");
+    while low < high {
+        let keep = (low + high).div_ceil(2);
+        let candidate = ctx.label(&format!("{}…", text[..cuts[keep]].trim_end()));
+        if label_width(&candidate) <= width {
+            best = candidate;
+            low = keep;
+        } else {
+            high = keep - 1;
+        }
+    }
+    best
 }
 
 /// Width of a shaped one-line label.

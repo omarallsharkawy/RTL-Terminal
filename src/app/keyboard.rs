@@ -10,6 +10,7 @@ use crate::blocks::{BlockList, BlockNav};
 use crate::input::route::{route_key, shortcut_is_idle, KeyRoute};
 use crate::input::{handle_key, key_shortcut, terminal_key, InputAction};
 use crate::layout::{PaneId, SplitDir};
+use crate::ui::palette::PaletteMode;
 use crate::ui::search::{search_bar_text, search_key, SearchCmd};
 use crate::ui::settings::DEFAULT_FONT_SIZE;
 
@@ -121,7 +122,8 @@ impl App {
             InputAction::SelectTab(index) => self.set_active_tab(index),
             InputAction::NextAttention => self.focus_next_attention(),
             InputAction::ToggleSidebar => self.toggle_sidebar(),
-            InputAction::CommandPalette => self.open_palette(),
+            InputAction::CommandPalette => self.open_palette(PaletteMode::Commands),
+            InputAction::NotificationList => self.open_palette(PaletteMode::Notifications),
             InputAction::AskAgent => self.ask_agent(id),
             InputAction::PrevBlock => self.navigate_blocks(id, BlockList::select_prev),
             InputAction::NextBlock => self.navigate_blocks(id, BlockList::select_next),

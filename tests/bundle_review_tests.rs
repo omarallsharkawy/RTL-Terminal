@@ -56,14 +56,17 @@ fn palette_view() -> PaletteView {
                 title_en: "Split right".into(),
                 title_ar: "قسّم يمين".into(),
                 shortcut: Some("Ctrl+Shift+E".into()),
+                ..Default::default()
             },
             PaletteItem {
                 title_en: "Split down".into(),
                 title_ar: "قسّم تحت".into(),
                 shortcut: Some("Ctrl+Shift+O".into()),
+                ..Default::default()
             },
         ],
         selected: 0,
+        placeholder: None,
     }
 }
 

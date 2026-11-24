@@ -70,6 +70,7 @@ Everything above `render/gpu` runs without a GPU and is covered by tests in `tes
 | `commands.rs`, `ui/palette.rs` | The command table (name, English and Arabic titles, shortcut, action) and the palette state with Arabic-aware matching. | `input` |
 | `control/` | The control socket (`$XDG_RUNTIME_DIR/twitty/twitty-<pid>.sock`, 0600 in a 0700 dir) speaking newline-delimited JSON, and the `twitty ctl/send/notify/list/read` client. | — |
 | `agent.rs` | "Ask an agent": picks a local agent CLI, builds its argv and a fenced prompt from the selection, block or screen. | — |
+| `ports.rs` | Listening TCP ports per pane for the sidebar: pure `/proc` parsing and a scanner thread. | — |
 
 Dependencies point downwards only: nothing in `render/`, `terminal.rs`, `input/` or `ui/` knows
 about winit windows or the app.
@@ -125,6 +126,9 @@ Shells and agents report things through OSC sequences that `alacritty_terminal` 
 
 All program text is cleaned (no control or bidi-override characters) and bounded before it is
 shown, sent to `notify-send`, returned over the control socket or put into an agent prompt.
+- **Port scanner thread (one, Linux):** while the sidebar is shown, every 2 s, reads `/proc` for
+  the TCP ports the panes' processes listen on and sends `AppEvent::Ports` when they change.
+  It sleeps on its channel while the sidebar is hidden.
 
 ## Testing
 

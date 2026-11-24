@@ -319,6 +319,18 @@ pub fn build(ctx: &mut DrawContext, view: &View, cache: &mut LabelCache) -> Scen
             placed.left = left;
             scene.labels.push(placed);
         }
+        if !entry.ports.is_empty() {
+            row.y += m.line_height;
+            let ports = crate::ports::format_ports(&entry.ports);
+            scene
+                .labels
+                .push(cache.get(ctx, ports, row.w, Trim::End).place(
+                    row,
+                    clip,
+                    view.right_aligned,
+                    ctx.palette.ansi[6],
+                ));
+        }
     }
     cache.labels.retain(|_, (_, used)| *used);
     scene

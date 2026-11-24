@@ -126,7 +126,7 @@ pub struct Pty {
     /// Ends the shell when the pane is closed (the reader thread keeps the PTY open otherwise).
     killer: Box<dyn ChildKiller + Send + Sync>,
     program_name: Option<String>,
-    /// Process id of the shell, to find its working directory (Linux only).
+    /// Process id of the shell, to find its working directory and listening ports (Linux only).
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pid: Option<u32>,
 }
@@ -297,6 +297,11 @@ impl Pty {
             program_name,
             pid,
         })
+    }
+
+    /// Process id of the shell, when the platform reports one.
+    pub(crate) fn pid(&self) -> Option<u32> {
+        self.pid
     }
 
     pub(crate) fn program_name(&self) -> Option<&str> {

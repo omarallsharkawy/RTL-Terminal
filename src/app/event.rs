@@ -1,6 +1,7 @@
 //! Events the event loop receives from shells and terminals (through the event proxy).
 
 use alacritty_terminal::event::{Event as TermEvent, WindowSize};
+use std::collections::HashMap;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -21,6 +22,8 @@ pub enum AppEvent {
     ClearSelection(PaneId, u64),
     /// A request from the local control socket, with the channel to send its reply on.
     Control(Request, mpsc::Sender<Response>),
+    /// Listening TCP ports of each pane's processes, from the port scanner thread.
+    Ports(HashMap<PaneId, Vec<u16>>),
 }
 
 /// Longest title kept from a program, in characters.
@@ -121,6 +124,7 @@ impl App {
     /// A program in pane `id` asked for the user's attention. It is marked for the sidebar
     /// unless the user is already looking at that pane.
     pub(super) fn notify(&mut self, id: PaneId, title: Option<String>, body: String) {
+        self.record_notification(id, title.as_deref(), &body);
         let Some(notice) = crate::notify::unseen_notice(
             self.window_focused,
             self.focused_id(),
