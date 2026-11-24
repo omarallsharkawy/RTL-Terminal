@@ -106,6 +106,16 @@ impl Window {
         self.renderer = None;
     }
 
+    pub(super) fn sidebar_visible(&self) -> bool {
+        self.sidebar.position != SidebarPosition::Hidden
+    }
+
+    pub(super) fn set_sidebar_visible(&mut self, visible: bool) {
+        if self.sidebar_visible() != visible {
+            self.sidebar.toggle();
+        }
+    }
+
     /// Cell metrics, once the window is open.
     pub(super) fn metrics(&self) -> Option<crate::render::CellMetrics> {
         self.renderer.as_ref().map(Renderer::metrics)

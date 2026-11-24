@@ -34,6 +34,8 @@ pub struct TwittyConfig {
     pub control_socket: bool,
     /// Load Twitty's shell integration (OSC 133 prompt marks, OSC 7 cwd) into bash, zsh and fish.
     pub shell_integration: bool,
+    /// Restore the tabs and splits from the last window closed normally. Defaults to true.
+    pub restore_session: bool,
     /// Command run by "Ask an agent", e.g. "claude" or "codex". Unset: the first one installed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_command: Option<String>,
@@ -60,6 +62,7 @@ impl Default for TwittyConfig {
             desktop_notifications: true,
             control_socket: true,
             shell_integration: true,
+            restore_session: true,
             agent_command: None,
             extra: serde_json::Map::new(),
             keep_file: false,

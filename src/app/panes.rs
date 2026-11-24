@@ -10,6 +10,26 @@ use crate::pty::SpawnOptions;
 use crate::session::spawn::ShellFactory;
 
 impl App {
+    pub(super) fn start_session(&mut self) {
+        if let Some(session) = self.startup_session.take() {
+            let was_visible = self.window.sidebar_visible();
+            self.window.set_sidebar_visible(session.sidebar_visible);
+            let mut options = SpawnOptions::default();
+            self.attach_control_env(&mut options);
+            let mut shells = ShellFactory::new(&self.proxy, self.config.cursor_blink)
+                .with_shell_integration(self.config.shell_integration);
+            shells.options = options;
+            self.ws = session.rebuild(&self.window, &mut shells);
+            if let Some(id) = self.focused_id() {
+                self.focus_changed(None, id);
+                return;
+            }
+            self.window.set_sidebar_visible(was_visible);
+            crate::config::warn("twitty: no shells from the saved session could be started".into());
+        }
+        self.new_tab();
+    }
+
     pub(super) fn pane_rect(&self, id: PaneId) -> Option<Rect> {
         self.ws.pane_rect(self.window.grid()?, id)
     }
@@ -170,6 +190,7 @@ impl App {
         self.pointer.forget(id);
         let Some(now) = closed.focused else {
             self.close_palette();
+            self.session.last_pane_closed();
             return true;
         };
         self.apply_layout();

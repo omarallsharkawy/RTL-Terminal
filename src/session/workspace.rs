@@ -188,6 +188,38 @@ impl Workspace {
         PaneId(self.next_id)
     }
 
+    /// Install one startup tab, with fresh IDs already assigned across the restored tabs.
+    /// If a shell cannot start, its sibling takes its space. Reserve failed IDs as their
+    /// terminal events may already have been queued.
+    pub(super) fn restore_tab(
+        &mut self,
+        mut tab: Tab,
+        tab_count: usize,
+        geo: &impl GridGeometry,
+        mut spawn: impl FnMut(PaneId, usize, usize) -> Option<Pane>,
+    ) -> bool {
+        let panes = layout(&tab.root, geo.content_rect(tab_count), geo.gap());
+        let mut root = Some(tab.root);
+        for (id, rect) in panes {
+            self.next_id = self.next_id.max(id.0);
+            let (cols, rows) = geo.grid_size(rect);
+            if let Some(pane) = spawn(id, cols, rows) {
+                self.panes.insert(id, pane);
+            } else {
+                root = root.and_then(|node| node.remove(id));
+            }
+        }
+        let Some(root) = root else {
+            return false;
+        };
+        if !root.contains(tab.focused) {
+            tab.focused = root.leaves()[0];
+        }
+        tab.root = root;
+        self.tabs.push(tab);
+        true
+    }
+
     /// The working directory of the focused pane's shell, where new shells start.
     fn focused_cwd(&self) -> Option<PathBuf> {
         self.focused_id()
