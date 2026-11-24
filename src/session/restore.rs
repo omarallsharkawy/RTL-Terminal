@@ -142,11 +142,13 @@ impl SavedTab {
                     self.focused = self.nodes.len();
                 }
                 let pane = workspace.pane(*id).expect("every leaf has a pane");
+                // The shell's own directory first, like new tabs: OSC 7 is only as fresh as the
+                // last prompt (`cd /tmp && server` never reports /tmp) and may name a remote host.
                 let cwd = pane
-                    .meta
-                    .cwd
-                    .clone()
-                    .or_else(|| pane.pty.as_ref().and_then(Pty::cwd));
+                    .pty
+                    .as_ref()
+                    .and_then(Pty::cwd)
+                    .or_else(|| pane.meta.cwd.clone());
                 SavedNode::Pane {
                     cwd: cwd.as_deref().and_then(Path::to_str).map(str::to_owned),
                     title: pane.title.as_deref().map(session_title),
@@ -669,7 +671,7 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn gets_the_linux_shell_directory_when_osc_7_has_not_reported_one() {
+    fn prefers_the_linux_shell_directory_over_the_last_osc_7() {
         use crate::pty::SpawnOptions;
 
         let temp = TempDir::new();
@@ -689,8 +691,16 @@ mod tests {
             [leaf(temp.0.to_str().map(str::to_owned))]
         );
 
+        // A stale OSC 7 (`cd x && server` never reaches a prompt) does not win over the shell.
         let reported = temp.0.join("مشروع");
         workspace.pane_mut(id).unwrap().meta.cwd = Some(reported.clone());
+        assert_eq!(
+            Session::capture(&workspace, true).tabs[0].nodes,
+            [leaf(temp.0.to_str().map(str::to_owned))]
+        );
+
+        // Without a shell directory to read, OSC 7 is used.
+        workspace.pane_mut(id).unwrap().pty = None;
         assert_eq!(
             Session::capture(&workspace, true).tabs[0].nodes,
             [leaf(reported.to_str().map(str::to_owned))]
