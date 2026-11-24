@@ -1,9 +1,11 @@
 //! Events the event loop receives from shells and terminals (through the event proxy).
 
 use alacritty_terminal::event::{Event as TermEvent, WindowSize};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use super::App;
+use crate::control::{Request, Response};
 use crate::layout::PaneId;
 use crate::pty::Pty;
 use crate::session::pane::Notification;
@@ -17,6 +19,8 @@ pub enum AppEvent {
     PtyExit(PaneId),
     /// Clear the highlight of a copied selection, unless a newer selection was started.
     ClearSelection(PaneId, u64),
+    /// A request from the local control socket, with the channel to send its reply on.
+    Control(Request, mpsc::Sender<Response>),
 }
 
 /// Longest title kept from a program, in characters.

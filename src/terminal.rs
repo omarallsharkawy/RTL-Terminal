@@ -522,6 +522,57 @@ impl Terminal {
             .filter(|text| !text.is_empty())
     }
 
+    /// Up to the last `max_lines` lines from scrollback and screen in logical grid order,
+    /// omitting trailing blank lines below the last non-empty row.
+    pub fn recent_lines(&self, max_lines: usize) -> String {
+        if max_lines == 0 {
+            return String::new();
+        }
+        let grid = self.term.grid();
+        let top = self.term.topmost_line().0;
+        let bottom = self.term.bottommost_line().0;
+        let row_is_blank = |line: i32| {
+            let row = &grid[Line(line)];
+            (0..self.cols).all(|c| {
+                let cell = &row[Column(c)];
+                cell.c == ' ' && drawn_marks(cell).is_empty()
+            })
+        };
+        let mut end = bottom;
+        while end >= top && row_is_blank(end) {
+            end -= 1;
+        }
+        if end < top {
+            return String::new();
+        }
+        let available = (end - top + 1) as usize;
+        let take = available.min(max_lines);
+        let start = top + (available - take) as i32;
+        let mut out = String::new();
+        for (i, line) in (start..=end).enumerate() {
+            if i > 0 {
+                out.push('\n');
+            }
+            let row = &grid[Line(line)];
+            let mut text = String::new();
+            for c in 0..self.cols {
+                let cell = &row[Column(c)];
+                if cell
+                    .flags
+                    .intersects(CellFlags::WIDE_CHAR_SPACER | CellFlags::LEADING_WIDE_CHAR_SPACER)
+                {
+                    continue;
+                }
+                text.push(cell.c);
+                for &z in drawn_marks(cell) {
+                    text.push(z);
+                }
+            }
+            out.push_str(text.trim_end_matches(' '));
+        }
+        out
+    }
+
     /// The viewport's rows and the cursor. Rows whose content and highlights did not change
     /// since the previous snapshot are shared with it instead of being rebuilt.
     pub fn snapshot(&self) -> (Vec<LineData>, CursorState) {

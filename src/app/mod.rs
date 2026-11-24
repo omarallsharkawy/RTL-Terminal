@@ -11,6 +11,7 @@
 //! - `selection`: mouse selection and the clipboard.
 
 mod agent;
+mod control;
 mod event;
 mod keyboard;
 mod mouse;
@@ -31,6 +32,7 @@ use winit::window::WindowId;
 
 use crate::blink::{BlinkState, BLINK_INTERVAL};
 use crate::config::TwittyConfig;
+use crate::control::ControlServer;
 use crate::input::mouse::StepAccumulator;
 use crate::input::pointer::PointerState;
 use crate::layout::PaneId;
@@ -58,6 +60,8 @@ pub struct App {
     window_focused: bool,
     /// The command palette, while it is open (keys and IME text go to it).
     palette: Option<crate::ui::palette::PaletteState>,
+    /// Local control socket server (`twitty ctl`), when enabled.
+    control: Option<ControlServer>,
 }
 
 impl App {
@@ -76,6 +80,7 @@ impl App {
             zoom_steps: StepAccumulator::default(),
             window_focused: true,
             palette: None,
+            control: None,
         }
     }
 
@@ -123,6 +128,7 @@ impl ApplicationHandler<AppEvent> for App {
         if !self.window.open(event_loop, &self.config) {
             return;
         }
+        self.start_control_server();
         self.new_tab();
         if self.ws.is_empty() {
             self.window.close();
@@ -153,6 +159,11 @@ impl ApplicationHandler<AppEvent> for App {
                 }
             }
             AppEvent::ClearSelection(id, generation) => self.on_clear_selection(id, generation),
+            AppEvent::Control(request, reply) => {
+                if self.on_control_request(request, reply) {
+                    event_loop.exit();
+                }
+            }
         }
     }
 
@@ -182,6 +193,7 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.control = None;
         if self.config_dirty {
             self.config.save();
         }

@@ -5,6 +5,7 @@ pub mod blink;
 pub mod color;
 pub mod commands;
 pub mod config;
+pub mod control;
 pub mod ime;
 pub mod input;
 pub mod layout;

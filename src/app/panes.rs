@@ -28,37 +28,42 @@ impl App {
     }
 
     pub(super) fn new_tab(&mut self) {
-        let Some(r) = self.window.grid() else {
-            return;
-        };
+        self.new_tab_with(SpawnOptions::default());
+    }
+
+    pub(super) fn new_tab_with(&mut self, mut options: SpawnOptions) -> Option<PaneId> {
+        let r = self.window.grid()?;
         let previous = self.focused_id();
+        self.attach_control_env(&mut options);
         let mut shells = ShellFactory::new(&self.proxy, self.config.cursor_blink);
-        let Some(id) = self.ws.new_tab(r, &mut shells) else {
-            return;
-        };
+        shells.options = options;
+        let id = self.ws.new_tab(r, &mut shells)?;
         self.release_held_buttons();
         self.pointer.cancel();
         // A second tab shows the tab bar, which shrinks every pane.
         self.apply_layout();
         self.focus_changed(previous, id);
+        Some(id)
     }
 
     pub(super) fn split_focused(&mut self, dir: SplitDir) {
         self.split_focused_with(dir, SpawnOptions::default());
     }
 
-    /// Split the focused pane, starting the new one as `options` says.
-    pub(super) fn split_focused_with(&mut self, dir: SplitDir, options: SpawnOptions) {
-        let Some(r) = self.window.grid() else {
-            return;
-        };
+    /// Split the focused pane, starting the new one as `options` says. Returns the new pane.
+    pub(super) fn split_focused_with(
+        &mut self,
+        dir: SplitDir,
+        mut options: SpawnOptions,
+    ) -> Option<PaneId> {
+        let r = self.window.grid()?;
+        self.attach_control_env(&mut options);
         let mut shells = ShellFactory::new(&self.proxy, self.config.cursor_blink);
         shells.options = options;
-        let Some((old, new)) = self.ws.split_focused(r, &mut shells, dir) else {
-            return;
-        };
+        let (old, new) = self.ws.split_focused(r, &mut shells, dir)?;
         self.apply_layout();
         self.focus_changed(Some(old), new);
+        Some(new)
     }
 
     /// Keyboard focus moved from `old` to `new`: tell the programs, restart the cursor blink and

@@ -71,7 +71,7 @@ impl App {
     }
 
     /// Typed input for the shell: it drops the selection and snaps the view to the live screen.
-    fn send_input(&mut self, id: PaneId, bytes: &[u8]) {
+    pub(super) fn send_input(&mut self, id: PaneId, bytes: &[u8]) {
         self.clear_selection(id);
         self.write_to(id, bytes);
         self.scroll_to_bottom(id);
