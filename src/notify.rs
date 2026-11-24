@@ -14,8 +14,14 @@ pub(crate) fn unseen_notice(
     title: Option<&str>,
     body: &str,
 ) -> Option<Notice> {
-    (!(window_focused && focused == Some(pane))).then(|| Notice::new(title, body))
+    if window_focused && focused == Some(pane) {
+        return None;
+    }
+    let notice = Notice::new(title, body);
+    (notice.title.is_some() || !notice.body.is_empty()).then_some(notice)
 }
+
+const THROTTLE_WINDOW: Duration = Duration::from_secs(3);
 
 #[derive(Default)]
 pub struct RateLimiter {
@@ -24,11 +30,9 @@ pub struct RateLimiter {
 
 impl RateLimiter {
     pub fn allow(&mut self, pane: PaneId, now: Instant) -> bool {
-        if self
-            .sent
-            .get(&pane)
-            .is_some_and(|at| now.saturating_duration_since(*at) < Duration::from_secs(3))
-        {
+        self.sent
+            .retain(|_, at| now.saturating_duration_since(*at) < THROTTLE_WINDOW);
+        if self.sent.contains_key(&pane) {
             return false;
         }
         self.sent.insert(pane, now);
@@ -37,6 +41,14 @@ impl RateLimiter {
 
     pub fn forget(&mut self, pane: PaneId) {
         self.sent.remove(&pane);
+    }
+
+    pub fn len(&self) -> usize {
+        self.sent.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.sent.is_empty()
     }
 }
 
@@ -95,6 +107,8 @@ pub fn command(title: &str, body: &str) -> std::process::Command {
     let mut command = std::process::Command::new("notify-send");
     command
         .args(["--app-name=Twitty", "--", &title, &body])
+        .env_remove("TWITTY_SOCKET")
+        .env_remove("TWITTY_PANE_ID")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
@@ -109,15 +123,41 @@ pub fn command(title: &str, body: &str) -> std::process::Command {
     target_os = "dragonfly"
 ))]
 fn show(title: String, body: String) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    const MAX_INFLIGHT: usize = 8;
+    static INFLIGHT: AtomicUsize = AtomicUsize::new(0);
+
+    struct Slot;
+    impl Drop for Slot {
+        fn drop(&mut self) {
+            INFLIGHT.fetch_sub(1, Ordering::AcqRel);
+        }
+    }
+
+    let mut cur = INFLIGHT.load(Ordering::Acquire);
+    loop {
+        if cur >= MAX_INFLIGHT {
+            return;
+        }
+        match INFLIGHT.compare_exchange_weak(cur, cur + 1, Ordering::AcqRel, Ordering::Acquire) {
+            Ok(_) => break,
+            Err(actual) => cur = actual,
+        }
+    }
+    let slot = Slot;
     if let Err(error) = std::thread::Builder::new()
         .name("twitty-notify".into())
-        .spawn(move || match command(&title, &body).spawn() {
-            Ok(mut child) => {
-                if let Err(error) = child.wait() {
-                    tracing::debug!(%error, "notify-send wait failed");
+        .spawn(move || {
+            let _slot = slot;
+            match command(&title, &body).spawn() {
+                Ok(mut child) => {
+                    if let Err(error) = child.wait() {
+                        tracing::debug!(%error, "notify-send wait failed");
+                    }
                 }
+                Err(error) => tracing::debug!(%error, "desktop notification unavailable"),
             }
-            Err(error) => tracing::debug!(%error, "desktop notification unavailable"),
         })
     {
         tracing::debug!(%error, "desktop notification thread unavailable");

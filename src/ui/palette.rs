@@ -83,7 +83,9 @@ impl PaletteState {
                 self.selected = 0;
             }
             _ => {
-                if let Some(text) = text.filter(|_| !modifiers.control_key()) {
+                if let Some(text) = text.filter(|_| {
+                    !modifiers.control_key() && !modifiers.alt_key() && !modifiers.super_key()
+                }) {
                     self.push_text(text);
                 }
             }

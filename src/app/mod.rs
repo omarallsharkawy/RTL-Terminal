@@ -221,7 +221,9 @@ impl ApplicationHandler<AppEvent> for App {
                 self.on_cursor_moved(position.x, position.y)
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                self.on_mouse_input(button, state == ElementState::Pressed)
+                if self.on_mouse_input(button, state == ElementState::Pressed) {
+                    event_loop.exit();
+                }
             }
             WindowEvent::MouseWheel { delta, .. } => self.on_wheel(delta),
             WindowEvent::Ime(ime) => self.on_ime(ime),

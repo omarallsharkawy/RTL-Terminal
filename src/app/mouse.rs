@@ -19,6 +19,9 @@ use crate::ui::hit::Hit;
 impl App {
     pub(super) fn on_modifiers(&mut self, modifiers: ModifiersState) {
         self.modifiers = modifiers;
+        if self.palette_open() {
+            return;
+        }
         let (x, y) = self.pointer.pos;
         if let Some(id) = self.pane_at(x, y).or(self.pointer.hover) {
             self.update_link_hover(id);
@@ -27,6 +30,10 @@ impl App {
 
     pub(super) fn on_cursor_moved(&mut self, x: f64, y: f64) {
         self.pointer.pos = (x, y);
+        if self.palette_open() {
+            self.window.set_cursor_icon(CursorIcon::Default);
+            return;
+        }
         if let Some(divider) = self.pointer.drag.clone() {
             self.drag_divider_to(&divider);
             return;
@@ -82,9 +89,13 @@ impl App {
         }
     }
 
-    pub(super) fn on_mouse_input(&mut self, button: MouseButton, pressed: bool) {
+    /// Returns true when a clicked palette command closed the last pane and the window should exit.
+    pub(super) fn on_mouse_input(&mut self, button: MouseButton, pressed: bool) -> bool {
+        if self.palette_open() {
+            return pressed && self.on_palette_mouse_press(button);
+        }
         let Some(code) = button_code(button) else {
-            return;
+            return false;
         };
         let target = if pressed {
             let (x, y) = self.pointer.pos;
@@ -111,9 +122,13 @@ impl App {
         if let Some(id) = target {
             self.handle_mouse_button(id, button, code, pressed);
         }
+        false
     }
 
     pub(super) fn on_wheel(&mut self, delta: MouseScrollDelta) {
+        if self.palette_open() {
+            return;
+        }
         let line_height = self.window.line_height().unwrap_or(20.0);
         let lines = wheel_lines(delta, line_height);
         if self

@@ -35,52 +35,101 @@ pub(crate) struct OverlayText {
     pub color: glyphon::Color,
 }
 
-/// Panel geometry in a `width` x `height` window: the panel and its first row's top.
+/// Result of hit-testing a pointer press against an open command palette panel.
+///
+/// Clicking outside the panel closes the palette and consumes the click so nothing reaches
+/// the panes or sidebar behind it; clicking an item row activates that item; any other click
+/// inside the panel is consumed without closing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PaletteHit {
+    Outside,
+    Inside,
+    Item(usize),
+}
+
+/// Panel geometry in a `width` x `height` window, clamped inside the surface.
 pub fn panel_rect(
     char_width: f32,
     line_height: f32,
     (width, height): (f32, f32),
     rows: usize,
 ) -> Rect {
+    let max_w = width.max(0.0);
+    let max_h = height.max(0.0);
     let w = (72.0 * char_width)
-        .min(width - 2.0 * char_width)
-        .max(char_width * 10.0);
-    let x = ((width - w) / 2.0).max(0.0);
-    let y = (line_height * 2.0).min((height / 4.0).max(0.0));
+        .min((max_w - 2.0 * char_width).max(0.0))
+        .max(char_width * 10.0)
+        .min(max_w);
+    let x = ((max_w - w) / 2.0).max(0.0);
+    let y = (line_height * 2.0).min(max_h / 4.0).max(0.0);
     let h = line_height * (rows as f32 + 1.0) + line_height * 0.5;
-    Rect::new(x, y, w, h.min((height - y).max(line_height)))
+    Rect::new(x, y, w, h.min((max_h - y).max(0.0)))
 }
 
-/// Quads (appended to `quads`) and labels of the palette.
+/// Hit-test physical pixel `(x, y)` against the command palette panel.
+pub fn hit_test(
+    panel: Rect,
+    line_height: f32,
+    edge: f32,
+    item_count: usize,
+    x: f64,
+    y: f64,
+) -> PaletteHit {
+    let outer = Rect::new(
+        (panel.x - edge).max(0.0),
+        (panel.y - edge).max(0.0),
+        panel.w + 2.0 * edge,
+        panel.h + 2.0 * edge,
+    );
+    if !outer.contains(x, y) {
+        return PaletteHit::Outside;
+    }
+    let rule_y = panel.y + line_height * 1.25;
+    let first_row = rule_y + edge;
+    if y >= first_row as f64 && y < panel.bottom() as f64 && line_height > 0.0 {
+        let index = ((y as f32 - first_row) / line_height).floor() as usize;
+        let top = first_row + index as f32 * line_height;
+        if index < item_count && top + line_height <= panel.bottom() + 0.5 {
+            return PaletteHit::Item(index);
+        }
+    }
+    PaletteHit::Inside
+}
+
+/// Quads (appended to `quads`), clamped outer border rect (for clipping underlying text),
+/// and labels of the palette.
 pub(crate) fn palette_overlay(
     ctx: &mut DrawContext,
     view: &PaletteView,
     surface: (f32, f32),
     quads: &mut Vec<Quad>,
-) -> Vec<OverlayText> {
+) -> (Option<Rect>, Vec<OverlayText>) {
+    let (sw, sh) = (surface.0.max(0.0), surface.1.max(0.0));
     let m = ctx.metrics;
     let (cw, lh) = (m.char_width, m.line_height);
-    let panel = panel_rect(cw, lh, surface, view.items.len().max(1));
+    let panel = panel_rect(cw, lh, (sw, sh), view.items.len().max(1));
+    if sw <= 0.0 || sh <= 0.0 || panel.w <= 0.0 || panel.h <= 0.0 {
+        return (None, Vec::new());
+    }
     let palette = ctx.palette;
     let panel_bg = palette.background.mix(palette.foreground, 0.12);
     let border = palette.background.mix(palette.foreground, 0.35);
     let edge = (m.scale).round().max(1.0);
-    quads.push((
-        panel.x - edge,
-        panel.y - edge,
-        panel.w + 2.0 * edge,
-        panel.h + 2.0 * edge,
-        ctx.color(border),
-    ));
+    let bx = (panel.x - edge).max(0.0);
+    let by = (panel.y - edge).max(0.0);
+    let br = (panel.right() + edge).min(sw);
+    let bb = (panel.bottom() + edge).min(sh);
+    let outer = Rect::new(bx, by, (br - bx).max(0.0), (bb - by).max(0.0));
+    quads.push((outer.x, outer.y, outer.w, outer.h, ctx.color(border)));
     quads.push((panel.x, panel.y, panel.w, panel.h, ctx.color(panel_bg)));
 
     let fg = palette.foreground;
     let dim = palette.foreground.mix(palette.background, 0.45);
     let bounds = TextBounds {
-        left: panel.x as i32,
-        top: panel.y as i32,
-        right: panel.right() as i32,
-        bottom: panel.bottom() as i32,
+        left: panel.x.ceil() as i32,
+        top: panel.y.ceil() as i32,
+        right: panel.right().floor() as i32,
+        bottom: panel.bottom().floor() as i32,
     };
     let pad = cw;
     let mut texts = Vec::new();
@@ -92,15 +141,20 @@ pub(crate) fn palette_overlay(
     } else {
         (format!("› {}", view.query), fg)
     };
-    texts.push(OverlayText {
-        buffer: ctx.label(&query),
-        left: panel.x + pad,
-        top: query_y,
-        bounds,
-        color: query_color.to_glyphon(),
-    });
+    if bounds.left < bounds.right && bounds.top < bounds.bottom {
+        texts.push(OverlayText {
+            buffer: ctx.label(&query),
+            left: panel.x + pad,
+            top: query_y,
+            bounds,
+            color: query_color.to_glyphon(),
+        });
+    }
     let rule_y = query_y + lh;
-    quads.push((panel.x, rule_y, panel.w, edge, ctx.color(border)));
+    if rule_y < panel.bottom() {
+        let rule_h = edge.min(panel.bottom() - rule_y);
+        quads.push((panel.x, rule_y, panel.w, rule_h, ctx.color(border)));
+    }
 
     for (i, item) in view.items.iter().enumerate() {
         let top = rule_y + edge + i as f32 * lh;
@@ -109,7 +163,13 @@ pub(crate) fn palette_overlay(
         }
         if i == view.selected {
             let sel = panel_bg.mix(palette.selection, 0.7);
-            quads.push((panel.x, top, panel.w, lh, ctx.color(sel)));
+            let sel_h = lh.min((panel.bottom() - top).max(0.0));
+            if sel_h > 0.0 {
+                quads.push((panel.x, top, panel.w, sel_h, ctx.color(sel)));
+            }
+        }
+        if bounds.left >= bounds.right || bounds.top >= bounds.bottom {
+            continue;
         }
         let left = match &item.shortcut {
             Some(keys) => format!("{}   {}", item.title_en, keys),
@@ -132,7 +192,7 @@ pub(crate) fn palette_overlay(
             color: fg.to_glyphon(),
         });
     }
-    texts
+    (Some(outer), texts)
 }
 
 /// Width of a shaped one-line label.

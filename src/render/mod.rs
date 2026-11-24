@@ -217,12 +217,35 @@ impl Renderer {
         self.row_cache.forget(id);
     }
 
-    /// Set (or clear with `None`) the IME composition drawn inline at the cursor.
     /// Show the command palette (`Some`) or hide it.
     pub(crate) fn set_command_palette(&mut self, view: Option<PaletteView>) {
         self.palette_view = view;
     }
 
+    /// Hit-test physical pixel `(x, y)` against the open command palette, if any.
+    pub(crate) fn palette_hit(&self, x: f64, y: f64) -> scene::palette::PaletteHit {
+        let Some(view) = &self.palette_view else {
+            return scene::palette::PaletteHit::Outside;
+        };
+        let surface = (self.config.width as f32, self.config.height as f32);
+        let panel = scene::palette::panel_rect(
+            self.metrics.char_width,
+            self.metrics.line_height,
+            surface,
+            view.items.len().max(1),
+        );
+        let edge = self.metrics.scale.round().max(1.0);
+        scene::palette::hit_test(
+            panel,
+            self.metrics.line_height,
+            edge,
+            view.items.len(),
+            x,
+            y,
+        )
+    }
+
+    /// Set (or clear with `None`) the IME composition drawn inline at the cursor.
     pub(crate) fn set_preedit(&mut self, preedit: Option<(String, Option<(usize, usize)>)>) {
         self.ime.set(preedit);
     }
@@ -308,10 +331,12 @@ impl Renderer {
             panes,
             dividers,
         );
+        frame.add_attention(&ctx, attention);
         if let Some(view) = sidebar {
             frame.add_sidebar(&mut ctx, view, &mut self.sidebar_labels);
+        } else {
+            self.sidebar_labels.clear();
         }
-        frame.add_attention(&ctx, attention);
         if let Some(view) = &self.palette_view {
             frame.add_palette(&mut ctx, view);
         }

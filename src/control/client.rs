@@ -9,7 +9,9 @@ mod imp {
 
     use serde_json::Value;
 
-    use crate::control::paths::{connect_newest_in, current_uid, default_runtime_dir};
+    use crate::control::paths::{
+        connect_newest_in, current_uid, default_runtime_dir, verify_socket,
+    };
     use crate::control::protocol::{
         read_bounded_line, ReadLine, Request, Response, MAX_LINE_BYTES,
     };
@@ -23,9 +25,10 @@ mod imp {
     }
 
     impl Client {
-        /// Connect to an explicit socket path.
+        /// Connect to an explicit socket path after verifying ownership and permissions.
         pub fn connect_path(path: impl Into<PathBuf>) -> io::Result<Self> {
             let path = path.into();
+            verify_socket(&path, current_uid()?)?;
             let stream = UnixStream::connect(&path)?;
             Self::from_stream(path, stream)
         }
@@ -35,6 +38,7 @@ mod imp {
         pub fn connect_default() -> io::Result<Self> {
             if let Some(env_path) = std::env::var_os("TWITTY_SOCKET").filter(|v| !v.is_empty()) {
                 let path = PathBuf::from(env_path);
+                verify_socket(&path, current_uid()?)?;
                 let stream = UnixStream::connect(&path).map_err(|e| {
                     io::Error::new(
                         e.kind(),

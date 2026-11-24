@@ -41,9 +41,9 @@ impl Default for ServerConfig {
 #[cfg(unix)]
 mod imp {
     use super::*;
-    use std::fs::{self, Permissions};
+    use std::fs::{self, DirBuilder, Permissions};
     use std::io::{self, BufReader, Write};
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -52,7 +52,8 @@ mod imp {
     use serde_json::Value;
 
     use crate::control::paths::{
-        cleanup_stale_sockets, current_uid, default_runtime_dir, ensure_runtime_dir, socket_path_in,
+        cleanup_stale_sockets, current_uid, default_runtime_dir, ensure_runtime_dir,
+        socket_path_in, verify_dir, verify_socket,
     };
     use crate::control::protocol::{parse_request_line, read_bounded_line, ReadLine};
 
@@ -83,7 +84,7 @@ mod imp {
             ensure_runtime_dir(dir, uid)?;
             let _ = cleanup_stale_sockets(dir);
             let path = socket_path_in(dir, std::process::id());
-            Self::bind_at(path, handler, config)
+            Self::bind_at(path, uid, handler, config)
         }
 
         /// Start listening at an explicit `path` inside an already-verified directory.
@@ -92,31 +93,29 @@ mod imp {
             handler: Handler,
             config: ServerConfig,
         ) -> io::Result<Self> {
-            if let Some(dir) = path.parent() {
-                let uid = current_uid()?;
-                ensure_runtime_dir(dir, uid)?;
-            }
-            Self::bind_at(path, handler, config)
+            let dir = match path.parent() {
+                Some(p) if !p.as_os_str().is_empty() => p,
+                _ => Path::new("."),
+            };
+            let uid = current_uid()?;
+            ensure_runtime_dir(dir, uid)?;
+            Self::bind_at(path, uid, handler, config)
         }
 
-        fn bind_at(path: PathBuf, handler: Handler, config: ServerConfig) -> io::Result<Self> {
-            let listener = match UnixListener::bind(&path) {
-                Ok(l) => l,
-                Err(e) if e.kind() == io::ErrorKind::AddrInUse => {
-                    // Only remove a pre-existing path if nobody is listening on it.
-                    if matches!(
-                        UnixStream::connect(&path),
-                        Err(ce) if ce.kind() == io::ErrorKind::ConnectionRefused
-                    ) {
-                        let _ = fs::remove_file(&path);
-                        UnixListener::bind(&path)?
-                    } else {
-                        return Err(e);
-                    }
-                }
-                Err(e) => return Err(e),
+        fn bind_at(
+            path: PathBuf,
+            uid: u32,
+            handler: Handler,
+            config: ServerConfig,
+        ) -> io::Result<Self> {
+            let dir = match path.parent() {
+                Some(p) if !p.as_os_str().is_empty() => p,
+                _ => Path::new("."),
             };
-            if let Err(err) = fs::set_permissions(&path, Permissions::from_mode(0o600)) {
+            // Bind and chmod 0600 inside a fresh private 0700 staging directory first, then
+            // publish atomically via hard_link so `path` never exists with wider permissions.
+            let listener = bind_private_socket(dir, &path, uid)?;
+            if let Err(err) = verify_dir(dir, uid).and_then(|()| verify_socket(&path, uid)) {
                 let _ = fs::remove_file(&path);
                 return Err(err);
             }
@@ -137,6 +136,72 @@ mod imp {
         /// Path of the bound Unix domain socket.
         pub fn path(&self) -> Option<&Path> {
             Some(&self.path)
+        }
+    }
+
+    struct StagingGuard {
+        sock: PathBuf,
+        dir: PathBuf,
+    }
+
+    impl Drop for StagingGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.sock);
+            let _ = fs::remove_dir(&self.dir);
+        }
+    }
+
+    fn bind_private_socket(dir: &Path, target: &Path, uid: u32) -> io::Result<UnixListener> {
+        static NONCE: AtomicUsize = AtomicUsize::new(0);
+        let pid = std::process::id();
+        let staging_dir = loop {
+            let n = NONCE.fetch_add(1, Ordering::Relaxed);
+            let candidate = dir.join(format!(".b{pid}-{n}"));
+            match DirBuilder::new().mode(0o700).create(&candidate) {
+                Ok(()) => break candidate,
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(e),
+            }
+        };
+        let staging_sock = staging_dir.join("s");
+        let _guard = StagingGuard {
+            sock: staging_sock.clone(),
+            dir: staging_dir,
+        };
+
+        let listener = UnixListener::bind(&staging_sock)?;
+        fs::set_permissions(&staging_sock, Permissions::from_mode(0o600))?;
+
+        match fs::hard_link(&staging_sock, target) {
+            Ok(()) => Ok(listener),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                // Only replace a pre-existing entry if it is our own dead Unix socket
+                // (never follow symlinks or delete regular files).
+                let meta = fs::symlink_metadata(target)?;
+                if !meta.file_type().is_socket() || meta.uid() != uid {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        format!(
+                            "refusing to replace non-socket or foreign path {}",
+                            target.display()
+                        ),
+                    ));
+                }
+                if matches!(
+                    UnixStream::connect(target),
+                    Err(ce) if ce.kind() == io::ErrorKind::ConnectionRefused
+                ) {
+                    fs::remove_file(target)?;
+                    fs::hard_link(&staging_sock, target)?;
+                    Ok(listener)
+                } else {
+                    Err(io::Error::new(
+                        io::ErrorKind::AddrInUse,
+                        format!("control socket {} is already in use", target.display()),
+                    ))
+                }
+            }
+            Err(e) => Err(e),
         }
     }
 

@@ -174,6 +174,12 @@ impl ScrollState {
         self.offset = (self.offset + pixels).clamp(0.0, max_scroll(entries, area, line_height));
     }
 
+    /// Force the next `update` to scroll the active tab into view even if its index is unchanged
+    /// (for example after closing the active tab or focusing a pane via the control socket).
+    pub fn reveal_active(&mut self) {
+        self.active = None;
+    }
+
     /// Reveal a tab selected by keyboard, while allowing the user to scroll away afterwards.
     pub fn update(&mut self, entries: &[Entry], active: usize, area: Rect, line_height: f32) {
         if self.active != Some(active) {

@@ -123,6 +123,18 @@ impl LabelCache {
         *used = true;
         label.clone()
     }
+
+    pub fn clear(&mut self) {
+        self.labels.clear();
+    }
+
+    pub fn len(&self) -> usize {
+        self.labels.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.labels.is_empty()
+    }
 }
 
 fn rtl(text: &str) -> bool {
@@ -310,6 +322,9 @@ pub fn build(ctx: &mut DrawContext, view: &View, cache: &mut LabelCache) -> Scen
     }
     cache.labels.retain(|_, (_, used)| *used);
     scene
+        .labels
+        .retain(|l| l.bounds.left < l.bounds.right && l.bounds.top < l.bounds.bottom);
+    scene
 }
 
 /// Attention is visual only; it does not affect the terminal's logical grid or cell mapping.
@@ -318,6 +333,9 @@ pub fn attention_quads(ctx: &DrawContext, rects: &[Rect]) -> Vec<Quad> {
     let mut out = Vec::new();
     for r in rects {
         let t = ctx.metrics.stroke().min(r.w / 2.0).min(r.h / 2.0).max(0.0);
+        if t <= 0.0 {
+            continue;
+        }
         out.extend([
             (r.x, r.y, r.w, t, color),
             (r.x, r.bottom() - t, r.w, t, color),

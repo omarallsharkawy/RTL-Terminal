@@ -64,6 +64,9 @@ pub struct Frame {
     surface: (f32, f32),
     /// Overlays drawn above everything (the command palette).
     overlay: Vec<OverlayText>,
+    /// Outer rectangle of the command palette (border included), used to clip underlying text
+    /// runs so panes and sidebar text never bleed through the palette background.
+    palette_rect: Option<Rect>,
 }
 
 fn rect_bounds(r: Rect) -> TextBounds {
@@ -199,13 +202,93 @@ pub fn build_frame(
         foreground: ctx.palette.foreground.to_glyphon(),
         surface: opts.surface,
         overlay: Vec::new(),
+        palette_rect: None,
+    }
+}
+
+/// Push `run` into `out`, clipped outside `obstacle` when one is present so underlying text
+/// never paints over an opaque overlay quad (all quads render before all text in one pass).
+fn push_clipped<'a>(
+    out: &mut Vec<TextRun<'a>>,
+    run: TextRun<'a>,
+    line_height: f32,
+    obstacle: Option<Rect>,
+) {
+    let Some(rect) = obstacle else {
+        out.push(run);
+        return;
+    };
+    let b = run.bounds;
+    let ox0 = rect.x.floor() as i32;
+    let oy0 = rect.y.floor() as i32;
+    let ox1 = rect.right().ceil() as i32;
+    let oy1 = rect.bottom().ceil() as i32;
+    if b.right <= ox0 || b.left >= ox1 || b.bottom <= oy0 || b.top >= oy1 {
+        out.push(run);
+        return;
+    }
+    let row_top = run.top;
+    let row_bottom = run.top + line_height;
+    let emit = |out: &mut Vec<TextRun<'a>>, bounds: TextBounds| {
+        if bounds.left < bounds.right && bounds.top < bounds.bottom {
+            out.push(TextRun {
+                buffer: run.buffer,
+                left: run.left,
+                top: run.top,
+                bounds,
+                color: run.color,
+            });
+        }
+    };
+    if row_top < oy0 as f32 {
+        emit(
+            out,
+            TextBounds {
+                bottom: b.bottom.min(oy0),
+                ..b
+            },
+        );
+    }
+    if row_bottom > oy1 as f32 {
+        emit(
+            out,
+            TextBounds {
+                top: b.top.max(oy1),
+                ..b
+            },
+        );
+    }
+    if row_top < oy1 as f32 && row_bottom > oy0 as f32 {
+        let mid_top = b.top.max(oy0);
+        let mid_bottom = b.bottom.min(oy1);
+        if mid_top < mid_bottom {
+            emit(
+                out,
+                TextBounds {
+                    top: mid_top,
+                    bottom: mid_bottom,
+                    right: b.right.min(ox0),
+                    ..b
+                },
+            );
+            emit(
+                out,
+                TextBounds {
+                    top: mid_top,
+                    bottom: mid_bottom,
+                    left: b.left.max(ox1),
+                    ..b
+                },
+            );
+        }
     }
 }
 
 impl Frame {
     /// Draw the command palette above everything else.
     pub fn add_palette(&mut self, ctx: &mut DrawContext, view: &PaletteView) {
-        let texts = palette_overlay(ctx, view, self.surface, &mut self.quads);
+        let (outer, texts) = palette_overlay(ctx, view, self.surface, &mut self.quads);
+        self.palette_rect = outer;
         self.overlay.extend(texts);
     }
 
@@ -226,8 +309,8 @@ impl Frame {
             .extend(super::sidebar::attention_quads(ctx, rects));
     }
 
-    /// Every text run, in drawing order: tab titles, then per pane its rows (the last one is
-    /// hidden under a status line) and status line, then the preedit.
+    /// Every text run, in drawing order: tab titles, per-pane rows (the last one hidden under
+    /// a status line) and status line, preedit, sidebar labels, then the command palette.
     pub fn text_runs<'a>(
         &'a self,
         panes: &[PaneFrame],
@@ -236,24 +319,21 @@ impl Frame {
     ) -> Vec<TextRun<'a>> {
         let m = &self.metrics;
         let fg = self.foreground;
+        let clip = self.palette_rect;
         let mut runs = Vec::new();
-        for label in &self.sidebar_labels {
-            runs.push(TextRun {
-                buffer: &label.buffer,
-                left: label.left,
-                top: label.top,
-                bounds: label.bounds,
-                color: label.color,
-            });
-        }
         for (buffer, rect, color) in &self.tab_titles {
-            runs.push(TextRun {
-                buffer,
-                left: rect.x + m.char_width,
-                top: rect.y,
-                bounds: rect_bounds(*rect),
-                color: *color,
-            });
+            push_clipped(
+                &mut runs,
+                TextRun {
+                    buffer,
+                    left: rect.x + m.char_width,
+                    top: rect.y,
+                    bounds: rect_bounds(*rect),
+                    color: *color,
+                },
+                m.line_height,
+                clip,
+            );
         }
         for (pane, status) in panes.iter().zip(&self.statuses) {
             let bounds = rect_bounds(pane.rect);
@@ -276,24 +356,34 @@ impl Frame {
                 };
                 for seg in &cached_row.segments {
                     for &bounds in &parts[..n] {
-                        runs.push(TextRun {
-                            buffer: &seg.buffer,
-                            left: pane.rect.x + m.padding_left + seg.seg_x,
-                            top: y,
-                            bounds,
-                            color: fg,
-                        });
+                        push_clipped(
+                            &mut runs,
+                            TextRun {
+                                buffer: &seg.buffer,
+                                left: pane.rect.x + m.padding_left + seg.seg_x,
+                                top: y,
+                                bounds,
+                                color: fg,
+                            },
+                            m.line_height,
+                            clip,
+                        );
                     }
                 }
             }
             if let Some((buffer, y)) = status {
-                runs.push(TextRun {
-                    buffer,
-                    left: pane.rect.x + m.padding_left,
-                    top: *y,
-                    bounds,
-                    color: fg,
-                });
+                push_clipped(
+                    &mut runs,
+                    TextRun {
+                        buffer,
+                        left: pane.rect.x + m.padding_left,
+                        top: *y,
+                        bounds,
+                        color: fg,
+                    },
+                    m.line_height,
+                    clip,
+                );
             }
         }
         if let Some((left, top, _)) = self.preedit_box {
@@ -302,14 +392,33 @@ impl Frame {
                 .ime_bounds
                 .unwrap_or_else(|| rect_bounds(Rect::new(0.0, 0.0, width, height)));
             if let Some(buffer) = ime.buffer() {
-                runs.push(TextRun {
-                    buffer,
-                    left,
-                    top,
-                    bounds,
-                    color: fg,
-                });
+                push_clipped(
+                    &mut runs,
+                    TextRun {
+                        buffer,
+                        left,
+                        top,
+                        bounds,
+                        color: fg,
+                    },
+                    m.line_height,
+                    clip,
+                );
             }
+        }
+        for label in &self.sidebar_labels {
+            push_clipped(
+                &mut runs,
+                TextRun {
+                    buffer: &label.buffer,
+                    left: label.left,
+                    top: label.top,
+                    bounds: label.bounds,
+                    color: label.color,
+                },
+                m.line_height,
+                clip,
+            );
         }
         for text in &self.overlay {
             runs.push(TextRun {

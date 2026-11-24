@@ -38,8 +38,7 @@ impl App {
         let mut shells = ShellFactory::new(&self.proxy, self.config.cursor_blink);
         shells.options = options;
         let id = self.ws.new_tab(r, &mut shells)?;
-        self.release_held_buttons();
-        self.pointer.cancel();
+        self.reset_pointer_gesture();
         // A second tab shows the tab bar, which shrinks every pane.
         self.apply_layout();
         self.focus_changed(previous, id);
@@ -66,11 +65,17 @@ impl App {
         Some(new)
     }
 
-    /// Keyboard focus moved from `old` to `new`: tell the programs, restart the cursor blink and
-    /// show the new pane's title.
+    /// Keyboard focus moved from `old` to `new`: close any open palette, tell the programs,
+    /// reveal the active tab in the sidebar, restart the cursor blink and show the new pane's title.
     fn focus_changed(&mut self, old: Option<PaneId>, new: PaneId) {
         if old == Some(new) {
             return;
+        }
+        self.close_palette();
+        if self.window_focused {
+            if let Some(pane) = self.ws.pane_mut(new) {
+                pane.meta.attention = None;
+            }
         }
         if self.window.is_focused() {
             if let Some(old) = old {
@@ -78,6 +83,7 @@ impl App {
             }
             self.report_focus(new, true);
         }
+        self.window.reveal_active_tab();
         self.cursor_blink.reset(Instant::now());
         self.refresh_window_title();
         self.window.request_redraw();
@@ -96,13 +102,29 @@ impl App {
         }
     }
 
+    /// Focus pane `id` across tabs in one atomic step (no intermediate focus events on the
+    /// target tab's previously focused pane). Returns the tab index holding `id`.
+    pub(super) fn focus_pane_by_id(&mut self, id: PaneId) -> Result<usize, String> {
+        let Some((tab_index, old, tab_changed)) = self.ws.focus_any_pane(id) else {
+            return Err(format!("unknown pane: {}", id.0));
+        };
+        if tab_changed {
+            self.reset_pointer_gesture();
+        }
+        self.focus_changed(old, id);
+        if old == Some(id) {
+            self.window.reveal_active_tab();
+            self.window.request_redraw();
+        }
+        Ok(tab_index)
+    }
+
     pub(super) fn set_active_tab(&mut self, index: usize) {
         let old = self.focused_id();
         if !self.ws.set_active_tab(index) {
             return;
         }
-        self.release_held_buttons();
-        self.pointer.cancel();
+        self.reset_pointer_gesture();
         if let Some(new) = self.focused_id() {
             self.focus_changed(old, new);
         }
@@ -116,11 +138,15 @@ impl App {
 
     /// Focus the pane with the oldest unseen notification, switching tabs when needed.
     pub(super) fn focus_next_attention(&mut self) {
-        let Some((tab, id)) = self.ws.oldest_attention() else {
+        let Some((_, id)) = self.ws.oldest_attention() else {
             return;
         };
-        self.set_active_tab(tab);
-        self.focus_pane(id);
+        let _ = self.focus_pane_by_id(id);
+        if self.window_focused {
+            if let Some(pane) = self.ws.pane_mut(id) {
+                pane.meta.attention = None;
+            }
+        }
         self.window.request_redraw();
     }
 
@@ -141,6 +167,7 @@ impl App {
         self.window.forget_pane(id);
         self.pointer.forget(id);
         let Some(now) = closed.focused else {
+            self.close_palette();
             return true;
         };
         self.apply_layout();

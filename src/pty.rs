@@ -35,6 +35,8 @@ pub const INHERITED_TERMINAL_VARS: &[&str] = &[
     "TERMINFO",
     "TMUX",
     "TMUX_PANE",
+    "TWITTY_PANE_ID",
+    "TWITTY_SOCKET",
     "VTE_VERSION",
     "WEZTERM_EXECUTABLE",
     "WEZTERM_PANE",

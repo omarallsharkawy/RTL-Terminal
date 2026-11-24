@@ -1,12 +1,16 @@
-//! The command palette: opening it, the keys and text typed while it is open, and running
-//! the chosen command.
+//! The command palette: opening it, the keys, mouse clicks and text typed while it is open,
+//! and running the chosen command.
+//!
+//! While the palette is open it owns all keyboard, IME and pointer input so nothing can reach
+//! panes or the PTY behind it. Clicking outside the palette closes it and consumes the click
+//! (never starting a selection, pasting, or switching tabs).
 
-use winit::event::KeyEvent;
+use winit::event::{KeyEvent, MouseButton};
 
 use super::App;
 use crate::commands;
 use crate::input::{key_shortcut, InputAction};
-use crate::render::scene::palette::{PaletteItem, PaletteView};
+use crate::render::scene::palette::{PaletteHit, PaletteItem, PaletteView};
 use crate::ui::palette::{matches, PaletteCmd, PaletteState, MAX_RESULTS};
 
 impl App {
@@ -14,19 +18,17 @@ impl App {
         self.palette.is_some()
     }
 
-    pub(super) fn toggle_palette(&mut self) {
-        if self.palette.is_some() {
-            self.close_palette();
-        } else {
-            self.palette = Some(PaletteState::default());
-            self.sync_palette();
-        }
+    pub(super) fn open_palette(&mut self) {
+        self.reset_pointer_gesture();
+        self.palette = Some(PaletteState::default());
+        self.sync_palette();
     }
 
     pub(super) fn close_palette(&mut self) {
-        self.palette = None;
-        self.window.set_command_palette(None);
-        self.window.request_redraw();
+        if self.palette.take().is_some() {
+            self.window.set_command_palette(None);
+            self.window.request_redraw();
+        }
     }
 
     /// Hand the current query and results to the renderer.
@@ -74,10 +76,43 @@ impl App {
             PaletteCmd::Close => self.close_palette(),
             PaletteCmd::Run(name) => {
                 self.close_palette();
+                if name == "palette.open" {
+                    return false;
+                }
                 return self.run_command(name);
             }
         }
         false
+    }
+
+    /// A mouse press while the palette is open. Clicking outside closes the palette and consumes
+    /// the click so nothing reaches panes or tabs; left-clicking an item row runs it. Returns
+    /// true when the window should close.
+    pub(super) fn on_palette_mouse_press(&mut self, button: MouseButton) -> bool {
+        let (x, y) = self.pointer.pos;
+        match self.window.palette_hit(x, y) {
+            PaletteHit::Outside => {
+                self.close_palette();
+                false
+            }
+            PaletteHit::Inside => false,
+            PaletteHit::Item(index) if button == MouseButton::Left => {
+                let name = self.palette.as_ref().and_then(|state| {
+                    let all = commands::all();
+                    matches(&all, &state.query)
+                        .into_iter()
+                        .take(MAX_RESULTS)
+                        .nth(index)
+                        .map(|i| all[i].name)
+                });
+                self.close_palette();
+                match name {
+                    Some("palette.open") | None => false,
+                    Some(name) => self.run_command(name),
+                }
+            }
+            PaletteHit::Item(_) => false,
+        }
     }
 
     /// Text committed by an input method while the palette is open (Arabic typing).

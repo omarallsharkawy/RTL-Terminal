@@ -8,9 +8,11 @@ use serde_json::{json, Value};
 
 use super::{App, AppEvent};
 use crate::commands;
+use crate::control::protocol::{bound_read_text, MAX_READ_BYTES};
 use crate::control::{ControlServer, MethodCall, Request, Response, REQUEST_TIMEOUT};
 use crate::layout::PaneId;
 use crate::pty::{Pty, SpawnOptions};
+use crate::shell_integration::clean_text;
 
 impl App {
     /// Start the control socket server if enabled in config.
@@ -125,7 +127,7 @@ impl App {
                         let panes: Vec<u64> = tab.root.leaves().into_iter().map(|p| p.0).collect();
                         json!({
                             "index": index,
-                            "title": self.ws.tab_title(index),
+                            "title": clean_text(&self.ws.tab_title(index), 256),
                             "active": index == active,
                             "panes": panes,
                         })
@@ -146,7 +148,13 @@ impl App {
                             .cwd
                             .clone()
                             .or_else(|| pane.pty.as_ref().and_then(Pty::cwd))
-                            .map(|p| p.to_string_lossy().into_owned());
+                            .map(|p| clean_text(&p.to_string_lossy(), 4096))
+                            .filter(|s| !s.is_empty());
+                        let title = pane
+                            .title
+                            .as_deref()
+                            .map(|t| clean_text(t, 256))
+                            .filter(|t| !t.is_empty());
                         let attention = pane.meta.attention.as_ref().map(|n| {
                             json!({
                                 "title": n.title,
@@ -157,7 +165,7 @@ impl App {
                             "id": pane.id.0,
                             "tab": tab_index,
                             "focused": focused == Some(pane.id),
-                            "title": pane.title,
+                            "title": title,
                             "cwd": cwd,
                             "running": pane.meta.running,
                             "last_exit": pane.meta.last_exit,
@@ -188,7 +196,7 @@ impl App {
                 let text = self
                     .ws
                     .pane(target)
-                    .map(|p| p.terminal.recent_lines(lines))
+                    .map(|p| bound_read_text(&p.terminal.recent_lines(lines), MAX_READ_BYTES))
                     .ok_or_else(|| format!("unknown pane: {}", target.0))?;
                 Ok((json!({ "pane": target.0, "text": text }), false))
             }
@@ -267,16 +275,5 @@ impl App {
                 .focused_id()
                 .ok_or_else(|| "no focused pane".to_owned()),
         }
-    }
-
-    fn focus_pane_by_id(&mut self, id: PaneId) -> Result<usize, String> {
-        let Some(tab_index) = self.ws.tabs().iter().position(|t| t.root.contains(id)) else {
-            return Err(format!("unknown pane: {}", id.0));
-        };
-        if tab_index != self.ws.active() {
-            self.set_active_tab(tab_index);
-        }
-        self.focus_pane(id);
-        Ok(tab_index)
     }
 }

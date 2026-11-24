@@ -90,4 +90,16 @@ impl BranchCache {
         self.directories
             .retain(|path, _| directories.contains(path));
     }
+
+    pub fn clear(&mut self) {
+        self.directories.clear();
+    }
+
+    pub fn len(&self) -> usize {
+        self.directories.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.directories.is_empty()
+    }
 }

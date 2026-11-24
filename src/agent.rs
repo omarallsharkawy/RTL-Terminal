@@ -7,6 +7,12 @@
 //! through a shell, and the terminal text is passed as one argument, so nothing in the output
 //! can become a command. The text is still untrusted input to the agent (it may try to
 //! instruct it); agents ask before acting, and the prompt says the text is terminal output.
+//!
+//! Environment note: an agent pane receives its own new `TWITTY_PANE_ID` (never the source
+//! pane's) and, when `control_socket` is enabled, `TWITTY_SOCKET`. Any process running as the
+//! same local user can already discover the socket in the runtime directory, so the trust
+//! boundary is the local user account; stale `TWITTY_SOCKET`/`TWITTY_PANE_ID` from a parent
+//! Twitty instance are stripped by `pty::INHERITED_TERMINAL_VARS`.
 
 use std::path::{Path, PathBuf};
 
@@ -90,31 +96,57 @@ pub fn agent_prompt(
          Answer in the language I use when I reply (Arabic or English).\n",
     );
     if let Some(cwd) = cwd {
-        prompt.push_str(&format!("\nWorking directory: {}\n", cwd.display()));
+        let cwd = crate::shell_integration::clean_text(&cwd.to_string_lossy(), 4096);
+        if !cwd.is_empty() {
+            prompt.push_str(&format!("\nWorking directory: {cwd}\n"));
+        }
     }
     if let Some(command) = command {
-        prompt.push_str(&format!("Command: {command}\n"));
+        let command = crate::shell_integration::clean_text(
+            command,
+            crate::shell_integration::MAX_COMMAND_CHARS,
+        );
+        if !command.is_empty() {
+            prompt.push_str(&format!("Command: {command}\n"));
+        }
     }
     if let Some(exit) = exit {
         prompt.push_str(&format!("Exit status: {exit}\n"));
     }
     let context = clean_context(context);
-    let fence = if context.contains("```") {
-        "~~~~"
-    } else {
-        "```"
-    };
+    let fence = safe_fence(&context);
     prompt.push_str(&format!("\n{fence}text\n{context}\n{fence}\n"));
     prompt
 }
 
+/// Choose a CommonMark fence that cannot be closed by any line inside `context`.
+fn safe_fence(context: &str) -> String {
+    if !context.contains("```") {
+        return "```".to_string();
+    }
+    let mut max_tildes = 0usize;
+    let mut run = 0usize;
+    for b in context.bytes() {
+        if b == b'~' {
+            run += 1;
+            max_tildes = max_tildes.max(run);
+        } else {
+            run = 0;
+        }
+    }
+    "~".repeat(max_tildes.max(3) + 1)
+}
+
 /// Terminal text made safe to pass along: no control characters except newlines and tabs, no
-/// bidi overrides, trailing blank lines dropped, at most `MAX_CONTEXT_BYTES` (the end kept).
+/// bidi overrides or line/paragraph separators, trailing blank lines dropped, at most
+/// `MAX_CONTEXT_BYTES` (the end kept).
 pub fn clean_context(text: &str) -> String {
     let cleaned: String = text
         .chars()
         .filter(|&c| {
-            (c == '\n' || c == '\t' || !c.is_control()) && !crate::terminal::is_bidi_control(c)
+            (c == '\n' || c == '\t' || !c.is_control())
+                && !crate::terminal::is_bidi_control(c)
+                && !matches!(c, '\u{2028}' | '\u{2029}')
         })
         .collect();
     let trimmed = cleaned.trim_end();
