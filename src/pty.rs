@@ -35,6 +35,14 @@ pub const INHERITED_TERMINAL_VARS: &[&str] = &[
     "TERMINFO",
     "TMUX",
     "TMUX_PANE",
+    // Twitty's own shell integration (`session::shell_setup`), from a Twitty this one was
+    // started in: set again for the shells that get it.
+    "TWITTY_SHELL_INTEGRATION",
+    "__TWITTY_BASH_LOGIN",
+    "__TWITTY_BASH_RCFILE",
+    "__TWITTY_FISH_XDG_DATA_DIRS",
+    "__TWITTY_ZSH_BOOTSTRAP",
+    "__TWITTY_ZSH_ZDOTDIR",
     "VTE_VERSION",
     "WEZTERM_EXECUTABLE",
     "WEZTERM_PANE",
@@ -319,7 +327,9 @@ impl Pty {
     }
 }
 
-fn default_shell() -> (String, Vec<String>) {
+/// The user's shell and its arguments: `TWITTY_SHELL` (split at spaces), else `$SHELL`, else
+/// bash (PowerShell or cmd on Windows).
+pub fn default_shell() -> (String, Vec<String>) {
     if let Ok(shell) = env::var("TWITTY_SHELL") {
         let mut parts = shell.split_whitespace().map(str::to_string);
         if let Some(program) = parts.next() {

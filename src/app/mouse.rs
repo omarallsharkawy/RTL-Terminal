@@ -80,7 +80,8 @@ impl App {
                 }
                 PressTarget::Pane(id) => {
                     self.focus_pane(id);
-                    Some(id)
+                    let gutter = button == MouseButton::Left && self.click_block_gutter(id);
+                    (!gutter).then_some(id)
                 }
                 PressTarget::None => None,
             }
@@ -269,6 +270,32 @@ impl App {
                 p.ui.mouse_button_down = None;
             }
         }
+    }
+
+    /// A left press in the left padding of pane `id`, where block gutters are drawn, selects
+    /// the block on that row. Returns true when it did (the press is then not a selection).
+    fn click_block_gutter(&mut self, id: PaneId) -> bool {
+        let (x, y) = self.pointer.pos;
+        let Some(rect) = self.pane_rect(id) else {
+            return false;
+        };
+        let Some(pad) = self.window.grid().map(|r| r.metrics().padding_left) else {
+            return false;
+        };
+        if x >= f64::from(rect.x + pad) || self.mode_of(id).intersects(TermMode::MOUSE_MODE) {
+            return false;
+        }
+        let Some((_, row, _)) = self.window.cell_at(id, rect, x, y) else {
+            return false;
+        };
+        let selected = self
+            .ws
+            .pane_mut(id)
+            .is_some_and(|p| p.blocks.select_at_row(&p.terminal, row));
+        if selected {
+            self.window.request_redraw();
+        }
+        selected
     }
 
     fn drag_divider_to(&mut self, divider: &Divider) {

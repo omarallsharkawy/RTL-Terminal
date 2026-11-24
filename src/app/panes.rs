@@ -31,7 +31,8 @@ impl App {
             return;
         };
         let previous = self.focused_id();
-        let mut shells = ShellFactory::new(&self.proxy, self.config.cursor_blink);
+        let mut shells = ShellFactory::new(&self.proxy, self.config.cursor_blink)
+            .with_shell_integration(self.config.shell_integration);
         let Some(id) = self.ws.new_tab(r, &mut shells) else {
             return;
         };
@@ -46,7 +47,8 @@ impl App {
         let Some(r) = self.window.grid() else {
             return;
         };
-        let mut shells = ShellFactory::new(&self.proxy, self.config.cursor_blink);
+        let mut shells = ShellFactory::new(&self.proxy, self.config.cursor_blink)
+            .with_shell_integration(self.config.shell_integration);
         let Some((old, new)) = self.ws.split_focused(r, &mut shells, dir) else {
             return;
         };

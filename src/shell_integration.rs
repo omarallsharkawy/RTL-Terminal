@@ -62,6 +62,9 @@ pub struct ShellEvent {
     /// Lines in scrollback at that moment. Together with `line` it places the mark in the
     /// scrollback; see `blocks` for how marks follow the text as it scrolls.
     pub history: usize,
+    /// For marks: the cursor line as an absolute line (`blocks::anchor`), which stays the same
+    /// while the text scrolls. `None` for other signals and in the alternate screen.
+    pub abs_line: Option<i64>,
 }
 
 /// The signal in one OSC payload (the bytes between `ESC ]` and the terminator), if it is one.

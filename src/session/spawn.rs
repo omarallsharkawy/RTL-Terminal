@@ -7,6 +7,7 @@ use crate::app::AppEvent;
 use crate::layout::PaneId;
 use crate::pty::{Pty, SpawnOptions};
 use crate::session::pane::Pane;
+use crate::session::shell_setup;
 use crate::session::workspace::PaneFactory;
 use crate::terminal::Terminal;
 
@@ -16,6 +17,8 @@ pub(crate) struct ShellFactory<'a> {
     cursor_blink: bool,
     /// Program to run instead of the shell, and extra environment, for the next spawn.
     pub options: SpawnOptions,
+    /// Load Twitty's shell integration into bash, zsh and fish (`shell_setup`).
+    shell_integration: bool,
 }
 
 impl<'a> ShellFactory<'a> {
@@ -24,7 +27,15 @@ impl<'a> ShellFactory<'a> {
             proxy,
             cursor_blink,
             options: SpawnOptions::default(),
+            shell_integration: false,
         }
+    }
+
+    /// Load the shell integration into the shells this factory starts (config
+    /// `shell_integration`).
+    pub fn with_shell_integration(mut self, on: bool) -> Self {
+        self.shell_integration = on;
+        self
     }
 }
 
@@ -50,6 +61,9 @@ impl PaneFactory for ShellFactory<'_> {
         options
             .env
             .push(("TWITTY_PANE_ID".into(), id.0.to_string()));
+        if self.shell_integration {
+            shell_setup::apply(&mut options);
+        }
         let pty = match Pty::spawn_with(
             &options,
             cols as u16,

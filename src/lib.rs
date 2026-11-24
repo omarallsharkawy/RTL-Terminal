@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 pub mod app;
 pub mod blink;
+pub mod blocks;
 pub mod color;
 pub mod commands;
 pub mod config;

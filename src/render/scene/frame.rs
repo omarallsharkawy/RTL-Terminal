@@ -5,6 +5,7 @@ use alacritty_terminal::vte::ansi::CursorShape;
 use cosmic_text::Buffer;
 use glyphon::TextBounds;
 
+use super::blocks::{self, Badge};
 use super::chrome;
 use super::context::DrawContext;
 use super::cursor::{
@@ -43,7 +44,8 @@ pub struct TextRun<'a> {
 /// Everything a frame draws. Row text stays in the `RowCache` and the preedit text in its
 /// `PreeditState`; `text_runs` collects them with the labels shaped here.
 pub struct Frame {
-    /// Back to front: tab bar, rows (backgrounds, geometry, decorations), preedit box,
+    /// Back to front: tab bar, per pane the selected block's tint, its rows (backgrounds,
+    /// geometry, decorations) and block marks and badges, then the preedit box,
     /// unfocused panes' cursors, the focused cursor (or preedit caret), status bars, dividers.
     pub quads: Vec<Quad>,
     /// Window clear color (the theme background) in surface space.
@@ -53,6 +55,8 @@ pub struct Frame {
     tab_titles: Vec<(Buffer, Rect, glyphon::Color)>,
     /// Per pane: the status line text and its top y.
     statuses: Vec<Option<(Buffer, f32)>>,
+    /// Per pane: the badges of its command blocks.
+    badges: Vec<Vec<Badge>>,
     /// The preedit box (left, y, width), when one is visible.
     preedit_box: Option<(f32, f32, f32)>,
     /// Clip of the pane the preedit is drawn in.
@@ -92,6 +96,7 @@ pub fn build_frame(
     let mut other_cursors: Vec<Quad> = Vec::new();
     let mut ime_caret: Option<(f32, f32, bool)> = None;
     let mut ime_bounds: Option<TextBounds> = None;
+    let mut badges = Vec::with_capacity(panes.len());
 
     let tab_geometry = chrome::tab_geometry(ctx, tabs.len(), width);
     chrome::tab_bar_quads(ctx, tabs, &tab_geometry, width, &mut quads);
@@ -103,6 +108,7 @@ pub fn build_frame(
         let mut rows = Vec::with_capacity(pane.lines.len());
         let shape = effective_cursor_shape(opts.cursor_style, pane.cursor.shape);
         let cursor_focused = opts.window_focused && pane.focused;
+        blocks::tint_quads(ctx, pane, &mut quads);
 
         for (r, line) in pane.lines.iter().enumerate() {
             let y = origin_y + r as f32 * m.line_height;
@@ -159,6 +165,9 @@ pub fn build_frame(
             }
         }
         cache.put(pane.id, rows);
+        blocks::mark_quads(ctx, pane, &mut quads);
+        let status_row = pane.status.as_ref().and(pane.lines.len().checked_sub(1));
+        badges.push(blocks::badges(ctx, pane, status_row, &mut quads));
     }
 
     let (preedit_box, ime_area) = ime.layout(ctx, ime_caret, &mut quads, &mut focused_cursor);
@@ -188,6 +197,7 @@ pub fn build_frame(
         ime_area,
         tab_titles,
         statuses,
+        badges,
         preedit_box,
         ime_bounds,
         metrics: m,
@@ -217,7 +227,7 @@ impl Frame {
                 color: *color,
             });
         }
-        for (pane, status) in panes.iter().zip(&self.statuses) {
+        for ((pane, status), badges) in panes.iter().zip(&self.statuses).zip(&self.badges) {
             let bounds = rect_bounds(pane.rect);
             let rows = pane.lines.len();
             for r in 0..rows {
@@ -230,10 +240,13 @@ impl Frame {
                 let y = pane.rect.y + m.padding_top + r as f32 * m.line_height;
                 // The row under the preedit is clipped around it, so its text does not show
                 // through the preedit's background.
-                let (parts, n) = match self.preedit_box {
-                    Some((left, _, width)) if pane.focused && pane.cursor.row == r => {
+                let badge = badges.iter().find(|b| b.row == r);
+                let (parts, n) = match (self.preedit_box, badge) {
+                    (Some((left, _, width)), _) if pane.focused && pane.cursor.row == r => {
                         (bounds_outside(bounds, left, left + width), 2)
                     }
+                    // A block badge covers the end of its row.
+                    (_, Some(b)) => (bounds_outside(bounds, b.left, b.right), 1),
                     _ => ([bounds, bounds], 1),
                 };
                 for seg in &cached_row.segments {
@@ -247,6 +260,15 @@ impl Frame {
                         });
                     }
                 }
+            }
+            for badge in badges {
+                runs.push(TextRun {
+                    buffer: &badge.buffer,
+                    left: badge.text_left,
+                    top: badge.top,
+                    bounds,
+                    color: badge.color,
+                });
             }
             if let Some((buffer, y)) = status {
                 runs.push(TextRun {

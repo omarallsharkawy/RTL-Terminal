@@ -318,6 +318,7 @@ impl App {
                     cursor,
                     focused: focused == Some(id),
                     status,
+                    blocks: pane.blocks.decor(&pane.terminal),
                 })
             })
             .collect();

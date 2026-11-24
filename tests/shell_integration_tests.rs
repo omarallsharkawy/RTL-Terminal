@@ -117,6 +117,8 @@ fn terminal_records_events_with_cursor_position() {
         vec![
             (Signal::Mark(MarkKind::PromptStart), 0, 0),
             (Signal::Mark(MarkKind::CommandStart), 0, 2),
+            // No OSC 633 E came: the command line is read from the grid, B up to C.
+            (Signal::CommandLine("ls".into()), 1, 0),
             (Signal::Mark(MarkKind::OutputStart), 1, 0),
             (Signal::Mark(MarkKind::CommandEnd { exit: Some(0) }), 3, 0),
         ]

@@ -3,6 +3,7 @@
 use alacritty_terminal::index::Side;
 use alacritty_terminal::term::TermMode;
 
+use crate::blocks::BlockList;
 use crate::input::mouse::{ClickCounter, StepAccumulator};
 use crate::layout::PaneId;
 use crate::pty::Pty;
@@ -21,6 +22,8 @@ pub(crate) struct Pane {
     pub ui: PaneUi,
     /// What the shell reported about itself (OSC 7, 9, 133, 777…).
     pub meta: PaneMeta,
+    /// Command blocks from OSC 133 marks.
+    pub blocks: BlockList,
 }
 
 /// What the shell and the programs in a pane reported through shell signals
@@ -97,6 +100,7 @@ impl Pane {
             title: None,
             ui: PaneUi::default(),
             meta: PaneMeta::default(),
+            blocks: BlockList::new(),
         }
     }
 
@@ -117,6 +121,7 @@ impl Pane {
         }
         self.size = (cols, rows);
         self.terminal.resize(cols, rows);
+        self.blocks.refresh(&self.terminal);
         if let Some(ref pty) = self.pty {
             let _ = pty.resize(cols as u16, rows as u16);
         }

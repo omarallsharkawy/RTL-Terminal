@@ -62,6 +62,8 @@ impl App {
             return;
         }
         let events = term.take_shell_events();
+        pane.blocks.refresh(&pane.terminal);
+        let term = &pane.terminal;
         let moved = term.cursor_position() != before;
         // Output that moves the cursor keeps it solid while text is appearing.
         if moved && self.focused_id() == Some(id) {
@@ -84,6 +86,7 @@ impl App {
         let Some(pane) = self.ws.pane_mut(id) else {
             return;
         };
+        pane.blocks.on_event(&event, &pane.terminal, Instant::now());
         let meta = &mut pane.meta;
         match event.signal {
             Signal::Cwd(path) => meta.cwd = Some(path),

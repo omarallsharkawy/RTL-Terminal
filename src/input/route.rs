@@ -20,16 +20,22 @@ impl InputAction {
 }
 
 /// A pane or tab shortcut with nothing to switch to (focus moves with a single pane, tab
-/// cycling with a single tab). Its key then goes to the program instead (Alt+Left in fish,
-/// Ctrl+PageUp in vim...). Decided from the shortcut itself, so the release follows its press.
+/// cycling with a single tab), or a block shortcut in a pane without command blocks (or on the
+/// alternate screen, `blocks_navigable` false). Its key then goes to the program instead
+/// (Alt+Left in fish, Ctrl+PageUp in vim, Ctrl+Shift+Up in an editor...). Decided from the
+/// shortcut itself, so the release follows its press.
 pub(crate) fn shortcut_is_idle(
     shortcut: Option<&InputAction>,
     single_pane: bool,
     tab_count: usize,
+    blocks_navigable: bool,
 ) -> bool {
     match shortcut {
         Some(InputAction::Focus(_)) => single_pane,
         Some(InputAction::NextTab | InputAction::PrevTab) => tab_count < 2,
+        Some(InputAction::PrevBlock | InputAction::NextBlock | InputAction::CopyBlockOutput) => {
+            !blocks_navigable
+        }
         _ => false,
     }
 }
@@ -97,11 +103,44 @@ mod tests {
     #[test]
     fn idle_shortcuts() {
         let focus = InputAction::Focus(FocusDir::Right);
-        assert!(shortcut_is_idle(Some(&focus), true, 3));
-        assert!(!shortcut_is_idle(Some(&focus), false, 1));
-        assert!(shortcut_is_idle(Some(&InputAction::NextTab), false, 1));
-        assert!(!shortcut_is_idle(Some(&InputAction::PrevTab), true, 2));
-        assert!(!shortcut_is_idle(Some(&InputAction::NewTab), true, 1));
-        assert!(!shortcut_is_idle(None, true, 1));
+        assert!(shortcut_is_idle(Some(&focus), true, 3, true));
+        assert!(!shortcut_is_idle(Some(&focus), false, 1, false));
+        assert!(shortcut_is_idle(
+            Some(&InputAction::NextTab),
+            false,
+            1,
+            true
+        ));
+        assert!(!shortcut_is_idle(
+            Some(&InputAction::PrevTab),
+            true,
+            2,
+            false
+        ));
+        assert!(!shortcut_is_idle(
+            Some(&InputAction::NewTab),
+            true,
+            1,
+            false
+        ));
+        assert!(!shortcut_is_idle(None, true, 1, false));
+    }
+
+    #[test]
+    fn block_shortcuts_are_idle_without_blocks() {
+        for action in [
+            InputAction::PrevBlock,
+            InputAction::NextBlock,
+            InputAction::CopyBlockOutput,
+        ] {
+            assert!(
+                shortcut_is_idle(Some(&action), false, 2, false),
+                "{action:?}"
+            );
+            assert!(
+                !shortcut_is_idle(Some(&action), true, 1, true),
+                "{action:?}"
+            );
+        }
     }
 }

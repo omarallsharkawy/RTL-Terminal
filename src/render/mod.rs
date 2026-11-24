@@ -52,6 +52,8 @@ pub struct PaneFrame {
     pub focused: bool,
     /// One-line bar drawn over the pane's last row (search query), if any.
     pub status: Option<String>,
+    /// Command blocks on screen (`BlockList::decor`); empty for most panes.
+    pub blocks: Vec<crate::blocks::BlockDecor>,
 }
 
 /// A tab in the tab bar.
