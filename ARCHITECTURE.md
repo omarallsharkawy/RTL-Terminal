@@ -57,10 +57,18 @@ Everything above `render/gpu` runs without a GPU and is covered by tests in `tes
 | `pty.rs` | Shell discovery, environment, PTY spawning, a writer thread so large pastes never block the UI. | `portable-pty` |
 | `render/text/` | Fonts, bidi helpers, and `RowShaper`, which turns a row of cells into shaped segments. | `cosmic-text` |
 | `render/row/` | A shaped row: per-cell visual extents, mouse hit testing, caret placement, and the per-pane `RowCache`. | `render/text` |
-| `render/scene/` | The frame on the CPU: row quads, box drawing, cursor, tab bar, status line, IME preedit, z-order. | `render/row`, `render/style` |
+| `render/scene/` | The frame on the CPU: row quads, box drawing, cursor, tab bar, status line, IME preedit, block decorations, sidebar, command palette, z-order. | `render/row`, `render/style` |
 | `render/gpu/` | wgpu device and surface, the quad pipeline (`quad.wgsl`) and glyphon's text pipeline. | `wgpu`, `glyphon` |
 | `color.rs`, `config.rs` | Themes and palette resolution; `config.json` loading, clamping and atomic saving. | — |
 | `links.rs`, `blink.rs`, `ime.rs` | URL detection and opening, cursor blink timing, IME helpers. | — |
+| `shell_integration.rs` | Parses the OSC signals shells and agents send (OSC 7 cwd, OSC 9/99/777 notifications, OSC 133/633 command marks) into bounded, cleaned `ShellEvent`s. | `links` |
+| `session/shell_setup.rs`, `assets/shell/` | Injects Twitty's bash/zsh/fish integration scripts into shells it starts, so they send the marks without user setup. | — |
+| `blocks/` | Command blocks: turns marks into a per-pane `BlockList` (prompt, command, output, exit, duration) anchored to absolute lines so blocks follow the text as it scrolls. | `shell_integration` |
+| `sidebar/` | The vertical tab sidebar model: one entry per tab with cwd, git branch (read from `.git/HEAD`, bounded), running state, last exit and the latest notification. | `session` |
+| `notify.rs` | Desktop notifications through `notify-send` (argv, never a shell), throttled per pane. | — |
+| `commands.rs`, `ui/palette.rs` | The command table (name, English and Arabic titles, shortcut, action) and the palette state with Arabic-aware matching. | `input` |
+| `control/` | The control socket (`$XDG_RUNTIME_DIR/twitty/twitty-<pid>.sock`, 0600 in a 0700 dir) speaking newline-delimited JSON, and the `twitty ctl/send/notify/list/read` client. | — |
+| `agent.rs` | "Ask an agent": picks a local agent CLI, builds its argv and a fenced prompt from the selection, block or screen. | — |
 
 Dependencies point downwards only: nothing in `render/`, `terminal.rs`, `input/` or `ui/` knows
 about winit windows or the app.
@@ -97,6 +105,25 @@ or link-hover state change.
   event-loop proxy; sends `AppEvent::PtyExit` when the shell ends.
 - **PTY writer thread (per pane):** drains a channel of input bytes so a huge paste never blocks
   a frame.
+- **Control server:** one accept thread plus at most 16 short-lived client threads, with read,
+  write and request timeouts. Requests reach the main thread as `AppEvent::Control` and the
+  reply comes back over a channel, so all state is still touched on the main thread only.
+- **Notifications:** each `notify-send` runs on its own short thread (at most 8 at once).
+
+## Shell signals
+
+Shells and agents report things through OSC sequences that `alacritty_terminal` ignores.
+`Terminal::process_bytes` stops the parser at each OSC terminator, hands the payload (at most
+4 KiB) to `shell_integration::parse_osc` and queues the result with the cursor position
+(at most 256 pending). After each batch of output the app drains the queue:
+
+- **OSC 7** sets `PaneMeta::cwd` (sidebar, new tabs and splits start there).
+- **OSC 9 / 99 / 777** set the pane's attention (sidebar line, ring around the pane) and send a
+  desktop notification unless the pane is focused in a focused window.
+- **OSC 133 / 633 A B C D** drive `blocks/`; **633 E** gives the command line.
+
+All program text is cleaned (no control or bidi-override characters) and bounded before it is
+shown, sent to `notify-send`, returned over the control socket or put into an agent prompt.
 
 ## Testing
 
