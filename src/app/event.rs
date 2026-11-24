@@ -26,11 +26,19 @@ pub enum AppEvent {
 /// Longest title kept from a program, in characters.
 const MAX_TITLE_CHARS: usize = 256;
 
-/// A program-set title as stored: no control characters, at most `MAX_TITLE_CHARS`. It is shaped
-/// for the tab bar on every frame, so a multi-megabyte one would freeze drawing.
+/// A program-set title as stored: no control, bidi-override or line-separator characters, at
+/// most `MAX_TITLE_CHARS`. It is shaped for the tab bar on every frame, so a multi-megabyte one
+/// would freeze drawing.
 pub fn clean_title(title: &str) -> String {
     crate::shell_integration::bounded_text(
-        title.chars().filter(|c| !c.is_control()),
+        title.chars().filter(|&c| {
+            !c.is_control()
+                && !crate::terminal::is_bidi_control(c)
+                && !matches!(
+                    c,
+                    '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{2028}' | '\u{2029}'
+                )
+        }),
         MAX_TITLE_CHARS,
     )
 }
@@ -76,7 +84,7 @@ impl App {
             self.window.request_redraw();
         }
         // The output may have replaced the link under a Ctrl-hovering pointer.
-        if self.modifiers.control_key() {
+        if self.modifiers.control_key() && !self.palette_open() {
             self.update_link_hover(id);
         }
         for event in events {
@@ -155,6 +163,9 @@ impl App {
 
     /// Something the terminal of pane `id` asks for: replies, title, bell, clipboard.
     pub(super) fn on_terminal_event(&mut self, id: PaneId, event: TermEvent) {
+        if self.ws.pane(id).is_none() {
+            return;
+        }
         match event {
             TermEvent::PtyWrite(text) => self.write_to(id, text.as_bytes()),
             TermEvent::Title(title) => {

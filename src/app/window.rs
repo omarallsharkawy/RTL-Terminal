@@ -221,6 +221,18 @@ impl Window {
         }
     }
 
+    pub(super) fn palette_hit(&self, x: f64, y: f64) -> crate::render::scene::palette::PaletteHit {
+        self.renderer
+            .as_ref()
+            .map_or(crate::render::scene::palette::PaletteHit::Outside, |r| {
+                r.palette_hit(x, y)
+            })
+    }
+
+    pub(super) fn reveal_active_tab(&mut self) {
+        self.sidebar_scroll.reveal_active();
+    }
+
     /// The window has keyboard focus.
     pub(super) fn is_focused(&self) -> bool {
         self.renderer.as_ref().is_some_and(Renderer::is_focused)
@@ -382,6 +394,9 @@ impl Window {
                 self.sidebar.position,
             )
         });
+        if sidebar.is_none() {
+            self.branches.clear();
+        }
         let attention: Vec<Rect> = panes
             .iter()
             .filter(|p| ws.pane(p.id).is_some_and(|p| p.meta.attention.is_some()))
@@ -435,7 +450,7 @@ impl App {
     /// Draw the active tab.
     pub(super) fn redraw(&mut self) {
         self.window.needs_redraw = false;
-        if self.modifiers.control_key() {
+        if self.modifiers.control_key() && !self.palette_open() {
             self.refresh_pointer_hover();
         }
         // A notification counts as seen once its pane is on screen, focused, in a focused window.

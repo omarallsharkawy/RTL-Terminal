@@ -22,6 +22,22 @@ pub const DEFAULT_READ_LINES: usize = 50;
 /// Maximum number of lines returned by `pane.read`.
 pub const MAX_READ_LINES: usize = 2000;
 
+/// Maximum UTF-8 bytes returned by `pane.read` so responses always stay well below
+/// `MAX_LINE_BYTES` even after JSON escaping.
+pub const MAX_READ_BYTES: usize = 256 * 1024;
+
+/// Keep at most `max_bytes` from the tail of `text`, aligned to a UTF-8 character boundary.
+pub fn bound_read_text(text: &str, max_bytes: usize) -> String {
+    if text.len() <= max_bytes {
+        return text.to_owned();
+    }
+    let mut start = text.len() - max_bytes;
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    text[start..].to_owned()
+}
+
 /// Maximum number of argv entries accepted by `tab.new` / `pane.split`.
 pub const MAX_COMMAND_ARGS: usize = 1024;
 
@@ -88,7 +104,7 @@ pub enum ReadLine {
 /// Never buffers more than `max_bytes + 1` bytes from `reader`.
 pub fn read_bounded_line<R: BufRead>(reader: &mut R, max_bytes: usize) -> io::Result<ReadLine> {
     let mut buf = Vec::new();
-    let mut limited = reader.take((max_bytes + 1) as u64);
+    let mut limited = reader.take(max_bytes.saturating_add(1) as u64);
     let n = limited.read_until(b'\n', &mut buf)?;
     if n == 0 {
         return Ok(ReadLine::Eof);

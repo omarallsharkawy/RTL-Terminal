@@ -261,9 +261,9 @@ pub fn build_frame(
 impl Frame {
     /// Draw the command palette above everything else.
     pub fn add_palette(&mut self, ctx: &mut DrawContext, view: &PaletteView) {
-        let (texts, rect) = palette_overlay(ctx, view, self.surface, &mut self.quads);
+        let (outer, texts) = palette_overlay(ctx, view, self.surface, &mut self.quads);
         self.overlay.extend(texts);
-        self.overlay_rect = Some(rect);
+        self.overlay_rect = outer;
     }
 
     /// Optional chrome is attached explicitly so offscreen/golden callers keep their layout.
@@ -283,8 +283,8 @@ impl Frame {
             .extend(super::sidebar::attention_quads(ctx, rects));
     }
 
-    /// Every text run, in drawing order: tab titles, then per pane its rows (the last one is
-    /// hidden under a status line) and status line, then the preedit.
+    /// Every text run, in drawing order: tab titles, per-pane rows (the last one hidden under
+    /// a status line) and status line, preedit, sidebar labels, then the command palette.
     pub fn text_runs<'a>(
         &'a self,
         panes: &[PaneFrame],
@@ -294,15 +294,6 @@ impl Frame {
         let m = &self.metrics;
         let fg = self.foreground;
         let mut runs = Vec::new();
-        for label in &self.sidebar_labels {
-            runs.push(TextRun {
-                buffer: &label.buffer,
-                left: label.left,
-                top: label.top,
-                bounds: label.bounds,
-                color: label.color,
-            });
-        }
         for (buffer, rect, color) in &self.tab_titles {
             runs.push(TextRun {
                 buffer,
@@ -379,6 +370,16 @@ impl Frame {
                     color: fg,
                 });
             }
+        }
+        // Sidebar labels after the panes, so they draw above anything a pane draws there.
+        for label in &self.sidebar_labels {
+            runs.push(TextRun {
+                buffer: &label.buffer,
+                left: label.left,
+                top: label.top,
+                bounds: label.bounds,
+                color: label.color,
+            });
         }
         if let Some(hole) = self.overlay_rect {
             runs = runs

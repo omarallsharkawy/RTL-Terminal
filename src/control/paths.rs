@@ -79,7 +79,7 @@ mod unix {
     }
 
     /// Verify that `dir` is a real directory (not a symlink), owned by `expected_uid`, and has no
-    /// group or world permission bits set (`mode & 0o077 == 0`).
+    /// setuid, setgid, group, or world permission bits set (`mode & 0o6077 == 0`).
     pub fn verify_dir(dir: &Path, expected_uid: u32) -> io::Result<()> {
         let meta = fs::symlink_metadata(dir)?;
         if !meta.file_type().is_dir() {
@@ -98,12 +98,50 @@ mod unix {
                 ),
             ));
         }
-        if meta.mode() & 0o077 != 0 {
+        if meta.mode() & 0o6077 != 0 {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 format!(
                     "control socket directory {} has unsafe permissions {:04o} (must be 0700)",
                     dir.display(),
+                    meta.mode() & 0o7777
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Verify that `path` is a real Unix socket (not a symlink), owned by `expected_uid`, has no
+    /// group or world permission bits (`mode & 0o077 == 0`), and resides in a verified directory.
+    pub fn verify_socket(path: &Path, expected_uid: u32) -> io::Result<()> {
+        let parent = match path.parent() {
+            Some(p) if !p.as_os_str().is_empty() => p,
+            _ => Path::new("."),
+        };
+        verify_dir(parent, expected_uid)?;
+        let meta = fs::symlink_metadata(path)?;
+        if !meta.file_type().is_socket() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("control socket path {} is not a socket", path.display()),
+            ));
+        }
+        if meta.uid() != expected_uid {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!(
+                    "control socket {} is owned by uid {}, expected {expected_uid}",
+                    path.display(),
+                    meta.uid()
+                ),
+            ));
+        }
+        if meta.mode() & 0o077 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!(
+                    "control socket {} has unsafe permissions {:04o} (must be 0600)",
+                    path.display(),
                     meta.mode() & 0o7777
                 ),
             ));
@@ -155,6 +193,8 @@ mod unix {
     /// Remove stale `twitty-<pid>.sock` files in `dir` whose owning process is no longer alive.
     /// Returns the number of sockets removed.
     pub fn cleanup_stale_sockets(dir: &Path) -> io::Result<usize> {
+        let uid = current_uid()?;
+        verify_dir(dir, uid)?;
         let mut removed = 0;
         for entry in fs::read_dir(dir)? {
             let Ok(entry) = entry else { continue };
@@ -169,7 +209,7 @@ mod unix {
             let Ok(meta) = fs::symlink_metadata(&path) else {
                 continue;
             };
-            if !meta.file_type().is_socket() {
+            if !meta.file_type().is_socket() || meta.uid() != uid {
                 continue;
             }
             if is_stale_socket(&path, pid) && fs::remove_file(&path).is_ok() {
@@ -196,7 +236,10 @@ mod unix {
             let Ok(meta) = fs::symlink_metadata(&path) else {
                 continue;
             };
-            if !meta.file_type().is_socket() || meta.uid() != expected_uid {
+            if !meta.file_type().is_socket()
+                || meta.uid() != expected_uid
+                || meta.mode() & 0o077 != 0
+            {
                 continue;
             }
             #[cfg(target_os = "linux")]
@@ -229,5 +272,5 @@ mod unix {
 #[cfg(unix)]
 pub use unix::{
     cleanup_stale_sockets, connect_newest_in, current_uid, default_runtime_dir, ensure_runtime_dir,
-    find_newest_socket_in, verify_dir,
+    find_newest_socket_in, verify_dir, verify_socket,
 };

@@ -746,9 +746,19 @@ impl Terminal {
                 {
                     continue;
                 }
-                text.push(cell.c);
+                if !cell.c.is_control()
+                    && !is_bidi_control(cell.c)
+                    && !matches!(cell.c, '\u{2028}' | '\u{2029}')
+                {
+                    text.push(cell.c);
+                }
                 for &z in drawn_marks(cell) {
-                    text.push(z);
+                    if !z.is_control()
+                        && !is_bidi_control(z)
+                        && !matches!(z, '\u{2028}' | '\u{2029}')
+                    {
+                        text.push(z);
+                    }
                 }
             }
             out.push_str(text.trim_end_matches(' '));

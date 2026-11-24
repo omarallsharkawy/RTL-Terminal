@@ -48,7 +48,20 @@ impl App {
             command: agent_argv(&agent, &prompt),
             env: Vec::new(),
         };
-        self.split_focused_with(SplitDir::Horizontal, options);
+        // Prefer a side-by-side split; when the sidebar or existing splits leave the pane too
+        // narrow for MIN_SPLIT_COLS, fall back to a stacked split, then a new tab.
+        let spawned = if self.ws.can_split_focused(SplitDir::Horizontal) {
+            self.split_focused_with(SplitDir::Horizontal, options)
+        } else if self.ws.can_split_focused(SplitDir::Vertical) {
+            self.split_focused_with(SplitDir::Vertical, options)
+        } else {
+            self.new_tab_with(options)
+        };
+        if spawned.is_none() {
+            let note = "\r\n\x1b[33mTwitty: failed to start the coding agent.\x1b[0m\r\n";
+            self.term(id, |t| t.process_bytes(note.as_bytes()));
+            self.window.request_redraw();
+        }
     }
 }
 

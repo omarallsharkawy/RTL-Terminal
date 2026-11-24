@@ -214,6 +214,21 @@ impl Workspace {
         Some(id)
     }
 
+    /// Whether the focused pane is large enough to split in `dir`.
+    pub(crate) fn can_split_focused(&self, dir: SplitDir) -> bool {
+        let Some((cols, rows)) = self
+            .focused_id()
+            .and_then(|id| self.panes.get(&id))
+            .map(|p| p.size)
+        else {
+            return false;
+        };
+        match dir {
+            SplitDir::Horizontal => cols >= MIN_SPLIT_COLS * 2,
+            SplitDir::Vertical => rows >= MIN_SPLIT_ROWS * 2,
+        }
+    }
+
     /// Split the focused pane and focus the new one. Returns `(old, new)` focused panes, or
     /// `None` when the pane is too small to split or no shell could be started.
     pub(crate) fn split_focused(
@@ -222,16 +237,11 @@ impl Workspace {
         factory: &mut impl PaneFactory,
         dir: SplitDir,
     ) -> Option<(PaneId, PaneId)> {
-        let tab = self.tabs.get(self.active)?;
-        let focused = tab.focused;
-        let (cols, rows) = self.panes.get(&focused)?.size;
-        let fits = match dir {
-            SplitDir::Horizontal => cols >= MIN_SPLIT_COLS * 2,
-            SplitDir::Vertical => rows >= MIN_SPLIT_ROWS * 2,
-        };
-        if !fits {
+        if !self.can_split_focused(dir) {
             return None;
         }
+        let tab = self.tabs.get(self.active)?;
+        let focused = tab.focused;
         let mut root = tab.root.clone();
         let new_id = self.alloc_id();
         root.split(focused, new_id, dir);
@@ -246,6 +256,18 @@ impl Workspace {
         self.tabs[self.active].root = root;
         self.tabs[self.active].focused = new_id;
         Some((focused, new_id))
+    }
+
+    /// Focus pane `id` in whichever tab holds it, switching tabs in one step without firing
+    /// intermediate focus events on that tab's previously focused pane.
+    /// Returns `(tab_index, previous_focused, tab_changed)`.
+    pub(crate) fn focus_any_pane(&mut self, id: PaneId) -> Option<(usize, Option<PaneId>, bool)> {
+        let tab_index = self.tabs.iter().position(|t| t.root.contains(id))?;
+        let previous = self.focused_id();
+        let tab_changed = tab_index != self.active;
+        self.active = tab_index;
+        self.tabs[tab_index].focused = id;
+        Some((tab_index, previous, tab_changed))
     }
 
     /// Focus pane `id` of the active tab. Returns the previously focused pane when focus moved.
@@ -533,5 +555,54 @@ mod tests {
         ws.pane_mut(PaneId(1)).unwrap().title = Some("vim".into());
         assert_eq!(ws.tab_title(0), "vim");
         assert_eq!(ws.focused_title().as_deref(), Some("vim"));
+    }
+
+    #[test]
+    fn can_split_focused_tracks_narrow_sidebar_area_for_agent_fallback() {
+        // Window narrowed by a sidebar: 40 cols x 28 rows (< MIN_SPLIT_COLS*2, >= MIN_SPLIT_ROWS*2).
+        let narrow = Grid { w: 400.0, h: 560.0 };
+        let mut ws = Workspace::new();
+        let mut shells = FakeShells::default();
+        ws.new_tab(&narrow, &mut shells).unwrap();
+        assert!(!ws.can_split_focused(SplitDir::Horizontal));
+        assert!(ws.can_split_focused(SplitDir::Vertical));
+        assert!(ws
+            .split_focused(&narrow, &mut shells, SplitDir::Vertical)
+            .is_some());
+        ws.apply_layout(&narrow);
+        // After the vertical split each half is 13-14 rows: too small in both directions.
+        assert!(!ws.can_split_focused(SplitDir::Horizontal));
+        assert!(!ws.can_split_focused(SplitDir::Vertical));
+    }
+
+    #[test]
+    fn focus_any_pane_switches_tab_and_pane_in_one_step_for_hidden_attention() {
+        use crate::session::pane::Notification;
+        use std::time::{Duration, SystemTime};
+
+        let (mut ws, mut shells) = ws_with_tab();
+        // Tab 0: Pane 1. Tab 1: split Pane 2 (focused) + Pane 3 (unfocused).
+        ws.new_tab(&BIG, &mut shells).unwrap();
+        ws.split_focused(&BIG, &mut shells, SplitDir::Horizontal)
+            .unwrap();
+        ws.focus_pane(PaneId(2));
+        // Switch back to Tab 0 so Tab 1 is hidden.
+        assert!(ws.set_active_tab(0));
+        assert_eq!(ws.focused_id(), Some(PaneId(1)));
+
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(10);
+        ws.pane_mut(PaneId(3)).unwrap().meta.attention = Some(Notification {
+            title: None,
+            body: "done".into(),
+            at: t0,
+        });
+        assert_eq!(ws.oldest_attention(), Some((1, PaneId(3))));
+        // Jump straight from Pane 1 (Tab 0) to Pane 3 (Tab 1) in one step.
+        assert_eq!(
+            ws.focus_any_pane(PaneId(3)),
+            Some((1, Some(PaneId(1)), true))
+        );
+        assert_eq!(ws.active(), 1);
+        assert_eq!(ws.focused_id(), Some(PaneId(3)));
     }
 }

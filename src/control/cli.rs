@@ -270,6 +270,8 @@ fn parse_usize_flag(flag: &str, val: &str) -> Result<usize, String> {
 
 /// Format `tab.list` and `pane.list` results for human-readable `twitty list` output.
 pub fn format_list(tabs: &Value, panes: &Value) -> String {
+    use crate::shell_integration::{clean_text, MAX_NOTIFY_CHARS};
+
     let tabs = tabs.as_array().map(Vec::as_slice).unwrap_or(&[]);
     let panes = panes.as_array().map(Vec::as_slice).unwrap_or(&[]);
 
@@ -280,7 +282,7 @@ pub fn format_list(tabs: &Value, panes: &Value) -> String {
     let mut out = String::new();
     for tab in tabs {
         let index = tab.get("index").and_then(Value::as_u64).unwrap_or(0);
-        let title = tab.get("title").and_then(Value::as_str).unwrap_or("");
+        let title = clean_text(tab.get("title").and_then(Value::as_str).unwrap_or(""), 256);
         let active = tab.get("active").and_then(Value::as_bool).unwrap_or(false);
         let active_tag = if active { " [active]" } else { "" };
         out.push_str(&format!("Tab {index}{active_tag}: {title}\n"));
@@ -306,7 +308,12 @@ pub fn format_list(tabs: &Value, panes: &Value) -> String {
                 .and_then(Value::as_u64)
                 .unwrap_or(0);
             let mut line = format!("  {marker} pane {id}  {cols}x{rows}");
-            if let Some(cwd) = pane.get("cwd").and_then(Value::as_str) {
+            if let Some(cwd) = pane
+                .get("cwd")
+                .and_then(Value::as_str)
+                .map(|s| clean_text(s, 4096))
+                .filter(|s| !s.is_empty())
+            {
                 line.push_str(&format!("  {cwd}"));
             }
             if pane
@@ -321,13 +328,20 @@ pub fn format_list(tabs: &Value, panes: &Value) -> String {
             if let Some(pt) = pane
                 .get("title")
                 .and_then(Value::as_str)
+                .map(|s| clean_text(s, 256))
                 .filter(|s| !s.is_empty())
             {
                 line.push_str(&format!("  {pt}"));
             }
             if let Some(att) = pane.get("attention").and_then(Value::as_object) {
-                let atitle = att.get("title").and_then(Value::as_str).unwrap_or("");
-                let abody = att.get("body").and_then(Value::as_str).unwrap_or("");
+                let atitle = clean_text(
+                    att.get("title").and_then(Value::as_str).unwrap_or(""),
+                    MAX_NOTIFY_CHARS,
+                );
+                let abody = clean_text(
+                    att.get("body").and_then(Value::as_str).unwrap_or(""),
+                    MAX_NOTIFY_CHARS,
+                );
                 if !atitle.is_empty() && !abody.is_empty() {
                     line.push_str(&format!("  [!] {atitle}: {abody}"));
                 } else if !atitle.is_empty() {
