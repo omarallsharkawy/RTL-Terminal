@@ -37,6 +37,7 @@ use crate::input::mouse::StepAccumulator;
 use crate::input::pointer::PointerState;
 use crate::layout::PaneId;
 use crate::session::pane::Pane;
+use crate::session::restore::{PreparedSession, SessionStore};
 use crate::session::workspace::Workspace;
 use crate::terminal::Terminal;
 use crate::ui::clipboard::Clipboard;
@@ -51,6 +52,8 @@ pub struct App {
     clipboard: Clipboard,
     config: TwittyConfig,
     config_dirty: bool,
+    session: SessionStore,
+    startup_session: Option<PreparedSession>,
     /// An IME composition (preedit) is on screen.
     preedit_active: bool,
     cursor_blink: BlinkState,
@@ -66,6 +69,13 @@ pub struct App {
 
 impl App {
     pub fn new(proxy: EventLoopProxy<AppEvent>) -> Self {
+        let config = TwittyConfig::load();
+        let session = SessionStore::new();
+        let startup_session = if config.restore_session {
+            session.load()
+        } else {
+            None
+        };
         Self {
             proxy,
             ws: Workspace::new(),
@@ -73,8 +83,10 @@ impl App {
             modifiers: ModifiersState::empty(),
             pointer: PointerState::default(),
             clipboard: Clipboard::default(),
-            config: TwittyConfig::load(),
+            config,
             config_dirty: false,
+            session,
+            startup_session,
             preedit_active: false,
             cursor_blink: BlinkState::new(BLINK_INTERVAL),
             zoom_steps: StepAccumulator::default(),
@@ -130,13 +142,13 @@ impl ApplicationHandler<AppEvent> for App {
             return;
         }
         self.start_control_server();
-        self.new_tab();
+        self.start_session();
         if self.ws.is_empty() {
             self.window.close();
             event_loop.exit();
             return;
         }
-        // Config problems found while starting (bad JSON, unknown theme, missing font).
+        // Config and session problems found while starting.
         let warnings = crate::config::take_warnings();
         if let Some(id) = self.ws.focused_id().filter(|_| !warnings.is_empty()) {
             let text: String = warnings
@@ -194,6 +206,7 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.session.finish(&self.ws, self.window.sidebar_visible());
         self.control = None;
         if self.config_dirty {
             self.config.save();

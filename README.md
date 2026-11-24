@@ -133,6 +133,18 @@ An unknown name prints a warning and falls back to `tokyo-night`.
 }
 ```
 
+### Session restore
+
+Closing the window saves the tabs, split sizes, pane directories and titles, focus, and sidebar
+visibility. Twitty restores them on the next launch by starting fresh shells. A missing directory
+uses the shell's default directory. The session file contains no scrollback, commands,
+environment variables, or input. Exiting or closing the last pane clears the saved session.
+
+Set `"restore_session": false` in `config.json` to start with a fresh window each time. Window
+close still saves the layout. The file is `$XDG_STATE_HOME/twitty/session.json`, with
+`~/.local/state/twitty/session.json` as the Unix fallback, or
+`%LOCALAPPDATA%\twitty\session.json` on Windows. Twitty restores up to 32 tabs and 64 panes.
+
 ### Shell
 
 On Linux and macOS Twitty starts `$SHELL` as a login shell. On Windows it picks PowerShell 7 (`pwsh.exe`), then Windows PowerShell, then `%COMSPEC%`. Set `TWITTY_SHELL` to override, arguments included:
