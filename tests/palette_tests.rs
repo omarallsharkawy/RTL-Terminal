@@ -166,7 +166,6 @@ fn overlay_draws_above_panes_with_arabic_on_the_right() {
     let mut ime = PreeditState::default();
     let mut frame = build_frame(&mut ctx, &opts, &mut cache, &mut ime, &[], &panes, &[]);
     let quads_before = frame.quads.len();
-    let runs_before = frame.text_runs(&panes, &cache, &ime).len();
     let view = PaletteView {
         query: "قسم".into(),
         items: vec![
@@ -190,12 +189,8 @@ fn overlay_draws_above_panes_with_arabic_on_the_right() {
     let (x, y, w, _, _) = frame.quads[quads_before];
     assert!(x < panel.x && y < panel.y && w > panel.w, "border first");
     let runs = frame.text_runs(&panes, &cache, &ime);
-    let overlay = &runs[runs_before..];
-    assert_eq!(
-        overlay.len(),
-        1 + 2 * 2,
-        "query + (english, arabic) per item"
-    );
+    // Query + (english, arabic) per item come last; pane text before them is clipped.
+    let overlay = &runs[runs.len() - (1 + 2 * 2)..];
     let arabic = &overlay[2];
     let right = arabic.left + label_width(arabic.buffer);
     assert!(
@@ -204,4 +199,101 @@ fn overlay_draws_above_panes_with_arabic_on_the_right() {
         panel.right()
     );
     assert!(overlay[1].left < arabic.left, "English starts on the left");
+}
+
+#[test]
+fn bounds_around_cuts_a_hole() {
+    use glyphon::TextBounds;
+    use twitty::render::scene::frame::bounds_around;
+    let b = TextBounds {
+        left: 0,
+        top: 0,
+        right: 100,
+        bottom: 100,
+    };
+    // No overlap: unchanged.
+    assert_eq!(bounds_around(b, Rect::new(200.0, 0.0, 10.0, 10.0)).len(), 1);
+    // Hole in the middle: four strips covering everything but the hole.
+    let parts = bounds_around(b, Rect::new(20.0, 30.0, 40.0, 20.0));
+    assert_eq!(parts.len(), 4);
+    let area: i32 = parts
+        .iter()
+        .map(|p| (p.right - p.left) * (p.bottom - p.top))
+        .sum();
+    assert_eq!(area, 100 * 100 - 40 * 20);
+    for p in &parts {
+        let overlaps = p.left < 60 && p.right > 20 && p.top < 50 && p.bottom > 30;
+        assert!(!overlaps, "{p:?}");
+    }
+    // Hole covering everything: nothing left.
+    assert!(bounds_around(b, Rect::new(-5.0, -5.0, 200.0, 200.0)).is_empty());
+}
+
+#[test]
+fn no_pane_text_is_drawn_under_the_palette() {
+    let mut font_system = FontSystem::new();
+    let palette = Palette::default();
+    let metrics = CellMetrics {
+        font_size: 15.0,
+        scale: 1.0,
+        char_width: 9.0,
+        line_height: 23.0,
+        padding_left: 8.0,
+        padding_top: 6.0,
+    };
+    let mut ctx = DrawContext {
+        font_system: &mut font_system,
+        family: None,
+        palette: &palette,
+        metrics,
+        is_srgb: false,
+    };
+    let surface = (900.0, 600.0);
+    let opts = FrameOptions {
+        window_focused: true,
+        cursor_style: "block",
+        cursor_blink_on: true,
+        surface,
+    };
+    let mut term = Terminal::new(80, 20, |_| {});
+    for i in 0..20 {
+        term.process_bytes(format!("سطر {i} line {i}\r\n").as_bytes());
+    }
+    let (lines, cursor) = term.snapshot();
+    let panes = vec![PaneFrame {
+        id: PaneId(1),
+        rect: Rect::new(0.0, 0.0, surface.0, surface.1),
+        lines,
+        cursor,
+        focused: true,
+        status: None,
+        blocks: Vec::new(),
+    }];
+    let mut cache = RowCache::default();
+    let mut ime = PreeditState::default();
+    let mut frame = build_frame(&mut ctx, &opts, &mut cache, &mut ime, &[], &panes, &[]);
+    let view = PaletteView {
+        query: String::new(),
+        items: vec![PaletteItem {
+            title_en: "New tab".into(),
+            title_ar: "تاب جديد".into(),
+            shortcut: None,
+        }],
+        selected: 0,
+    };
+    frame.add_palette(&mut ctx, &view);
+    let panel = panel_rect(9.0, 23.0, surface, 1);
+    let runs = frame.text_runs(&panes, &cache, &ime);
+    let overlay_runs = 3;
+    let (under, overlay) = runs.split_at(runs.len() - overlay_runs);
+    assert!(!under.is_empty());
+    for run in under {
+        let b = run.bounds;
+        let overlaps = (b.left as f32) < panel.right()
+            && (b.right as f32) > panel.x
+            && (b.top as f32) < panel.bottom()
+            && (b.bottom as f32) > panel.y;
+        assert!(!overlaps, "pane text clipped into the palette: {b:?}");
+    }
+    assert!(overlay.iter().all(|r| r.top >= panel.y));
 }

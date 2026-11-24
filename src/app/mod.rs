@@ -78,7 +78,8 @@ impl App {
             preedit_active: false,
             cursor_blink: BlinkState::new(BLINK_INTERVAL),
             zoom_steps: StepAccumulator::default(),
-            window_focused: true,
+            // Until the system says the window has focus (it does as soon as it gets it).
+            window_focused: false,
             palette: None,
             control: None,
         }

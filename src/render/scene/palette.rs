@@ -57,7 +57,7 @@ pub(crate) fn palette_overlay(
     view: &PaletteView,
     surface: (f32, f32),
     quads: &mut Vec<Quad>,
-) -> Vec<OverlayText> {
+) -> (Vec<OverlayText>, Rect) {
     let m = ctx.metrics;
     let (cw, lh) = (m.char_width, m.line_height);
     let panel = panel_rect(cw, lh, surface, view.items.len().max(1));
@@ -88,7 +88,7 @@ pub(crate) fn palette_overlay(
     // Query line, with a prompt and a hint when empty.
     let query_y = panel.y + lh * 0.25;
     let (query, query_color) = if view.query.is_empty() {
-        ("› اكتب أمر… / Type a command…".to_string(), dim)
+        ("› Type a command… / اكتب أمر…".to_string(), dim)
     } else {
         (format!("› {}", view.query), fg)
     };
@@ -132,7 +132,13 @@ pub(crate) fn palette_overlay(
             color: fg.to_glyphon(),
         });
     }
-    texts
+    let edge_rect = Rect::new(
+        panel.x - edge,
+        panel.y - edge,
+        panel.w + 2.0 * edge,
+        panel.h + 2.0 * edge,
+    );
+    (texts, edge_rect)
 }
 
 /// Width of a shaped one-line label.

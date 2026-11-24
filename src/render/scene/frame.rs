@@ -68,6 +68,51 @@ pub struct Frame {
     surface: (f32, f32),
     /// Overlays drawn above everything (the command palette).
     overlay: Vec<OverlayText>,
+    /// Area the overlay covers: other text is clipped out of it, since all text is drawn
+    /// after all quads and would otherwise show through the overlay's background.
+    overlay_rect: Option<Rect>,
+}
+
+/// The parts of `bounds` outside `hole`: up to four strips (above, below, left, right).
+pub fn bounds_around(bounds: TextBounds, hole: Rect) -> Vec<TextBounds> {
+    let (hl, ht) = (hole.x.floor() as i32, hole.y.floor() as i32);
+    let (hr, hb) = (hole.right().ceil() as i32, hole.bottom().ceil() as i32);
+    if hr <= bounds.left || hl >= bounds.right || hb <= bounds.top || ht >= bounds.bottom {
+        return vec![bounds];
+    }
+    let mid_top = bounds.top.max(ht);
+    let mid_bottom = bounds.bottom.min(hb);
+    [
+        TextBounds {
+            bottom: ht,
+            ..bounds
+        },
+        TextBounds { top: hb, ..bounds },
+        TextBounds {
+            top: mid_top,
+            bottom: mid_bottom,
+            right: hl,
+            ..bounds
+        },
+        TextBounds {
+            top: mid_top,
+            bottom: mid_bottom,
+            left: hr,
+            ..bounds
+        },
+    ]
+    .into_iter()
+    .filter(|b| {
+        b.left.max(bounds.left) < b.right.min(bounds.right)
+            && b.top.max(bounds.top) < b.bottom.min(bounds.bottom)
+    })
+    .map(|b| TextBounds {
+        left: b.left.max(bounds.left),
+        top: b.top.max(bounds.top),
+        right: b.right.min(bounds.right),
+        bottom: b.bottom.min(bounds.bottom),
+    })
+    .collect()
 }
 
 fn rect_bounds(r: Rect) -> TextBounds {
@@ -209,14 +254,16 @@ pub fn build_frame(
         foreground: ctx.palette.foreground.to_glyphon(),
         surface: opts.surface,
         overlay: Vec::new(),
+        overlay_rect: None,
     }
 }
 
 impl Frame {
     /// Draw the command palette above everything else.
     pub fn add_palette(&mut self, ctx: &mut DrawContext, view: &PaletteView) {
-        let texts = palette_overlay(ctx, view, self.surface, &mut self.quads);
+        let (texts, rect) = palette_overlay(ctx, view, self.surface, &mut self.quads);
         self.overlay.extend(texts);
+        self.overlay_rect = Some(rect);
     }
 
     /// Optional chrome is attached explicitly so offscreen/golden callers keep their layout.
@@ -332,6 +379,16 @@ impl Frame {
                     color: fg,
                 });
             }
+        }
+        if let Some(hole) = self.overlay_rect {
+            runs = runs
+                .into_iter()
+                .flat_map(|run| {
+                    bounds_around(run.bounds, hole)
+                        .into_iter()
+                        .map(move |bounds| TextRun { bounds, ..run })
+                })
+                .collect();
         }
         for text in &self.overlay {
             runs.push(TextRun {
