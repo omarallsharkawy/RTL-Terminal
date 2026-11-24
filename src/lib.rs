@@ -2,6 +2,7 @@
 pub mod app;
 pub mod blink;
 pub mod color;
+pub mod commands;
 pub mod config;
 pub mod ime;
 pub mod input;
@@ -10,6 +11,7 @@ pub mod links;
 pub mod pty;
 pub mod render;
 pub mod session;
+pub mod shell_integration;
 pub mod terminal;
 pub mod ui;
 

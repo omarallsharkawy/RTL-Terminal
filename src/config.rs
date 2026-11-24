@@ -22,6 +22,20 @@ pub struct TwittyConfig {
     pub font_family: Option<String>,
     /// Blink the cursor, unless the running program asks for a steady one (DECSCUSR).
     pub cursor_blink: bool,
+    /// Where the workspace sidebar sits: "right", "left" or "hidden".
+    pub sidebar: String,
+    /// Sidebar width in logical pixels.
+    pub sidebar_width: f32,
+    /// Show a desktop notification when a program in an unfocused pane asks for attention
+    /// (OSC 9/99/777).
+    pub desktop_notifications: bool,
+    /// Listen on a local socket so `twitty ctl` and agents can drive this window.
+    pub control_socket: bool,
+    /// Load Twitty's shell integration (OSC 133 prompt marks, OSC 7 cwd) into bash, zsh and fish.
+    pub shell_integration: bool,
+    /// Command run by "Ask an agent", e.g. "claude" or "codex". Unset: the first one installed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_command: Option<String>,
     /// Keys this version does not know about are kept so saving never drops them.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
@@ -40,6 +54,12 @@ impl Default for TwittyConfig {
             colors: None,
             font_family: None,
             cursor_blink: true,
+            sidebar: "right".into(),
+            sidebar_width: 220.0,
+            desktop_notifications: true,
+            control_socket: true,
+            shell_integration: true,
+            agent_command: None,
             extra: serde_json::Map::new(),
             keep_file: false,
         }

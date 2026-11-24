@@ -5,7 +5,7 @@ use winit::event_loop::EventLoopProxy;
 
 use crate::app::AppEvent;
 use crate::layout::PaneId;
-use crate::pty::Pty;
+use crate::pty::{Pty, SpawnOptions};
 use crate::session::pane::Pane;
 use crate::session::workspace::PaneFactory;
 use crate::terminal::Terminal;
@@ -14,6 +14,8 @@ pub(crate) struct ShellFactory<'a> {
     proxy: &'a EventLoopProxy<AppEvent>,
     /// Blink the cursor when the program has not chosen a style.
     cursor_blink: bool,
+    /// Program to run instead of the shell, and extra environment, for the next spawn.
+    pub options: SpawnOptions,
 }
 
 impl<'a> ShellFactory<'a> {
@@ -21,6 +23,7 @@ impl<'a> ShellFactory<'a> {
         Self {
             proxy,
             cursor_blink,
+            options: SpawnOptions::default(),
         }
     }
 }
@@ -41,8 +44,14 @@ impl PaneFactory for ShellFactory<'_> {
         let proxy = self.proxy.clone();
         let proxy_exit = self.proxy.clone();
         // New tabs and splits open in the directory of the pane that has focus.
-        let pty = match Pty::spawn_in(
-            cwd.as_deref(),
+        let mut options = self.options.clone();
+        options.cwd = cwd.or(options.cwd);
+        // Lets `twitty ctl` and agents running inside the pane address it.
+        options
+            .env
+            .push(("TWITTY_PANE_ID".into(), id.0.to_string()));
+        let pty = match Pty::spawn_with(
+            &options,
             cols as u16,
             rows as u16,
             move || {

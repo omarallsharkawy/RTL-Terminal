@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 use super::App;
 use crate::layout::PaneId;
 use crate::pty::Pty;
+use crate::session::pane::Notification;
+use crate::shell_integration::{MarkKind, ShellEvent, Signal};
 
 #[derive(Debug)]
 pub enum AppEvent {
@@ -59,6 +61,7 @@ impl App {
         if !any {
             return;
         }
+        let events = term.take_shell_events();
         let moved = term.cursor_position() != before;
         // Output that moves the cursor keeps it solid while text is appearing.
         if moved && self.focused_id() == Some(id) {
@@ -71,6 +74,51 @@ impl App {
         if self.modifiers.control_key() {
             self.update_link_hover(id);
         }
+        for event in events {
+            self.on_shell_event(id, event);
+        }
+    }
+
+    /// A shell signal from pane `id` (see `shell_integration`).
+    fn on_shell_event(&mut self, id: PaneId, event: ShellEvent) {
+        let Some(pane) = self.ws.pane_mut(id) else {
+            return;
+        };
+        let meta = &mut pane.meta;
+        match event.signal {
+            Signal::Cwd(path) => meta.cwd = Some(path),
+            Signal::Notify { title, body } => {
+                self.notify(id, title, body);
+                return;
+            }
+            Signal::CommandLine(line) => meta.last_command = Some(line),
+            Signal::Mark(kind) => match kind {
+                MarkKind::OutputStart => meta.running = true,
+                MarkKind::CommandEnd { exit } => {
+                    meta.running = false;
+                    meta.last_exit = exit;
+                }
+                MarkKind::PromptStart | MarkKind::CommandStart => {}
+            },
+        }
+        self.window.request_redraw();
+    }
+
+    /// A program in pane `id` asked for the user's attention. It is marked for the sidebar
+    /// unless the user is already looking at that pane.
+    pub(super) fn notify(&mut self, id: PaneId, title: Option<String>, body: String) {
+        let seen = self.window_focused && self.focused_id() == Some(id);
+        if seen {
+            return;
+        }
+        if let Some(pane) = self.ws.pane_mut(id) {
+            pane.meta.attention = Some(Notification {
+                title,
+                body,
+                at: std::time::SystemTime::now(),
+            });
+        }
+        self.window.request_redraw();
     }
 
     /// The delayed clear of a copied selection.

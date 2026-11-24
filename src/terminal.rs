@@ -1,4 +1,5 @@
 use crate::links::find_url_at;
+use crate::shell_integration::{parse_osc, ShellEvent, Signal, MAX_PENDING_EVENTS, MAX_SIGNAL_LEN};
 use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::{Dimensions, Row, Scroll};
 use alacritty_terminal::index::{Boundary, Column, Direction, Line, Point, Side};
@@ -13,7 +14,7 @@ use alacritty_terminal::vte::ansi::{
     Color as AnsiColor, CursorShape, CursorStyle, NamedColor, Processor, StdSyncHandler,
 };
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::ops::Range;
 use std::sync::Arc;
 use unicode_bidi::{bidi_class, BidiClass};
@@ -205,6 +206,10 @@ pub const MAX_OSC_LEN: usize = 8 << 20;
 #[derive(Default)]
 struct OscGuard {
     state: OscState,
+    /// Start of the current OSC's payload, up to `MAX_SIGNAL_LEN` bytes, for shell signals.
+    payload: Vec<u8>,
+    /// The payload went past `MAX_SIGNAL_LEN`: it is not a signal.
+    payload_cut: bool,
 }
 
 #[derive(Default, Clone, Copy, PartialEq)]
@@ -221,6 +226,8 @@ enum OscState {
 #[derive(PartialEq)]
 enum OscStep {
     Keep,
+    /// Keep this byte; it ends an OSC whose payload is in `OscGuard::payload`.
+    End,
     Drop,
     /// The OSC just went over the limit: replace this byte with one that spoils the payload, so
     /// a cut clipboard copy (invalid base64) or link is ignored instead of applied half.
@@ -231,13 +238,27 @@ impl OscGuard {
     fn step(&mut self, byte: u8) -> OscStep {
         use OscState::*;
         let (next, step) = match (self.state, byte) {
-            // BEL, CAN and SUB end an OSC; ESC ends it and starts an escape (ST is ESC \).
-            (Osc(_) | Overflow, 0x07 | 0x18 | 0x1A) => (Other, OscStep::Keep),
+            // BEL and ESC (ST is ESC \) end an OSC; CAN and SUB cancel it.
+            (Osc(_), 0x07) => (Other, OscStep::End),
+            (Osc(_), 0x1B) => (Escape, OscStep::End),
+            (Osc(_) | Overflow, 0x18 | 0x1A) => (Other, OscStep::Keep),
+            (Overflow, 0x07) => (Other, OscStep::Keep),
             (_, 0x1B) => (Escape, OscStep::Keep),
-            (Escape, b']') => (Osc(0), OscStep::Keep),
+            (Escape, b']') => {
+                self.payload.clear();
+                self.payload_cut = false;
+                (Osc(0), OscStep::Keep)
+            }
             (Escape, _) => (Other, OscStep::Keep),
             (Osc(n), _) if n >= MAX_OSC_LEN => (Overflow, OscStep::Spoil),
-            (Osc(n), _) => (Osc(n + 1), OscStep::Keep),
+            (Osc(n), _) => {
+                if self.payload.len() < MAX_SIGNAL_LEN {
+                    self.payload.push(byte);
+                } else {
+                    self.payload_cut = true;
+                }
+                (Osc(n + 1), OscStep::Keep)
+            }
             (Overflow, _) => (Overflow, OscStep::Drop),
             (Other, _) => (Other, OscStep::Keep),
         };
@@ -256,6 +277,8 @@ pub struct Terminal {
     link_hover: Option<(usize, Range<usize>)>,
     /// The last snapshot's rows by key, so rows that did not change are not rebuilt.
     snapshot_rows: RefCell<HashMap<u64, LineData>>,
+    /// Shell signals (OSC 7, 9, 99, 133, 633, 777) not yet taken by the app.
+    shell_events: VecDeque<ShellEvent>,
 }
 
 struct SearchState {
@@ -340,6 +363,7 @@ impl Terminal {
             search: None,
             link_hover: None,
             snapshot_rows: RefCell::default(),
+            shell_events: VecDeque::new(),
         }
     }
 
@@ -359,7 +383,18 @@ impl Terminal {
                 }
             }
             let step = self.osc_guard.step(bytes[i]);
-            if step != OscStep::Keep {
+            if step == OscStep::End {
+                let signal = (!self.osc_guard.payload_cut)
+                    .then(|| parse_osc(&self.osc_guard.payload))
+                    .flatten();
+                if let Some(signal) = signal {
+                    // Parse what came before the terminator first, so the event records
+                    // where the cursor was when the shell sent it.
+                    self.parser.advance(&mut self.term, &bytes[from..=i]);
+                    from = i + 1;
+                    self.push_shell_event(signal);
+                }
+            } else if step != OscStep::Keep {
                 self.parser.advance(&mut self.term, &bytes[from..i]);
                 if step == OscStep::Spoil {
                     self.parser.advance(&mut self.term, b"!");
@@ -390,6 +425,24 @@ impl Terminal {
     /// Whether the cursor should blink: the program's DECSCUSR choice, else the default.
     pub fn cursor_blinking(&self) -> bool {
         self.term.cursor_style().blinking
+    }
+
+    /// Shell signals received since the last call, oldest first.
+    pub fn take_shell_events(&mut self) -> Vec<ShellEvent> {
+        self.shell_events.drain(..).collect()
+    }
+
+    fn push_shell_event(&mut self, signal: Signal) {
+        if self.shell_events.len() >= MAX_PENDING_EVENTS {
+            self.shell_events.pop_front();
+        }
+        let point = self.term.grid().cursor.point;
+        self.shell_events.push_back(ShellEvent {
+            signal,
+            line: point.line.0,
+            column: point.column.0,
+            history: self.term.grid().history_size(),
+        });
     }
 
     /// Grid position of the cursor, to tell whether output moved it.

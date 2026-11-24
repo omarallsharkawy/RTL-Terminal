@@ -19,6 +19,32 @@ pub(crate) struct Pane {
     /// Window title set by the program (OSC 0/2).
     pub title: Option<String>,
     pub ui: PaneUi,
+    /// What the shell reported about itself (OSC 7, 9, 133, 777…).
+    pub meta: PaneMeta,
+}
+
+/// What the shell and the programs in a pane reported through shell signals
+/// (`shell_integration`). The sidebar, notifications, blocks and the control socket read it.
+#[derive(Debug, Default)]
+pub(crate) struct PaneMeta {
+    /// Working directory from OSC 7.
+    pub cwd: Option<std::path::PathBuf>,
+    /// An unseen notification (OSC 9/99/777) from this pane: the sidebar shows it until the
+    /// pane is focused while the window has focus.
+    pub attention: Option<Notification>,
+    /// A command is running: OSC 133 C seen, D not yet.
+    pub running: bool,
+    /// Exit status of the last finished command (OSC 133 D).
+    pub last_exit: Option<i32>,
+    /// Last command line the shell reported (OSC 633 E).
+    pub last_command: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Notification {
+    pub title: Option<String>,
+    pub body: String,
+    pub at: std::time::SystemTime,
 }
 
 /// Pointer, selection and search state of one pane.
@@ -70,6 +96,7 @@ impl Pane {
             size,
             title: None,
             ui: PaneUi::default(),
+            meta: PaneMeta::default(),
         }
     }
 

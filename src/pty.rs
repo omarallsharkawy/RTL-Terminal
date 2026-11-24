@@ -127,6 +127,17 @@ impl Drop for Pty {
     }
 }
 
+/// How to start a pane's process.
+#[derive(Clone, Debug, Default)]
+pub struct SpawnOptions {
+    /// Starting directory, used when it exists.
+    pub cwd: Option<std::path::PathBuf>,
+    /// Program and arguments to run instead of the user's shell. Empty: the shell.
+    pub command: Vec<String>,
+    /// Extra environment variables, applied last.
+    pub env: Vec<(String, String)>,
+}
+
 impl Pty {
     /// Start the default shell. `on_output` is called (on the reader thread) when output arrives
     /// in an empty queue; take it with `take_output`. `on_exit` is called when the shell ends.
@@ -143,6 +154,25 @@ impl Pty {
         cwd: Option<&Path>,
         cols: u16,
         rows: u16,
+        on_output: F,
+        on_exit: E,
+    ) -> Result<Self>
+    where
+        F: FnMut() + Send + 'static,
+        E: FnMut() + Send + 'static,
+    {
+        let options = SpawnOptions {
+            cwd: cwd.map(Path::to_path_buf),
+            ..SpawnOptions::default()
+        };
+        Self::spawn_with(&options, cols, rows, on_output, on_exit)
+    }
+
+    /// Start `options.command` (default: the user's shell) with extra environment variables.
+    pub fn spawn_with<F, E>(
+        options: &SpawnOptions,
+        cols: u16,
+        rows: u16,
         mut on_output: F,
         mut on_exit: E,
     ) -> Result<Self>
@@ -150,6 +180,7 @@ impl Pty {
         F: FnMut() + Send + 'static,
         E: FnMut() + Send + 'static,
     {
+        let cwd = options.cwd.as_deref();
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize {
@@ -160,11 +191,22 @@ impl Pty {
             })
             .context("Failed to open PTY pair")?;
 
-        let (shell_cmd, shell_args) = default_shell();
-        let mut cmd = CommandBuilder::new(shell_cmd);
-        for arg in shell_args {
-            cmd.arg(arg);
-        }
+        let mut cmd = match options.command.split_first() {
+            // An explicit program and its arguments, run directly (no shell parses them).
+            Some((program, args)) => {
+                let mut cmd = CommandBuilder::new(program);
+                cmd.args(args);
+                cmd
+            }
+            None => {
+                let (shell_cmd, shell_args) = default_shell();
+                let mut cmd = CommandBuilder::new(shell_cmd);
+                for arg in shell_args {
+                    cmd.arg(arg);
+                }
+                cmd
+            }
+        };
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "Twitty");
@@ -178,6 +220,9 @@ impl Pty {
 
         if let Some(dir) = cwd.filter(|d| d.is_dir()) {
             cmd.cwd(dir);
+        }
+        for (key, value) in &options.env {
+            cmd.env(key, value);
         }
 
         let mut child = pair

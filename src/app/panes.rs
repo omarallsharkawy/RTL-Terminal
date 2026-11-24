@@ -102,6 +102,16 @@ impl App {
         }
     }
 
+    /// Focus the pane with the oldest unseen notification, switching tabs when needed.
+    pub(super) fn focus_next_attention(&mut self) {
+        let Some((tab, id)) = self.ws.oldest_attention() else {
+            return;
+        };
+        self.set_active_tab(tab);
+        self.focus_pane(id);
+        self.window.request_redraw();
+    }
+
     pub(super) fn focus_direction(&mut self, dir: FocusDir) {
         let Some(r) = self.window.grid() else {
             return;

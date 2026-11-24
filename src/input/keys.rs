@@ -12,7 +12,7 @@ use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey};
 use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 
 /// What a key press asks for: bytes for the program, or one of Twitty's own actions.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InputAction {
     /// Send these bytes to the program.
     Bytes(Vec<u8>),
@@ -42,6 +42,22 @@ pub enum InputAction {
     SplitDown,
     /// Move focus to the neighbouring pane.
     Focus(FocusDir),
+    /// Switch to tab `n` (0-based).
+    SelectTab(usize),
+    /// Show or hide the workspace sidebar.
+    ToggleSidebar,
+    /// Focus the next pane with an unseen notification.
+    NextAttention,
+    /// Open the command palette.
+    CommandPalette,
+    /// Scroll to the previous command block (OSC 133).
+    PrevBlock,
+    /// Scroll to the next command block.
+    NextBlock,
+    /// Copy the output of the selected (or last) command block.
+    CopyBlockOutput,
+    /// Ask a coding agent about the selected (or last) command block.
+    AskAgent,
 }
 
 /// One key event with everything the encoders look at. Window-free, so the `*_raw` entry
@@ -302,6 +318,22 @@ fn ctrl_shift_shortcut(key_code: KeyCode) -> Option<InputAction> {
         KeyCode::KeyW => InputAction::ClosePane,
         KeyCode::KeyE => InputAction::SplitRight,
         KeyCode::KeyO => InputAction::SplitDown,
+        KeyCode::KeyP => InputAction::CommandPalette,
+        KeyCode::KeyB => InputAction::ToggleSidebar,
+        KeyCode::KeyU => InputAction::NextAttention,
+        KeyCode::KeyY => InputAction::CopyBlockOutput,
+        KeyCode::KeyA => InputAction::AskAgent,
+        KeyCode::ArrowUp => InputAction::PrevBlock,
+        KeyCode::ArrowDown => InputAction::NextBlock,
+        KeyCode::Digit1 => InputAction::SelectTab(0),
+        KeyCode::Digit2 => InputAction::SelectTab(1),
+        KeyCode::Digit3 => InputAction::SelectTab(2),
+        KeyCode::Digit4 => InputAction::SelectTab(3),
+        KeyCode::Digit5 => InputAction::SelectTab(4),
+        KeyCode::Digit6 => InputAction::SelectTab(5),
+        KeyCode::Digit7 => InputAction::SelectTab(6),
+        KeyCode::Digit8 => InputAction::SelectTab(7),
+        KeyCode::Digit9 => InputAction::SelectTab(8),
         _ => return None,
     })
 }

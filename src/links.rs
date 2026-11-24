@@ -170,6 +170,17 @@ fn local_hostname() -> Option<String> {
 /// on a harmless-looking link must never run one. Links to other hosts are refused: on Windows
 /// they make the system connect to that host and send the user's credentials.
 pub fn file_link_target(url: &str) -> Option<std::path::PathBuf> {
+    let path = local_file_url(url)?;
+    if is_launchable(&path) {
+        return path.parent().map(std::path::Path::to_path_buf);
+    }
+    Some(path)
+}
+
+/// The path of a `file://` URL on this machine (empty host, `localhost` or this host's name),
+/// decoded; `None` for other hosts, malformed escapes and, on Windows, UNC paths. Shared by
+/// link opening and OSC 7 (the shell's working directory).
+pub(crate) fn local_file_url(url: &str) -> Option<std::path::PathBuf> {
     let rest = url
         .get(..7)
         .filter(|p| p.eq_ignore_ascii_case("file://"))
@@ -193,11 +204,7 @@ pub fn file_link_target(url: &str) -> Option<std::path::PathBuf> {
             return None;
         }
     }
-    let path = std::path::PathBuf::from(path);
-    if is_launchable(&path) {
-        return path.parent().map(std::path::Path::to_path_buf);
-    }
-    Some(path)
+    Some(std::path::PathBuf::from(path))
 }
 
 /// True when opening `path` would run it rather than show it.

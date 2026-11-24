@@ -275,6 +275,12 @@ impl App {
     /// Draw the active tab.
     pub(super) fn redraw(&mut self) {
         self.window.needs_redraw = false;
+        // A notification counts as seen once its pane is on screen, focused, in a focused window.
+        if self.window_focused {
+            if let Some(pane) = self.focused_id().and_then(|id| self.ws.pane_mut(id)) {
+                pane.meta.attention = None;
+            }
+        }
         let (tabs, panes, dividers) = self.frame();
         let visible = self.cursor_blink.visible();
         self.window.render(&tabs, &panes, &dividers, visible);
@@ -342,6 +348,8 @@ impl App {
         }
         self.cursor_blink.set_focused(Instant::now(), focused);
         self.window.set_focused(focused);
+        self.window_focused = focused;
+        self.window.request_redraw();
         if let Some(id) = self.focused_id() {
             self.report_focus(id, focused);
         }

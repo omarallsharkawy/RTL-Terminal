@@ -259,6 +259,20 @@ impl Workspace {
         Some(old)
     }
 
+    /// Tab index and id of the pane whose unseen notification is the oldest.
+    pub(crate) fn oldest_attention(&self) -> Option<(usize, PaneId)> {
+        self.tabs
+            .iter()
+            .enumerate()
+            .flat_map(|(index, tab)| tab.root.leaves().into_iter().map(move |id| (index, id)))
+            .filter_map(|(index, id)| {
+                let at = self.pane(id)?.meta.attention.as_ref()?.at;
+                Some((at, index, id))
+            })
+            .min_by_key(|&(at, ..)| at)
+            .map(|(_, index, id)| (index, id))
+    }
+
     /// The pane next to the focused one in direction `dir`.
     pub fn neighbor(&self, geo: &impl GridGeometry, dir: FocusDir) -> Option<PaneId> {
         let from = self.focused_id()?;

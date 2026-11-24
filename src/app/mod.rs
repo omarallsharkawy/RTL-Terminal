@@ -50,6 +50,8 @@ pub struct App {
     cursor_blink: BlinkState,
     /// Fractional Ctrl+wheel notches not yet turned into zoom or opacity steps.
     zoom_steps: StepAccumulator,
+    /// The window has keyboard focus (notifications from the focused pane are then seen).
+    window_focused: bool,
 }
 
 impl App {
@@ -66,6 +68,7 @@ impl App {
             preedit_active: false,
             cursor_blink: BlinkState::new(BLINK_INTERVAL),
             zoom_steps: StepAccumulator::default(),
+            window_focused: true,
         }
     }
 
