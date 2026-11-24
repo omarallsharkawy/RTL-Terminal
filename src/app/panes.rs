@@ -6,6 +6,7 @@ use std::time::Instant;
 
 use super::App;
 use crate::layout::{FocusDir, PaneId, Rect, SplitDir};
+use crate::pty::SpawnOptions;
 use crate::session::spawn::ShellFactory;
 
 impl App {
@@ -27,31 +28,41 @@ impl App {
     }
 
     pub(super) fn new_tab(&mut self) {
-        let Some(r) = self.window.grid() else {
-            return;
-        };
+        self.new_tab_with(SpawnOptions::default());
+    }
+
+    pub(super) fn new_tab_with(&mut self, mut options: SpawnOptions) -> Option<PaneId> {
+        let r = self.window.grid()?;
         let previous = self.focused_id();
+        self.attach_control_env(&mut options);
         let mut shells = ShellFactory::new(&self.proxy, self.config.cursor_blink);
-        let Some(id) = self.ws.new_tab(r, &mut shells) else {
-            return;
-        };
+        shells.options = options;
+        let id = self.ws.new_tab(r, &mut shells)?;
         self.release_held_buttons();
         self.pointer.cancel();
         // A second tab shows the tab bar, which shrinks every pane.
         self.apply_layout();
         self.focus_changed(previous, id);
+        Some(id)
     }
 
     pub(super) fn split_focused(&mut self, dir: SplitDir) {
-        let Some(r) = self.window.grid() else {
-            return;
-        };
+        self.split_focused_with(dir, SpawnOptions::default());
+    }
+
+    pub(super) fn split_focused_with(
+        &mut self,
+        dir: SplitDir,
+        mut options: SpawnOptions,
+    ) -> Option<PaneId> {
+        let r = self.window.grid()?;
+        self.attach_control_env(&mut options);
         let mut shells = ShellFactory::new(&self.proxy, self.config.cursor_blink);
-        let Some((old, new)) = self.ws.split_focused(r, &mut shells, dir) else {
-            return;
-        };
+        shells.options = options;
+        let (old, new) = self.ws.split_focused(r, &mut shells, dir)?;
         self.apply_layout();
         self.focus_changed(Some(old), new);
+        Some(new)
     }
 
     /// Keyboard focus moved from `old` to `new`: tell the programs, restart the cursor blink and

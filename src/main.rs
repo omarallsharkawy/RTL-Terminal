@@ -3,9 +3,23 @@
 #![forbid(unsafe_code)]
 
 use twitty::app::{App, AppEvent};
+use twitty::control::cli::{parse_args, run_cli, CliAction};
 use winit::event_loop::EventLoop;
 
 fn main() -> anyhow::Result<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let env_pane = std::env::var("TWITTY_PANE_ID").ok();
+    match parse_args(&args, env_pane.as_deref()) {
+        Ok(CliAction::RunGui) => {}
+        Ok(action) => {
+            std::process::exit(run_cli(action));
+        }
+        Err(msg) => {
+            eprintln!("twitty: {msg}");
+            std::process::exit(1);
+        }
+    }
+
     // Logs go to stderr; TWITTY_LOG (or RUST_LOG) picks the level, e.g. TWITTY_LOG=debug.
     let level = std::env::var("TWITTY_LOG")
         .or_else(|_| std::env::var("RUST_LOG"))

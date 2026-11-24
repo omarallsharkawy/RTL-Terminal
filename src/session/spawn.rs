@@ -43,9 +43,9 @@ impl PaneFactory for ShellFactory<'_> {
         terminal.set_default_cursor_blink(self.cursor_blink);
         let proxy = self.proxy.clone();
         let proxy_exit = self.proxy.clone();
-        // New tabs and splits open in the directory of the pane that has focus.
+        // Explicit cwd overrides the focused pane's directory; otherwise inherit it.
         let mut options = self.options.clone();
-        options.cwd = cwd.or(options.cwd);
+        options.cwd = options.cwd.or(cwd);
         // Lets `twitty ctl` and agents running inside the pane address it.
         options
             .env
