@@ -276,3 +276,23 @@ fn english_status_line_with_one_arabic_word_keeps_its_order() {
     let s = shaped("ok تحذير done", false);
     assert!(span(&s.row, 3, 7).1 <= span(&s.row, 9, 12).0 + 0.5);
 }
+
+#[test]
+fn english_message_quoting_an_arabic_name_keeps_reading_left_to_right() {
+    // `ls` on a missing Arabic file name, cut where a 44-column window wraps it.
+    let s = shaped("\"ملف_مش_موجود\": No such file", false);
+    let name = span(&s.row, 1, 12);
+    let no = span(&s.row, 15, 16);
+    let file = span(&s.row, 23, 26);
+    assert!(
+        name.1 <= no.0 + 0.5,
+        "the name stays left of the message: {name:?} {no:?}"
+    );
+    assert!(
+        no.1 <= file.0 + 0.5,
+        "the message reads left to right: {no:?} {file:?}"
+    );
+    // An Arabic sentence with one English word still reads right to left.
+    let s = shaped("تم حفظ الملف config بنجاح", false);
+    assert!(span(&s.row, 13, 18).1 <= span(&s.row, 0, 1).0 + 0.5);
+}

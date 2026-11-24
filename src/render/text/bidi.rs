@@ -39,18 +39,19 @@ pub(crate) fn trails_rtl_neutrals(cells: &[CellData]) -> bool {
 /// on the left; inside the phrase Latin words sit to the left of the Arabic that precedes them,
 /// as in any Arabic text.
 ///
-/// A segment that starts with Arabic, and the line being typed (`typing`), are always right to
-/// left, so English typed after an Arabic word lands on its left. In finished output the phrase
-/// is right to left when its Arabic words outnumber its Latin ones, or match them after a lead
-/// with no words (a `❯ ` prompt): `Error: ملف not found` and `ok تحذير done` keep reading left
-/// to right.
+/// The line being typed (`typing`) is always right to left from its first Arabic word, so
+/// English typed after an Arabic word lands on its left. In finished output the phrase is right
+/// to left when its Arabic words outnumber its Latin ones, or match them when nothing with
+/// words comes before (the line starts with Arabic, or a `❯ ` prompt): `Error: ملف not found`,
+/// `ok تحذير done` and `"ملف": No such file or directory` keep reading left to right.
 pub(crate) fn arabic_phrase(cells: &[CellData], typing: bool) -> Option<usize> {
     let first = cells.iter().position(|c| is_rtl_char(c.c))?;
     let start = cells[..first]
         .iter()
         .rposition(CellData::is_word_break)
         .map_or(0, |b| b + 1);
-    if typing || start == 0 {
+    // While typing, Arabic starts a right-to-left phrase at once.
+    if typing {
         return Some(start);
     }
     let (mut arabic, mut latin) = (0, 0);
@@ -61,6 +62,9 @@ pub(crate) fn arabic_phrase(cells: &[CellData], typing: bool) -> Option<usize> {
             latin += 1;
         }
     }
+    // A finished line that starts with Arabic still reads left to right when most of its
+    // words are Latin: `"ملف": No such file or directory` is an English message quoting an
+    // Arabic name.
     let lead_has_words = cells[..start].iter().any(|c| c.c.is_alphabetic());
     (arabic > latin || (arabic == latin && !lead_has_words)).then_some(start)
 }
