@@ -13,6 +13,7 @@ use crate::control::{ControlServer, MethodCall, Request, Response, REQUEST_TIMEO
 use crate::layout::PaneId;
 use crate::pty::{Pty, SpawnOptions};
 use crate::shell_integration::clean_text;
+use crate::workflows::WorkflowSet;
 
 impl App {
     /// Start the control socket server if enabled in config.
@@ -86,35 +87,36 @@ impl App {
                 false,
             )),
             MethodCall::CommandList => {
-                let list: Vec<Value> = commands::all()
-                    .into_iter()
-                    .map(|c| {
-                        json!({
-                            "name": c.name,
-                            "title_en": c.title_en,
-                            "title_ar": c.title_ar,
-                            "shortcut": c.shortcut,
-                        })
-                    })
-                    .collect();
-                Ok((Value::Array(list), false))
+                let cwd = self.focused_id().and_then(|id| self.pane_cwd(id));
+                let set = WorkflowSet::load(&self.config.commands, cwd.as_deref());
+                Ok((Value::Array(set.control_list_json()), false))
             }
             MethodCall::CommandRun { name, pane } => {
-                let Some(action) = commands::action(&name) else {
-                    return Err(format!("unknown command: {name}"));
-                };
-                let target = match pane {
-                    Some(p) => {
-                        let id = PaneId(p);
-                        self.focus_pane_by_id(id)?;
-                        id
-                    }
-                    None => self
-                        .focused_id()
-                        .ok_or_else(|| "no focused pane".to_owned())?,
-                };
-                let should_exit = self.run_action(target, action);
-                Ok((json!({ "command": name, "pane": target.0 }), should_exit))
+                if let Some(action) = commands::action(&name) {
+                    let target = match pane {
+                        Some(p) => {
+                            let id = PaneId(p);
+                            self.focus_pane_by_id(id)?;
+                            id
+                        }
+                        None => self
+                            .focused_id()
+                            .ok_or_else(|| "no focused pane".to_owned())?,
+                    };
+                    let should_exit = self.run_action(target, action);
+                    return Ok((json!({ "command": name, "pane": target.0 }), should_exit));
+                }
+                let target = self.resolve_pane(pane)?;
+                let cwd = self.pane_cwd(target);
+                let set = WorkflowSet::load(&self.config.commands, cwd.as_deref());
+                let workflow = set
+                    .resolve_control_run(&name)
+                    .map_err(|err| err.to_string())?;
+                if pane.is_some() {
+                    self.focus_pane_by_id(target)?;
+                }
+                self.run_workflow(target, &workflow)?;
+                Ok((json!({ "command": name, "pane": target.0 }), false))
             }
             MethodCall::TabList => {
                 let active = self.ws.active();

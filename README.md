@@ -133,6 +133,38 @@ An unknown name prints a warning and falls back to `tokyo-night`.
 }
 ```
 
+### Custom commands (workflows)
+
+You can add your own commands to the command palette (`Ctrl+Shift+P`) with optional Arabic titles (`name_ar`), either globally in `config.json` under `"commands"` or per repository in `.twitty/commands.json`.
+
+Twitty walks up from the focused pane's working directory to the nearest `.twitty/commands.json` (stopping at `$HOME` or the filesystem root, at most 32 levels). Project command files are untrusted until you confirm them in the palette; trust is recorded per canonical directory and SHA-256 hash in `$XDG_STATE_HOME/twitty/trust.json` (`~/.local/state/twitty/trust.json`), so editing the file asks again.
+
+Example `.twitty/commands.json`:
+
+```json
+{
+  "commands": [
+    {
+      "name": "Run tests",
+      "name_ar": "شغّل الاختبارات",
+      "command": "cargo test",
+      "mode": "run",
+      "cwd": ".",
+      "description": "Run the Rust test suite"
+    },
+    {
+      "name": "Git status",
+      "name_ar": "حالة جيت",
+      "command": "git status -sb",
+      "mode": "insert"
+    }
+  ]
+}
+```
+
+- `mode`: `"insert"` (default) pastes the command into the focused pane without a newline so you can review it and press Enter; `"run"` opens a split (or tab) and runs it with `$SHELL -c <command>` in the entry's `cwd` (must stay inside the project root) or the pane's working directory.
+- `twitty ctl command.list` lists built-in and custom commands (`source`, `trusted`); `twitty ctl command.run` can run trusted custom commands by name and always refuses untrusted project commands.
+
 ### Shell
 
 On Linux and macOS Twitty starts `$SHELL` as a login shell. On Windows it picks PowerShell 7 (`pwsh.exe`), then Windows PowerShell, then `%COMSPEC%`. Set `TWITTY_SHELL` to override, arguments included:

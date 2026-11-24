@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Custom commands ("workflows") in the command palette (`Ctrl+Shift+P`), loaded from `"commands"` in `config.json` and per-project `.twitty/commands.json` files (walked up from the focused pane's cwd, bounded to `$HOME` / root and 32 levels). Supports English and Arabic titles, `"insert"` (no newline, bracketed paste aware) and `"run"` (new split/tab via `$SHELL -c`, cwd confined to the project root) modes, per-file SHA-256 trust persisted in `$XDG_STATE_HOME/twitty/trust.json`, and `command.list` / `command.run` integration on the control socket (which never runs or trusts untrusted project commands).
 - Security: Ctrl+Click on a `file://` link never runs a program. Links to executables, scripts and launchers (`.desktop`, `.exe`, `.bat`, `.AppImage`…, or any file with an execute bit) open their folder instead, and `file://` links to other hosts are refused (on Windows they would send the user's credentials to that host).
 - Security: while Ctrl is held over a link, its real target is shown in the status line, so a hyperlink (OSC 8) whose text names one site can't silently open another. Bidi and control characters in the shown target are replaced with `�`.
 - Security: bidi embeddings, overrides and isolates (U+202A–202E, U+2066–2069) in program output and window titles are no longer applied, so `cat` of a file can't make a line read differently from what it contains ("Trojan Source"). Direction marks still work.

@@ -15,6 +15,45 @@ pub const MAX_RESULTS: usize = 10;
 /// Longest query kept, in characters.
 const MAX_QUERY_CHARS: usize = 200;
 
+/// Identifier of one palette entry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PaletteId {
+    Builtin(&'static str),
+    Custom(usize),
+}
+
+/// One searchable entry in the command palette.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PaletteEntry {
+    pub id: PaletteId,
+    /// Extra search text (stable command name, command line, description…).
+    pub name: String,
+    pub title_en: String,
+    pub title_ar: String,
+    /// Shortcut or small tag shown beside the English title.
+    pub shortcut: Option<String>,
+}
+
+impl PaletteEntry {
+    pub fn from_command(command: &Command) -> Self {
+        Self {
+            id: PaletteId::Builtin(command.name),
+            name: command.name.to_owned(),
+            title_en: command.title_en.to_owned(),
+            title_ar: command.title_ar.to_owned(),
+            shortcut: command.shortcut.map(str::to_owned),
+        }
+    }
+
+    pub fn from_commands(commands: &[Command]) -> Vec<Self> {
+        commands.iter().map(Self::from_command).collect()
+    }
+
+    pub fn builtins() -> Vec<Self> {
+        Self::from_commands(&crate::commands::all())
+    }
+}
+
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct PaletteState {
     pub query: String,
@@ -27,8 +66,8 @@ pub struct PaletteState {
 pub enum PaletteCmd {
     None,
     Close,
-    /// Run the command with this name and close.
-    Run(&'static str),
+    /// Activate the chosen entry.
+    Run(PaletteId),
 }
 
 impl PaletteState {
@@ -46,17 +85,17 @@ impl PaletteState {
     /// Handle one key press. `text` is what the key typed, if anything.
     pub fn key(
         &mut self,
-        commands: &[Command],
+        entries: &[PaletteEntry],
         key: &Key,
         text: Option<&str>,
         modifiers: ModifiersState,
     ) -> PaletteCmd {
-        let results = matches(commands, &self.query);
+        let results = matches(entries, &self.query);
         match key {
             Key::Named(NamedKey::Escape) => return PaletteCmd::Close,
             Key::Named(NamedKey::Enter) => {
                 return match results.get(self.selected) {
-                    Some(&i) => PaletteCmd::Run(commands[i].name),
+                    Some(&i) => PaletteCmd::Run(entries[i].id.clone()),
                     None => PaletteCmd::None,
                 };
             }
@@ -94,18 +133,17 @@ impl PaletteState {
     }
 }
 
-/// Indices of the commands matching `query`, best first. An empty query lists them all in
-/// palette order.
-pub fn matches(commands: &[Command], query: &str) -> Vec<usize> {
+/// Indices of the entries matching `query`, best first. An empty query lists them all in order.
+pub fn matches(entries: &[PaletteEntry], query: &str) -> Vec<usize> {
     let words: Vec<String> = query.split_whitespace().map(fold).collect();
     if words.is_empty() {
-        return (0..commands.len()).collect();
+        return (0..entries.len()).collect();
     }
-    let mut scored: Vec<(usize, usize)> = commands
+    let mut scored: Vec<(usize, usize)> = entries
         .iter()
         .enumerate()
         .filter_map(|(i, c)| {
-            let fields = [fold(c.title_en), fold(c.title_ar), fold(c.name)];
+            let fields = [fold(&c.title_en), fold(&c.title_ar), fold(&c.name)];
             let mut score = 0;
             for word in &words {
                 let best = fields

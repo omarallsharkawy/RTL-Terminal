@@ -19,6 +19,7 @@ pub mod shell_integration;
 pub mod sidebar;
 pub mod terminal;
 pub mod ui;
+pub mod workflows;
 
 /// Older path of `session::pane`.
 pub use session::pane;

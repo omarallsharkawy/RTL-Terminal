@@ -182,15 +182,17 @@ pub(crate) fn palette_overlay(
             bounds,
             color: if i == view.selected { fg } else { dim }.to_glyphon(),
         });
-        let arabic = ctx.label(&item.title_ar);
-        let width = label_width(&arabic);
-        texts.push(OverlayText {
-            buffer: arabic,
-            left: (panel.right() - pad - width).max(panel.x + pad),
-            top,
-            bounds,
-            color: fg.to_glyphon(),
-        });
+        if !item.title_ar.is_empty() {
+            let arabic = ctx.label(&item.title_ar);
+            let width = label_width(&arabic);
+            texts.push(OverlayText {
+                buffer: arabic,
+                left: (panel.right() - pad - width).max(panel.x + pad),
+                top,
+                bounds,
+                color: fg.to_glyphon(),
+            });
+        }
     }
     (Some(outer), texts)
 }
