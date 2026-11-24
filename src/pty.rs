@@ -115,6 +115,7 @@ pub struct Pty {
     writer: Sender<Vec<u8>>,
     /// Ends the shell when the pane is closed (the reader thread keeps the PTY open otherwise).
     killer: Box<dyn ChildKiller + Send + Sync>,
+    program_name: Option<String>,
     /// Process id of the shell, to find its working directory (Linux only).
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pid: Option<u32>,
@@ -225,6 +226,11 @@ impl Pty {
             cmd.env(key, value);
         }
 
+        let program_name = cmd
+            .get_argv()
+            .first()
+            .and_then(|program| Path::new(program).file_name())
+            .map(|name| name.to_string_lossy().into_owned());
         let mut child = pair
             .slave
             .spawn_command(cmd)
@@ -278,8 +284,13 @@ impl Pty {
             master: pair.master,
             writer,
             killer,
+            program_name,
             pid,
         })
+    }
+
+    pub(crate) fn program_name(&self) -> Option<&str> {
+        self.program_name.as_deref()
     }
 
     /// The shell's current working directory, so a new tab or split can open in it.

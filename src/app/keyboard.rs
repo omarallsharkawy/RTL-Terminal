@@ -94,9 +94,9 @@ impl App {
             InputAction::Focus(dir) => self.focus_direction(dir),
             InputAction::SelectTab(index) => self.set_active_tab(index),
             InputAction::NextAttention => self.focus_next_attention(),
+            InputAction::ToggleSidebar => self.toggle_sidebar(),
             // Lanes of the bundle work (docs/bundle/PLAN.md) fill these in.
-            InputAction::ToggleSidebar
-            | InputAction::CommandPalette
+            InputAction::CommandPalette
             | InputAction::PrevBlock
             | InputAction::NextBlock
             | InputAction::CopyBlockOutput

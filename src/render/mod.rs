@@ -39,6 +39,7 @@ use gpu::Gpu;
 use scene::context::DrawContext;
 use scene::frame::{build_frame, FrameOptions};
 use scene::preedit::PreeditState;
+use scene::sidebar::LabelCache;
 use text::fonts::{installed_family, new_font_system};
 
 /// Everything the renderer needs to draw one pane.
@@ -83,6 +84,7 @@ pub(crate) struct Renderer {
     cursor_blink_on: bool,
     /// Shaped rows of every pane, so a pane that did not change is not reshaped.
     row_cache: RowCache,
+    sidebar_labels: LabelCache,
     /// Input-method composition drawn at the cursor.
     ime: PreeditState,
 }
@@ -114,6 +116,7 @@ impl Renderer {
             cursor_style: "block".into(),
             cursor_blink_on: true,
             row_cache: RowCache::default(),
+            sidebar_labels: LabelCache::default(),
             ime: Default::default(),
         };
         renderer.update_metrics();
@@ -249,12 +252,6 @@ impl Renderer {
         self.metrics().grid_size(rect)
     }
 
-    /// Map a physical pixel position to a (col, row) cell of the pane in `rect`, clamped to
-    /// its grid.
-    pub fn pixel_to_cell(&self, rect: Rect, x: f64, y: f64) -> (usize, usize) {
-        self.metrics().pixel_to_cell(rect, x, y)
-    }
-
     /// Map a pixel to the cell drawn there and its side. Unlike `pixel_to_cell`, this follows
     /// reordered Arabic glyphs, so selections and mouse reports match what is on screen.
     pub(crate) fn pixel_to_visual_cell(
@@ -264,22 +261,7 @@ impl Renderer {
         x: f64,
         y: f64,
     ) -> (usize, usize, Side) {
-        let (col, row) = self.pixel_to_cell(rect, x, y);
-        let (cols, _) = self.compute_grid_size(rect);
-        let rel_x = (x - (rect.x + self.metrics.padding_left) as f64) as f32;
-        match self.row_cache.row(pane, row) {
-            Some(cached) => {
-                let (col, side) = cached.hit_test(rel_x, self.metrics.char_width, cols);
-                (col, row, side)
-            }
-            None => (col, row, self.pixel_side(rect, x)),
-        }
-    }
-
-    /// Which half of its cell the pixel falls in (selections include a cell only when the
-    /// pointer passes its middle).
-    pub fn pixel_side(&self, rect: Rect, x: f64) -> Side {
-        self.metrics().pixel_side(rect, x)
+        self.row_cache.cell_at(pane, self.metrics, rect, x, y)
     }
 
     /// Draw the tab bar (with two or more tabs), every pane and the dividers between them.
@@ -288,6 +270,8 @@ impl Renderer {
         tabs: &[TabLabel],
         panes: &[PaneFrame],
         dividers: &[Rect],
+        sidebar: Option<&crate::sidebar::View>,
+        attention: &[Rect],
     ) -> anyhow::Result<()> {
         let Some(surface_texture) = self.gpu.acquire(&self.config, &self.window) else {
             return Ok(());
@@ -306,15 +290,19 @@ impl Renderer {
             palette: &self.palette,
             is_srgb: self.is_srgb,
         };
-        let frame = build_frame(
+        let mut frame = build_frame(
             &mut ctx,
             &opts,
             &mut self.row_cache,
             &mut self.ime,
-            tabs,
+            if sidebar.is_some() { &[] } else { tabs },
             panes,
             dividers,
         );
+        if let Some(view) = sidebar {
+            frame.add_sidebar(&mut ctx, view, &mut self.sidebar_labels);
+        }
+        frame.add_attention(&ctx, attention);
         if let Some((x, y, w, h)) = frame.ime_area {
             self.window.set_ime_cursor_area(
                 winit::dpi::PhysicalPosition::new(x, y),

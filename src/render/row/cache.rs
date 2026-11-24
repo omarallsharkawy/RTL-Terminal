@@ -2,8 +2,11 @@
 
 use std::collections::HashMap;
 
+use alacritty_terminal::index::Side;
+
 use super::CachedRow;
-use crate::layout::PaneId;
+use crate::layout::{PaneId, Rect};
+use crate::render::metrics::CellMetrics;
 
 /// Rows are keyed by pane and row index; each row remembers the hash it was built from.
 #[derive(Default)]
@@ -25,6 +28,33 @@ impl RowCache {
     /// The cached row `row` of `pane`, as last drawn.
     pub fn row(&self, pane: PaneId, row: usize) -> Option<&CachedRow> {
         self.panes.get(&pane).and_then(|rows| rows.get(row))
+    }
+
+    /// The logical cell drawn at a physical pixel. A drag outside the grid keeps the outer
+    /// half of its edge cell, and a row from before a width change cannot supply the hit map.
+    pub fn cell_at(
+        &self,
+        pane: PaneId,
+        metrics: CellMetrics,
+        rect: Rect,
+        x: f64,
+        y: f64,
+    ) -> (usize, usize, Side) {
+        let (cols, _) = metrics.grid_size(rect);
+        let origin = f64::from(rect.x + metrics.padding_left);
+        let span = cols as f64 * f64::from(metrics.char_width);
+        let x = x.clamp(origin, origin + span - 0.01);
+        let (col, row) = metrics.pixel_to_cell(rect, x, y);
+        match self
+            .row(pane, row)
+            .filter(|cached| cached.visual.len() == cols)
+        {
+            Some(cached) => {
+                let (col, side) = cached.hit_test((x - origin) as f32, metrics.char_width, cols);
+                (col, row, side)
+            }
+            None => (col, row, metrics.pixel_side(rect, x)),
+        }
     }
 
     /// Take a pane's rows out of the cache, to be looked up by hash while the next frame is

@@ -7,3 +7,4 @@ pub mod cursor;
 pub mod frame;
 pub mod preedit;
 pub mod row_quads;
+pub mod sidebar;

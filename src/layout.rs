@@ -38,6 +38,75 @@ impl Rect {
     }
 }
 
+/// Sidebar placement. Hidden keeps the original horizontal tab-bar geometry.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SidebarPosition {
+    Left,
+    #[default]
+    Right,
+    Hidden,
+}
+
+impl SidebarPosition {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Right => "right",
+            Self::Hidden => "hidden",
+        }
+    }
+}
+
+impl std::str::FromStr for SidebarPosition {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "left" => Ok(Self::Left),
+            "right" => Ok(Self::Right),
+            "hidden" => Ok(Self::Hidden),
+            _ => Err(()),
+        }
+    }
+}
+
+/// Shared drawing and input geometry, in physical pixels. `legacy_content` is the pane
+/// area with a horizontal tab bar; a visible sidebar replaces that bar entirely.
+pub fn sidebar_layout(
+    surface: Rect,
+    legacy_content: Rect,
+    position: SidebarPosition,
+    logical_width: f32,
+    scale: f32,
+) -> (Rect, Option<Rect>) {
+    if position == SidebarPosition::Hidden {
+        return (legacy_content, None);
+    }
+    // Preserve some terminal space even in a window smaller than the configured sidebar.
+    let width = (clamp_sidebar_width(logical_width) * scale)
+        .round()
+        .clamp(0.0, (surface.w - 80.0 * scale).max(0.0));
+    if width == 0.0 {
+        return (legacy_content, None);
+    }
+    let (pane_x, sidebar_x) = match position {
+        SidebarPosition::Left => (surface.x + width, surface.x),
+        _ => (surface.x, surface.right() - width),
+    };
+    (
+        Rect::new(pane_x, surface.y, surface.w - width, surface.h),
+        Some(Rect::new(sidebar_x, surface.y, width, surface.h)),
+    )
+}
+
+pub fn clamp_sidebar_width(width: f32) -> f32 {
+    if width.is_finite() {
+        width.clamp(140.0, 480.0)
+    } else {
+        220.0
+    }
+}
+
 /// How a split divides its rectangle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SplitDir {
