@@ -213,10 +213,42 @@ fn unescape_633(s: &str) -> String {
 /// Program text as shown in the UI: no control or bidi-override characters, trimmed, at most
 /// `max` characters.
 pub fn clean_text(text: &str, max: usize) -> String {
-    text.chars()
-        .filter(|&c| !c.is_control() && !crate::terminal::is_bidi_control(c))
-        .take(max)
-        .collect::<String>()
-        .trim()
-        .to_string()
+    use unicode_segmentation::UnicodeSegmentation;
+
+    let text = bounded_text(
+        text.chars().filter(|&c| {
+            !c.is_control()
+                && !crate::terminal::is_bidi_control(c)
+                && !matches!(
+                    c,
+                    '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{2028}' | '\u{2029}'
+                )
+        }),
+        max,
+    );
+    let mut graphemes = text.grapheme_indices(true);
+    let Some((start, first)) = graphemes.find(|(_, g)| !g.chars().all(char::is_whitespace)) else {
+        return String::new();
+    };
+    let end = graphemes
+        .rfind(|(_, g)| !g.chars().all(char::is_whitespace))
+        .map_or(start + first.len(), |(i, g)| i + g.len());
+    text[start..end].to_owned()
+}
+
+pub(crate) fn bounded_text(chars: impl Iterator<Item = char>, max: usize) -> String {
+    use unicode_segmentation::UnicodeSegmentation;
+
+    // Look one scalar past the limit to tell whether the final grapheme continues.
+    let mut text: String = chars.take(max.saturating_add(1)).collect();
+    if let Some((limit, _)) = text.char_indices().nth(max) {
+        let end = text
+            .grapheme_indices(true)
+            .map(|(i, _)| i)
+            .take_while(|&i| i <= limit)
+            .last()
+            .unwrap_or(0);
+        text.truncate(end);
+    }
+    text
 }

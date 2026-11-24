@@ -23,6 +23,7 @@ pub struct TwittyConfig {
     /// Blink the cursor, unless the running program asks for a steady one (DECSCUSR).
     pub cursor_blink: bool,
     /// Where the workspace sidebar sits: "right", "left" or "hidden".
+    #[serde(deserialize_with = "deserialize_sidebar")]
     pub sidebar: String,
     /// Sidebar width in logical pixels.
     pub sidebar_width: f32,
@@ -99,6 +100,15 @@ pub fn take_warnings() -> Vec<String> {
         .lock()
         .map(|mut w| std::mem::take(&mut *w))
         .unwrap_or_default()
+}
+
+fn deserialize_sidebar<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let value = serde_json::Value::deserialize(d)?;
+    if let serde_json::Value::String(value) = value {
+        return Ok(value);
+    }
+    warn("twitty: invalid sidebar value, using right".into());
+    Ok(crate::layout::SidebarPosition::Right.as_str().to_owned())
 }
 
 /// Parses a color value from the config, warning on stderr and returning `None` if invalid.
@@ -206,6 +216,18 @@ impl TwittyConfig {
         } else {
             defaults.background_opacity
         };
+        self.sidebar_width = crate::layout::clamp_sidebar_width(self.sidebar_width);
+        if self
+            .sidebar
+            .parse::<crate::layout::SidebarPosition>()
+            .is_err()
+        {
+            warn(format!(
+                "twitty: invalid sidebar {:?}, using right",
+                self.sidebar
+            ));
+            self.sidebar = defaults.sidebar;
+        }
     }
 
     pub(crate) fn save(&self) {

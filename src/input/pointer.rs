@@ -1,7 +1,7 @@
 //! The pointer: where it is, which pane a held button belongs to, the pane it hovers, and a
 //! divider being dragged.
 
-use winit::window::CursorIcon;
+use winit::{event::MouseButton, window::CursorIcon};
 
 use crate::layout::{Divider, PaneId, SplitDir};
 use crate::ui::hit::Hit;
@@ -12,6 +12,7 @@ pub(crate) struct PointerState {
     pub pos: (f64, f64),
     /// The pane a pressed mouse button belongs to until it is released.
     pub capture: Option<PaneId>,
+    capture_button: Option<MouseButton>,
     /// The pane the pointer last moved over.
     pub hover: Option<PaneId>,
     /// A divider is being dragged.
@@ -31,7 +32,11 @@ pub(crate) enum PressTarget {
 
 impl PointerState {
     /// A button was pressed on `hit`. Left presses on a divider start dragging it.
-    pub fn press(&mut self, hit: Hit, left: bool) -> PressTarget {
+    pub fn press(&mut self, hit: Hit, button: MouseButton) -> PressTarget {
+        if self.capture.is_some() || self.drag.is_some() {
+            return PressTarget::None;
+        }
+        let left = button == MouseButton::Left;
         match hit {
             Hit::Tab(i) if left => PressTarget::Tab(i),
             Hit::Divider(d) => {
@@ -42,6 +47,7 @@ impl PointerState {
             }
             Hit::Pane(id) => {
                 self.capture = Some(id);
+                self.capture_button = Some(button);
                 PressTarget::Pane(id)
             }
             Hit::Tab(_) | Hit::TabBar | Hit::Nothing => PressTarget::None,
@@ -50,16 +56,21 @@ impl PointerState {
 
     /// A button was released: the pane that receives the release, if any. The release that
     /// ends a divider drag is swallowed.
-    pub fn release(&mut self) -> Option<PaneId> {
-        if self.drag.take().is_some() {
+    pub fn release(&mut self, button: MouseButton) -> Option<PaneId> {
+        if button == MouseButton::Left && self.drag.take().is_some() {
             return None;
         }
-        self.capture.take()
+        if self.capture_button == Some(button) {
+            self.capture_button = None;
+            return self.capture.take();
+        }
+        None
     }
 
     /// Drop the capture and any divider drag (tab switch, focus loss...).
     pub(crate) fn cancel(&mut self) {
         self.capture = None;
+        self.capture_button = None;
         self.drag = None;
     }
 
@@ -67,6 +78,7 @@ impl PointerState {
     pub(crate) fn forget(&mut self, id: PaneId) {
         if self.capture == Some(id) {
             self.capture = None;
+            self.capture_button = None;
         }
         if self.hover == Some(id) {
             self.hover = None;
@@ -128,33 +140,51 @@ mod tests {
     fn press_and_release_in_a_pane() {
         let mut p = PointerState::default();
         assert_eq!(
-            p.press(Hit::Pane(PaneId(3)), true),
+            p.press(Hit::Pane(PaneId(3)), MouseButton::Left),
             PressTarget::Pane(PaneId(3))
         );
         assert_eq!(p.capture, Some(PaneId(3)));
-        assert_eq!(p.release(), Some(PaneId(3)));
+        assert_eq!(p.release(MouseButton::Left), Some(PaneId(3)));
         assert_eq!(p.capture, None);
-        assert_eq!(p.release(), None);
+        assert_eq!(p.release(MouseButton::Left), None);
     }
 
     #[test]
     fn divider_drag_swallows_its_release() {
         let mut p = PointerState::default();
-        assert_eq!(p.press(Hit::Divider(divider()), true), PressTarget::None);
+        assert_eq!(
+            p.press(Hit::Divider(divider()), MouseButton::Left),
+            PressTarget::None
+        );
         assert!(p.drag.is_some());
-        assert_eq!(p.release(), None);
+        assert_eq!(p.release(MouseButton::Left), None);
         assert!(p.drag.is_none());
         // Right click on a divider does not drag.
-        p.press(Hit::Divider(divider()), false);
+        p.press(Hit::Divider(divider()), MouseButton::Right);
         assert!(p.drag.is_none());
     }
 
     #[test]
     fn tabs_activate_only_on_left_click() {
         let mut p = PointerState::default();
-        assert_eq!(p.press(Hit::Tab(2), true), PressTarget::Tab(2));
-        assert_eq!(p.press(Hit::Tab(2), false), PressTarget::None);
-        assert_eq!(p.press(Hit::TabBar, true), PressTarget::None);
+        assert_eq!(p.press(Hit::Tab(2), MouseButton::Left), PressTarget::Tab(2));
+        assert_eq!(p.press(Hit::Tab(2), MouseButton::Right), PressTarget::None);
+        assert_eq!(p.press(Hit::TabBar, MouseButton::Left), PressTarget::None);
+    }
+
+    #[test]
+    fn sidebar_clicks_do_not_capture_or_release_pane_buttons() {
+        let mut p = PointerState::default();
+        assert_eq!(p.press(Hit::Tab(2), MouseButton::Left), PressTarget::Tab(2));
+        assert_eq!(p.release(MouseButton::Left), None);
+        p.press(Hit::Pane(PaneId(1)), MouseButton::Left);
+        assert_eq!(p.press(Hit::Tab(2), MouseButton::Right), PressTarget::None);
+        assert_eq!(
+            p.press(Hit::Pane(PaneId(3)), MouseButton::Right),
+            PressTarget::None
+        );
+        assert_eq!(p.release(MouseButton::Right), None);
+        assert_eq!(p.release(MouseButton::Left), Some(PaneId(1)));
     }
 
     #[test]
@@ -162,9 +192,9 @@ mod tests {
         let mut p = PointerState::default();
         assert_eq!(p.moved(&Hit::Pane(PaneId(1))), (Some(PaneId(1)), None));
         assert_eq!(p.moved(&Hit::Pane(PaneId(1))), (Some(PaneId(1)), None));
-        p.press(Hit::Pane(PaneId(1)), true);
+        p.press(Hit::Pane(PaneId(1)), MouseButton::Left);
         assert_eq!(p.moved(&Hit::Pane(PaneId(2))), (Some(PaneId(1)), None));
-        p.release();
+        p.release(MouseButton::Left);
         assert_eq!(
             p.moved(&Hit::Pane(PaneId(2))),
             (Some(PaneId(2)), Some(PaneId(1)))
@@ -175,12 +205,12 @@ mod tests {
     #[test]
     fn cancel_and_forget() {
         let mut p = PointerState::default();
-        p.press(Hit::Pane(PaneId(1)), true);
+        p.press(Hit::Pane(PaneId(1)), MouseButton::Left);
         p.moved(&Hit::Pane(PaneId(1)));
         p.forget(PaneId(1));
         assert_eq!((p.capture, p.hover), (None, None));
-        p.press(Hit::Divider(divider()), true);
-        p.press(Hit::Pane(PaneId(2)), true);
+        p.press(Hit::Divider(divider()), MouseButton::Left);
+        p.press(Hit::Pane(PaneId(2)), MouseButton::Left);
         p.cancel();
         assert!(p.capture.is_none() && p.drag.is_none());
     }

@@ -52,6 +52,7 @@ pub struct Frame {
     /// The candidate popup area, when it moved since it was last reported.
     pub ime_area: Option<ImeArea>,
     tab_titles: Vec<(Buffer, Rect, glyphon::Color)>,
+    sidebar_labels: Vec<super::sidebar::Label>,
     /// Per pane: the status line text and its top y.
     statuses: Vec<Option<(Buffer, f32)>>,
     /// The preedit box (left, y, width), when one is visible.
@@ -93,7 +94,7 @@ pub fn build_frame(
     // The focused pane's cursor is separate: a preedit replaces it.
     let mut focused_cursor: Vec<Quad> = Vec::new();
     let mut other_cursors: Vec<Quad> = Vec::new();
-    let mut ime_caret: Option<(f32, f32, bool)> = None;
+    let mut ime_caret = None;
     let mut ime_bounds: Option<TextBounds> = None;
 
     let tab_geometry = chrome::tab_geometry(ctx, tabs.len(), width);
@@ -135,7 +136,7 @@ pub fn build_frame(
 
             if pane.focused && pane.cursor.row == r {
                 let (x, ext) = cached.cursor_anchor(pane.cursor.col, m.char_width);
-                ime_caret = Some((origin_x + x, y, ext));
+                ime_caret = Some((origin_x + x, y, ext, rect));
                 ime_bounds = Some(rect_bounds(rect));
             }
 
@@ -190,6 +191,7 @@ pub fn build_frame(
         background,
         ime_area,
         tab_titles,
+        sidebar_labels: Vec::new(),
         statuses,
         preedit_box,
         ime_bounds,
@@ -207,6 +209,23 @@ impl Frame {
         self.overlay.extend(texts);
     }
 
+    /// Optional chrome is attached explicitly so offscreen/golden callers keep their layout.
+    pub fn add_sidebar(
+        &mut self,
+        ctx: &mut DrawContext,
+        view: &crate::sidebar::View,
+        cache: &mut super::sidebar::LabelCache,
+    ) {
+        let scene = super::sidebar::build(ctx, view, cache);
+        self.quads.extend(scene.quads);
+        self.sidebar_labels = scene.labels;
+    }
+
+    pub fn add_attention(&mut self, ctx: &DrawContext, rects: &[Rect]) {
+        self.quads
+            .extend(super::sidebar::attention_quads(ctx, rects));
+    }
+
     /// Every text run, in drawing order: tab titles, then per pane its rows (the last one is
     /// hidden under a status line) and status line, then the preedit.
     pub fn text_runs<'a>(
@@ -218,6 +237,15 @@ impl Frame {
         let m = &self.metrics;
         let fg = self.foreground;
         let mut runs = Vec::new();
+        for label in &self.sidebar_labels {
+            runs.push(TextRun {
+                buffer: &label.buffer,
+                left: label.left,
+                top: label.top,
+                bounds: label.bounds,
+                color: label.color,
+            });
+        }
         for (buffer, rect, color) in &self.tab_titles {
             runs.push(TextRun {
                 buffer,

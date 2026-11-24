@@ -5,6 +5,7 @@ use cosmic_text::Buffer;
 use glyphon::TextBounds;
 
 use super::context::DrawContext;
+use crate::layout::Rect;
 use crate::render::style::Quad;
 use crate::render::text::bidi::LRM;
 
@@ -96,16 +97,19 @@ impl PreeditState {
     pub fn layout(
         &mut self,
         ctx: &mut DrawContext,
-        caret: Option<(f32, f32, bool)>,
+        caret: Option<(f32, f32, bool, Rect)>,
         quads: &mut Vec<Quad>,
         cursor_quads: &mut Vec<Quad>,
     ) -> (Option<(f32, f32, f32)>, Option<ImeArea>) {
-        let Some((caret_x, y, extends_left)) = caret else {
+        let Some((caret_x, y, extends_left, pane)) = caret else {
+            self.last_area = None;
             return (None, None);
         };
-        let (cw, lh) = (ctx.metrics.char_width, ctx.metrics.line_height);
+        let cw = ctx.metrics.char_width.min(pane.w);
+        let lh = ctx.metrics.line_height.min(pane.h);
+        let y = y.clamp(pane.y, pane.bottom() - lh);
 
-        let mut area = (caret_x, cw);
+        let mut area = (caret_x.clamp(pane.x, pane.right() - cw), cw);
         let mut origin = None;
         if self.is_active() {
             let rtl = !self.text.is_ascii();
@@ -120,12 +124,15 @@ impl PreeditState {
                 .map(|r| r.line_w)
                 .fold(0.0_f32, f32::max)
                 .max(cw);
-            let left = preedit_left(caret_x, extends_left, width);
+            let visible_width = width.min(pane.w);
+            let left = preedit_left(caret_x, extends_left, width)
+                .clamp(pane.x, pane.right() - visible_width);
             let prefix = if rtl { LRM.len() } else { 0 };
             let cursor_byte = self.cursor.map_or(self.text.len(), |c| c.0) + prefix;
             let cx = left + cursor_offset(&buffer, cursor_byte, width);
 
-            let t = ctx.metrics.stroke();
+            let width = visible_width;
+            let t = ctx.metrics.stroke().min(width).min(lh);
             let fg = ctx.color(ctx.palette.foreground);
             quads.push((left, y, width, lh, ctx.color(ctx.palette.background)));
             quads.push((left, y + lh - t, width, t, fg));
@@ -145,8 +152,8 @@ impl PreeditState {
         let rect = (
             area.0.round() as i32,
             y.round() as i32,
-            area.1.ceil() as u32,
-            lh.ceil() as u32,
+            ((area.0 + area.1).round() - area.0.round()) as u32,
+            ((y + lh).round() - y.round()) as u32,
         );
         let moved = self.last_area != Some(rect);
         self.last_area = Some(rect);

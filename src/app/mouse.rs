@@ -14,11 +14,13 @@ use crate::input::mouse::{
 };
 use crate::input::pointer::{cursor_icon_for, PressTarget};
 use crate::layout::{ratio_at, Divider, PaneId, SplitDir};
+use crate::ui::hit::Hit;
 
 impl App {
     pub(super) fn on_modifiers(&mut self, modifiers: ModifiersState) {
         self.modifiers = modifiers;
-        if let Some(id) = self.pointer.hover.or(self.focused_id()) {
+        let (x, y) = self.pointer.pos;
+        if let Some(id) = self.pane_at(x, y).or(self.pointer.hover) {
             self.update_link_hover(id);
         }
     }
@@ -30,10 +32,14 @@ impl App {
             return;
         }
         let hit = self.window.hit_test(&self.ws, x, y);
+        let over_sidebar = self.window.sidebar_contains(&self.ws, x, y);
         let captured = self.pointer.capture.is_some();
-        if let Some(icon) = cursor_icon_for(&hit, captured, self.window.cursor_icon()) {
+        if over_sidebar {
+            self.window.set_cursor_icon(CursorIcon::Default);
+        } else if let Some(icon) = cursor_icon_for(&hit, captured, self.window.cursor_icon()) {
             self.window.set_cursor_icon(icon);
         }
+        let previous_hover = self.pointer.hover;
         let (target, left) = self.pointer.moved(&hit);
         if let Some(old) = left {
             self.clear_link_hover(old);
@@ -48,53 +54,74 @@ impl App {
         let Some(pane) = self.ws.pane_mut(id) else {
             return;
         };
-        pane.ui.mouse_side = side;
-        if pane.ui.selection.selecting {
+        let selecting = pane.ui.selection.selecting;
+        if selecting {
             pane.terminal.update_selection(col, row, side);
             self.window.request_redraw();
         }
-        let Some(pane) = self.ws.pane_mut(id) else {
-            return;
-        };
-        if (col, row) == (pane.ui.mouse_col, pane.ui.mouse_row) {
+        if over_sidebar {
+            // A selection may extend to its pane's edge, but programs only receive the
+            // release of their captured press, using the last reported pane cell.
+            self.clear_link_hover(id);
             return;
         }
-        pane.ui.mouse_col = col;
-        pane.ui.mouse_row = row;
-        let (down, selecting) = (pane.ui.mouse_button_down, pane.ui.selection.selecting);
-        self.update_link_hover(id);
+        pane.ui.mouse_side = side;
+        let changed = (col, row) != (pane.ui.mouse_col, pane.ui.mouse_row);
+        (pane.ui.mouse_col, pane.ui.mouse_row) = (col, row);
+        let down = pane.ui.mouse_button_down;
+        if changed || previous_hover != Some(id) || self.modifiers.control_key() {
+            let over_pane = hit == Hit::Pane(id);
+            let cell = (over_pane && self.modifiers.control_key()).then_some((col, row));
+            self.set_link_hover(id, over_pane, cell);
+        }
 
-        if let Some(button) = motion_report(self.mode_of(id), down, selecting) {
-            self.send_mouse(id, button, true);
+        if changed {
+            if let Some(button) = motion_report(self.mode_of(id), down, selecting) {
+                self.send_mouse(id, button, true);
+            }
         }
     }
 
     pub(super) fn on_mouse_input(&mut self, button: MouseButton, pressed: bool) {
+        let Some(code) = button_code(button) else {
+            return;
+        };
         let target = if pressed {
             let (x, y) = self.pointer.pos;
             let hit = self.window.hit_test(&self.ws, x, y);
-            match self.pointer.press(hit, button == MouseButton::Left) {
+            match self.pointer.press(hit, button) {
                 PressTarget::Tab(i) => {
+                    if self.window.sidebar_contains(&self.ws, x, y) && i != self.ws.active() {
+                        self.reset_pointer_gesture();
+                    }
                     self.set_active_tab(i);
                     None
                 }
                 PressTarget::Pane(id) => {
                     self.focus_pane(id);
+                    // Geometry can change under a stationary pointer (e.g. sidebar toggle).
+                    self.update_mouse_cell(id);
                     Some(id)
                 }
                 PressTarget::None => None,
             }
         } else {
-            self.pointer.release()
+            self.pointer.release(button)
         };
         if let Some(id) = target {
-            self.handle_mouse_button(id, button, pressed);
+            self.handle_mouse_button(id, button, code, pressed);
         }
     }
 
     pub(super) fn on_wheel(&mut self, delta: MouseScrollDelta) {
         let line_height = self.window.line_height().unwrap_or(20.0);
         let lines = wheel_lines(delta, line_height);
+        if self
+            .window
+            .scroll_sidebar(&self.ws, self.pointer.pos.0, self.pointer.pos.1, lines)
+        {
+            return;
+        }
 
         if self.modifiers.control_key() {
             // Ctrl (+ Shift) + wheel: one zoom (opacity) step per notch. Trackpads send
@@ -125,6 +152,7 @@ impl App {
         }
         match wheel_action(pane.mode(), steps) {
             WheelAction::Report { button, count } => {
+                self.update_mouse_cell(id);
                 for _ in 0..count {
                     self.send_mouse(id, button, true);
                 }
@@ -141,12 +169,22 @@ impl App {
     /// Underline the link under the pointer while Ctrl is held, show a pointer cursor and the
     /// link's target. Also called after output, which can change the link under a still pointer.
     pub(super) fn update_link_hover(&mut self, id: PaneId) {
-        let Some((col, row)) = self.ws.pane(id).map(|p| (p.ui.mouse_col, p.ui.mouse_row)) else {
-            return;
-        };
-        let ctrl = self.modifiers.control_key();
+        let (x, y) = self.pointer.pos;
+        let over_pane = self.pane_at(x, y) == Some(id)
+            && matches!(self.window.hit_test(&self.ws, x, y), Hit::Pane(hit_id) if hit_id == id);
+        let cell = (over_pane && self.modifiers.control_key())
+            .then(|| {
+                self.pane_rect(id)
+                    .and_then(|r| self.window.cell_at(id, r, x, y))
+                    .map(|(col, row, _)| (col, row))
+            })
+            .flatten();
+        self.set_link_hover(id, over_pane, cell);
+    }
+
+    fn set_link_hover(&mut self, id: PaneId, over_pane: bool, cell: Option<(usize, usize)>) {
         let result = self.term(id, |t| {
-            let link = if ctrl { t.link_at(col, row) } else { None };
+            let link = cell.and_then(|(col, row)| t.link_at(col, row));
             let hover = link.as_ref().map(|l| (l.row, l.cols.clone()));
             (t.set_link_hover(hover), link)
         });
@@ -159,23 +197,72 @@ impl App {
             .ws
             .pane_mut(id)
             .is_some_and(|p| std::mem::replace(&mut p.ui.hover_target, target.clone()) != target);
-        if cells_changed || target_changed {
+        if over_pane {
             self.window.set_cursor_icon(if over_link {
                 CursorIcon::Pointer
             } else {
                 CursorIcon::Text
             });
+        }
+        if cells_changed || target_changed {
             self.window.request_redraw();
         }
     }
 
     /// The pointer left a pane: its link underline goes away.
     fn clear_link_hover(&mut self, id: PaneId) {
-        if let Some(p) = self.ws.pane_mut(id) {
-            p.ui.hover_target = None;
-        }
-        if self.term(id, |t| t.set_link_hover(None)) == Some(true) {
+        let target_changed = self
+            .ws
+            .pane_mut(id)
+            .is_some_and(|p| p.ui.hover_target.take().is_some());
+        if self.term(id, |t| t.set_link_hover(None)) == Some(true) || target_changed {
             self.window.request_redraw();
+        }
+    }
+
+    fn update_mouse_cell(&mut self, id: PaneId) {
+        let (x, y) = self.pointer.pos;
+        let cell = self
+            .pane_rect(id)
+            .and_then(|r| self.window.cell_at(id, r, x, y));
+        if let (Some(pane), Some((col, row, side))) = (self.ws.pane_mut(id), cell) {
+            (pane.ui.mouse_col, pane.ui.mouse_row, pane.ui.mouse_side) = (col, row, side);
+        }
+    }
+
+    pub(super) fn reset_pointer_gesture(&mut self) {
+        if let Some(id) = self.pointer.capture {
+            if let Some(pane) = self.ws.pane_mut(id) {
+                pane.ui.link_press = false;
+                if pane.ui.selection.selecting {
+                    self.finish_selection(id);
+                }
+            }
+        }
+        if let Some(id) = self.pointer.hover.take() {
+            self.clear_link_hover(id);
+        }
+        self.window.set_cursor_icon(CursorIcon::Default);
+        self.release_held_buttons();
+        self.pointer.cancel();
+    }
+
+    pub(super) fn refresh_pointer_hover(&mut self) {
+        if self.pointer.capture.is_some() || self.pointer.drag.is_some() {
+            return;
+        }
+        let (x, y) = self.pointer.pos;
+        let hit = self.window.hit_test(&self.ws, x, y);
+        let (target, left) = self.pointer.moved(&hit);
+        if let Some(id) = left {
+            self.clear_link_hover(id);
+            self.window.set_cursor_icon(CursorIcon::Default);
+        }
+        if let Some(icon) = cursor_icon_for(&hit, false, self.window.cursor_icon()) {
+            self.window.set_cursor_icon(icon);
+        }
+        if let Some(id) = target {
+            self.update_link_hover(id);
         }
     }
 
@@ -195,11 +282,8 @@ impl App {
     }
 
     /// A mouse button was pressed or released inside pane `id`.
-    fn handle_mouse_button(&mut self, id: PaneId, button: MouseButton, pressed: bool) {
+    fn handle_mouse_button(&mut self, id: PaneId, button: MouseButton, code: u8, pressed: bool) {
         let mode = self.mode_of(id);
-        let Some(code) = button_code(button) else {
-            return;
-        };
         // Ctrl+Click opens a link and takes priority over mouse reporting.
         if button == MouseButton::Left {
             let Some((col, row, link_press)) = self

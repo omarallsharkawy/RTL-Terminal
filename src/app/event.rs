@@ -29,11 +29,10 @@ const MAX_TITLE_CHARS: usize = 256;
 /// A program-set title as stored: no control characters, at most `MAX_TITLE_CHARS`. It is shaped
 /// for the tab bar on every frame, so a multi-megabyte one would freeze drawing.
 pub fn clean_title(title: &str) -> String {
-    title
-        .chars()
-        .filter(|c| !c.is_control())
-        .take(MAX_TITLE_CHARS)
-        .collect()
+    crate::shell_integration::bounded_text(
+        title.chars().filter(|c| !c.is_control()),
+        MAX_TITLE_CHARS,
+    )
 }
 
 /// Longest stretch spent parsing output before the screen is redrawn.
@@ -111,17 +110,32 @@ impl App {
     /// A program in pane `id` asked for the user's attention. It is marked for the sidebar
     /// unless the user is already looking at that pane.
     pub(super) fn notify(&mut self, id: PaneId, title: Option<String>, body: String) {
-        let seen = self.window_focused && self.focused_id() == Some(id);
-        if seen {
+        let Some(notice) = crate::notify::unseen_notice(
+            self.window_focused,
+            self.focused_id(),
+            id,
+            title.as_deref(),
+            &body,
+        ) else {
             return;
-        }
-        if let Some(pane) = self.ws.pane_mut(id) {
-            pane.meta.attention = Some(Notification {
-                title,
-                body,
-                at: std::time::SystemTime::now(),
+        };
+        let Some(pane) = self.ws.pane_mut(id) else {
+            return;
+        };
+        pane.meta.attention = Some(Notification {
+            title: notice.title.clone(),
+            body: notice.body.clone(),
+            at: std::time::SystemTime::now(),
+        });
+        self.window
+            .notify(self.config.desktop_notifications, id, &notice, || {
+                self.ws
+                    .tabs()
+                    .iter()
+                    .position(|t| t.root.contains(id))
+                    .map(|i| super::window::sidebar_title(&self.ws, i))
+                    .unwrap_or_default()
             });
-        }
         self.window.request_redraw();
     }
 

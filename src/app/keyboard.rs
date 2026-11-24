@@ -101,13 +101,11 @@ impl App {
             InputAction::Focus(dir) => self.focus_direction(dir),
             InputAction::SelectTab(index) => self.set_active_tab(index),
             InputAction::NextAttention => self.focus_next_attention(),
-            // Lanes of the bundle work (docs/bundle/PLAN.md) fill these in.
+            InputAction::ToggleSidebar => self.toggle_sidebar(),
             InputAction::CommandPalette => self.toggle_palette(),
             InputAction::AskAgent => self.ask_agent(id),
-            InputAction::ToggleSidebar
-            | InputAction::PrevBlock
-            | InputAction::NextBlock
-            | InputAction::CopyBlockOutput => {}
+            // Lane O (blocks, docs/bundle/PLAN.md) fills these in.
+            InputAction::PrevBlock | InputAction::NextBlock | InputAction::CopyBlockOutput => {}
         }
         false
     }
