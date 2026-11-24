@@ -145,6 +145,15 @@ impl Window {
         }
     }
 
+    pub(super) fn set_command_palette(
+        &mut self,
+        view: Option<crate::render::scene::palette::PaletteView>,
+    ) {
+        if let Some(ref mut r) = self.renderer {
+            r.set_command_palette(view);
+        }
+    }
+
     /// The window has keyboard focus.
     pub(super) fn is_focused(&self) -> bool {
         self.renderer.as_ref().is_some_and(Renderer::is_focused)

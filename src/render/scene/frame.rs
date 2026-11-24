@@ -11,6 +11,7 @@ use super::cursor::{
     cursor_cell_width, cursor_left, cursor_quads, effective_cursor_shape,
     geometry_under_block_cursor,
 };
+use super::palette::{palette_overlay, OverlayText, PaletteView};
 use super::preedit::{bounds_outside, ImeArea, PreeditState};
 use crate::layout::Rect;
 use crate::render::metrics::CellMetrics;
@@ -60,6 +61,8 @@ pub struct Frame {
     metrics: CellMetrics,
     foreground: glyphon::Color,
     surface: (f32, f32),
+    /// Overlays drawn above everything (the command palette).
+    overlay: Vec<OverlayText>,
 }
 
 fn rect_bounds(r: Rect) -> TextBounds {
@@ -193,10 +196,17 @@ pub fn build_frame(
         metrics: m,
         foreground: ctx.palette.foreground.to_glyphon(),
         surface: opts.surface,
+        overlay: Vec::new(),
     }
 }
 
 impl Frame {
+    /// Draw the command palette above everything else.
+    pub fn add_palette(&mut self, ctx: &mut DrawContext, view: &PaletteView) {
+        let texts = palette_overlay(ctx, view, self.surface, &mut self.quads);
+        self.overlay.extend(texts);
+    }
+
     /// Every text run, in drawing order: tab titles, then per pane its rows (the last one is
     /// hidden under a status line) and status line, then the preedit.
     pub fn text_runs<'a>(
@@ -272,6 +282,15 @@ impl Frame {
                     color: fg,
                 });
             }
+        }
+        for text in &self.overlay {
+            runs.push(TextRun {
+                buffer: &text.buffer,
+                left: text.left,
+                top: text.top,
+                bounds: text.bounds,
+                color: text.color,
+            });
         }
         runs
     }

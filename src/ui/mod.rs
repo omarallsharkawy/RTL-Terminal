@@ -2,6 +2,7 @@
 
 pub mod clipboard;
 pub mod hit;
+pub mod palette;
 pub mod search;
 pub mod selection;
 pub mod settings;

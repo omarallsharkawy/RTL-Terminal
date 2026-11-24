@@ -5,12 +5,16 @@
 //! - `window`: the window and renderer (every renderer call lives there).
 //! - `panes`: opening, splitting, focusing and closing tabs and panes.
 //! - `keyboard`: keys, input-method text, the search bar and shortcut actions.
+//! - `palette`: the command palette.
+//! - `agent`: "Ask an agent" about the output.
 //! - `mouse`: pointer, mouse reporting, divider dragging and the wheel.
 //! - `selection`: mouse selection and the clipboard.
 
+mod agent;
 mod event;
 mod keyboard;
 mod mouse;
+mod palette;
 mod panes;
 mod selection;
 mod window;
@@ -52,6 +56,8 @@ pub struct App {
     zoom_steps: StepAccumulator,
     /// The window has keyboard focus (notifications from the focused pane are then seen).
     window_focused: bool,
+    /// The command palette, while it is open (keys and IME text go to it).
+    palette: Option<crate::ui::palette::PaletteState>,
 }
 
 impl App {
@@ -69,6 +75,7 @@ impl App {
             cursor_blink: BlinkState::new(BLINK_INTERVAL),
             zoom_steps: StepAccumulator::default(),
             window_focused: true,
+            palette: None,
         }
     }
 

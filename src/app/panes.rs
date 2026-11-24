@@ -6,6 +6,7 @@ use std::time::Instant;
 
 use super::App;
 use crate::layout::{FocusDir, PaneId, Rect, SplitDir};
+use crate::pty::SpawnOptions;
 use crate::session::spawn::ShellFactory;
 
 impl App {
@@ -43,10 +44,16 @@ impl App {
     }
 
     pub(super) fn split_focused(&mut self, dir: SplitDir) {
+        self.split_focused_with(dir, SpawnOptions::default());
+    }
+
+    /// Split the focused pane, starting the new one as `options` says.
+    pub(super) fn split_focused_with(&mut self, dir: SplitDir, options: SpawnOptions) {
         let Some(r) = self.window.grid() else {
             return;
         };
         let mut shells = ShellFactory::new(&self.proxy, self.config.cursor_blink);
+        shells.options = options;
         let Some((old, new)) = self.ws.split_focused(r, &mut shells, dir) else {
             return;
         };

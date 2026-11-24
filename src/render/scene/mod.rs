@@ -5,5 +5,6 @@ pub mod chrome;
 pub mod context;
 pub mod cursor;
 pub mod frame;
+pub mod palette;
 pub mod preedit;
 pub mod row_quads;

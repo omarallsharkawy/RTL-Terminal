@@ -38,6 +38,7 @@ use crate::terminal::{CursorState, LineData};
 use gpu::Gpu;
 use scene::context::DrawContext;
 use scene::frame::{build_frame, FrameOptions};
+use scene::palette::PaletteView;
 use scene::preedit::PreeditState;
 use text::fonts::{installed_family, new_font_system};
 
@@ -85,6 +86,8 @@ pub(crate) struct Renderer {
     row_cache: RowCache,
     /// Input-method composition drawn at the cursor.
     ime: PreeditState,
+    /// The command palette, while it is open.
+    palette_view: Option<PaletteView>,
 }
 
 impl Renderer {
@@ -115,6 +118,7 @@ impl Renderer {
             cursor_blink_on: true,
             row_cache: RowCache::default(),
             ime: Default::default(),
+            palette_view: None,
         };
         renderer.update_metrics();
         Ok(renderer)
@@ -211,6 +215,11 @@ impl Renderer {
     }
 
     /// Set (or clear with `None`) the IME composition drawn inline at the cursor.
+    /// Show the command palette (`Some`) or hide it.
+    pub(crate) fn set_command_palette(&mut self, view: Option<PaletteView>) {
+        self.palette_view = view;
+    }
+
     pub(crate) fn set_preedit(&mut self, preedit: Option<(String, Option<(usize, usize)>)>) {
         self.ime.set(preedit);
     }
@@ -306,7 +315,7 @@ impl Renderer {
             palette: &self.palette,
             is_srgb: self.is_srgb,
         };
-        let frame = build_frame(
+        let mut frame = build_frame(
             &mut ctx,
             &opts,
             &mut self.row_cache,
@@ -315,6 +324,9 @@ impl Renderer {
             panes,
             dividers,
         );
+        if let Some(view) = &self.palette_view {
+            frame.add_palette(&mut ctx, view);
+        }
         if let Some((x, y, w, h)) = frame.ime_area {
             self.window.set_ime_cursor_area(
                 winit::dpi::PhysicalPosition::new(x, y),

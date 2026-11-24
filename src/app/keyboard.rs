@@ -14,6 +14,9 @@ use crate::ui::settings::DEFAULT_FONT_SIZE;
 impl App {
     /// A key press or release. Returns true when the window should close.
     pub(super) fn on_key(&mut self, event: &KeyEvent) -> bool {
+        if self.palette_open() {
+            return self.handle_palette_key(event);
+        }
         let Some(id) = self.focused_id() else {
             return false;
         };
@@ -47,6 +50,10 @@ impl App {
             }
             Ime::Commit(text) => {
                 self.update_preedit(None);
+                if self.palette_open() {
+                    self.palette_text(&text);
+                    return;
+                }
                 let Some(id) = self.focused_id() else { return };
                 // While searching, composed text belongs to the query, not the shell.
                 if let Some(query) = self
@@ -71,7 +78,7 @@ impl App {
     }
 
     /// Run a shortcut action on the focused pane. Returns true when the window should close.
-    fn run_action(&mut self, id: PaneId, action: InputAction) -> bool {
+    pub(super) fn run_action(&mut self, id: PaneId, action: InputAction) -> bool {
         match action {
             InputAction::Bytes(bytes) => {
                 self.send_input(id, &bytes);
@@ -95,12 +102,12 @@ impl App {
             InputAction::SelectTab(index) => self.set_active_tab(index),
             InputAction::NextAttention => self.focus_next_attention(),
             // Lanes of the bundle work (docs/bundle/PLAN.md) fill these in.
+            InputAction::CommandPalette => self.toggle_palette(),
+            InputAction::AskAgent => self.ask_agent(id),
             InputAction::ToggleSidebar
-            | InputAction::CommandPalette
             | InputAction::PrevBlock
             | InputAction::NextBlock
-            | InputAction::CopyBlockOutput
-            | InputAction::AskAgent => {}
+            | InputAction::CopyBlockOutput => {}
         }
         false
     }
