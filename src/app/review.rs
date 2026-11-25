@@ -17,9 +17,11 @@ use crate::input::route::shortcut_is_idle;
 use crate::input::{key_shortcut, InputAction};
 use crate::layout::PaneId;
 use crate::pty::Pty;
-use crate::review::comment::{choose_agent_pane, format_comment, CommentTarget, PaneInfo};
+use crate::review::comment::{
+    choose_agent_pane, format_agent_prompt, format_comment, CommentTarget, PaneInfo,
+};
 use crate::review::layout::{PanelHit, PanelLayout};
-use crate::review::panel::{View, COMMIT_LABEL};
+use crate::review::panel::{cwd_in_repo, View, COMMIT_LABEL};
 use crate::review::{LoadError, PanelCmd, Snapshot};
 use crate::workflows::encode_insert;
 
@@ -199,12 +201,15 @@ impl App {
     /// A mouse press: inside the panel it is the panel's (true); outside, the panel gives the
     /// keyboard back and the press goes on (false).
     pub(super) fn review_mouse_press(&mut self, button: MouseButton) -> bool {
+        if !self.review.is_open() {
+            return false;
+        }
         let Some(layout) = self.review_layout() else {
             return false;
         };
         let (x, y) = self.pointer.pos;
         let rows = self.review.rows().len();
-        let gutter = self.review_view().map_or(0, |v| v.gutter_cols);
+        let gutter = self.review.gutter_cols();
         let top = self.review.visible_top(layout.page_rows());
         let hit = layout.hit(x, y, top, rows, gutter);
         if hit == PanelHit::Outside {
@@ -242,8 +247,14 @@ impl App {
 
     /// The pointer icon over the panel (`None` when not over it).
     pub(super) fn review_cursor(&self, x: f64, y: f64) -> Option<CursorIcon> {
+        if !self.review.is_open() {
+            return None;
+        }
         let layout = self.review_layout()?;
-        let gutter = self.review_view().map_or(0, |v| v.gutter_cols);
+        if !layout.panel.contains(x, y) {
+            return None;
+        }
+        let gutter = self.review.gutter_cols();
         let top = self.review.visible_top(layout.page_rows());
         let hit = layout.hit(x, y, top, self.review.rows().len(), gutter);
         Some(match hit {
@@ -271,7 +282,16 @@ impl App {
             PanelCmd::Submit(target) => self.send_review_comment(&target),
             PanelCmd::StartAgent(target) => self.start_review_agent(&target),
             PanelCmd::Commit => {
-                if let Some(id) = self.focused_id() {
+                let Some(id) = self.focused_id() else {
+                    return false;
+                };
+                let cwd = self.pane_cwd(id);
+                let root = self.review.snapshot().map(|s| s.root.as_path());
+                if !cwd_in_repo(cwd.as_deref(), root) {
+                    self.review.warn(
+                        "Focused pane is not in this repository; refresh or switch panes / اللوحة المحددة ليست في هذا المستودع؛ حدّث أو بدّل اللوحة",
+                    );
+                } else {
                     self.insert_text(id, "git commit");
                     self.review.set_focused(false);
                 }
@@ -344,14 +364,10 @@ impl App {
     }
 
     fn start_review_agent(&mut self, target: &CommentTarget) {
-        let text = format_comment(target);
-        if text.is_empty() {
+        let prompt = format_agent_prompt(target);
+        if prompt.is_empty() {
             return;
         }
-        let prompt = format!(
-            "A review comment on my uncommitted changes (git diff HEAD):\n{}",
-            text.trim_end()
-        );
         let cwd = self
             .review
             .snapshot()

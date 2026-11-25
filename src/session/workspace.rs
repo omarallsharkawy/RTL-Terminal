@@ -15,6 +15,47 @@ use crate::session::pane::Pane;
 pub(crate) const MIN_SPLIT_COLS: usize = 24;
 pub(crate) const MIN_SPLIT_ROWS: usize = 10;
 
+/// Why splitting the focused pane failed: a machine-readable code for the control socket and a
+/// bilingual (`English / عربي`) message shown both in the UI and over the control socket.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SplitFailure {
+    pub code: &'static str,
+    pub message: String,
+}
+
+impl SplitFailure {
+    pub fn for_size(size: Option<(usize, usize)>, dir: SplitDir) -> Self {
+        let Some((cols, rows)) = size else {
+            return Self {
+                code: "not_found",
+                message: "no focused pane / لا توجد لوحة محددة".into(),
+            };
+        };
+        let min_cols = MIN_SPLIT_COLS * 2;
+        let min_rows = MIN_SPLIT_ROWS * 2;
+        match dir {
+            SplitDir::Horizontal if cols < min_cols => Self {
+                code: "pane_too_small",
+                message: format!(
+                    "cannot split pane horizontally: pane is too small ({cols}x{rows}; need at least {min_cols} columns) / لا يمكن تقسيم اللوحة أفقياً: اللوحة صغيرة جداً ({cols}x{rows}، يلزم {min_cols} عموداً على الأقل)"
+                ),
+            },
+            SplitDir::Vertical if rows < min_rows => Self {
+                code: "pane_too_small",
+                message: format!(
+                    "cannot split pane vertically: pane is too small ({cols}x{rows}; need at least {min_rows} rows) / لا يمكن تقسيم اللوحة رأسياً: اللوحة صغيرة جداً ({cols}x{rows}، يلزم {min_rows} صفاً على الأقل)"
+                ),
+            },
+            _ => Self {
+                code: "internal",
+                message:
+                    "could not split pane: failed to start shell / تعذر تقسيم اللوحة: فشل تشغيل الصدفة"
+                        .into(),
+            },
+        }
+    }
+}
+
 /// Where panes go on screen and how many cells fit in a rectangle (the renderer).
 pub(crate) trait GridGeometry {
     /// Area the panes of the active tab share when there are `tab_count` tabs.
@@ -357,20 +398,34 @@ impl Workspace {
         Some(id)
     }
 
-    /// Whether the focused pane is large enough to split in `dir`.
-    pub(crate) fn can_split_focused(&self, geo: &impl GridGeometry, dir: SplitDir) -> bool {
-        let Some((cols, rows)) = self.active_tab().and_then(|tab| {
+    /// Grid size `(cols, rows)` of the focused pane under `geo`'s unzoomed tab layout.
+    pub(crate) fn focused_layout_size(&self, geo: &impl GridGeometry) -> Option<(usize, usize)> {
+        self.active_tab().and_then(|tab| {
             layout(&tab.root, geo.content_rect(self.tabs.len()), geo.gap())
                 .into_iter()
                 .find(|(id, _)| *id == tab.focused)
                 .map(|(_, rect)| geo.grid_size(rect))
-        }) else {
+        })
+    }
+
+    /// Whether the focused pane is large enough to split in `dir`.
+    pub(crate) fn can_split_focused(&self, geo: &impl GridGeometry, dir: SplitDir) -> bool {
+        let Some((cols, rows)) = self.focused_layout_size(geo) else {
             return false;
         };
         match dir {
             SplitDir::Horizontal => cols >= MIN_SPLIT_COLS * 2,
             SplitDir::Vertical => rows >= MIN_SPLIT_ROWS * 2,
         }
+    }
+
+    /// Explain why splitting the focused pane in `dir` failed under `geo`.
+    pub(crate) fn split_failure_reason(
+        &self,
+        geo: &impl GridGeometry,
+        dir: SplitDir,
+    ) -> SplitFailure {
+        SplitFailure::for_size(self.focused_layout_size(geo), dir)
     }
 
     /// Split the focused pane and focus the new one. Returns `(old, new)` focused panes, or

@@ -71,10 +71,10 @@ impl App {
             Ok(_) => return,
             Err(AgentStartError::NotFound) => {
                 "\r\n\x1b[33mTwitty: no coding agent found (claude, codex, gemini, \
-                 opencode, grok). Set \"agent_command\" in config.json.\x1b[0m\r\n"
+                 opencode, grok). Set \"agent_command\" in config.json. / مفيش وكيل برمجة متسطّب؛ اضبط agent_command في config.json\x1b[0m\r\n"
             }
             Err(AgentStartError::Failed) => {
-                "\r\n\x1b[33mTwitty: failed to start the coding agent.\x1b[0m\r\n"
+                "\r\n\x1b[33mTwitty: failed to start the coding agent. / مقدرناش نشغّل وكيل البرمجة.\x1b[0m\r\n"
             }
         };
         self.term(id, |t| t.process_bytes(note.as_bytes()));
@@ -105,9 +105,9 @@ impl App {
         // Prefer a side-by-side split; when the sidebar or existing splits leave the pane too
         // narrow for MIN_SPLIT_COLS, fall back to a stacked split, then a new tab.
         let spawned = if self.can_split_focused(SplitDir::Horizontal) {
-            self.split_focused_with(SplitDir::Horizontal, options)
+            self.split_focused_with(SplitDir::Horizontal, options).ok()
         } else if self.can_split_focused(SplitDir::Vertical) {
-            self.split_focused_with(SplitDir::Vertical, options)
+            self.split_focused_with(SplitDir::Vertical, options).ok()
         } else {
             self.new_tab_with(options)
         };

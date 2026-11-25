@@ -107,11 +107,13 @@ impl App {
                     .pane_mut(id)
                     .and_then(|p| p.ui.search_query.as_mut())
                 {
-                    query.push_str(&text);
-                    self.run_search(id, Direction::Left);
+                    if crate::ui::search::push_search_text(query, &text) {
+                        self.run_search(id, Direction::Left);
+                    }
                     return;
                 }
                 self.send_input(id, text.as_bytes());
+                self.cursor_blink.reset(Instant::now());
             }
         }
     }
@@ -148,8 +150,12 @@ impl App {
             InputAction::JumpUnread => self.focus_newest_attention(),
             InputAction::NextTab => self.cycle_tab(1),
             InputAction::PrevTab => self.cycle_tab(-1),
-            InputAction::SplitRight => self.split_focused(SplitDir::Horizontal),
-            InputAction::SplitDown => self.split_focused(SplitDir::Vertical),
+            InputAction::SplitRight => {
+                let _ = self.split_focused(SplitDir::Horizontal);
+            }
+            InputAction::SplitDown => {
+                let _ = self.split_focused(SplitDir::Vertical);
+            }
             InputAction::Focus(dir) => self.focus_direction(dir),
             InputAction::SelectTab(index) => self.set_active_tab(index),
             InputAction::NextAttention => self.focus_next_attention(),
@@ -214,7 +220,7 @@ impl App {
     pub(super) fn search_bar_text(&self, id: PaneId, query: &str) -> String {
         match self.ws.pane(id).map(|p| &p.terminal) {
             Some(t) => search_bar_text(query, t.has_search_match(), || t.search_position()),
-            None => format!("Find: {query}"),
+            None => format!("Find / بحث: {query}"),
         }
     }
 

@@ -3,6 +3,33 @@
 use std::sync::Arc;
 use winit::window::Window;
 
+/// Choose a surface texture format (preferring non-sRGB) or return an error when none exist.
+pub fn choose_surface_format(
+    formats: &[wgpu::TextureFormat],
+) -> anyhow::Result<wgpu::TextureFormat> {
+    formats
+        .iter()
+        .copied()
+        .find(|f| !f.is_srgb())
+        .or_else(|| formats.first().copied())
+        .ok_or_else(|| anyhow::anyhow!("GPU surface reported no supported texture formats"))
+}
+
+/// Choose a composite alpha mode (preferring pre/post-multiplied transparency) or return an error
+/// when none exist.
+pub fn choose_alpha_mode(
+    alpha_modes: &[wgpu::CompositeAlphaMode],
+) -> anyhow::Result<wgpu::CompositeAlphaMode> {
+    [
+        wgpu::CompositeAlphaMode::PreMultiplied,
+        wgpu::CompositeAlphaMode::PostMultiplied,
+    ]
+    .into_iter()
+    .find(|m| alpha_modes.contains(m))
+    .or_else(|| alpha_modes.first().copied())
+    .ok_or_else(|| anyhow::anyhow!("GPU surface reported no supported alpha modes"))
+}
+
 /// Device, queue and the surface frames are presented to.
 pub(crate) struct GpuContext {
     pub surface: wgpu::Surface<'static>,
@@ -52,12 +79,7 @@ impl GpuContext {
             .await?;
 
         let surface_caps = surface.get_capabilities(&adapter);
-        let format = surface_caps
-            .formats
-            .iter()
-            .copied()
-            .find(|f| !f.is_srgb())
-            .unwrap_or(surface_caps.formats[0]);
+        let format = choose_surface_format(&surface_caps.formats)?;
 
         let present_mode = if surface_caps
             .present_modes
@@ -73,20 +95,16 @@ impl GpuContext {
             wgpu::PresentMode::AutoVsync
         };
 
+        // A pre/post-multiplied surface lets the compositor show what is behind the window.
+        let alpha_mode = choose_alpha_mode(&surface_caps.alpha_modes)?;
+
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
             width,
             height,
             present_mode,
-            // A pre/post-multiplied surface lets the compositor show what is behind the window.
-            alpha_mode: [
-                wgpu::CompositeAlphaMode::PreMultiplied,
-                wgpu::CompositeAlphaMode::PostMultiplied,
-            ]
-            .into_iter()
-            .find(|m| surface_caps.alpha_modes.contains(m))
-            .unwrap_or(surface_caps.alpha_modes[0]),
+            alpha_mode,
             view_formats: vec![],
             desired_maximum_frame_latency: 1,
             color_space: Default::default(),

@@ -10,7 +10,7 @@ use crate::layout::{FocusDir, PaneId, Rect, SplitDir};
 use crate::pty::SpawnOptions;
 use crate::remote::Target;
 use crate::session::spawn::ShellFactory;
-use crate::session::workspace::CloseOthers;
+use crate::session::workspace::{CloseOthers, SplitFailure};
 use winit::event_loop::EventLoopProxy;
 
 fn shell_factory<'a>(
@@ -35,13 +35,15 @@ impl App {
         if let Some(session) = self.startup_session.take() {
             let was_visible = self.window.sidebar_visible();
             self.window.set_sidebar_visible(session.sidebar_visible);
-            let socket = self.control_socket_path();
-            let mut shells =
-                shell_factory(&self.proxy, &self.config, socket, SpawnOptions::default());
-            self.ws = session.rebuild(&self.window, &mut shells);
-            if let Some(id) = self.focused_id() {
-                self.focus_changed(None, id);
-                return;
+            if let Some(grid) = self.window.grid() {
+                let socket = self.control_socket_path();
+                let mut shells =
+                    shell_factory(&self.proxy, &self.config, socket, SpawnOptions::default());
+                self.ws = session.rebuild(grid, &mut shells);
+                if let Some(id) = self.focused_id() {
+                    self.focus_changed(None, id);
+                    return;
+                }
             }
             self.window.set_sidebar_visible(was_visible);
             crate::config::warn("twitty: no shells from the saved session could be started".into());
@@ -107,23 +109,38 @@ impl App {
             .is_some_and(|grid| self.ws.can_split_focused(grid, dir))
     }
 
-    pub(super) fn split_focused(&mut self, dir: SplitDir) {
-        self.split_focused_with(dir, SpawnOptions::default());
+    pub(super) fn split_focused(&mut self, dir: SplitDir) -> Result<PaneId, SplitFailure> {
+        let focused = self.focused_id();
+        let res = self.split_focused_with(dir, SpawnOptions::default());
+        if let Err(ref err) = res {
+            if let Some(id) = focused {
+                self.show_pane_warning(id, &err.message);
+            }
+        }
+        res
     }
 
-    /// Split the focused pane, starting the new one as `options` says. Returns the new pane.
+    /// Split the focused pane, starting the new one as `options` says. Returns the new pane or
+    /// the bilingual failure reason.
     pub(super) fn split_focused_with(
         &mut self,
         dir: SplitDir,
         options: SpawnOptions,
-    ) -> Option<PaneId> {
-        let r = self.window.grid()?;
+    ) -> Result<PaneId, SplitFailure> {
+        let Some(r) = self.window.grid() else {
+            return Err(SplitFailure::for_size(None, dir));
+        };
+        if !self.ws.can_split_focused(r, dir) {
+            return Err(self.ws.split_failure_reason(r, dir));
+        }
         let socket = self.control_socket_path();
         let mut shells = shell_factory(&self.proxy, &self.config, socket, options);
-        let (old, new) = self.ws.split_focused(r, &mut shells, dir)?;
+        let Some((old, new)) = self.ws.split_focused(r, &mut shells, dir) else {
+            return Err(self.ws.split_failure_reason(r, dir));
+        };
         self.apply_layout();
         self.focus_changed(Some(old), new);
-        Some(new)
+        Ok(new)
     }
 
     /// Keyboard focus moved from `old` to `new`: close any open palette, tell the programs,
@@ -148,6 +165,9 @@ impl App {
         self.window.reveal_active_tab();
         self.cursor_blink.reset(Instant::now());
         self.refresh_window_title();
+        if self.review.is_open() {
+            self.refresh_review();
+        }
         self.window.request_redraw();
     }
 

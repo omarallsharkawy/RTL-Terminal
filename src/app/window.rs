@@ -3,6 +3,7 @@
 use alacritty_terminal::index::Side;
 use alacritty_terminal::vte::ansi::{Color as AnsiColor, Rgb};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use winit::event_loop::ActiveEventLoop;
@@ -39,7 +40,8 @@ pub(super) const WINDOW_APP_ID: &str = "twitty";
 
 impl GridGeometry for Window {
     fn content_rect(&self, tab_count: usize) -> Rect {
-        self.layout(tab_count).content
+        self.layout(tab_count)
+            .map_or(Rect::new(0.0, 0.0, 0.0, 0.0), |layout| layout.content)
     }
 
     fn gap(&self) -> f32 {
@@ -193,11 +195,8 @@ impl Window {
         self.renderer.as_ref().map(|_| self)
     }
 
-    fn layout(&self, tab_count: usize) -> WindowLayout {
-        let r = self
-            .renderer
-            .as_ref()
-            .expect("layout requires an open window");
+    fn layout(&self, tab_count: usize) -> Option<WindowLayout> {
+        let r = self.renderer.as_ref()?;
         let mut layout = WindowLayout::new(
             r.metrics(),
             r.surface_size(),
@@ -215,7 +214,7 @@ impl Window {
             layout.content = content;
             layout.review = review;
         }
-        layout
+        Some(layout)
     }
 
     /// Open or close the review panel's area (the caller lays the panes out again).
@@ -228,8 +227,7 @@ impl Window {
 
     /// Where the review panel is drawn, while it is open and fits.
     pub(super) fn review_rect(&self, ws: &Workspace) -> Option<Rect> {
-        self.renderer.as_ref()?;
-        self.layout(ws.tabs().len()).review
+        self.layout(ws.tabs().len())?.review
     }
 
     /// Hand the review panel's view to the renderer (`None` hides it).
@@ -248,10 +246,13 @@ impl Window {
     }
 
     pub(super) fn diff_visible(&self) -> bool {
-        self.renderer.as_ref().is_some_and(|r| {
-            let top = self.layout(0).top_bar;
-            !self.occluded && TopBarLayout::can_show_diff(top, r.metrics().scale)
-        })
+        let Some(r) = self.renderer.as_ref() else {
+            return false;
+        };
+        let Some(layout) = self.layout(0) else {
+            return false;
+        };
+        !self.occluded && TopBarLayout::can_show_diff(layout.top_bar, r.metrics().scale)
     }
 
     pub(super) fn set_occluded(&mut self, occluded: bool) {
@@ -304,7 +305,30 @@ impl Window {
 
     /// The sidebar is on screen.
     pub(super) fn sidebar_shown(&self, ws: &Workspace) -> bool {
-        self.is_open() && self.layout(ws.tabs().len()).sidebar.is_some()
+        self.layout(ws.tabs().len())
+            .is_some_and(|layout| layout.sidebar.is_some())
+    }
+
+    /// Local directories currently displayed in the sidebar, for off-thread git branch lookups.
+    pub(super) fn sidebar_branch_dirs(&self, ws: &Workspace) -> Vec<PathBuf> {
+        ws.tabs()
+            .iter()
+            .filter_map(|tab| {
+                if sidebar_remote(ws, tab).is_some() {
+                    return None;
+                }
+                ws.pane(tab.focused)?.meta.cwd.clone()
+            })
+            .collect()
+    }
+
+    /// Apply git branch lookups produced off the UI thread; returns true when any changed.
+    pub(super) fn set_branches(
+        &mut self,
+        branches: HashMap<PathBuf, Option<String>>,
+        now: Instant,
+    ) -> bool {
+        self.branches.update(branches, now)
     }
 
     /// New port scan results; true when they differ from what is shown.
@@ -315,11 +339,9 @@ impl Window {
     }
 
     pub(super) fn sidebar_contains(&self, ws: &Workspace, x: f64, y: f64) -> bool {
-        self.is_open()
-            && self
-                .layout(ws.tabs().len())
-                .sidebar
-                .is_some_and(|area| area.contains(x, y))
+        self.layout(ws.tabs().len())
+            .and_then(|layout| layout.sidebar)
+            .is_some_and(|area| area.contains(x, y))
     }
 
     pub(super) fn notify(
@@ -365,7 +387,7 @@ impl Window {
         let drag = self.sidebar_drag.take()?;
         self.request_redraw();
         let view = self.sidebar_view.as_ref()?;
-        let area = self.layout(ws.tabs().len()).sidebar?;
+        let area = self.layout(ws.tabs().len())?.sidebar?;
         if !view.matches(area, ws.tabs().len()) || ws.active_tab()?.id != drag.tab_id {
             return None;
         }
@@ -518,7 +540,9 @@ impl Window {
             return Hit::Nothing;
         };
         let n = ws.tabs().len();
-        let layout = self.layout(n);
+        let Some(layout) = self.layout(n) else {
+            return Hit::Nothing;
+        };
         if layout.review.is_some_and(|area| area.contains(x, y)) {
             // The review panel handles its own pointer input (`App::review_mouse_press`).
             return Hit::Nothing;
@@ -629,14 +653,15 @@ impl Window {
         let Some(metrics) = self.metrics() else {
             return;
         };
-        let layout = self.layout(ws.tabs().len());
+        let Some(layout) = self.layout(ws.tabs().len()) else {
+            return;
+        };
         self.sidebar_view = layout.sidebar.and_then(|area| {
             let mut entries = sidebar_entries(ws, &self.ports, history, self.language);
             let directories = entries.iter().filter_map(|e| e.cwd.clone()).collect();
             self.branches.retain(&directories);
-            let now = Instant::now();
             for entry in &mut entries {
-                entry.branch = entry.cwd.as_deref().and_then(|p| self.branches.get(p, now));
+                entry.branch = entry.cwd.as_deref().and_then(|p| self.branches.cached(p));
             }
             let cards = self.renderer.as_mut()?.sidebar_cards(entries, area);
             let mut view = self.sidebar_scroll.view(
@@ -861,6 +886,7 @@ impl App {
             }
         }
         self.sync_port_watch();
+        self.sync_branch_watch();
         let review = self.review_view();
         self.window.set_review(review);
         let (panes, dividers) = self.frame();
@@ -1085,5 +1111,19 @@ mod tests {
             let rect = ws.pane_rect(&grid, two).unwrap();
             assert_eq!((rect.x, rect.y), origin);
         }
+    }
+
+    #[test]
+    fn closed_window_layout_returns_none_without_panicking() {
+        let win = Window::new();
+        let ws = Workspace::new();
+        assert!(win.layout(0).is_none());
+        assert!(win.layout(2).is_none());
+        assert_eq!(win.content_rect(1), Rect::new(0.0, 0.0, 0.0, 0.0));
+        assert!(win.review_rect(&ws).is_none());
+        assert!(!win.diff_visible());
+        assert!(!win.sidebar_shown(&ws));
+        assert!(!win.sidebar_contains(&ws, 0.0, 0.0));
+        assert_eq!(win.hit_test(&ws, 0.0, 0.0), Hit::Nothing);
     }
 }

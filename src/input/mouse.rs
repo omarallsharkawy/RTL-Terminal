@@ -22,16 +22,20 @@ pub(crate) fn button_code(button: MouseButton) -> Option<u8> {
 
 /// Counts single, double and triple clicks on one cell.
 #[derive(Debug, Default)]
-pub(crate) struct ClickCounter {
+pub struct ClickCounter {
     last: Option<(Instant, usize, usize)>,
     count: u8,
 }
 
 impl ClickCounter {
     /// A press at `(col, row)`: returns 1, 2 or 3, cycling back to 1 after a triple click.
-    pub(crate) fn click(&mut self, now: Instant, col: usize, row: usize) -> u8 {
+    pub fn click(&mut self, now: Instant, col: usize, row: usize) -> u8 {
         self.count = match self.last {
-            Some((t, c, r)) if now - t < MULTI_CLICK && (c, r) == (col, row) => self.count % 3 + 1,
+            Some((t, c, r))
+                if now.saturating_duration_since(t) < MULTI_CLICK && (c, r) == (col, row) =>
+            {
+                self.count % 3 + 1
+            }
             _ => 1,
         };
         self.last = Some((now, col, row));
@@ -41,33 +45,50 @@ impl ClickCounter {
 
 /// Sums fractional wheel or trackpad deltas into whole steps.
 #[derive(Debug, Default)]
-pub(crate) struct StepAccumulator {
+pub struct StepAccumulator {
     accum: f64,
 }
 
 impl StepAccumulator {
     /// Add `delta` and return the whole steps it completes (keeping the remainder).
     pub fn add(&mut self, delta: f64) -> i32 {
+        if !delta.is_finite() {
+            return 0;
+        }
         self.accum += delta;
+        if !self.accum.is_finite() {
+            self.accum = 0.0;
+            return 0;
+        }
         let steps = self.accum.trunc();
         if steps != 0.0 {
             self.accum -= steps;
         }
-        steps as i32
+        steps.clamp(i32::MIN as f64, i32::MAX as f64) as i32
     }
 }
 
 /// Lines a wheel event scrolls (positive is up).
-pub(crate) fn wheel_lines(delta: MouseScrollDelta, line_height: f64) -> f64 {
-    match delta {
+pub fn wheel_lines(delta: MouseScrollDelta, line_height: f64) -> f64 {
+    let lines = match delta {
         MouseScrollDelta::LineDelta(_, y) => y as f64 * LINES_PER_WHEEL_NOTCH,
-        MouseScrollDelta::PixelDelta(p) => p.y / line_height,
+        MouseScrollDelta::PixelDelta(p) => {
+            if !line_height.is_finite() || line_height <= 0.0 {
+                return 0.0;
+            }
+            p.y / line_height
+        }
+    };
+    if lines.is_finite() {
+        lines
+    } else {
+        0.0
     }
 }
 
 /// What `steps` whole wheel lines do in a pane with terminal mode `mode`.
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum WheelAction {
+pub enum WheelAction {
     /// Report wheel button `button` (64 up, 65 down) `count` times.
     Report {
         button: u8,
@@ -80,7 +101,8 @@ pub(crate) enum WheelAction {
     None,
 }
 
-pub(crate) fn wheel_action(mode: TermMode, steps: i32) -> WheelAction {
+pub fn wheel_action(mode: TermMode, steps: i32) -> WheelAction {
+    let steps = steps.clamp(-100, 100);
     if steps == 0 {
         return WheelAction::None;
     }

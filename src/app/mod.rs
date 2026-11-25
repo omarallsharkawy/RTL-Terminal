@@ -13,6 +13,7 @@
 //! - `selection`: mouse selection and the clipboard.
 
 mod agent;
+mod branches;
 mod control;
 mod event;
 mod git_diff;
@@ -26,7 +27,18 @@ mod selection;
 mod ssh;
 mod window;
 
-pub use event::{clean_title, AppEvent};
+pub use event::{accept_osc52_clipboard, clean_title, AppEvent, MAX_OSC52_CLIPBOARD_BYTES};
+pub use palette::format_pane_warning;
+
+/// Sanitize startup warning strings (from config/paths) before writing them to the terminal.
+pub fn format_startup_warnings(warnings: &[String]) -> String {
+    warnings
+        .iter()
+        .map(|w| crate::shell_integration::clean_text(w, 512))
+        .filter(|w| !w.is_empty())
+        .map(|w| format!("\x1b[33m{w}\x1b[0m\r\n"))
+        .collect()
+}
 
 use alacritty_terminal::term::TermMode;
 use std::time::Instant;
@@ -76,6 +88,8 @@ pub struct App {
     notification_history: crate::ui::notifications::NotificationHistory,
     /// The thread scanning listening ports while the sidebar is shown.
     ports: ports::PortWatch,
+    /// The thread resolving git branches off the UI thread while the sidebar is shown.
+    branches: branches::BranchWatch,
     /// The code review panel.
     review: crate::review::ReviewPanel,
     git_diff: git_diff::GitDiffWatch,
@@ -111,6 +125,7 @@ impl App {
             control: None,
             notification_history: Default::default(),
             ports: ports::PortWatch::default(),
+            branches: branches::BranchWatch::default(),
             review: Default::default(),
             git_diff: git_diff::GitDiffWatch::default(),
         }
@@ -176,11 +191,10 @@ impl ApplicationHandler<AppEvent> for App {
         // Config and session problems found while starting.
         let warnings = crate::config::take_warnings();
         if let Some(id) = self.ws.focused_id().filter(|_| !warnings.is_empty()) {
-            let text: String = warnings
-                .iter()
-                .map(|w| format!("\x1b[33m{w}\x1b[0m\r\n"))
-                .collect();
-            self.term(id, |t| t.process_bytes(text.as_bytes()));
+            let text = format_startup_warnings(&warnings);
+            if !text.is_empty() {
+                self.term(id, |t| t.process_bytes(text.as_bytes()));
+            }
         }
         self.window.request_redraw_now();
     }
@@ -197,14 +211,13 @@ impl ApplicationHandler<AppEvent> for App {
                 }
             }
             AppEvent::SshAttached(id) => self.on_ssh_attached(id),
-            AppEvent::RetrySsh(id) => self.retry_ssh(id),
-            AppEvent::ClearSelection(id, generation) => self.on_clear_selection(id, generation),
-            AppEvent::Control(request, reply) => {
-                if self.on_control_request(request, reply) {
+            AppEvent::Control(request, reply, cancelled) => {
+                if self.on_control_request(request, reply, cancelled) {
                     event_loop.exit();
                 }
             }
             AppEvent::Ports(ports) => self.on_ports(ports),
+            AppEvent::Branches(branches) => self.on_branches(branches),
             AppEvent::Review(generation, result) => self.on_review_loaded(generation, result),
             AppEvent::GitDiff(generation, stat) => self.on_git_diff(generation, stat),
         }
@@ -231,10 +244,14 @@ impl ApplicationHandler<AppEvent> for App {
         }
         let search_due = self.poll_search_all(now);
         let flash_due = self.window.tick_pane_flash(now);
+        let selection_due = self.poll_selection_clears(now);
+        let ssh_due = self.poll_ssh_retries(now);
         let deadline = [
             self.cursor_blink.next_deadline(),
             search_due,
             flash_due,
+            selection_due,
+            ssh_due,
             self.poll_git_diff(now),
             self.window.poll_sidebar_animation(now),
         ]

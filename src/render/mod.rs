@@ -236,7 +236,11 @@ impl Renderer {
     }
 
     pub(crate) fn set_scale_factor(&mut self, scale: f32) {
-        self.metrics.scale = scale.max(0.25);
+        self.metrics.scale = if scale.is_finite() {
+            scale.clamp(0.25, 16.0)
+        } else {
+            1.0
+        };
         self.update_metrics();
     }
 

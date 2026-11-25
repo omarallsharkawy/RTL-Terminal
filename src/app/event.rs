@@ -2,7 +2,9 @@
 
 use alacritty_terminal::event::{Event as TermEvent, WindowSize};
 use std::collections::HashMap;
-use std::sync::mpsc;
+use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use super::App;
@@ -19,13 +21,12 @@ pub enum AppEvent {
     Terminal(PaneId, TermEvent),
     PtyExit(PaneId, Option<u32>),
     SshAttached(PaneId),
-    RetrySsh(PaneId),
-    /// Clear the highlight of a copied selection, unless a newer selection was started.
-    ClearSelection(PaneId, u64),
-    /// A request from the local control socket, with the channel to send its reply on.
-    Control(Request, mpsc::Sender<Response>),
+    /// A request from the local control socket, with its reply channel and cancellation flag.
+    Control(Request, mpsc::Sender<Response>, Arc<AtomicBool>),
     /// Listening TCP ports of each pane's processes, from the port scanner thread.
     Ports(HashMap<PaneId, Vec<u16>>),
+    /// Git branch names resolved off the UI thread for sidebar tab directories.
+    Branches(HashMap<PathBuf, Option<String>>),
     /// The review panel's changes, loaded on a worker thread (tagged with its load number).
     Review(
         u64,
@@ -36,6 +37,14 @@ pub enum AppEvent {
 
 /// Longest title kept from a program, in characters.
 const MAX_TITLE_CHARS: usize = 256;
+
+/// Maximum bytes accepted from a program's OSC 52 clipboard write (1 MiB).
+pub const MAX_OSC52_CLIPBOARD_BYTES: usize = 1024 * 1024;
+
+/// Accept an OSC 52 clipboard payload only if it stays within [`MAX_OSC52_CLIPBOARD_BYTES`].
+pub fn accept_osc52_clipboard(text: String) -> Option<String> {
+    (text.len() <= MAX_OSC52_CLIPBOARD_BYTES).then_some(text)
+}
 
 /// A program-set title as stored: no control, bidi-override or line-separator characters, at
 /// most `MAX_TITLE_CHARS`. It is shaped for the tab bar on every frame, so a multi-megabyte one
@@ -182,17 +191,6 @@ impl App {
         self.window.request_redraw();
     }
 
-    /// The delayed clear of a copied selection.
-    pub(super) fn on_clear_selection(&mut self, id: PaneId, generation: u64) {
-        let current = self
-            .ws
-            .pane(id)
-            .is_some_and(|p| p.ui.selection.may_clear(generation));
-        if current {
-            self.clear_selection(id);
-        }
-    }
-
     /// Something the terminal of pane `id` asks for: replies, title, bell, clipboard.
     pub(super) fn on_terminal_event(&mut self, id: PaneId, event: TermEvent) {
         if self.ws.pane(id).is_none() {
@@ -240,8 +238,10 @@ impl App {
                 self.write_to(id, format(size).as_bytes());
             }
             TermEvent::ClipboardStore(_, text) => {
-                // OSC 52 copy (e.g. from tmux/vim over SSH).
-                self.clipboard.set_text(text);
+                // OSC 52 copy (e.g. from tmux/vim over SSH), bounded to prevent memory exhaustion.
+                if let Some(text) = accept_osc52_clipboard(text) {
+                    self.clipboard.set_text(text);
+                }
             }
             // OSC 52 reads are refused: any program could silently exfiltrate the clipboard.
             TermEvent::ClipboardLoad(..) => {}

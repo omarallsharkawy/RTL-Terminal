@@ -4,10 +4,9 @@ use alacritty_terminal::index::Side;
 use alacritty_terminal::term::TermMode;
 use std::time::Instant;
 
-use super::{App, AppEvent};
+use super::App;
 use crate::input::encode_paste;
 use crate::layout::PaneId;
-use crate::ui::selection::COPIED_HIGHLIGHT;
 
 impl App {
     pub(super) fn clear_selection(&mut self, id: PaneId) {
@@ -22,6 +21,7 @@ impl App {
             .unwrap_or(false);
         if let Some(pane) = self.ws.pane_mut(id) {
             pane.ui.selection.end();
+            pane.ui.selection.cancel_clear();
         }
         if had {
             self.window.request_redraw();
@@ -49,7 +49,8 @@ impl App {
         self.window.request_redraw();
     }
 
-    /// Mouse released: copy what was selected, flash it briefly, then clear the highlight.
+    /// Mouse released: copy what was selected, flash it briefly, then clear the highlight once
+    /// its deadline elapses in `App::about_to_wait`.
     pub(super) fn finish_selection(&mut self, id: PaneId) {
         if let Some(pane) = self.ws.pane_mut(id) {
             pane.ui.selection.end();
@@ -58,14 +59,37 @@ impl App {
             self.clear_selection(id);
             return;
         }
-        let Some(generation) = self.ws.pane(id).map(|p| p.ui.selection.generation()) else {
-            return;
-        };
-        let proxy = self.proxy.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(COPIED_HIGHLIGHT);
-            let _ = proxy.send_event(AppEvent::ClearSelection(id, generation));
-        });
+        if let Some(pane) = self.ws.pane_mut(id) {
+            pane.ui.selection.schedule_clear(Instant::now());
+        }
+    }
+
+    /// Clear any copied-selection highlights whose deadline has passed at `now`, returning the
+    /// earliest remaining deadline for `ControlFlow::WaitUntil`.
+    pub(super) fn poll_selection_clears(&mut self, now: Instant) -> Option<Instant> {
+        let due: Vec<PaneId> = self
+            .ws
+            .panes()
+            .filter(|p| {
+                p.ui.selection
+                    .next_clear_deadline()
+                    .is_some_and(|at| now >= at)
+            })
+            .map(|p| p.id)
+            .collect();
+        for id in due {
+            let clear = self
+                .ws
+                .pane_mut(id)
+                .is_some_and(|p| p.ui.selection.take_due_clear(now));
+            if clear {
+                self.clear_selection(id);
+            }
+        }
+        self.ws
+            .panes()
+            .filter_map(|p| p.ui.selection.next_clear_deadline())
+            .min()
     }
 
     pub(super) fn paste_clipboard(&mut self, id: PaneId) {

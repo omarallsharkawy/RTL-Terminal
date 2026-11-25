@@ -226,7 +226,11 @@ impl PaletteState {
                 if modifiers.control_key() {
                     // Ctrl+Backspace drops the last word.
                     let trimmed = self.query.trim_end();
-                    let cut = trimmed.rfind(char::is_whitespace).map_or(0, |i| i + 1);
+                    let cut = trimmed
+                        .char_indices()
+                        .rev()
+                        .find(|&(_, c)| c.is_whitespace())
+                        .map_or(0, |(i, c)| i + c.len_utf8());
                     self.query.truncate(cut);
                 } else {
                     self.query.pop();

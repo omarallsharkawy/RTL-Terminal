@@ -944,8 +944,12 @@ fn key_with_mode(key: &KeyInput, mode: TermMode, shortcuts: bool) -> Option<Inpu
 /// (and won't run it line by line); otherwise newlines become carriage returns like a typed Enter.
 pub fn encode_paste(text: &str, bracketed: bool) -> Vec<u8> {
     if bracketed {
-        // Strip ESC so pasted content can't terminate the bracket early and inject commands.
-        let body: String = text.chars().filter(|&c| c != '\x1b').collect();
+        // Strip ESC, 8-bit C1 CSI (U+009B) and NUL so pasted content can't terminate the
+        // bracket early or inject control sequences.
+        let body: String = text
+            .chars()
+            .filter(|&c| !matches!(c, '\x1b' | '\u{009b}' | '\0'))
+            .collect();
         let mut out = b"\x1b[200~".to_vec();
         out.extend_from_slice(body.as_bytes());
         out.extend_from_slice(b"\x1b[201~");
@@ -978,13 +982,20 @@ pub fn encode_mouse(
 
     if sgr {
         let suffix = if pressed { 'M' } else { 'm' };
-        format!("\x1b[<{};{};{}{}", code, col + 1, row + 1, suffix).into_bytes()
+        format!(
+            "\x1b[<{};{};{}{}",
+            code,
+            col.saturating_add(1),
+            row.saturating_add(1),
+            suffix
+        )
+        .into_bytes()
     } else {
         // Legacy X10/normal encoding: releases are button 3, coordinates capped at 223.
         if !pressed {
             code = (code & !0b11) | 3;
         }
-        let clamp = |v: usize| (v + 1).min(223) as u8 + 32;
+        let clamp = |v: usize| v.saturating_add(1).min(223) as u8 + 32;
         vec![0x1b, b'[', b'M', 32 + code, clamp(col), clamp(row)]
     }
 }
@@ -1013,7 +1024,7 @@ pub fn encode_mouse_for_mode(
     out.truncate(4);
     // Each coordinate is one UTF-8 character, up to 2015 (the largest 2-byte code point - 32).
     for v in [col, row] {
-        let c = char::from_u32((v + 1).min(2015) as u32 + 32).unwrap_or(' ');
+        let c = char::from_u32(v.saturating_add(1).min(2015) as u32 + 32).unwrap_or(' ');
         let mut buf = [0u8; 4];
         out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
     }

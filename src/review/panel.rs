@@ -132,6 +132,7 @@ pub struct ReviewPanel {
     /// Collapsed files by path, kept across refreshes.
     collapsed: HashSet<String>,
     rows: Vec<Row>,
+    gutter_cols: usize,
     top: usize,
     selected: Option<usize>,
     editor: Option<Editor>,
@@ -195,6 +196,11 @@ impl ReviewPanel {
         &self.rows
     }
 
+    /// Cached line-number gutter width in cells for the currently applied snapshot (0 without one).
+    pub fn gutter_cols(&self) -> usize {
+        self.gutter_cols
+    }
+
     pub fn top(&self) -> usize {
         self.top
     }
@@ -225,7 +231,13 @@ impl ReviewPanel {
 
     /// Nothing to load: the focused pane has no local folder.
     pub fn set_no_folder(&mut self) {
+        self.generation += 1;
+        self.in_flight = false;
+        self.rerun = false;
+        self.waiting = None;
+        self.editor = None;
         self.snapshot = None;
+        self.gutter_cols = 0;
         self.load = Some(Load::NoFolder);
         self.rebuild();
     }
@@ -259,11 +271,14 @@ impl ReviewPanel {
                     self.top = 0;
                     self.selected = None;
                 }
+                let digits = snapshot.diff.max_line_number().to_string().len().max(3);
+                self.gutter_cols = 2 * digits + 1;
                 self.snapshot = Some(snapshot);
                 self.load = Some(Load::Ready);
             }
             Err(err) => {
                 self.snapshot = None;
+                self.gutter_cols = 0;
                 self.load = Some(match err {
                     LoadError::NotRepo => Load::NotRepo,
                     LoadError::NoGit => Load::NoGit,
@@ -324,12 +339,29 @@ impl ReviewPanel {
             return;
         };
         if collapsed {
-            self.collapsed.insert(path);
+            self.collapsed.insert(path.clone());
+            if self.editor.as_ref().is_some_and(|e| e.anchor.file == file) {
+                self.close_comment();
+                self.selected = self.file_row_by_path(&path);
+                return;
+            }
         } else {
             self.collapsed.remove(&path);
         }
         self.rebuild();
         self.selected = self.rows.iter().position(|r| *r == Row::File(file));
+    }
+
+    fn file_row_by_path(&self, path: &str) -> Option<usize> {
+        let snapshot = self.snapshot.as_ref()?;
+        self.rows.iter().position(|r| match *r {
+            Row::File(f) => snapshot
+                .diff
+                .files
+                .get(f)
+                .is_some_and(|file| file.path() == path),
+            _ => false,
+        })
     }
 
     fn file_collapsed(&self, file: usize) -> bool {
@@ -444,7 +476,11 @@ impl ReviewPanel {
                         c
                     }
                 })
-                .filter(|&c| !c.is_control() && !crate::terminal::is_bidi_control(c))
+                .filter(|&c| {
+                    !c.is_control()
+                        && !crate::terminal::is_bidi_control(c)
+                        && !matches!(c, '\u{2028}' | '\u{2029}')
+                })
                 .take(room),
         );
         if editor.text.len() != before {
@@ -705,13 +741,12 @@ impl ReviewPanel {
                     if n == 1 { "file" } else { "files" },
                     if n == 1 { "ملف" } else { "ملفات" }
                 );
-                let digits = s.diff.max_line_number().to_string().len().max(3);
                 (
                     display_text(&title, MAX_ROW_COLS),
                     branch,
                     summary,
                     Some(s.diff.totals()),
-                    2 * digits + 1,
+                    self.gutter_cols,
                 )
             }
             None => (
@@ -943,6 +978,17 @@ pub fn display_text(text: &str, max_cols: usize) -> String {
         col += c.width().unwrap_or(0);
     }
     out
+}
+
+/// Whether `cwd` lies inside (or equals) `snapshot_root`, resolving symlinks on both paths.
+pub fn cwd_in_repo(cwd: Option<&std::path::Path>, snapshot_root: Option<&std::path::Path>) -> bool {
+    let (Some(cwd), Some(root)) = (cwd, snapshot_root) else {
+        return false;
+    };
+    let (Ok(cwd), Ok(root)) = (cwd.canonicalize(), root.canonicalize()) else {
+        return false;
+    };
+    cwd.starts_with(&root)
 }
 
 /// The last `max` characters of `text`.
