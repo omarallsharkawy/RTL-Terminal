@@ -16,9 +16,12 @@ use crate::render::text::shaper::shape_label;
 use crate::render::text::ui::{label_width, UiAlign, UiFont, UiSize, UiWeight};
 use crate::render::ui_style::{UiStyle, RADIUS_12, RADIUS_6, RADIUS_8};
 use crate::render::CellMetrics;
-use crate::sidebar::cards::{fit_title, wrap_notice, Card, CardLayout, Item, View};
+use crate::sidebar::cards::{
+    wrap_notice, Card, CardLayout, Item, View, STATE_ICON_WIDTH, STATE_LABEL_PAD,
+};
 use crate::sidebar::{display_path, AgentState, Entry};
-use crate::ui::chrome::count_badge;
+use crate::ui::chrome::{count_badge, UiLanguage};
+use crate::ui::text::fit_text;
 
 pub struct Label {
     pub buffer: Rc<Buffer>,
@@ -50,6 +53,7 @@ enum Kind {
     Title,
     Message,
     Small,
+    State,
     Footer,
     Path,
     Ports,
@@ -69,6 +73,8 @@ pub struct LabelCache {
     labels: HashMap<LabelKey, (Rc<Buffer>, bool)>,
     wrap_width: (f32, f32),
     messages: HashMap<String, Vec<String>>,
+    state_widths: HashMap<&'static str, f32>,
+    title_ellipsis_width: f32,
 }
 
 impl LabelCache {
@@ -81,6 +87,11 @@ impl LabelCache {
         scale: f32,
     ) -> Vec<Card> {
         let width = CardLayout::message_width(area, scale);
+        if self.wrap_width.1 != scale {
+            self.state_widths.clear();
+            let ellipsis = font.shape(fonts, UiSize::Body, UiWeight::Semibold, scale, "…");
+            self.title_ellipsis_width = label_width(&ellipsis).ceil() + 1.0;
+        }
         let mut previous = if self.wrap_width == (width, scale) {
             std::mem::take(&mut self.messages)
         } else {
@@ -110,7 +121,25 @@ impl LabelCache {
                         })
                         .clone()
                 });
-                Card { entry, message }
+                let mut card = Card::new(entry, message);
+                if let Some(state) = card.entry.display_state() {
+                    card.title_ellipsis_width = self.title_ellipsis_width;
+                    card.state_label_widths =
+                        [UiLanguage::English, UiLanguage::Arabic].map(|language| {
+                            let text = state.label(language);
+                            *self.state_widths.entry(text).or_insert_with(|| {
+                                let label = font.shape(
+                                    fonts,
+                                    UiSize::Small,
+                                    UiWeight::Semibold,
+                                    scale,
+                                    text,
+                                );
+                                label_width(&label).ceil() + 1.0
+                            })
+                        });
+                }
+                card
             })
             .collect()
     }
@@ -149,6 +178,7 @@ impl LabelCache {
     pub fn clear(&mut self) {
         self.labels.clear();
         self.messages.clear();
+        self.state_widths.clear();
     }
 
     pub fn len(&self) -> usize {
@@ -163,19 +193,21 @@ impl LabelCache {
 fn shape(ctx: &mut DrawContext, font: &UiFont, kind: Kind, text: &str, width: f32) -> Buffer {
     let scale = ctx.metrics.scale;
     match kind {
-        Kind::Title => {
-            let mut shape = |text: &str| {
-                font.shape(
-                    ctx.font_system,
-                    UiSize::Body,
-                    UiWeight::Semibold,
-                    scale,
-                    text,
-                )
-            };
-            let fitted = fit_title(text, |text| label_width(&shape(text)).ceil() + 1.0 <= width);
-            shape(&fitted)
-        }
+        Kind::Title => font.fit_words(
+            ctx.font_system,
+            UiSize::Body,
+            UiWeight::Semibold,
+            scale,
+            text,
+            (width - 1.0).floor(),
+        ),
+        Kind::State => font.shape(
+            ctx.font_system,
+            UiSize::Small,
+            UiWeight::Semibold,
+            scale,
+            text,
+        ),
         Kind::Message => font.shape(
             ctx.font_system,
             UiSize::Caption,
@@ -198,6 +230,10 @@ fn shape(ctx: &mut DrawContext, font: &UiFont, kind: Kind, text: &str, width: f3
                 shape_label(ctx.font_system, family, (size, (size * 1.5).ceil()), text)
             };
             let fits = |buffer: &Buffer| label_width(buffer).ceil() + 1.0 <= width;
+            if kind == Kind::Footer {
+                let fitted = fit_text(text, |text| fits(&mono(text)));
+                return mono(&fitted);
+            }
             let full = mono(text);
             if fits(&full) {
                 return full;
@@ -207,35 +243,40 @@ fn shape(ctx: &mut DrawContext, font: &UiFont, kind: Kind, text: &str, width: f3
             }
             let ellipsis = mono("…");
             if !fits(&ellipsis) {
-                return mono("");
+                let tail = mono(text.graphemes(true).next_back().unwrap_or(""));
+                return if fits(&tail) { tail } else { mono("") };
             }
-            let mut cuts: Vec<_> = text
-                .grapheme_indices(true)
-                .skip(1)
+            let components: Vec<_> = text
+                .rmatch_indices(['/', '\\'])
                 .map(|(i, _)| i)
+                .filter(|&i| i > 0 && i + 1 < text.len())
                 .collect();
-            if kind == Kind::Path {
-                cuts.reverse();
-            }
-            let candidate = |cut| {
-                if kind == Kind::Path {
-                    path_tail(text, cut)
-                } else {
-                    format!("{}…", &text[..cut])
+            let graphemes: Vec<_> = text
+                .grapheme_indices(true)
+                .rev()
+                .map(|(i, _)| i)
+                .take_while(|&i| i > 0)
+                .collect();
+            // Preserve the working-directory tail, eliding whole components when possible.
+            for cuts in [&components, &graphemes] {
+                for keep_home in [true, false]
+                    .into_iter()
+                    .filter(|&keep| !keep || text.starts_with("~/"))
+                {
+                    let candidate = |cut| path_tail(text, cut, keep_home);
+                    let n = cuts.partition_point(|&cut| fits(&mono(&candidate(cut))));
+                    if n > 0 {
+                        return mono(&candidate(cuts[n - 1]));
+                    }
                 }
-            };
-            let n = cuts.partition_point(|&cut| fits(&mono(&candidate(cut))));
-            if n == 0 {
-                ellipsis
-            } else {
-                mono(&candidate(cuts[n - 1]))
             }
+            ellipsis
         }
     }
 }
 
-fn path_tail(text: &str, cut: usize) -> String {
-    let prefix = if text.starts_with("~/") && cut > 2 {
+fn path_tail(text: &str, cut: usize, home_prefix: bool) -> String {
+    let prefix = if home_prefix && cut >= 2 {
         "~/…"
     } else {
         "…"
@@ -332,7 +373,7 @@ impl Cards<'_, '_> {
             self.label(badge, Kind::Small, &count, UiAlign::Center, text);
         }
         if let Some(state) = entry.display_state() {
-            self.state(parts.state, state, bg, item.active);
+            self.state(parts.state, parts.state_has_label, state, bg, item.active);
         }
         if hovered
             && parts.close.y >= self.view.area.y
@@ -361,32 +402,26 @@ impl Cards<'_, '_> {
         self.footer(parts.footer, entry, home, faint);
     }
 
-    fn state(&mut self, rect: Rect, state: AgentState, bg: Rgba, selected: bool) {
+    fn state(&mut self, rect: Rect, with_text: bool, state: AgentState, bg: Rgba, selected: bool) {
         let s = self.style;
-        let language = self.view.language;
-        let (icon, semantic, name) = match state {
-            AgentState::Working => (None, s.text, language.text("Working", "شغّال")),
-            AgentState::NeedsInput => (
-                Some(Icon::Warning),
-                s.warn,
-                language.text("Needs input", "مستني إدخال"),
-            ),
-            AgentState::Done => (Some(Icon::Check), s.ok, language.text("Done", "تم")),
-            AgentState::Error => (Some(Icon::Close), s.danger, language.text("Error", "خطأ")),
+        let (icon, semantic) = match state {
+            AgentState::Working => (None, s.text),
+            AgentState::NeedsInput => (Some(Icon::Warning), s.warn),
+            AgentState::Done => (Some(Icon::Check), s.ok),
+            AgentState::Error => (Some(Icon::Close), s.danger),
         };
         let rect = center_height(rect, s.px(16.0));
         let surface = if selected { s.bg1 } else { bg };
         let fill = surface.mix(semantic, 0.17);
         let ink = semantic.mix(s.text, 0.28);
         self.panel(rect, RADIUS_12, fill);
-        let glyph_width = s.px(16.0);
+        let glyph_width = s.px(STATE_ICON_WIDTH);
         if rect.w < glyph_width {
             return;
         }
-        let with_text = rect.w >= s.px(50.0);
         let mirror = self.view.mirrored;
         let pad = if with_text {
-            s.px(4.0)
+            s.px(STATE_LABEL_PAD)
         } else {
             (rect.w - glyph_width) / 2.0
         };
@@ -410,8 +445,14 @@ impl Cards<'_, '_> {
             }
         }
         if with_text {
-            let (_, caption) = take_side(caption, s.px(4.0), !mirror);
-            self.label(caption, Kind::Small, name, UiAlign::Center, ink);
+            let (_, caption) = take_side(caption, s.px(STATE_LABEL_PAD), !mirror);
+            self.label(
+                caption,
+                Kind::State,
+                state.label(self.view.language),
+                UiAlign::Center,
+                ink,
+            );
         }
     }
 

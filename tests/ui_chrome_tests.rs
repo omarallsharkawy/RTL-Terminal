@@ -387,7 +387,7 @@ fn search_placeholder_and_badges_follow_width_locale_and_counts() {
     assert_eq!(
         SearchContents::fit(74.0, 300.0, 150.0, 75.0),
         SearchContents {
-            placeholder: SearchPlaceholder::Hidden,
+            placeholder: SearchPlaceholder::LocalShortened,
             keycap: false
         }
     );
@@ -414,7 +414,7 @@ fn search_placeholder_and_badges_follow_width_locale_and_counts() {
 }
 
 #[test]
-fn rendered_search_uses_only_complete_labels_and_bell_count_is_conditional() {
+fn rendered_search_prefers_complete_labels_and_bell_count_is_conditional() {
     let mut fonts = new_font_system();
     let font = UiFont::default();
     let palette = Palette::default();
@@ -447,7 +447,7 @@ fn rendered_search_uses_only_complete_labels_and_bell_count_is_conditional() {
         ),
         (en_w + 39.0, UiLanguage::English, 0, vec![SEARCH_EN]),
         (ar_w + 39.0, UiLanguage::Arabic, 0, vec![SEARCH_AR]),
-        (65.0, UiLanguage::Arabic, 0, vec![]),
+        (47.0, UiLanguage::Arabic, 0, vec![]),
     ] {
         let surface = (900.0, 300.0);
         let layout = WindowLayout::new(metrics, surface, 1, (SidebarPosition::Hidden, 220.0), true);

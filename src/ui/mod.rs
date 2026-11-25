@@ -10,3 +10,4 @@ pub mod search;
 pub mod search_all;
 pub mod selection;
 pub mod settings;
+pub(crate) mod text;

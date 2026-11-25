@@ -8,6 +8,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use super::fonts::{installed_family, is_arabic_script};
 use crate::color::Rgba;
 use crate::layout::Rect;
+use crate::ui::text::fit_text;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UiSize {
@@ -128,6 +129,26 @@ impl UiFont {
         }
         buffer.shape_until_scroll(fonts, false);
         buffer
+    }
+
+    pub(crate) fn fit_words(
+        &self,
+        fonts: &mut FontSystem,
+        size: UiSize,
+        weight: UiWeight,
+        scale: f32,
+        text: &str,
+        width: f32,
+    ) -> Buffer {
+        let mut shape = |text: &str| self.shape(fonts, size, weight, scale, text);
+        let full = shape(text);
+        if label_width(&full) <= width {
+            return full;
+        }
+        let fitted = fit_text(text, |candidate| {
+            candidate != text && label_width(&shape(candidate)) <= width
+        });
+        shape(&fitted)
     }
 
     /// Shape and shorten by whole graphemes to fit available physical pixels.
