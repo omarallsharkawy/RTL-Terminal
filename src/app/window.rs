@@ -8,14 +8,17 @@ use std::time::Instant;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{CursorIcon, UserAttentionType, WindowAttributes};
 
-use super::App;
+use super::{git_diff, App};
 use crate::config::TwittyConfig;
-use crate::layout::{sidebar_layout, PaneId, Rect, SidebarPosition};
+use crate::layout::{PaneId, Rect, SidebarPosition};
+use crate::render::scene::window_chrome::{ChromeView, PaneHeaderView};
 use crate::render::{PaneFrame, Renderer, TabLabel};
 use crate::session::workspace::{GridGeometry, Workspace};
 use crate::sidebar::{
     entry_title, git::BranchCache, pick_tab_agent_status, Entry, Notice, Placement, ScrollState,
 };
+use crate::ui::chrome::{ChromeAction, PaneHeaderLayout, TopBarLayout, WindowLayout};
+use crate::ui::git_diff::DiffStat;
 use crate::ui::hit::{hit_test, Hit, HitGeometry};
 use crate::ui::settings::{clamp_font_size, step_opacity};
 
@@ -31,7 +34,7 @@ pub(super) const WINDOW_APP_ID: &str = "twitty";
 
 impl GridGeometry for Window {
     fn content_rect(&self, tab_count: usize) -> Rect {
-        self.layout(tab_count).0
+        self.layout(tab_count).content
     }
 
     fn gap(&self) -> f32 {
@@ -41,7 +44,7 @@ impl GridGeometry for Window {
     fn grid_size(&self, rect: Rect) -> (usize, usize) {
         self.renderer
             .as_ref()
-            .map_or((2, 1), |r| r.compute_grid_size(rect))
+            .map_or((2, 1), |r| r.compute_grid_size(self.pane_layout(rect).grid))
     }
 }
 
@@ -52,6 +55,11 @@ pub(super) struct Window {
     cursor_icon: CursorIcon,
     sidebar: Placement,
     sidebar_width: f32,
+    top_bar: bool,
+    pane_headers: bool,
+    occluded: bool,
+    chrome_hover: Option<ChromeAction>,
+    diff: Option<(git_diff::Target, DiffStat)>,
     sidebar_scroll: ScrollState,
     branches: BranchCache,
     notifications: crate::notify::DesktopNotifier,
@@ -69,6 +77,11 @@ impl Window {
             cursor_icon: CursorIcon::Default,
             sidebar: Placement::new(SidebarPosition::Right),
             sidebar_width: 220.0,
+            top_bar: true,
+            pane_headers: true,
+            occluded: false,
+            chrome_hover: None,
+            diff: None,
             sidebar_scroll: ScrollState::default(),
             branches: BranchCache::default(),
             notifications: crate::notify::DesktopNotifier::default(),
@@ -122,11 +135,14 @@ impl Window {
         };
 
         renderer.set_font_family(config.font_family.as_deref());
+        renderer.set_ui_style(config.ui_font_family.as_deref(), config.ui_accent_color());
         renderer.set_opacity(config.background_opacity);
         renderer.set_cursor_style(config.cursor_style.clone());
         renderer.set_palette(config.palette());
         self.sidebar = Placement::new(config.sidebar.parse().unwrap_or_default());
         self.sidebar_width = config.sidebar_width;
+        self.top_bar = config.top_bar;
+        self.pane_headers = config.pane_headers;
         self.renderer = Some(renderer);
         true
     }
@@ -155,31 +171,29 @@ impl Window {
         self.renderer.as_ref().map(|_| self)
     }
 
-    fn layout(&self, tab_count: usize) -> (Rect, Option<Rect>) {
-        let (content, sidebar, _) = self.layout_with_review(tab_count);
-        (content, sidebar)
-    }
-
-    /// Panes, sidebar and review panel areas. The panel takes the right part of what the
-    /// sidebar leaves to the panes.
-    fn layout_with_review(&self, tab_count: usize) -> (Rect, Option<Rect>, Option<Rect>) {
-        let Some(r) = &self.renderer else {
-            return (Rect::new(0.0, 0.0, 0.0, 0.0), None, None);
-        };
-        let surface = r.content_rect(0);
-        let scale = r.metrics().scale;
-        let (content, sidebar) = sidebar_layout(
-            surface,
-            r.content_rect(tab_count),
-            self.sidebar.position,
-            self.sidebar_width,
-            scale,
+    fn layout(&self, tab_count: usize) -> WindowLayout {
+        let r = self
+            .renderer
+            .as_ref()
+            .expect("layout requires an open window");
+        let mut layout = WindowLayout::new(
+            r.metrics(),
+            r.surface_size(),
+            tab_count,
+            (self.sidebar.position, self.sidebar_width),
+            self.top_bar,
         );
-        if !self.review_open {
-            return (content, sidebar, None);
+        if self.review_open {
+            // The review panel takes the right part of what the sidebar leaves to the panes.
+            let (content, review) = crate::review::layout::split_content(
+                layout.content,
+                r.surface_size().0,
+                r.metrics().scale,
+            );
+            layout.content = content;
+            layout.review = review;
         }
-        let (content, review) = crate::review::layout::split_content(content, surface.w, scale);
-        (content, sidebar, review)
+        layout
     }
 
     /// Open or close the review panel's area (the caller lays the panes out again).
@@ -192,7 +206,8 @@ impl Window {
 
     /// Where the review panel is drawn, while it is open and fits.
     pub(super) fn review_rect(&self, ws: &Workspace) -> Option<Rect> {
-        self.layout_with_review(ws.tabs().len()).2
+        self.renderer.as_ref()?;
+        self.layout(ws.tabs().len()).review
     }
 
     /// Hand the review panel's view to the renderer (`None` hides it).
@@ -202,9 +217,51 @@ impl Window {
         }
     }
 
+    pub(super) fn pane_layout(&self, rect: Rect) -> PaneHeaderLayout {
+        PaneHeaderLayout::new(
+            rect,
+            self.metrics().map_or(1.0, |m| m.scale),
+            self.pane_headers,
+        )
+    }
+
+    pub(super) fn diff_visible(&self) -> bool {
+        self.renderer.as_ref().is_some_and(|r| {
+            let top = self.layout(0).top_bar;
+            !self.occluded
+                && top.h > 0.0
+                && TopBarLayout::new(top, r.metrics().scale, Some(DiffStat::default()))
+                    .diff
+                    .is_some()
+        })
+    }
+
+    pub(super) fn set_occluded(&mut self, occluded: bool) {
+        self.occluded = occluded;
+    }
+
+    pub(super) fn set_diff(&mut self, diff: Option<(git_diff::Target, DiffStat)>) {
+        if self.diff != diff {
+            self.diff = diff;
+            self.request_redraw();
+        }
+    }
+
+    fn diff(&self, ws: &Workspace) -> Option<DiffStat> {
+        let (target, stats) = self.diff.as_ref()?;
+        (git_diff::target(ws).as_ref() == Some(target)).then_some(*stats)
+    }
+
+    pub(super) fn set_chrome_hover(&mut self, hover: Option<ChromeAction>) {
+        if self.chrome_hover != hover {
+            self.chrome_hover = hover;
+            self.request_redraw();
+        }
+    }
+
     /// The sidebar is on screen.
     pub(super) fn sidebar_shown(&self, ws: &Workspace) -> bool {
-        self.layout(ws.tabs().len()).1.is_some()
+        self.is_open() && self.layout(ws.tabs().len()).sidebar.is_some()
     }
 
     /// New port scan results; true when they differ from what is shown.
@@ -215,9 +272,11 @@ impl Window {
     }
 
     pub(super) fn sidebar_contains(&self, ws: &Workspace, x: f64, y: f64) -> bool {
-        self.layout(ws.tabs().len())
-            .1
-            .is_some_and(|area| area.contains(x, y))
+        self.is_open()
+            && self
+                .layout(ws.tabs().len())
+                .sidebar
+                .is_some_and(|area| area.contains(x, y))
     }
 
     pub(super) fn notify(
@@ -231,7 +290,14 @@ impl Window {
     }
 
     pub(super) fn scroll_sidebar(&mut self, ws: &Workspace, x: f64, y: f64, lines: f64) -> bool {
-        let Some(area) = self.layout(ws.tabs().len()).1.filter(|a| a.contains(x, y)) else {
+        if !self.is_open() {
+            return false;
+        }
+        let Some(area) = self
+            .layout(ws.tabs().len())
+            .sidebar
+            .filter(|a| a.contains(x, y))
+        else {
             return false;
         };
         let line_height = self
@@ -306,6 +372,10 @@ impl Window {
         }
     }
 
+    pub(super) fn palette_rows(&self, max: usize) -> usize {
+        self.renderer.as_ref().map_or(max, |r| r.palette_rows(max))
+    }
+
     pub(super) fn palette_hit(&self, x: f64, y: f64) -> crate::render::scene::palette::PaletteHit {
         self.renderer
             .as_ref()
@@ -368,12 +438,17 @@ impl Window {
             return Hit::Nothing;
         };
         let n = ws.tabs().len();
-        let (content, sidebar, review) = self.layout_with_review(n);
-        if review.is_some_and(|area| area.contains(x, y)) {
+        let layout = self.layout(n);
+        if layout.review.is_some_and(|area| area.contains(x, y)) {
             // The review panel handles its own pointer input (`App::review_mouse_press`).
             return Hit::Nothing;
         }
-        if let Some(area) = sidebar {
+        if let Some(hit) =
+            TopBarLayout::new(layout.top_bar, r.metrics().scale, self.diff(ws)).hit(x, y)
+        {
+            return hit;
+        }
+        if let Some(area) = layout.sidebar {
             if area.contains(x, y) {
                 let view = self.sidebar_scroll.view(
                     &sidebar_entries(ws, &self.ports),
@@ -385,11 +460,17 @@ impl Window {
                 return view.pointer_hit(x, y).unwrap_or(Hit::TabBar);
             }
         }
-        let hidden = sidebar.is_none();
+        if self.pane_headers && layout.content.contains(x, y) {
+            for (id, rect) in ws.active_layout(self) {
+                if let Some(action) = self.pane_layout(rect).hit(id, x, y) {
+                    return Hit::Chrome(action);
+                }
+            }
+        }
         let geometry = HitGeometry {
-            tab_bar_height: if hidden { r.tab_bar_height(n) } else { 0.0 },
-            tabs: if hidden { r.tab_rects(n) } else { Vec::new() },
-            content,
+            tab_bar_height: layout.tab_bar.h,
+            tabs: layout.tabs,
+            content: layout.content,
             gap: r.divider_gap(),
             slop: (r.metrics().scale * 3.0).max(2.0),
         };
@@ -460,8 +541,13 @@ impl Window {
         panes: &[PaneFrame],
         dividers: &[Rect],
         blink: bool,
+        unread: usize,
     ) {
-        let sidebar = self.layout(ws.tabs().len()).1.map(|area| {
+        let Some(metrics) = self.metrics() else {
+            return;
+        };
+        let layout = self.layout(ws.tabs().len());
+        let sidebar = layout.sidebar.map(|area| {
             let line_height = self
                 .renderer
                 .as_ref()
@@ -486,18 +572,79 @@ impl Window {
         if sidebar.is_none() {
             self.branches.clear();
         }
-        let attention: Vec<Rect> = panes
-            .iter()
-            .filter(|p| ws.pane(p.id).is_some_and(|p| p.meta.attention.is_some()))
-            .map(|p| p.rect)
-            .collect();
+        let pane_headers = ws
+            .active_layout(self)
+            .into_iter()
+            .filter_map(|(id, rect)| {
+                let pane = ws.pane(id)?;
+                let layout = self.pane_layout(rect);
+                let focused = ws.focused_id() == Some(id);
+                let attention = pane.meta.needs_attention();
+                if layout.header.h == 0.0 && !attention {
+                    return None;
+                }
+                let (title, agent) = pane_header_title(pane);
+                Some(PaneHeaderView {
+                    id,
+                    layout,
+                    title,
+                    agent,
+                    focused,
+                    attention,
+                })
+            })
+            .collect::<Vec<_>>();
+        let diff = self.diff(ws);
+        let chrome = ChromeView {
+            layout: &layout,
+            top: TopBarLayout::new(layout.top_bar, metrics.scale, diff),
+            diff,
+            unread,
+            sidebar_visible: sidebar.is_some(),
+            hover: self.chrome_hover,
+            panes: &pane_headers,
+            tabs,
+        };
         if let Some(ref mut r) = self.renderer {
             r.set_cursor_blink(blink);
-            if let Err(e) = r.render(tabs, panes, dividers, sidebar.as_ref(), &attention) {
+            if let Err(e) = r.render(&chrome, panes, dividers, sidebar.as_ref()) {
                 tracing::error!("render error: {e:?}");
             }
         }
     }
+}
+
+fn pane_header_title(pane: &crate::session::pane::Pane) -> (String, bool) {
+    let program = pane.pty.as_ref().and_then(|pty| pty.program_name());
+    let command = pane
+        .meta
+        .last_command
+        .as_deref()
+        .filter(|_| pane.meta.running);
+    let agent_name = [
+        program,
+        command.and_then(|command| command.split_whitespace().next()),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(|command| {
+        let name = std::path::Path::new(command).file_stem()?.to_str()?;
+        crate::agent::KNOWN_AGENTS
+            .iter()
+            .copied()
+            .find(|agent| name.eq_ignore_ascii_case(agent))
+    });
+    let title = agent_name
+        .or(command)
+        .or(pane.title.as_deref())
+        .or(program)
+        .map(|title| crate::shell_integration::clean_text(title, 256))
+        .filter(|title| !title.is_empty())
+        .unwrap_or_else(|| "Terminal / الطرفية".to_owned());
+    (
+        title,
+        agent_name.is_some() || pane.meta.agent_status.is_some(),
+    )
 }
 
 fn sidebar_entries(ws: &Workspace, ports: &HashMap<PaneId, Vec<u16>>) -> Vec<Entry> {
@@ -592,6 +739,7 @@ impl App {
         if self.window_focused {
             if let Some(pane) = self.focused_id().and_then(|id| self.ws.pane_mut(id)) {
                 pane.meta.attention = None;
+                pane.meta.mark_agent_input_seen();
                 self.notification_history.mark_seen(pane.id);
             }
         }
@@ -600,8 +748,14 @@ impl App {
         self.window.set_review(review);
         let (tabs, panes, dividers) = self.frame();
         let visible = self.cursor_blink.visible();
-        self.window
-            .render(&self.ws, &tabs, &panes, &dividers, visible);
+        self.window.render(
+            &self.ws,
+            &tabs,
+            &panes,
+            &dividers,
+            visible,
+            self.notification_history.unseen(),
+        );
     }
 
     /// Snapshot everything the renderer draws for the active tab.
@@ -631,7 +785,7 @@ impl App {
                     .or_else(|| pane.ui.hover_target.as_ref().map(|t| format!("→ {t}")));
                 Some(PaneFrame {
                     id,
-                    rect,
+                    rect: self.window.pane_layout(rect).grid,
                     lines,
                     cursor,
                     focused: focused == Some(id),
@@ -691,7 +845,6 @@ impl App {
         self.config.sidebar = self.window.sidebar.toggle().as_str().to_owned();
         self.config_dirty = true;
         self.apply_layout();
-        self.refresh_pointer_hover();
     }
 
     pub(super) fn set_sidebar_shown(&mut self, visible: bool) {
@@ -731,6 +884,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::layout::sidebar_layout;
     use crate::render::CellMetrics;
     use crate::session::{pane::Pane, workspace::PaneFactory};
     use crate::terminal::Terminal;

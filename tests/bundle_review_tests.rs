@@ -23,11 +23,12 @@ use twitty::notify::RateLimiter;
 use twitty::pty::INHERITED_TERMINAL_VARS;
 use twitty::render::scene::context::DrawContext;
 use twitty::render::scene::frame::{build_frame, FrameOptions};
-use twitty::render::scene::palette::{
-    hit_test as palette_hit_test, panel_rect, PaletteHit, PaletteItem, PaletteView,
-};
+use twitty::render::scene::palette::{PaletteHit, PaletteItem, PaletteLayout, PaletteView};
 use twitty::render::scene::preedit::PreeditState;
 use twitty::render::scene::sidebar::LabelCache;
+use twitty::render::shapes::Shape;
+use twitty::render::text::ui::UiFont;
+use twitty::render::ui_style::UiStyle;
 use twitty::render::{CellMetrics, PaneFrame, RowCache};
 use twitty::sidebar::git::BranchCache;
 use twitty::sidebar::{Entry, Notice, ScrollState};
@@ -145,30 +146,22 @@ fn palette_above_sidebar_above_panes_and_clips_underlying_text() {
         assert!(quads_after_sidebar > quads_after_attention);
 
         let pview = palette_view();
-        frame.add_palette(&mut ctx, &pview);
-        assert!(frame.quads.len() > quads_after_sidebar);
-
-        let panel = panel_rect(
-            metrics.char_width,
-            metrics.line_height,
-            (surface.w, surface.h),
-            pview.items.len(),
+        frame.add_palette(
+            &mut ctx,
+            UiStyle::new(&palette, None, metrics.scale),
+            &UiFont::default(),
+            &pview,
         );
-        let edge = metrics.scale.round().max(1.0);
-        let outer = Rect::new(
-            (panel.x - edge).max(0.0),
-            (panel.y - edge).max(0.0),
-            (panel.right() + edge).min(surface.w) - (panel.x - edge).max(0.0),
-            (panel.bottom() + edge).min(surface.h) - (panel.y - edge).max(0.0),
+        assert_eq!(frame.quads.len(), quads_after_sidebar);
+        let panel =
+            PaletteLayout::new(metrics.scale, (surface.w, surface.h), pview.items.len()).panel;
+        let outer = panel;
+        assert!(
+            matches!(frame.shapes.overlay.first(), Some(Shape::RoundedRect { rect, border: Some(_), .. }) if *rect == panel)
         );
-
-        // Palette border quad comes after sidebar quads (palette above sidebar above panes).
-        let (bx, by, bw, bh, _) = frame.quads[quads_after_sidebar];
-        assert!((bx - outer.x).abs() < 0.01 && (by - outer.y).abs() < 0.01);
-        assert!((bw - outer.w).abs() < 0.01 && (bh - outer.h).abs() < 0.01);
 
         let runs = frame.text_runs(&panes, &cache, &ime);
-        let overlay_count = 1 + pview.items.len() * 2;
+        let overlay_count = 1 + pview.items.len() * 5;
         assert!(runs.len() > overlay_count);
         let underlying = &runs[..runs.len() - overlay_count];
         let overlay = &runs[runs.len() - overlay_count..];
@@ -245,7 +238,12 @@ fn palette_and_sidebar_never_draw_outside_tiny_surfaces() {
             );
             frame.add_sidebar(&mut ctx, &view, &mut labels);
         }
-        frame.add_palette(&mut ctx, &pview);
+        frame.add_palette(
+            &mut ctx,
+            UiStyle::new(&palette, None, metrics.scale),
+            &UiFont::default(),
+            &pview,
+        );
 
         for &(x, y, w, h, _) in &frame.quads {
             assert!(
@@ -331,53 +329,27 @@ fn palette_shortcut_works_on_arabic_layout_and_modifiers_do_not_inject_text() {
 
 #[test]
 fn palette_hit_test_distinguishes_outside_inside_and_items() {
-    let panel = panel_rect(9.0, 23.0, (900.0, 600.0), 2);
-    let edge = 1.0;
-    // Outside panel -> Outside (closes palette, click consumed).
+    let layout = PaletteLayout::new(1.0, (900.0, 600.0), 2);
+    let panel = layout.panel;
+    assert_eq!(layout.hit(10.0, 10.0), PaletteHit::Outside);
     assert_eq!(
-        palette_hit_test(panel, 23.0, edge, 2, 10.0, 10.0),
+        layout.hit(f64::from(panel.right() + 5.0), 60.0),
         PaletteHit::Outside
     );
     assert_eq!(
-        palette_hit_test(panel, 23.0, edge, 2, (panel.right() + 5.0) as f64, 60.0),
-        PaletteHit::Outside
-    );
-    // Query row -> Inside (stays open, click consumed).
-    assert_eq!(
-        palette_hit_test(
-            panel,
-            23.0,
-            edge,
-            2,
-            (panel.x + 20.0) as f64,
-            (panel.y + 10.0) as f64
+        layout.hit(
+            f64::from(layout.search.x + 5.0),
+            f64::from(layout.search.y + 5.0)
         ),
         PaletteHit::Inside
     );
-    // First and second items.
-    let first_row = panel.y + 23.0 * 1.25 + edge;
-    assert_eq!(
-        palette_hit_test(
-            panel,
-            23.0,
-            edge,
-            2,
-            (panel.x + 20.0) as f64,
-            (first_row + 5.0) as f64
-        ),
-        PaletteHit::Item(0)
-    );
-    assert_eq!(
-        palette_hit_test(
-            panel,
-            23.0,
-            edge,
-            2,
-            (panel.x + 20.0) as f64,
-            (first_row + 23.0 + 5.0) as f64
-        ),
-        PaletteHit::Item(1)
-    );
+    for index in 0..2 {
+        let row = layout.row(index).unwrap();
+        assert_eq!(
+            layout.hit(f64::from(row.x + 5.0), f64::from(row.y + 5.0)),
+            PaletteHit::Item(index)
+        );
+    }
 }
 
 // ---- Security: sanitization, bounding, fence escaping, environment hygiene ----

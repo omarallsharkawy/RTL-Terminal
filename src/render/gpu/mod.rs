@@ -1,25 +1,28 @@
-//! Everything that touches wgpu: device and surface, the quad pipeline and the glyphon text
-//! pipeline. It draws a frame the CPU side (`render::scene`) has already laid out, either to
+//! Everything that touches wgpu: device and surface, quad and shape pipelines and glyphon text. It draws a frame the CPU side (`render::scene`) has already laid out, either to
 //! the window (`Gpu`) or to a texture read back to memory (`offscreen`, for golden tests).
 
 pub mod context;
 pub mod offscreen;
 pub mod quad_pipeline;
+mod shape_pipeline;
 pub mod text_pipeline;
 
 use std::sync::Arc;
 use winit::window::Window;
 
 use crate::render::scene::frame::TextRun;
+use crate::render::shapes::ShapeLayers;
 use crate::render::style::Quad;
 use context::GpuContext;
 use cosmic_text::FontSystem;
 use quad_pipeline::QuadRenderer;
+use shape_pipeline::ShapeRenderer;
 use text_pipeline::TextPipeline;
 
 pub(crate) struct Gpu {
     pub ctx: GpuContext,
     quads: QuadRenderer,
+    shapes: ShapeRenderer,
     text: TextPipeline,
 }
 
@@ -30,8 +33,18 @@ impl Gpu {
         let (width, height) = (config.width, config.height);
         let quads = QuadRenderer::new(&ctx.device, config.format);
         quads.update_screen_size(&ctx.queue, width as f32, height as f32);
+        let shapes = ShapeRenderer::new(&ctx.device, config.format);
+        shapes.resize(&ctx.queue, width, height);
         let text = TextPipeline::new(&ctx.device, &ctx.queue, config.format, (width, height));
-        Ok((Gpu { ctx, quads, text }, config))
+        Ok((
+            Gpu {
+                ctx,
+                quads,
+                shapes,
+                text,
+            },
+            config,
+        ))
     }
 
     /// Apply a new surface size from `config`.
@@ -39,6 +52,7 @@ impl Gpu {
         let (width, height) = (config.width, config.height);
         self.ctx.surface.configure(&self.ctx.device, config);
         self.text.resize(&self.ctx.queue, width, height);
+        self.shapes.resize(&self.ctx.queue, width, height);
         self.quads
             .update_screen_size(&self.ctx.queue, width as f32, height as f32);
     }
@@ -52,12 +66,12 @@ impl Gpu {
         self.ctx.acquire(config, window)
     }
 
-    /// Draw `quads` then `runs` over a window cleared to `background` (surface color space)
+    /// Draw plain quads, shapes and text over a window cleared to `background` (surface color space)
     /// at `opacity`, and present it.
     pub fn draw<'a>(
         &mut self,
         surface_texture: wgpu::SurfaceTexture,
-        quads: &[Quad],
+        geometry: (&[Quad], &ShapeLayers),
         runs: impl IntoIterator<Item = TextRun<'a>>,
         font_system: &mut FontSystem,
         background: [f32; 4],
@@ -67,7 +81,8 @@ impl Gpu {
         let view = surface_texture
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-        self.quads.set_rects(device, queue, quads);
+        self.quads.set_rects(device, queue, geometry.0);
+        self.shapes.prepare(device, queue, geometry.1);
         self.text.prepare(device, queue, font_system, runs)?;
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -76,8 +91,7 @@ impl Gpu {
         encode_pass(
             &mut encoder,
             &view,
-            &self.quads,
-            &self.text,
+            (&self.quads, &self.shapes, &self.text),
             background,
             opacity,
         )?;
@@ -92,12 +106,11 @@ impl Gpu {
 }
 
 /// Record a frame's render pass into `encoder`: clear `view` to `background` at `opacity`,
-/// then draw the prepared quads and text over it. Shared by the window and offscreen targets.
+/// then draw the prepared quads, shapes and text over it. Shared by the window and offscreen targets.
 pub(crate) fn encode_pass(
     encoder: &mut wgpu::CommandEncoder,
     view: &wgpu::TextureView,
-    quads: &QuadRenderer,
-    text: &TextPipeline,
+    (quads, shapes, text): (&QuadRenderer, &ShapeRenderer, &TextPipeline),
     background: [f32; 4],
     opacity: f32,
 ) -> anyhow::Result<()> {
@@ -124,5 +137,6 @@ pub(crate) fn encode_pass(
         multiview_mask: None,
     });
     quads.render(&mut pass);
+    shapes.render(&mut pass);
     text.render(&mut pass)
 }

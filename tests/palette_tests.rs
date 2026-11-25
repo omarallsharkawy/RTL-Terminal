@@ -4,8 +4,11 @@ use twitty::color::Palette;
 use twitty::layout::{PaneId, Rect};
 use twitty::render::scene::context::DrawContext;
 use twitty::render::scene::frame::{build_frame, FrameOptions};
-use twitty::render::scene::palette::{label_width, panel_rect, PaletteItem, PaletteView};
+use twitty::render::scene::palette::{label_width, PaletteItem, PaletteLayout, PaletteView};
 use twitty::render::scene::preedit::PreeditState;
+use twitty::render::shapes::Shape;
+use twitty::render::text::ui::UiFont;
+use twitty::render::ui_style::UiStyle;
 use twitty::render::{CellMetrics, PaneFrame, RowCache};
 use twitty::terminal::Terminal;
 use twitty::ui::palette::{fold, matches, PaletteCmd, PaletteEntry, PaletteId, PaletteState};
@@ -169,6 +172,8 @@ fn overlay_draws_above_panes_with_arabic_on_the_right() {
     let mut ime = PreeditState::default();
     let mut frame = build_frame(&mut ctx, &opts, &mut cache, &mut ime, &[], &panes, &[]);
     let quads_before = frame.quads.len();
+    let style = UiStyle::new(&palette, None, metrics.scale);
+    let font = UiFont::default();
     let view = PaletteView {
         query: "قسم".into(),
         items: vec![
@@ -188,23 +193,23 @@ fn overlay_draws_above_panes_with_arabic_on_the_right() {
         selected: 0,
         ..Default::default()
     };
-    frame.add_palette(&mut ctx, &view);
-    let panel = panel_rect(9.0, 23.0, surface, 2);
-    assert!(frame.quads.len() > quads_before, "panel quads added");
-    // Panel quads come after the panes' quads, so they cover them.
-    let (x, y, w, _, _) = frame.quads[quads_before];
-    assert!(x < panel.x && y < panel.y && w > panel.w, "border first");
+    frame.add_palette(&mut ctx, style, &font, &view);
+    let panel = PaletteLayout::new(1.0, surface, 2).panel;
+    assert_eq!(frame.quads.len(), quads_before);
+    assert!(
+        matches!(frame.shapes.overlay.first(), Some(Shape::RoundedRect { rect, radii, border: Some(_), shadow: Some(_), .. }) if *rect == panel && *radii == [12.0; 4])
+    );
     let runs = frame.text_runs(&panes, &cache, &ime);
-    // Query + (english, arabic) per item come last; pane text before them is clipped.
-    let overlay = &runs[runs.len() - (1 + 2 * 2)..];
-    let arabic = &overlay[2];
+    // Query, three key caps, and both bilingual rows are drawn after the pane.
+    let overlay = &runs[runs.len() - (1 + 3 + 2 * 2)..];
+    let arabic = &overlay[5];
     let right = arabic.left + label_width(arabic.buffer);
     assert!(
-        (right - (panel.right() - 9.0)).abs() < 1.0,
+        (right - (panel.right() - 16.0)).abs() < 1.0,
         "Arabic title ends at the panel's right padding: {right} vs {}",
         panel.right()
     );
-    assert!(overlay[1].left < arabic.left, "English starts on the left");
+    assert!(overlay[4].left < arabic.left, "English starts on the left");
 }
 
 #[test]
@@ -289,8 +294,13 @@ fn no_pane_text_is_drawn_under_the_palette() {
         selected: 0,
         ..Default::default()
     };
-    frame.add_palette(&mut ctx, &view);
-    let panel = panel_rect(9.0, 23.0, surface, 1);
+    frame.add_palette(
+        &mut ctx,
+        UiStyle::new(&palette, None, metrics.scale),
+        &UiFont::default(),
+        &view,
+    );
+    let panel = PaletteLayout::new(1.0, surface, 1).panel;
     let runs = frame.text_runs(&panes, &cache, &ime);
     let overlay_runs = 3;
     let (under, overlay) = runs.split_at(runs.len() - overlay_runs);

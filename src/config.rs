@@ -20,6 +20,14 @@ pub struct TwittyConfig {
     pub colors: Option<ThemeColors>,
     /// Font family for the terminal grid, e.g. "JetBrains Mono". Unset or not installed: monospace.
     pub font_family: Option<String>,
+    /// Proportional chrome font. Unset uses the system sans-serif.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ui_font_family: Option<String>,
+    /// Chrome accent as `#rgb` or `#rrggbb`. Unset uses the theme cursor color.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ui_accent: Option<String>,
+    pub top_bar: bool,
+    pub pane_headers: bool,
     /// Blink the cursor, unless the running program asks for a steady one (DECSCUSR).
     pub cursor_blink: bool,
     /// Where the workspace sidebar sits: "right", "left" or "hidden".
@@ -70,6 +78,10 @@ impl Default for TwittyConfig {
             theme: None,
             colors: None,
             font_family: None,
+            ui_font_family: None,
+            ui_accent: None,
+            top_bar: true,
+            pane_headers: true,
             cursor_blink: true,
             sidebar: "right".into(),
             sidebar_width: 220.0,
@@ -143,6 +155,12 @@ fn parse_config_color(value: &str, key: &str) -> Option<Rgba> {
 }
 
 impl TwittyConfig {
+    pub(crate) fn ui_accent_color(&self) -> Option<Rgba> {
+        self.ui_accent
+            .as_deref()
+            .and_then(|value| parse_config_color(value, "ui_accent"))
+    }
+
     /// The palette for the configured `theme`, with any `colors` overrides applied.
     pub fn palette(&self) -> Palette {
         let mut palette = match self.theme.as_deref() {

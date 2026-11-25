@@ -1216,21 +1216,30 @@ fn review_text_is_clipped_under_the_command_palette() {
     frame.add_review(&mut ctx, &view, &mut cache);
     let without = frame.text_runs(&[], &rows, &ime).len();
     assert!(without > 0);
+    let style = twitty::render::ui_style::UiStyle::new(&palette, None, ctx.metrics.scale);
+    let palette_view = PaletteView {
+        query: String::new(),
+        items: vec![PaletteItem {
+            title_en: "Review changes".into(),
+            title_ar: "راجع التغييرات".into(),
+            shortcut: Some("Ctrl+Shift+R".into()),
+            dimmed: false,
+        }],
+        selected: 0,
+        placeholder: None,
+    };
     frame.add_palette(
         &mut ctx,
-        &PaletteView {
-            query: String::new(),
-            items: vec![PaletteItem {
-                title_en: "Review changes".into(),
-                title_ar: "راجع التغييرات".into(),
-                shortcut: Some("Ctrl+Shift+R".into()),
-                dimmed: false,
-            }],
-            selected: 0,
-            placeholder: None,
-        },
+        style,
+        &twitty::render::text::ui::UiFont::default(),
+        &palette_view,
     );
-    let panel_rect = twitty::render::scene::palette::panel_rect(9.0, 20.0, (800.0, 600.0), 1);
+    let panel_rect = twitty::render::scene::palette::PaletteLayout::new(
+        ctx.metrics.scale,
+        (800.0, 600.0),
+        palette_view.items.len(),
+    )
+    .panel;
     let runs = frame.text_runs(&[], &rows, &ime);
     // Review text never draws inside the palette (only the palette's own labels do).
     let inside = |b: &glyphon::TextBounds| {
@@ -1241,7 +1250,8 @@ fn review_text_is_clipped_under_the_command_palette() {
     };
     let review_inside = runs
         .iter()
-        .take(runs.len() - 3)
+        // The palette's own labels come last: the query row plus five per item.
+        .take(runs.len() - (1 + palette_view.items.len() * 5))
         .filter(|r| inside(&r.bounds))
         .count();
     assert_eq!(review_inside, 0);

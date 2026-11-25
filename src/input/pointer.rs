@@ -50,7 +50,9 @@ impl PointerState {
                 self.capture_button = Some(button);
                 PressTarget::Pane(id)
             }
-            Hit::Tab(_) | Hit::TabBar | Hit::Nothing => PressTarget::None,
+            Hit::Tab(_) | Hit::TabBar | Hit::Chrome(_) | Hit::ChromeBackground | Hit::Nothing => {
+                PressTarget::None
+            }
         }
     }
 
@@ -110,6 +112,8 @@ pub(crate) fn cursor_icon_for(
     current: CursorIcon,
 ) -> Option<CursorIcon> {
     match hit {
+        Hit::Chrome(_) if !captured => Some(CursorIcon::Pointer),
+        Hit::ChromeBackground | Hit::TabBar | Hit::Tab(_) if !captured => Some(CursorIcon::Default),
         Hit::Divider(d) if !captured => Some(match d.dir {
             SplitDir::Horizontal => CursorIcon::ColResize,
             SplitDir::Vertical => CursorIcon::RowResize,

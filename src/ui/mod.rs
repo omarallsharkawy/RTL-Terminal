@@ -1,6 +1,8 @@
 //! Window-free UI logic: hit testing, search bar, selection lifecycle, settings and clipboard.
 
+pub mod chrome;
 pub mod clipboard;
+pub mod git_diff;
 pub mod hit;
 pub mod notifications;
 pub mod palette;

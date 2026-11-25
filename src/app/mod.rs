@@ -15,6 +15,7 @@
 mod agent;
 mod control;
 mod event;
+mod git_diff;
 mod keyboard;
 mod mouse;
 mod palette;
@@ -77,6 +78,7 @@ pub struct App {
     ports: ports::PortWatch,
     /// The code review panel.
     review: crate::review::ReviewPanel,
+    git_diff: git_diff::GitDiffWatch,
 }
 
 impl App {
@@ -110,6 +112,7 @@ impl App {
             notification_history: Default::default(),
             ports: ports::PortWatch::default(),
             review: Default::default(),
+            git_diff: git_diff::GitDiffWatch::default(),
         }
     }
 
@@ -203,6 +206,7 @@ impl ApplicationHandler<AppEvent> for App {
             }
             AppEvent::Ports(ports) => self.on_ports(ports),
             AppEvent::Review(generation, result) => self.on_review_loaded(generation, result),
+            AppEvent::GitDiff(generation, stat) => self.on_git_diff(generation, stat),
         }
     }
 
@@ -226,10 +230,14 @@ impl ApplicationHandler<AppEvent> for App {
             self.window.request_redraw();
         }
         let search_due = self.poll_search_all(now);
-        let deadline = match (self.cursor_blink.next_deadline(), search_due) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        };
+        let deadline = [
+            self.cursor_blink.next_deadline(),
+            search_due,
+            self.poll_git_diff(now),
+        ]
+        .into_iter()
+        .flatten()
+        .min();
         event_loop.set_control_flow(match deadline {
             Some(deadline) => ControlFlow::WaitUntil(deadline),
             None => ControlFlow::Wait,
@@ -254,12 +262,16 @@ impl ApplicationHandler<AppEvent> for App {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
                 self.window.resize(size.width, size.height);
+                self.sync_palette();
                 self.apply_layout();
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 self.window.set_scale_factor(scale_factor as f32);
+                self.sync_palette();
                 self.apply_layout();
             }
+            WindowEvent::Occluded(occluded) => self.window.set_occluded(occluded),
+            WindowEvent::CursorLeft { .. } => self.on_cursor_left(),
             WindowEvent::Focused(focused) => self.on_window_focus(focused),
             WindowEvent::ModifiersChanged(mods) => self.on_modifiers(mods.state()),
             WindowEvent::CursorMoved { position, .. } => {

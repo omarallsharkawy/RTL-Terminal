@@ -31,6 +31,7 @@ pub enum AppEvent {
         u64,
         Result<crate::review::Snapshot, crate::review::LoadError>,
     ),
+    GitDiff(u64, Option<crate::ui::git_diff::DiffStat>),
 }
 
 /// Longest title kept from a program, in characters.
@@ -122,6 +123,7 @@ impl App {
                 MarkKind::CommandEnd { exit } => {
                     meta.running = false;
                     meta.last_exit = exit;
+                    self.git_diff.refresh(id);
                 }
                 MarkKind::PromptStart | MarkKind::CommandStart => {}
             },
