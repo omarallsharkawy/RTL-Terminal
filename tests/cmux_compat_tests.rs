@@ -21,10 +21,14 @@ use twitty::layout::{Rect, SidebarPosition};
 use twitty::pty::{is_stripped_env_var, INHERITED_TERMINAL_VARS};
 use twitty::render::scene::context::DrawContext;
 use twitty::render::scene::sidebar::{build, LabelCache};
+use twitty::render::text::ui::UiFont;
+use twitty::render::ui_style::UiStyle;
 use twitty::render::CellMetrics;
 use twitty::session::shell_setup::{install_claude_wrapper, prepend_path};
 use twitty::session::spawn::cmux_env_vars;
-use twitty::sidebar::{AgentState, AgentStatus, ScrollState};
+use twitty::sidebar::cards::ScrollState;
+use twitty::sidebar::{AgentState, AgentStatus};
+use twitty::ui::chrome::UiLanguage;
 
 fn s(items: &[&str]) -> Vec<String> {
     items.iter().map(|v| (*v).to_owned()).collect()
@@ -808,13 +812,6 @@ fn per_pane_agent_status_lifecycle_and_sidebar_rendering() {
         padding_top: 6.0,
     };
     let area = Rect::new(0.0, 0.0, 240.0, 400.0);
-    let view = ScrollState::default().view(
-        &entries,
-        0,
-        area,
-        metrics.line_height,
-        SidebarPosition::Right,
-    );
     let mut cache = LabelCache::default();
     let mut ctx = DrawContext {
         font_system: &mut font_system,
@@ -823,7 +820,23 @@ fn per_pane_agent_status_lifecycle_and_sidebar_rendering() {
         metrics,
         is_srgb: false,
     };
-    let scene = build(&mut ctx, &view, &mut cache);
+    let font = UiFont::default();
+    let cards = cache.cards(&font, ctx.font_system, entries, area, metrics.scale);
+    let view = ScrollState::default().view(
+        &cards,
+        0,
+        area,
+        metrics.scale,
+        SidebarPosition::Right,
+        UiLanguage::English,
+    );
+    let scene = build(
+        &mut ctx,
+        &view,
+        &mut cache,
+        UiStyle::new(&palette, None, metrics.scale),
+        &font,
+    );
     assert!(
         scene.labels.len() >= 4,
         "expected title, Arabic notice, cwd, and agent badge labels"

@@ -30,9 +30,11 @@ use twitty::render::shapes::Shape;
 use twitty::render::text::ui::UiFont;
 use twitty::render::ui_style::UiStyle;
 use twitty::render::{CellMetrics, PaneFrame, RowCache};
+use twitty::sidebar::cards::{Card, ScrollState};
 use twitty::sidebar::git::BranchCache;
-use twitty::sidebar::{Entry, Notice, ScrollState};
+use twitty::sidebar::{Entry, Notice};
 use twitty::terminal::Terminal;
+use twitty::ui::chrome::UiLanguage;
 use twitty::ui::palette::{PaletteCmd, PaletteEntry, PaletteState};
 use winit::event::ElementState;
 use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey};
@@ -140,8 +142,29 @@ fn palette_above_sidebar_above_panes_and_clips_underlying_text() {
             ),
             Entry::new("shell", None, false, None, []),
         ];
-        let view = ScrollState::default().view(&entries, 0, sidebar_area, 23.0, position);
-        frame.add_sidebar(&mut ctx, &view, &mut label_cache);
+        let font = UiFont::default();
+        let cards = label_cache.cards(
+            &font,
+            ctx.font_system,
+            entries.into(),
+            sidebar_area,
+            metrics.scale,
+        );
+        let view = ScrollState::default().view(
+            &cards,
+            0,
+            sidebar_area,
+            metrics.scale,
+            position,
+            UiLanguage::English,
+        );
+        frame.add_sidebar(
+            &mut ctx,
+            &view,
+            &mut label_cache,
+            UiStyle::new(&palette, None, metrics.scale),
+            &font,
+        );
         let quads_after_sidebar = frame.quads.len();
         assert!(quads_after_sidebar > quads_after_attention);
 
@@ -229,14 +252,29 @@ fn palette_and_sidebar_never_draw_outside_tiny_surfaces() {
             sidebar_layout(surface, surface, SidebarPosition::Right, 220.0, 1.0);
         frame.add_attention(&ctx, &[content]);
         if let Some(area) = sidebar_area {
+            let font = UiFont::default();
+            let cards = labels.cards(
+                &font,
+                ctx.font_system,
+                entries.to_vec(),
+                area,
+                metrics.scale,
+            );
             let view = ScrollState::default().view(
-                &entries,
+                &cards,
                 0,
                 area,
-                metrics.line_height,
+                metrics.scale,
                 SidebarPosition::Right,
+                UiLanguage::English,
             );
-            frame.add_sidebar(&mut ctx, &view, &mut labels);
+            frame.add_sidebar(
+                &mut ctx,
+                &view,
+                &mut labels,
+                UiStyle::new(&palette, None, metrics.scale),
+                &font,
+            );
         }
         frame.add_palette(
             &mut ctx,
@@ -686,8 +724,23 @@ fn caches_throttles_and_sidebar_scroll_stay_bounded_and_reveal_after_close() {
     let area = Rect::new(0.0, 0.0, 220.0, 200.0);
     for i in 0..50 {
         let entries = [Entry::new(&format!("tab-{i}"), None, false, None, [])];
-        let view = ScrollState::default().view(&entries, 0, area, 23.0, SidebarPosition::Left);
-        let _ = twitty::render::scene::sidebar::build(&mut ctx, &view, &mut labels);
+        let font = UiFont::default();
+        let cards = labels.cards(&font, ctx.font_system, entries.into(), area, 1.0);
+        let view = ScrollState::default().view(
+            &cards,
+            0,
+            area,
+            1.0,
+            SidebarPosition::Left,
+            UiLanguage::English,
+        );
+        let _ = twitty::render::scene::sidebar::build(
+            &mut ctx,
+            &view,
+            &mut labels,
+            UiStyle::new(&palette, None, 1.0),
+            &font,
+        );
         assert!(
             labels.len() <= 4,
             "stale labels accumulated: {}",
@@ -714,23 +767,46 @@ fn caches_throttles_and_sidebar_scroll_stay_bounded_and_reveal_after_close() {
     // 4. ScrollState::reveal_active scrolls index 0 back into view even when active index stays 0
     //    (e.g. Tab 0 was active, user scrolled to bottom, then Tab 0 closed so Tab 1 became index 0).
     let entries: Vec<_> = (0..8)
-        .map(|i| Entry::new(&format!("t{i}"), None, false, None, []))
+        .map(|i| Card {
+            entry: Entry::new(&format!("t{i}"), None, false, None, []),
+            message: Vec::new(),
+        })
         .collect();
     let mut scroll = ScrollState::default();
     let area = Rect::new(0.0, 0.0, 200.0, 100.0);
-    scroll.update(&entries, 0, area, 20.0);
-    scroll.scroll(10_000.0, &entries, area, 20.0);
+    let view = scroll.view(
+        &entries,
+        0,
+        area,
+        1.0,
+        SidebarPosition::Left,
+        UiLanguage::English,
+    );
+    scroll.scroll(10_000.0, &view);
     assert_eq!(
         scroll
-            .view(&entries, 0, area, 20.0, SidebarPosition::Left)
-            .hit_test(10.0, 95.0),
+            .view(
+                &entries,
+                0,
+                area,
+                1.0,
+                SidebarPosition::Left,
+                UiLanguage::English
+            )
+            .hit_test(10.0, 59.0),
         Some(7)
     );
     scroll.reveal_active();
-    scroll.update(&entries[1..], 0, area, 20.0);
     assert_eq!(
         scroll
-            .view(&entries[1..], 0, area, 20.0, SidebarPosition::Left)
+            .view(
+                &entries[1..],
+                0,
+                area,
+                1.0,
+                SidebarPosition::Left,
+                UiLanguage::English
+            )
             .hit_test(10.0, 10.0),
         Some(0)
     );

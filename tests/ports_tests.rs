@@ -14,8 +14,12 @@ use twitty::ports::{
 };
 use twitty::render::scene::context::DrawContext;
 use twitty::render::scene::sidebar::{build, LabelCache};
+use twitty::render::text::ui::UiFont;
+use twitty::render::ui_style::UiStyle;
 use twitty::render::CellMetrics;
-use twitty::sidebar::{Entry, ScrollState};
+use twitty::sidebar::cards::ScrollState;
+use twitty::sidebar::Entry;
+use twitty::ui::chrome::UiLanguage;
 
 const TCP: &str = "\
   sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
@@ -249,7 +253,7 @@ fn watcher_scans_while_watching_and_sends_only_changes() {
 }
 
 #[test]
-fn sidebar_entry_gets_a_ports_line_next_to_an_arabic_title() {
+fn sidebar_entry_gets_ports_in_the_mono_footer_below_an_arabic_title() {
     let mut fs = FontSystem::new();
     let palette = Palette::default();
     let mut ctx = DrawContext {
@@ -274,13 +278,27 @@ fn sidebar_entry_gets_a_ports_line_next_to_an_arabic_title() {
         [],
     );
     let with_ports = plain.clone().with_ports(vec![3000, 5173, 8080, 9000, 9229]);
-    assert_eq!(with_ports.height(22.0) - plain.height(22.0), 22.0);
     let entries = [with_ports, plain];
     let area = Rect::new(500.0, 0.0, 320.0, 400.0);
-    let view = ScrollState::default().view(&entries, 0, area, 22.0, SidebarPosition::Right);
-    // The second entry starts below the first one's extra line.
-    assert_eq!(view.items[1].rect.y, entries[0].height(22.0));
-    let scene = build(&mut ctx, &view, &mut LabelCache::default());
+    let font = UiFont::default();
+    let mut cache = LabelCache::default();
+    let cards = cache.cards(&font, ctx.font_system, entries.into(), area, 1.0);
+    let view = ScrollState::default().view(
+        &cards,
+        0,
+        area,
+        1.0,
+        SidebarPosition::Right,
+        UiLanguage::English,
+    );
+    assert_eq!(view.items[0].rect.h, view.items[1].rect.h);
+    let scene = build(
+        &mut ctx,
+        &view,
+        &mut cache,
+        UiStyle::new(&palette, None, 1.0),
+        &font,
+    );
     let texts: Vec<String> = scene
         .labels
         .iter()
@@ -288,16 +306,16 @@ fn sidebar_entry_gets_a_ports_line_next_to_an_arabic_title() {
         .collect();
     let ports = texts
         .iter()
-        .position(|t| t == ":3000 :5173 :8080 :9000 +1")
+        .position(|t| t == ":3000 :5173 +3")
         .expect("ports line");
     let title = texts.iter().position(|t| t == "سيرفر التطوير").unwrap();
     let (p, t) = (&scene.labels[ports], &scene.labels[title]);
     assert!(p.top > t.top, "ports below the title");
-    // Right sidebar: both end at the right padding.
-    let right = |l: &twitty::render::scene::sidebar::Label| {
-        l.left + l.buffer.layout_runs().next().unwrap().line_w
-    };
-    assert!((right(p) - (area.right() - 8.0)).abs() < 0.1);
+    assert!(
+        p.left < t.left,
+        "ports go at the trailing side of the mirrored footer"
+    );
+    assert_eq!(p.buffer.metrics().font_size, 11.0);
     assert!(t.buffer.layout_runs().next().unwrap().rtl);
     // Only one ports line in the whole scene (the second tab has none).
     assert_eq!(texts.iter().filter(|t| t.starts_with(':')).count(), 1);

@@ -300,13 +300,27 @@ impl Renderer {
         self.row_cache.cell_at(pane, self.metrics, rect, x, y)
     }
 
+    pub(crate) fn sidebar_cards(
+        &mut self,
+        entries: Vec<crate::sidebar::Entry>,
+        area: Rect,
+    ) -> Vec<crate::sidebar::cards::Card> {
+        self.sidebar_labels.cards(
+            &self.ui_font,
+            &mut self.font_system,
+            entries,
+            area,
+            self.metrics.scale,
+        )
+    }
+
     /// Draw the tab bar (with two or more tabs), every pane and the dividers between them.
     pub fn render(
         &mut self,
         chrome: &ChromeView,
         panes: &[PaneFrame],
         dividers: &[Rect],
-        sidebar: Option<&crate::sidebar::View>,
+        sidebar: Option<&crate::sidebar::cards::View>,
     ) -> anyhow::Result<()> {
         let Some(surface_texture) = self.gpu.acquire(&self.config, &self.window) else {
             return Ok(());
@@ -334,17 +348,30 @@ impl Renderer {
             panes,
             dividers,
         );
+        let style = UiStyle::new(&self.palette, self.ui_accent, self.metrics.scale);
         if let Some(view) = sidebar {
-            frame.add_sidebar(&mut ctx, view, &mut self.sidebar_labels);
+            frame.add_sidebar(
+                &mut ctx,
+                view,
+                &mut self.sidebar_labels,
+                style,
+                &self.ui_font,
+            );
         } else {
             self.sidebar_labels.clear();
         }
         if let Some(view) = &self.review_view {
-            frame.add_review(&mut ctx, view, &mut self.review_labels);
+            frame.add_review(
+                &mut ctx,
+                view,
+                &mut self.review_labels,
+                style,
+                &self.ui_font,
+                chrome.language,
+            );
         } else {
             self.review_labels.clear();
         }
-        let style = UiStyle::new(&self.palette, self.ui_accent, self.metrics.scale);
         frame.add_chrome(&mut ctx, style, &self.ui_font, chrome);
         if let Some(view) = &self.palette_view {
             frame.add_palette(&mut ctx, style, &self.ui_font, view);

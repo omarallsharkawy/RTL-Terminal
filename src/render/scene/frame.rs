@@ -24,6 +24,7 @@ use crate::render::style::Quad;
 use crate::render::text::ui::{UiFont, UiLabel};
 use crate::render::ui_style::UiStyle;
 use crate::render::{PaneFrame, TabLabel};
+use crate::ui::chrome::UiLanguage;
 
 /// Renderer state a frame depends on besides what it is drawn with.
 pub struct FrameOptions<'a> {
@@ -55,6 +56,9 @@ pub struct Frame {
     pub quads: Vec<Quad>,
     pub shapes: ShapeLayers,
     chrome_labels: Vec<UiLabel>,
+    review_labels: Vec<UiLabel>,
+    sidebar_rect: Option<Rect>,
+    review_rect: Option<Rect>,
     pane_clips: Vec<(PaneId, TextBounds)>,
     /// Window clear color (the theme background) in surface space.
     pub background: [f32; 4],
@@ -122,6 +126,16 @@ pub fn bounds_around(bounds: TextBounds, hole: Rect) -> Vec<TextBounds> {
         bottom: b.bottom.min(bounds.bottom),
     })
     .collect()
+}
+
+fn clip_runs(runs: Vec<TextRun<'_>>, hole: Rect) -> Vec<TextRun<'_>> {
+    runs.into_iter()
+        .flat_map(|run| {
+            bounds_around(run.bounds, hole)
+                .into_iter()
+                .map(move |bounds| TextRun { bounds, ..run })
+        })
+        .collect()
 }
 
 fn rect_bounds(r: Rect) -> TextBounds {
@@ -253,6 +267,9 @@ pub fn build_frame(
         quads,
         shapes: ShapeLayers::default(),
         chrome_labels: Vec::new(),
+        review_labels: Vec::new(),
+        sidebar_rect: None,
+        review_rect: None,
         pane_clips: Vec::new(),
         background,
         ime_area,
@@ -326,11 +343,15 @@ impl Frame {
     pub fn add_sidebar(
         &mut self,
         ctx: &mut DrawContext,
-        view: &crate::sidebar::View,
+        view: &crate::sidebar::cards::View,
         cache: &mut super::sidebar::LabelCache,
+        style: UiStyle,
+        font: &UiFont,
     ) {
-        let scene = super::sidebar::build(ctx, view, cache);
+        let scene = super::sidebar::build(ctx, view, cache, style, font);
         self.quads.extend(scene.quads);
+        self.shapes.chrome.extend(scene.shapes);
+        self.sidebar_rect = Some(view.area);
         self.sidebar_labels = scene.labels;
     }
 
@@ -340,9 +361,15 @@ impl Frame {
         ctx: &mut DrawContext,
         view: &crate::review::panel::View,
         cache: &mut super::review::ReviewCache,
+        style: UiStyle,
+        font: &UiFont,
+        language: UiLanguage,
     ) {
-        let scene = super::review::build(ctx, view, cache);
+        let scene = super::review::build(ctx, view, cache, style, font, language);
         self.quads.extend(scene.quads);
+        self.shapes.chrome.extend(scene.shapes);
+        self.review_labels = scene.labels;
+        self.review_rect = Some(view.rect);
         self.review_texts = scene.texts;
     }
 
@@ -449,7 +476,10 @@ impl Frame {
                 });
             }
         }
-        // Sidebar labels after the panes, so they draw above anything a pane draws there.
+        // Glyphon draws after these surfaces. Keep pane labels and preedit behind them.
+        for hole in [self.sidebar_rect, self.review_rect].into_iter().flatten() {
+            runs = clip_runs(runs, hole);
+        }
         for label in &self.sidebar_labels {
             runs.push(TextRun {
                 buffer: &label.buffer,
@@ -470,16 +500,10 @@ impl Frame {
                 });
             }
         }
+        runs.extend(self.review_labels.iter().map(ui_run));
         runs.extend(self.chrome_labels.iter().map(ui_run));
         if let Some(hole) = self.overlay_rect {
-            runs = runs
-                .into_iter()
-                .flat_map(|run| {
-                    bounds_around(run.bounds, hole)
-                        .into_iter()
-                        .map(move |bounds| TextRun { bounds, ..run })
-                })
-                .collect();
+            runs = clip_runs(runs, hole);
         }
         runs.extend(self.overlay.iter().map(ui_run));
         runs

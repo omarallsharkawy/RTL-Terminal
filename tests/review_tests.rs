@@ -13,6 +13,8 @@ use twitty::input::{handle_key_mode_raw, InputAction};
 use twitty::layout::{PaneId, Rect};
 use twitty::render::scene::context::DrawContext;
 use twitty::render::scene::review::{build, ReviewCache};
+use twitty::render::text::ui::UiFont;
+use twitty::render::ui_style::UiStyle;
 use twitty::render::CellMetrics;
 use twitty::review::comment::{
     choose_agent_pane, clean_comment, format_comment, runs_agent, CommentTarget, PaneInfo,
@@ -25,6 +27,7 @@ use twitty::review::rows::{
     build_rows, clamp_top, nearest, next_file, reveal, row_at, step, LineRef, Note, Row,
 };
 use twitty::review::{Diff, FileStatus, LineKind, LoadError, PanelCmd, ReviewPanel, Snapshot};
+use twitty::ui::chrome::UiLanguage;
 use twitty::workflows::encode_insert;
 
 // ---- fixtures ----
@@ -694,13 +697,20 @@ fn the_view_shows_the_visible_rows() {
     let mut panel = loaded(TWO_FILES);
     named(&mut panel, NamedKey::ArrowDown);
     let view = panel.view(Rect::new(0.0, 0.0, 400.0, 300.0), 4);
-    assert_eq!(view.title, "repo  ⎇ main");
+    assert_eq!(view.title, "repo");
+    assert_eq!(view.branch.as_deref(), Some("main"));
     assert_eq!(view.summary, "2 files / 2 ملفات");
     assert_eq!(view.totals, Some((3, 3)));
     assert_eq!(view.gutter_cols, 7);
     assert_eq!(view.rows.len(), 4);
-    assert_eq!(view.rows[0].style, RowStyle::File { collapsed: false });
-    assert_eq!(view.rows[0].text, "▾ M src/main.rs");
+    assert_eq!(
+        view.rows[0].style,
+        RowStyle::File {
+            collapsed: false,
+            status: FileStatus::Modified
+        }
+    );
+    assert_eq!(view.rows[0].text, "src/main.rs");
     assert_eq!(view.rows[0].counts, Some((2, 2)));
     assert!(view.rows[0].selected);
     assert_eq!(view.rows[2].gutter, "  1   1");
@@ -873,7 +883,7 @@ fn panel_hits() {
         false,
         14,
     );
-    assert_eq!(layout.page_rows(), 17);
+    assert_eq!(layout.page_rows(), 16);
     let center = |r: Rect| ((r.x + r.w / 2.0) as f64, (r.y + r.h / 2.0) as f64);
     let (x, y) = center(layout.close);
     assert_eq!(layout.hit(x, y, 0, 100, 7), PanelHit::Close);
@@ -908,6 +918,21 @@ fn panel_hits() {
     let with_footer = PanelLayout::new(layout.panel, 20.0, 10.0, 1.0, true, 14);
     assert!(with_footer.body.h < layout.body.h);
     assert!(with_footer.footer.unwrap().bottom() <= layout.panel.bottom() + 0.01);
+}
+
+#[test]
+fn review_header_and_counts_do_not_overlap_at_360_logical_pixels() {
+    for scale in [1.0, 1.25, 2.0] {
+        let rect = Rect::new(0.0, 0.0, 360.0 * scale, 300.0 * scale);
+        let layout = PanelLayout::new(rect, 20.0 * scale, 10.0 * scale, scale, false, 14);
+        let (repo, branch) = layout.repository_and_branch(300.0 * scale, 500.0 * scale);
+        assert!(repo.right() < branch.x && branch.right() < layout.refresh.x);
+        assert!(layout.refresh.right() < layout.close.x);
+        assert!(layout.summary.right() < layout.commit.x);
+        assert!(layout.close.bottom() <= layout.summary.y);
+        assert!(layout.commit.right() < rect.right());
+        assert!(layout.commit.bottom() < layout.body.y);
+    }
 }
 
 // ---- shortcut and command ----
@@ -1154,7 +1179,16 @@ diff --git a/ar.txt b/ar.txt
             is_srgb: false,
         };
         let mut cache = ReviewCache::default();
-        let scene = build(&mut ctx, &view, &mut cache);
+        let font = UiFont::default();
+        let style = UiStyle::new(&palette, None, 1.0);
+        let scene = build(
+            &mut ctx,
+            &view,
+            &mut cache,
+            style,
+            &font,
+            UiLanguage::English,
+        );
         assert!(!scene.quads.is_empty());
         for &(x, y, w, h, _) in &scene.quads {
             assert!(x >= rect.x - 0.01 && y >= rect.y - 0.01, "{x},{y}");
@@ -1172,7 +1206,14 @@ diff --git a/ar.txt b/ar.txt
         let cached = cache.len();
         assert!(cached > 0);
         // A second frame reuses every label.
-        let again = build(&mut ctx, &view, &mut cache);
+        let again = build(
+            &mut ctx,
+            &view,
+            &mut cache,
+            style,
+            &font,
+            UiLanguage::English,
+        );
         assert_eq!(cache.len(), cached);
         assert_eq!(again.texts.len(), scene.texts.len());
     }
@@ -1213,7 +1254,14 @@ fn review_text_is_clipped_under_the_command_palette() {
     let mut ime = PreeditState::default();
     let mut frame = build_frame(&mut ctx, &opts, &mut rows, &mut ime, &[], &[], &[]);
     let mut cache = ReviewCache::default();
-    frame.add_review(&mut ctx, &view, &mut cache);
+    frame.add_review(
+        &mut ctx,
+        &view,
+        &mut cache,
+        UiStyle::new(&palette, None, 1.0),
+        &UiFont::default(),
+        UiLanguage::English,
+    );
     let without = frame.text_runs(&[], &rows, &ime).len();
     assert!(without > 0);
     let style = twitty::render::ui_style::UiStyle::new(&palette, None, ctx.metrics.scale);

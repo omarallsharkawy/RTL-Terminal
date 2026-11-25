@@ -31,6 +31,7 @@ impl App {
 
     pub(super) fn on_cursor_moved(&mut self, x: f64, y: f64) {
         self.pointer.pos = (x, y);
+        self.window.update_sidebar_drag();
         if self.palette_open() {
             let hit = self.window.palette_hit(x, y);
             let icon = if matches!(hit, crate::render::scene::palette::PaletteHit::Item(_)) {
@@ -51,8 +52,6 @@ impl App {
         self.update_chrome_hover(&hit, captured);
         if let Some(icon) = self.review_cursor(x, y).filter(|_| !captured) {
             self.window.set_cursor_icon(icon);
-        } else if over_sidebar {
-            self.window.set_cursor_icon(CursorIcon::Default);
         } else if let Some(icon) = cursor_icon_for(&hit, captured, self.window.cursor_icon()) {
             self.window.set_cursor_icon(icon);
         }
@@ -100,7 +99,8 @@ impl App {
     }
 
     pub(super) fn on_cursor_left(&mut self) {
-        self.window.set_chrome_hover(None);
+        self.window.set_chrome_hover(None, None);
+        self.window.cancel_sidebar_drag();
         if self.pointer.capture.is_none() && self.pointer.drag.is_none() {
             self.pointer.pos = (f64::NEG_INFINITY, f64::NEG_INFINITY);
             if let Some(id) = self.pointer.hover.take() {
@@ -132,10 +132,14 @@ impl App {
             }
             match self.pointer.press(hit, button) {
                 PressTarget::Tab(i) => {
-                    if self.window.sidebar_contains(&self.ws, x, y) && i != self.ws.active() {
-                        self.reset_pointer_gesture();
-                    }
+                    let sidebar = self.window.sidebar_contains(&self.ws, x, y);
                     self.set_active_tab(i);
+                    if sidebar {
+                        if let Some(tab) = self.ws.tabs().get(i) {
+                            self.window.start_sidebar_drag(tab.id, y);
+                        }
+                    }
+                    self.refresh_pointer_hover();
                     None
                 }
                 PressTarget::Pane(id) => {
@@ -148,6 +152,13 @@ impl App {
                 PressTarget::None => None,
             }
         } else {
+            if button == MouseButton::Left {
+                if let Some(index) = self.window.sidebar_drop(&self.ws, self.pointer.pos) {
+                    if self.ws.move_active_tab(index) {
+                        self.window.request_redraw();
+                    }
+                }
+            }
             self.pointer.release(button)
         };
         if let Some(id) = target {
@@ -162,6 +173,8 @@ impl App {
             ChromeAction::Search => self.run_command("palette.open"),
             ChromeAction::Diff => self.run_command("review.toggle"),
             ChromeAction::Notifications => self.run_command("notifications.list"),
+            ChromeAction::NewTab => self.run_command("tab.new"),
+            ChromeAction::CloseTab(index) => self.close_tab(index),
             ChromeAction::FocusPane(id) => {
                 self.focus_pane(id);
                 false
@@ -190,7 +203,11 @@ impl App {
             Hit::Chrome(action) if !captured => Some(*action),
             _ => None,
         };
-        self.window.set_chrome_hover(hover);
+        let tab = match hit {
+            Hit::Tab(i) if !captured => Some(*i),
+            _ => None,
+        };
+        self.window.set_chrome_hover(hover, tab);
     }
 
     pub(super) fn on_wheel(&mut self, delta: MouseScrollDelta) {
@@ -329,7 +346,8 @@ impl App {
             self.clear_link_hover(id);
         }
         self.window.set_cursor_icon(CursorIcon::Default);
-        self.window.set_chrome_hover(None);
+        self.window.set_chrome_hover(None, None);
+        self.window.cancel_sidebar_drag();
         self.release_held_buttons();
         self.pointer.cancel();
     }

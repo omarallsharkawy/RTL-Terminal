@@ -102,17 +102,21 @@ pub fn descendants(processes: &[(u32, u32)], root: u32, limit: usize) -> Vec<u32
 /// The sidebar line for a tab's ports: sorted, without repeats, at most [`MAX_SHOWN`] and then
 /// `+N` for the rest. Empty when there are none.
 pub fn format_ports(ports: &[u16]) -> String {
+    format_ports_limit(ports, MAX_SHOWN)
+}
+
+pub(crate) fn format_ports_limit(ports: &[u16], limit: usize) -> String {
     let mut ports = ports.to_vec();
     ports.sort_unstable();
     ports.dedup();
     let mut text = ports
         .iter()
-        .take(MAX_SHOWN)
+        .take(limit)
         .map(|p| format!(":{p}"))
         .collect::<Vec<_>>()
         .join(" ");
-    if ports.len() > MAX_SHOWN {
-        text.push_str(&format!(" +{}", ports.len() - MAX_SHOWN));
+    if ports.len() > limit {
+        text.push_str(&format!(" +{}", ports.len() - limit));
     }
     text
 }

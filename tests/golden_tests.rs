@@ -395,3 +395,132 @@ fn sdf_shapes_render_rounded_border_shadow_and_capsule() {
     let blended = pixel(28, 20);
     assert!(blended[0].abs_diff(140) <= 2 && blended[2].abs_diff(242) <= 2);
 }
+
+#[test]
+fn workspace_cards_draw_in_dark_and_light_themes() {
+    use twitty::color::Rgba;
+    use twitty::layout::SidebarPosition;
+    use twitty::render::scene::sidebar::LabelCache;
+    use twitty::render::text::ui::UiFont;
+    use twitty::render::ui_style::UiStyle;
+    use twitty::sidebar::cards::ScrollState;
+    use twitty::sidebar::{AgentState, AgentStatus, Entry, Notice};
+    use twitty::ui::chrome::UiLanguage;
+
+    let _gpu = GPU.lock().unwrap_or_else(|e| e.into_inner());
+    let (width, height) = (360, 280);
+    let mut target = match Offscreen::new(width, height) {
+        Ok(target) => target,
+        Err(err) if !env_flag("TWITTY_REQUIRE_GOLDEN") => {
+            eprintln!("workspace card pixels skipped: {err:#}");
+            return;
+        }
+        Err(err) => panic!("workspace cards require an offscreen adapter: {err:#}"),
+    };
+    let mut fonts = font_system();
+    let font = UiFont::default();
+    let metrics = CellMetrics::measure(&mut fonts, None, 15.0, 1.0);
+    let selected = Entry::new(
+        "Review change",
+        Some(Path::new("/tmp/project")),
+        false,
+        None,
+        [Notice::new(None, "Ready to merge")],
+    )
+    .with_ports(vec![3000]);
+    let waiting = Entry::new("Build", None, false, None, []).with_agent_status(Some(
+        AgentStatus::new(AgentState::NeedsInput, Some("Approve the change")),
+    ));
+    let arabic = Entry::new(
+        "مراجعة التغييرات",
+        None,
+        false,
+        None,
+        [Notice::new(None, "هل أتابع النشر؟")],
+    );
+    let area = Rect::new(110.0, 0.0, 250.0, height as f32);
+    let entries = [selected, waiting, arabic];
+    for palette in [Palette::default(), Palette::named("github-light").unwrap()] {
+        let style = UiStyle::new(&palette, Some(Rgba::from_rgb8(54, 86, 170)), 1.0);
+        let mut ctx = DrawContext {
+            font_system: &mut fonts,
+            family: None,
+            palette: &palette,
+            metrics,
+            is_srgb: false,
+        };
+        let mut labels = LabelCache::default();
+        let cards = labels.cards(&font, ctx.font_system, entries.to_vec(), area, 1.0);
+        let mut view = ScrollState::default().view(
+            &cards,
+            0,
+            area,
+            1.0,
+            SidebarPosition::Right,
+            UiLanguage::English,
+        );
+        assert_eq!(view.items.len(), 3);
+        let waiting = view.items[1].rect;
+        view.update_hover((
+            f64::from(waiting.x + 10.0),
+            f64::from(waiting.bottom() - 2.0),
+        ));
+        let opts = FrameOptions {
+            window_focused: true,
+            cursor_style: "block",
+            cursor_blink_on: true,
+            surface: (width as f32, height as f32),
+        };
+        let mut rows = RowCache::default();
+        let mut ime = PreeditState::default();
+        let mut frame = build_frame(&mut ctx, &opts, &mut rows, &mut ime, &[], &[], &[]);
+        frame.add_sidebar(&mut ctx, &view, &mut labels, style, &font);
+        let runs = frame.text_runs(&[], &rows, &ime);
+        let ar = runs
+            .iter()
+            .find(|run| run.buffer.lines[0].text() == "مراجعة التغييرات")
+            .unwrap();
+        assert!(ar.buffer.layout_runs().next().unwrap().rtl);
+        let ar = ar.bounds;
+        let pixels = target
+            .render_layers(
+                (&frame.quads, &frame.shapes),
+                runs,
+                ctx.font_system,
+                frame.background,
+                1.0,
+            )
+            .unwrap();
+        let pixel = |x: usize, y: usize| &pixels[((y * width as usize + x) * 4)..][..4];
+        let near = |pixel: &[u8], color: Rgba| {
+            pixel
+                .iter()
+                .zip(color.to_array())
+                .all(|(&a, b)| a.abs_diff((b * 255.0).round() as u8) <= 2)
+        };
+        let sample = |rect: Rect| pixel((rect.x + 10.0) as usize, (rect.bottom() - 5.0) as usize);
+        assert!(near(sample(view.items[0].rect), style.accent));
+        assert!(near(sample(waiting), style.bg3));
+        assert!(near(sample(view.items[2].rect), style.bg2));
+        assert!(near(pixel(area.x as usize + 1, 1), style.bg1));
+        let first = view.items[0].rect;
+        assert!(
+            near(pixel(first.x as usize, first.y as usize), style.bg1),
+            "rounded corner"
+        );
+        let badge = view.items[1].layout(&view).state;
+        assert!(
+            !near(
+                pixel((badge.x + 3.0) as usize, (badge.y + badge.h / 2.0) as usize),
+                style.bg3
+            ),
+            "needs-input pill"
+        );
+        assert!(
+            (ar.top as usize..ar.bottom as usize).any(|y| {
+                (ar.left as usize..ar.right as usize).any(|x| near(pixel(x, y), style.text))
+            }),
+            "Arabic glyphs must reach the output pixels"
+        );
+    }
+}

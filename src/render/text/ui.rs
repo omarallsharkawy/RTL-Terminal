@@ -101,12 +101,15 @@ impl UiFont {
             UiWeight::Semibold => Weight::SEMIBOLD,
         });
         if !self.covers_arabic && text.chars().any(is_arabic_script) {
-            let arabic = Attrs::new().family(Family::Name("Noto Naskh Arabic"));
+            let arabic = attrs.clone().family(Family::Name("Noto Naskh Arabic"));
             let mut spans = Vec::new();
             let mut start = 0;
             let mut rtl = false;
             for (i, grapheme) in text.grapheme_indices(true) {
-                let is_arabic = grapheme.chars().any(is_arabic_script);
+                // Keep neutral punctuation with the preceding Arabic span. In particular an
+                // ellipsis must share its shaping run to land at the visual end of an RTL title.
+                let is_arabic = grapheme.chars().any(is_arabic_script)
+                    || (rtl && grapheme.chars().all(|c| !c.is_alphanumeric()));
                 if is_arabic != rtl {
                     if i > start {
                         spans.push((

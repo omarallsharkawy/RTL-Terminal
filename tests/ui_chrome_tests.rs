@@ -4,13 +4,20 @@ use twitty::color::{Palette, Rgba};
 use twitty::config::TwittyConfig;
 use twitty::layout::{Node, PaneId, Rect, SidebarPosition};
 use twitty::render::icons::Icon;
+use twitty::render::scene::context::DrawContext;
+use twitty::render::scene::frame::{build_frame, FrameOptions};
 use twitty::render::scene::palette::{PaletteHit, PaletteLayout};
+use twitty::render::scene::preedit::PreeditState;
+use twitty::render::scene::window_chrome::ChromeView;
 use twitty::render::shapes::{append_instances, Border, Shadow, Shape};
 use twitty::render::text::fonts::new_font_system;
 use twitty::render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
 use twitty::render::ui_style::UiStyle;
-use twitty::render::CellMetrics;
-use twitty::ui::chrome::{ChromeAction, PaneHeaderLayout, TopBarLayout, WindowLayout};
+use twitty::render::{CellMetrics, RowCache, TabLabel};
+use twitty::ui::chrome::{
+    count_badge, ChromeAction, PaneHeaderLayout, SearchContents, SearchPlaceholder, TopBarLayout,
+    UiLanguage, WindowLayout, SEARCH_AR, SEARCH_EN, SEARCH_KEYCAP,
+};
 use twitty::ui::git_diff::{parse_numstat, DiffStat, MAX_FILES, MAX_LINES, MAX_OUTPUT};
 use twitty::ui::hit::{hit_test, Hit, HitGeometry};
 
@@ -220,15 +227,15 @@ fn grid_geometry_accounts_for_headers_and_sidebar() {
         assert_eq!(with_sidebar.tab_bar.h, 0.0);
         let with_tabs = WindowLayout::new(metrics, size, 2, (SidebarPosition::Hidden, 220.0), true);
         assert_eq!(with_tabs.tabs.len(), 2);
-        assert_eq!(with_tabs.tabs[0].y, 36.0 * scale);
-        assert_eq!(with_tabs.content.y, 56.0 * scale);
+        assert_eq!(with_tabs.tabs[0].y, 40.0 * scale);
+        assert_eq!(with_tabs.content.y, 68.0 * scale);
         let pane = PaneHeaderLayout::new(with_sidebar.content, scale, true);
         assert_eq!(pane.header.h, 28.0 * scale);
         assert_eq!(pane.grid.y, 64.0 * scale);
         assert_eq!(pane.grid.bottom(), with_sidebar.content.bottom());
         assert_eq!(metrics.grid_size(pane.grid), (56, 26));
         let no_chrome =
-            WindowLayout::new(metrics, size, 1, (SidebarPosition::Hidden, 220.0), false);
+            WindowLayout::new(metrics, size, 0, (SidebarPosition::Hidden, 220.0), false);
         let pane = PaneHeaderLayout::new(no_chrome.content, scale, false);
         assert_eq!(pane.grid, Rect::new(0.0, 0.0, size.0, size.1));
         assert_eq!(metrics.grid_size(pane.grid), (78, 29));
@@ -281,22 +288,15 @@ fn chrome_hits_are_distinct_from_terminal_hits() {
         assert_eq!(pane.hit(id, x, y), Some(action));
     }
     assert_eq!(pane.hit(id, 0.0, f64::from(pane.grid.y)), None);
+    let (x, y) = center(window.tabs[0]);
+    assert_eq!(window.tab_hit(x, y), Some(Hit::Tab(0)));
     let geometry = HitGeometry {
-        tab_bar_height: window.tab_bar.h,
-        tabs: window.tabs,
+        tab_bar_height: 0.0,
+        tabs: Vec::new(),
         content: window.content,
         gap: 1.0,
         slop: 2.0,
     };
-    assert_eq!(
-        hit_test(
-            &geometry,
-            Some(&Node::Leaf(id)),
-            1.0,
-            f64::from(geometry.content.y) - 1.0
-        ),
-        Hit::Tab(0)
-    );
     assert_eq!(
         hit_test(
             &geometry,
@@ -316,6 +316,173 @@ fn chrome_hits_are_distinct_from_terminal_hits() {
         assert_eq!(overlay.hit(x, y), PaletteHit::Item(index));
     }
     assert_eq!(overlay.hit(0.0, 0.0), PaletteHit::Outside);
+}
+
+#[test]
+fn pill_tabs_have_disjoint_tab_close_and_new_tab_hits() {
+    for (scale, width, count) in [(1.0, 800.0, 1), (1.25, 600.0, 4), (2.0, 380.0, 20)] {
+        let layout = WindowLayout::new(
+            metrics(scale),
+            (width, 600.0),
+            count,
+            (SidebarPosition::Hidden, 220.0),
+            true,
+        );
+        assert!(layout.new_tab.right() <= layout.tab_bar.right());
+        let (x, y) = center(layout.new_tab);
+        assert_eq!(
+            layout.tab_hit(x, y),
+            Some(Hit::Chrome(ChromeAction::NewTab))
+        );
+        for (i, &tab) in layout.tabs.iter().enumerate() {
+            let close = layout.tab_close(tab);
+            let (x, y) = center(close);
+            assert_eq!(
+                layout.tab_hit(x, y),
+                Some(Hit::Chrome(ChromeAction::CloseTab(i)))
+            );
+            let x = f64::from((tab.x + close.x) / 2.0);
+            assert_eq!(layout.tab_hit(x, y), Some(Hit::Tab(i)));
+        }
+        assert_eq!(
+            layout.tab_hit(0.0, f64::from(layout.tab_bar.y)),
+            Some(Hit::TabBar)
+        );
+        assert_eq!(layout.tab_hit(0.0, f64::from(layout.content.y)), None);
+    }
+}
+
+#[test]
+fn search_placeholder_and_badges_follow_width_locale_and_counts() {
+    for (locale, expected) in [
+        ("ar_EG.UTF-8", UiLanguage::Arabic),
+        ("ar", UiLanguage::Arabic),
+        ("en_US.UTF-8", UiLanguage::English),
+        ("C", UiLanguage::English),
+    ] {
+        assert_eq!(UiLanguage::from_locale(locale), expected);
+    }
+    assert_eq!(
+        SearchContents::fit(299.0, 300.0, 150.0, 75.0).placeholder,
+        SearchPlaceholder::Local
+    );
+    assert_eq!(
+        SearchContents::fit(375.0, 300.0, 150.0, 75.0),
+        SearchContents {
+            placeholder: SearchPlaceholder::Bilingual,
+            keycap: true
+        }
+    );
+    assert_eq!(
+        SearchContents::fit(300.0, 300.0, 150.0, 75.0),
+        SearchContents {
+            placeholder: SearchPlaceholder::Bilingual,
+            keycap: false
+        }
+    );
+    assert_eq!(
+        SearchContents::fit(74.0, 300.0, 150.0, 75.0),
+        SearchContents {
+            placeholder: SearchPlaceholder::Hidden,
+            keycap: false
+        }
+    );
+    assert_eq!(count_badge(0), None);
+    assert_eq!(count_badge(2).as_deref(), Some("2"));
+    assert_eq!(count_badge(100).as_deref(), Some("99+"));
+
+    let area = Rect::new(0.0, 0.0, 800.0, 36.0);
+    assert!(TopBarLayout::new(area, 1.0, Some(DiffStat::default()))
+        .diff
+        .is_none());
+    for stat in [
+        DiffStat {
+            added: 1,
+            removed: 0,
+        },
+        DiffStat {
+            added: 0,
+            removed: 1,
+        },
+    ] {
+        assert!(TopBarLayout::new(area, 1.0, Some(stat)).diff.is_some());
+    }
+}
+
+#[test]
+fn rendered_search_uses_only_complete_labels_and_bell_count_is_conditional() {
+    let mut fonts = new_font_system();
+    let font = UiFont::default();
+    let palette = Palette::default();
+    let metrics = metrics(1.0);
+    let mut ctx = DrawContext {
+        font_system: &mut fonts,
+        family: None,
+        palette: &palette,
+        metrics,
+        is_srgb: false,
+    };
+    let placeholder_w = |ctx: &mut DrawContext, text| {
+        label_width(&font.shape(
+            ctx.font_system,
+            UiSize::Caption,
+            UiWeight::Regular,
+            1.0,
+            text,
+        ))
+        .ceil()
+    };
+    let en_w = placeholder_w(&mut ctx, SEARCH_EN);
+    let ar_w = placeholder_w(&mut ctx, SEARCH_AR);
+    for (field_width, language, unread, expected) in [
+        (
+            456.0,
+            UiLanguage::English,
+            99,
+            vec![SEARCH_KEYCAP, SEARCH_EN, "/", SEARCH_AR, "99"],
+        ),
+        (en_w + 39.0, UiLanguage::English, 0, vec![SEARCH_EN]),
+        (ar_w + 39.0, UiLanguage::Arabic, 0, vec![SEARCH_AR]),
+        (65.0, UiLanguage::Arabic, 0, vec![]),
+    ] {
+        let surface = (900.0, 300.0);
+        let layout = WindowLayout::new(metrics, surface, 1, (SidebarPosition::Hidden, 220.0), true);
+        let mut top = TopBarLayout::new(layout.top_bar, metrics.scale, Some(DiffStat::default()));
+        top.search.w = field_width;
+        let tabs = [TabLabel {
+            title: "Shell".to_owned(),
+            active: true,
+        }];
+        let view = ChromeView {
+            layout: &layout,
+            top,
+            diff: Some(DiffStat::default()),
+            unread,
+            sidebar_visible: false,
+            hover: None,
+            hover_tab: Some(0),
+            language,
+            panes: &[],
+            tabs: &tabs,
+        };
+        let opts = FrameOptions {
+            window_focused: true,
+            cursor_style: "block",
+            cursor_blink_on: true,
+            surface,
+        };
+        let mut rows = RowCache::default();
+        let mut ime = PreeditState::default();
+        let mut frame = build_frame(&mut ctx, &opts, &mut rows, &mut ime, &[], &[], &[]);
+        frame.add_chrome(&mut ctx, UiStyle::new(&palette, None, 1.0), &font, &view);
+        let runs = frame.text_runs(&[], &rows, &ime);
+        let labels: Vec<_> = runs
+            .iter()
+            .filter(|run| run.bounds.bottom <= layout.top_bar.bottom() as i32)
+            .map(|run| run.buffer.lines[0].text())
+            .collect();
+        assert_eq!(labels, expected, "search field {field_width}, {language:?}");
+    }
 }
 
 #[test]

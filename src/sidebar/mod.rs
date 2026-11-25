@@ -1,21 +1,33 @@
 //! Window-free workspace labels, scrolling and repository metadata.
 
+pub mod cards;
 pub mod git;
 
 use std::path::{Path, PathBuf};
 
-use crate::layout::{Rect, SidebarPosition};
+use crate::layout::{PaneId, SidebarPosition};
 use crate::remote::ConnectionState;
+use crate::session::pane::Notification;
 use crate::shell_integration::{clean_text, MAX_NOTIFY_CHARS};
-use crate::ui::hit::Hit;
+use crate::ui::chrome::UiLanguage;
+use crate::ui::notifications::HistoryEntry;
 
 pub fn entry_title(title: Option<&str>, program: Option<&str>, index: usize) -> String {
+    localized_entry_title(title, program, index, UiLanguage::English)
+}
+
+pub fn localized_entry_title(
+    title: Option<&str>,
+    program: Option<&str>,
+    index: usize,
+    language: UiLanguage,
+) -> String {
     title
         .into_iter()
         .chain(program)
         .map(|text| clean_text(text, 256))
         .find(|text| !text.is_empty())
-        .unwrap_or_else(|| format!("Tab {}", index + 1))
+        .unwrap_or_else(|| format!("{} {}", language.text("Tab", "تاب"), index + 1))
 }
 
 pub struct Placement {
@@ -76,6 +88,7 @@ pub enum AgentState {
     Working,
     NeedsInput,
     Done,
+    Error,
 }
 
 impl AgentState {
@@ -84,15 +97,7 @@ impl AgentState {
             Self::Working => "working",
             Self::NeedsInput => "needs_input",
             Self::Done => "done",
-        }
-    }
-
-    /// Short status label drawn in the sidebar state row.
-    pub fn badge(self) -> &'static str {
-        match self {
-            Self::Working => "● working",
-            Self::NeedsInput => "! needs input",
-            Self::Done => "✓ done",
+            Self::Error => "error",
         }
     }
 
@@ -101,7 +106,8 @@ impl AgentState {
         match self {
             Self::Done => 1,
             Self::Working => 2,
-            Self::NeedsInput => 3,
+            Self::Error => 3,
+            Self::NeedsInput => 4,
         }
     }
 
@@ -118,6 +124,7 @@ impl AgentState {
                 Some(Self::NeedsInput)
             }
             "done" | "idle" | "finished" | "complete" | "completed" => Some(Self::Done),
+            "error" | "failed" | "failure" => Some(Self::Error),
             _ => None,
         }
     }
@@ -200,7 +207,7 @@ impl Entry {
         }
     }
 
-    /// The entry with these listening ports (shown on their own line when there are any).
+    /// The entry with these listening ports.
     pub fn with_ports(mut self, ports: Vec<u16>) -> Self {
         self.ports = ports;
         self
@@ -212,19 +219,72 @@ impl Entry {
         self
     }
 
-    /// Text for the notification line: the unseen notification first, else the agent status text.
-    pub fn display_notice(&self) -> Option<String> {
-        self.notification
-            .as_ref()
-            .map(Notice::label)
-            .or_else(|| self.agent_status.as_ref().and_then(|s| s.text.clone()))
+    /// Retain the latest message after it has been read. A pane may still carry attention
+    /// for a notification that has fallen out of the window's bounded history.
+    pub(crate) fn with_notification_history<'a>(
+        mut self,
+        panes: &[PaneId],
+        newest_first: &[&HistoryEntry],
+        pending: impl Iterator<Item = (PaneId, &'a Notification)>,
+    ) -> Self {
+        let notices = newest_first
+            .iter()
+            .copied()
+            .filter(|notice| panes.contains(&notice.pane));
+        let latest = notices
+            .clone()
+            .next()
+            .map(|notice| Notice::new(notice.title.as_deref(), &notice.body));
+        self.attention_count = notices.clone().filter(|notice| !notice.seen).count();
+        let mut fallback = None;
+        for (id, notice) in pending {
+            if notices.clone().any(|entry| entry.pane == id && !entry.seen) {
+                continue;
+            }
+            self.attention_count += 1;
+            if fallback.is_none_or(|previous: &Notification| notice.at > previous.at) {
+                fallback = Some(notice);
+            }
+        }
+        self.notification = latest
+            .or_else(|| fallback.map(|notice| Notice::new(notice.title.as_deref(), &notice.body)));
+        self
     }
 
-    pub fn height(&self, line_height: f32) -> f32 {
-        let lines = 3.5
-            + f32::from(u8::from(self.display_notice().is_some()))
-            + f32::from(u8::from(!self.ports.is_empty()));
-        line_height * lines
+    /// The latest notification for the workspace, or the current agent message.
+    pub fn display_notice(&self) -> Option<String> {
+        let notice = || {
+            self.notification
+                .as_ref()
+                .map(Notice::label)
+                .filter(|text| !text.is_empty())
+        };
+        let agent = || {
+            self.agent_status
+                .as_ref()
+                .and_then(|status| status.text.clone())
+        };
+        if self.attention_count > 0 {
+            notice().or_else(agent)
+        } else {
+            agent().or_else(notice)
+        }
+    }
+
+    pub fn display_state(&self) -> Option<AgentState> {
+        if let Some(status) = &self.agent_status {
+            Some(status.state)
+        } else if self.running {
+            Some(AgentState::Working)
+        } else {
+            self.last_exit.map(|exit| {
+                if exit == 0 {
+                    AgentState::Done
+                } else {
+                    AgentState::Error
+                }
+            })
+        }
     }
 }
 
@@ -240,112 +300,4 @@ pub fn display_path(path: &Path, home: Option<&Path>) -> String {
         None => path.to_string_lossy().into_owned(),
     };
     clean_text(&path, 4096)
-}
-
-/// An entry's full rect; labels and highlights are clipped against `View::area`.
-#[derive(Clone, Debug)]
-pub struct Item {
-    pub index: usize,
-    pub rect: Rect,
-    pub active: bool,
-    pub entry: Entry,
-}
-
-#[derive(Clone, Debug)]
-pub struct View {
-    pub area: Rect,
-    pub right_aligned: bool,
-    pub items: Vec<Item>,
-}
-
-impl View {
-    pub fn hit_test(&self, x: f64, y: f64) -> Option<usize> {
-        self.area
-            .contains(x, y)
-            .then(|| {
-                self.items
-                    .iter()
-                    .find(|i| i.rect.contains(x, y))
-                    .map(|i| i.index)
-            })
-            .flatten()
-    }
-
-    pub fn pointer_hit(&self, x: f64, y: f64) -> Option<Hit> {
-        self.area
-            .contains(x, y)
-            .then(|| self.hit_test(x, y).map_or(Hit::TabBar, Hit::Tab))
-    }
-}
-
-#[derive(Default)]
-pub struct ScrollState {
-    offset: f32,
-    active: Option<usize>,
-}
-
-impl ScrollState {
-    pub fn scroll(&mut self, pixels: f32, entries: &[Entry], area: Rect, line_height: f32) {
-        self.offset = (self.offset + pixels).clamp(0.0, max_scroll(entries, area, line_height));
-    }
-
-    /// Force the next `update` to scroll the active tab into view even if its index is unchanged
-    /// (for example after closing the active tab or focusing a pane via the control socket).
-    pub fn reveal_active(&mut self) {
-        self.active = None;
-    }
-
-    /// Reveal a tab selected by keyboard, while allowing the user to scroll away afterwards.
-    pub fn update(&mut self, entries: &[Entry], active: usize, area: Rect, line_height: f32) {
-        if self.active != Some(active) {
-            let top: f32 = entries
-                .iter()
-                .take(active)
-                .map(|e| e.height(line_height))
-                .sum();
-            let bottom = top + entries.get(active).map_or(0.0, |e| e.height(line_height));
-            if top < self.offset {
-                self.offset = top;
-            } else if bottom > self.offset + area.h {
-                self.offset = bottom - area.h;
-            }
-            self.active = Some(active);
-        }
-        self.offset = self
-            .offset
-            .clamp(0.0, max_scroll(entries, area, line_height));
-    }
-
-    pub fn view(
-        &self,
-        entries: &[Entry],
-        active: usize,
-        area: Rect,
-        line_height: f32,
-        position: SidebarPosition,
-    ) -> View {
-        let mut y = area.y - self.offset.min(max_scroll(entries, area, line_height));
-        let mut items = Vec::new();
-        for (index, entry) in entries.iter().enumerate() {
-            let rect = Rect::new(area.x, y, area.w, entry.height(line_height));
-            y = rect.bottom();
-            if rect.bottom() > area.y && rect.y < area.bottom() {
-                items.push(Item {
-                    index,
-                    rect,
-                    active: index == active,
-                    entry: entry.clone(),
-                });
-            }
-        }
-        View {
-            area,
-            right_aligned: position == SidebarPosition::Right,
-            items,
-        }
-    }
-}
-
-fn max_scroll(entries: &[Entry], area: Rect, line_height: f32) -> f32 {
-    (entries.iter().map(|e| e.height(line_height)).sum::<f32>() - area.h).max(0.0)
 }

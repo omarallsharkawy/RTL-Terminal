@@ -20,6 +20,9 @@ pub enum Icon {
     Terminal,
     Agent,
     Diff,
+    Refresh,
+    ChevronRight,
+    ChevronDown,
 }
 
 impl Icon {
@@ -135,6 +138,27 @@ impl Icon {
                     [8.0, 2.5],
                 ],
             ),
+            Self::Refresh => {
+                line(
+                    out,
+                    &[
+                        [12.9, 6.8],
+                        [11.6, 4.4],
+                        [9.1, 3.2],
+                        [6.4, 3.4],
+                        [4.2, 5.1],
+                        [3.2, 7.6],
+                        [3.8, 10.3],
+                        [5.8, 12.3],
+                        [8.5, 12.9],
+                        [11.0, 12.0],
+                        [12.6, 9.9],
+                    ],
+                );
+                line(out, &[[10.1, 6.9], [13.0, 6.9], [13.0, 4.0]]);
+            }
+            Self::ChevronRight => line(out, &[[6.0, 4.0], [10.0, 8.0], [6.0, 12.0]]),
+            Self::ChevronDown => line(out, &[[4.0, 6.0], [8.0, 10.0], [12.0, 6.0]]),
             Self::Diff => {
                 icon.stroke(out, [3.9, 5.8], [12.1, 5.8]);
                 icon.stroke(out, [8.0, 2.9], [8.0, 8.7]);

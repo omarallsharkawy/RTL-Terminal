@@ -14,12 +14,14 @@ use crate::layout::{PaneId, Rect, SidebarPosition};
 use crate::render::scene::window_chrome::{ChromeView, PaneHeaderView};
 use crate::render::{PaneFrame, Renderer, TabLabel};
 use crate::session::workspace::{GridGeometry, Workspace};
+use crate::sidebar::cards::{Drag, ScrollState, View as SidebarView, DOT_INTERVAL};
 use crate::sidebar::{
-    entry_title, git::BranchCache, pick_tab_agent_status, Entry, Notice, Placement, ScrollState,
+    git::BranchCache, localized_entry_title, pick_tab_agent_status, Entry, Notice, Placement,
 };
-use crate::ui::chrome::{ChromeAction, PaneHeaderLayout, TopBarLayout, WindowLayout};
+use crate::ui::chrome::{ChromeAction, PaneHeaderLayout, TopBarLayout, UiLanguage, WindowLayout};
 use crate::ui::git_diff::DiffStat;
 use crate::ui::hit::{hit_test, Hit, HitGeometry};
+use crate::ui::notifications::NotificationHistory;
 use crate::ui::settings::{clamp_font_size, step_opacity};
 
 pub(super) const WINDOW_TITLE: &str = "Twitty · RTL Terminal";
@@ -59,6 +61,12 @@ pub(super) struct Window {
     pane_headers: bool,
     occluded: bool,
     chrome_hover: Option<ChromeAction>,
+    tab_hover: Option<usize>,
+    language: UiLanguage,
+    sidebar_view: Option<SidebarView>,
+    sidebar_drag: Option<Drag>,
+    sidebar_tick: Option<Instant>,
+    sidebar_dot: usize,
     diff: Option<(git_diff::Target, DiffStat)>,
     sidebar_scroll: ScrollState,
     branches: BranchCache,
@@ -81,6 +89,12 @@ impl Window {
             pane_headers: true,
             occluded: false,
             chrome_hover: None,
+            tab_hover: None,
+            language: UiLanguage::from_environment(),
+            sidebar_view: None,
+            sidebar_drag: None,
+            sidebar_tick: None,
+            sidebar_dot: 0,
             diff: None,
             sidebar_scroll: ScrollState::default(),
             branches: BranchCache::default(),
@@ -228,11 +242,7 @@ impl Window {
     pub(super) fn diff_visible(&self) -> bool {
         self.renderer.as_ref().is_some_and(|r| {
             let top = self.layout(0).top_bar;
-            !self.occluded
-                && top.h > 0.0
-                && TopBarLayout::new(top, r.metrics().scale, Some(DiffStat::default()))
-                    .diff
-                    .is_some()
+            !self.occluded && TopBarLayout::can_show_diff(top, r.metrics().scale)
         })
     }
 
@@ -252,9 +262,10 @@ impl Window {
         (git_diff::target(ws).as_ref() == Some(target)).then_some(*stats)
     }
 
-    pub(super) fn set_chrome_hover(&mut self, hover: Option<ChromeAction>) {
-        if self.chrome_hover != hover {
+    pub(super) fn set_chrome_hover(&mut self, hover: Option<ChromeAction>, tab: Option<usize>) {
+        if self.chrome_hover != hover || self.tab_hover != tab {
             self.chrome_hover = hover;
+            self.tab_hover = tab;
             self.request_redraw();
         }
     }
@@ -290,28 +301,58 @@ impl Window {
     }
 
     pub(super) fn scroll_sidebar(&mut self, ws: &Workspace, x: f64, y: f64, lines: f64) -> bool {
-        if !self.is_open() {
+        if !self.sidebar_contains(ws, x, y) {
             return false;
         }
-        let Some(area) = self
-            .layout(ws.tabs().len())
-            .sidebar
-            .filter(|a| a.contains(x, y))
-        else {
-            return false;
-        };
-        let line_height = self
-            .renderer
-            .as_ref()
-            .map_or(20.0, |r| r.metrics().line_height);
-        self.sidebar_scroll.scroll(
-            -lines as f32 * line_height,
-            &sidebar_entries(ws, &self.ports),
-            area,
-            line_height,
-        );
+        if let Some(view) = &self.sidebar_view {
+            let line_height = self.line_height().unwrap_or(20.0);
+            self.sidebar_scroll
+                .scroll((-lines * line_height) as f32, view);
+        }
         self.request_redraw();
         true
+    }
+
+    pub(super) fn start_sidebar_drag(&mut self, tab_id: u64, y: f64) {
+        self.sidebar_drag = Some(Drag::new(tab_id, y));
+    }
+
+    pub(super) fn cancel_sidebar_drag(&mut self) {
+        if self.sidebar_drag.take().is_some() {
+            self.request_redraw();
+        }
+    }
+
+    pub(super) fn update_sidebar_drag(&mut self) {
+        if self.sidebar_drag.is_some() {
+            self.request_redraw();
+        }
+    }
+
+    pub(super) fn sidebar_drop(&mut self, ws: &Workspace, pointer: (f64, f64)) -> Option<usize> {
+        let drag = self.sidebar_drag.take()?;
+        self.request_redraw();
+        let view = self.sidebar_view.as_ref()?;
+        let area = self.layout(ws.tabs().len()).sidebar?;
+        if !view.matches(area, ws.tabs().len()) || ws.active_tab()?.id != drag.tab_id {
+            return None;
+        }
+        let target = drag.target(view, ws.active(), pointer)?;
+        self.sidebar_view = None;
+        self.reveal_active_tab();
+        Some(target)
+    }
+
+    pub(super) fn poll_sidebar_animation(&mut self, now: Instant) -> Option<Instant> {
+        if self.occluded {
+            return None;
+        }
+        if now >= self.sidebar_tick? {
+            self.sidebar_dot = (self.sidebar_dot + 1) % 3;
+            self.sidebar_tick = Some(now + DOT_INTERVAL);
+            self.request_redraw();
+        }
+        self.sidebar_tick
     }
 
     /// Ask for one redraw; repeated requests before it happens are merged.
@@ -448,17 +489,16 @@ impl Window {
         {
             return hit;
         }
-        if let Some(area) = layout.sidebar {
-            if area.contains(x, y) {
-                let view = self.sidebar_scroll.view(
-                    &sidebar_entries(ws, &self.ports),
-                    ws.active(),
-                    area,
-                    r.metrics().line_height,
-                    self.sidebar.position,
-                );
-                return view.pointer_hit(x, y).unwrap_or(Hit::TabBar);
-            }
+        if let Some(area) = layout.sidebar.filter(|area| area.contains(x, y)) {
+            return self
+                .sidebar_view
+                .as_ref()
+                .filter(|view| view.matches(area, n))
+                .and_then(|view| view.pointer_hit(x, y))
+                .unwrap_or(Hit::TabBar);
+        }
+        if let Some(hit) = layout.tab_hit(x, y) {
+            return hit;
         }
         if self.pane_headers && layout.content.contains(x, y) {
             for (id, rect) in ws.active_layout(self) {
@@ -468,8 +508,8 @@ impl Window {
             }
         }
         let geometry = HitGeometry {
-            tab_bar_height: layout.tab_bar.h,
-            tabs: layout.tabs,
+            tab_bar_height: 0.0,
+            tabs: Vec::new(),
             content: layout.content,
             gap: r.divider_gap(),
             slop: (r.metrics().scale * 3.0).max(2.0),
@@ -537,40 +577,53 @@ impl Window {
     fn render(
         &mut self,
         ws: &Workspace,
-        tabs: &[TabLabel],
         panes: &[PaneFrame],
         dividers: &[Rect],
         blink: bool,
-        unread: usize,
+        history: &NotificationHistory,
+        pointer: (f64, f64),
     ) {
         let Some(metrics) = self.metrics() else {
             return;
         };
         let layout = self.layout(ws.tabs().len());
-        let sidebar = layout.sidebar.map(|area| {
-            let line_height = self
-                .renderer
-                .as_ref()
-                .map_or(20.0, |r| r.metrics().line_height);
-            let mut entries = sidebar_entries(ws, &self.ports);
+        self.sidebar_view = layout.sidebar.and_then(|area| {
+            let mut entries = sidebar_entries(ws, &self.ports, history, self.language);
             let directories = entries.iter().filter_map(|e| e.cwd.clone()).collect();
             self.branches.retain(&directories);
             let now = Instant::now();
             for entry in &mut entries {
                 entry.branch = entry.cwd.as_deref().and_then(|p| self.branches.get(p, now));
             }
-            self.sidebar_scroll
-                .update(&entries, ws.active(), area, line_height);
-            self.sidebar_scroll.view(
-                &entries,
+            let cards = self.renderer.as_mut()?.sidebar_cards(entries, area);
+            let mut view = self.sidebar_scroll.view(
+                &cards,
                 ws.active(),
                 area,
-                line_height,
+                metrics.scale,
                 self.sidebar.position,
-            )
+                self.language,
+            );
+            view.update_hover(pointer);
+            view.dot_phase = self.sidebar_dot;
+            view.drop_target = self
+                .sidebar_drag
+                .and_then(|drag| drag.target(&view, ws.active(), pointer));
+            Some(view)
         });
-        if sidebar.is_none() {
+        if self.sidebar_view.is_none() {
             self.branches.clear();
+        }
+        if self
+            .sidebar_view
+            .as_ref()
+            .is_some_and(SidebarView::animates)
+        {
+            self.sidebar_tick
+                .get_or_insert_with(|| Instant::now() + DOT_INTERVAL);
+        } else {
+            self.sidebar_tick = None;
+            self.sidebar_dot = 0;
         }
         let pane_headers = ws
             .active_layout(self)
@@ -595,19 +648,31 @@ impl Window {
             })
             .collect::<Vec<_>>();
         let diff = self.diff(ws);
+        let tabs: Vec<_> = (0..layout.tabs.len())
+            .map(|i| TabLabel {
+                title: ws.tab_title_for_ui(i, self.language),
+                active: i == ws.active(),
+            })
+            .collect();
+        let hover_tab = match layout.tab_hit(pointer.0, pointer.1) {
+            Some(Hit::Tab(i) | Hit::Chrome(ChromeAction::CloseTab(i))) => Some(i),
+            _ => None,
+        };
         let chrome = ChromeView {
             layout: &layout,
             top: TopBarLayout::new(layout.top_bar, metrics.scale, diff),
             diff,
-            unread,
-            sidebar_visible: sidebar.is_some(),
+            unread: history.unseen(),
+            sidebar_visible: self.sidebar_view.is_some(),
             hover: self.chrome_hover,
+            hover_tab,
+            language: self.language,
             panes: &pane_headers,
-            tabs,
+            tabs: &tabs,
         };
         if let Some(ref mut r) = self.renderer {
             r.set_cursor_blink(blink);
-            if let Err(e) = r.render(&chrome, panes, dividers, sidebar.as_ref()) {
+            if let Err(e) = r.render(&chrome, panes, dividers, self.sidebar_view.as_ref()) {
                 tracing::error!("render error: {e:?}");
             }
         }
@@ -647,52 +712,50 @@ fn pane_header_title(pane: &crate::session::pane::Pane) -> (String, bool) {
     )
 }
 
-fn sidebar_entries(ws: &Workspace, ports: &HashMap<PaneId, Vec<u16>>) -> Vec<Entry> {
+fn sidebar_entries(
+    ws: &Workspace,
+    ports: &HashMap<PaneId, Vec<u16>>,
+    history: &NotificationHistory,
+    language: UiLanguage,
+) -> Vec<Entry> {
+    let history = history.newest_first();
     ws.tabs()
         .iter()
         .enumerate()
         .map(|(index, tab)| {
             let focused = ws.pane(tab.focused);
-            let mut tab_ports: Vec<u16> = tab
-                .root
-                .leaves()
-                .into_iter()
-                .filter_map(|id| ports.get(&id))
+            let panes = tab.root.leaves();
+            let mut tab_ports: Vec<u16> = panes
+                .iter()
+                .filter_map(|id| ports.get(id))
                 .flatten()
                 .copied()
                 .collect();
             tab_ports.sort_unstable();
             tab_ports.dedup();
-            let mut notifications: Vec<_> = tab
-                .root
-                .leaves()
-                .into_iter()
-                .filter_map(|id| ws.pane(id)?.meta.attention.as_ref())
-                .collect();
-            notifications.sort_by_key(|n| n.at);
+            let pending = panes
+                .iter()
+                .filter_map(|&id| Some((id, ws.pane(id)?.meta.attention.as_ref()?)));
             let focused_status = focused.and_then(|p| p.meta.agent_status.as_ref());
-            let other_statuses: Vec<_> = tab
-                .root
-                .leaves()
-                .into_iter()
+            let other_statuses = panes
+                .iter()
+                .copied()
                 .filter(|&id| id != tab.focused)
-                .filter_map(|id| ws.pane(id)?.meta.agent_status.as_ref())
-                .collect();
+                .filter_map(|id| ws.pane(id)?.meta.agent_status.as_ref());
             let agent_status = pick_tab_agent_status(focused_status, other_statuses);
             let remote = sidebar_remote(ws, tab);
             let mut entry = Entry::new(
-                &sidebar_title(ws, index),
+                &localized_sidebar_title(ws, index, language),
                 focused
                     .filter(|_| remote.is_none())
                     .and_then(|p| p.meta.cwd.as_deref()),
                 focused.is_some_and(|p| p.meta.running),
                 focused.and_then(|p| p.meta.last_exit),
-                notifications
-                    .into_iter()
-                    .map(|n| Notice::new(n.title.as_deref(), &n.body)),
+                [],
             )
             .with_ports(tab_ports)
-            .with_agent_status(agent_status);
+            .with_agent_status(agent_status)
+            .with_notification_history(&panes, &history, pending);
             entry.remote_state = remote.map(|remote| remote.state);
             entry
         })
@@ -700,6 +763,10 @@ fn sidebar_entries(ws: &Workspace, ports: &HashMap<PaneId, Vec<u16>>) -> Vec<Ent
 }
 
 pub(super) fn sidebar_title(ws: &Workspace, index: usize) -> String {
+    localized_sidebar_title(ws, index, UiLanguage::from_environment())
+}
+
+fn localized_sidebar_title(ws: &Workspace, index: usize, language: UiLanguage) -> String {
     let tab = ws.tabs().get(index);
     if let Some(custom) = tab
         .and_then(|t| t.title.as_deref())
@@ -712,10 +779,11 @@ pub(super) fn sidebar_title(ws: &Workspace, index: usize) -> String {
         return crate::shell_integration::clean_text(remote.target.destination(), 256);
     }
     let pane = tab.and_then(|tab| ws.pane(tab.focused));
-    entry_title(
+    localized_entry_title(
         pane.and_then(|p| p.title.as_deref()),
         pane.and_then(|p| p.pty.as_ref()?.program_name()),
         index,
+        language,
     )
 }
 
@@ -746,28 +814,26 @@ impl App {
         self.sync_port_watch();
         let review = self.review_view();
         self.window.set_review(review);
-        let (tabs, panes, dividers) = self.frame();
+        let (panes, dividers) = self.frame();
         let visible = self.cursor_blink.visible();
         self.window.render(
             &self.ws,
-            &tabs,
             &panes,
             &dividers,
             visible,
-            self.notification_history.unseen(),
+            &self.notification_history,
+            if self.pointer.capture.is_none() && self.pointer.drag.is_none() {
+                self.pointer.pos
+            } else {
+                (f64::NEG_INFINITY, f64::NEG_INFINITY)
+            },
         );
     }
 
     /// Snapshot everything the renderer draws for the active tab.
-    fn frame(&self) -> (Vec<TabLabel>, Vec<PaneFrame>, Vec<Rect>) {
-        let tabs = (0..self.ws.tabs().len())
-            .map(|i| TabLabel {
-                title: self.ws.tab_title(i),
-                active: i == self.ws.active(),
-            })
-            .collect();
+    fn frame(&self) -> (Vec<PaneFrame>, Vec<Rect>) {
         let Some(r) = self.window.grid() else {
-            return (tabs, Vec::new(), Vec::new());
+            return (Vec::new(), Vec::new());
         };
         let focused = self.focused_id();
         let panes = self
@@ -800,7 +866,7 @@ impl App {
             .into_iter()
             .map(|d| d.rect)
             .collect();
-        (tabs, panes, dividers)
+        (panes, dividers)
     }
 
     /// The window gained or lost keyboard focus.
@@ -818,6 +884,7 @@ impl App {
             }
             self.release_held_buttons();
             self.pointer.cancel();
+            self.window.cancel_sidebar_drag();
         }
         self.cursor_blink.set_focused(Instant::now(), focused);
         self.window.set_focused(focused);
