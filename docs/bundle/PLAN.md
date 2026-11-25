@@ -3,9 +3,13 @@
 Twitty stays what it is (a native Rust/wgpu terminal whose one rule is *the grid is logical,
 only drawing is bidirectional*) and gains the features that make cmux and Warp good for
 working with coding agents. **No code is copied from either project**: Warp is AGPL-3.0 and
-cmux is GPL-3.0 (and Swift/AppKit, macOS only), while Twitty is MIT OR Apache-2.0. Features are
+cmux is GPL-3.0 (and Swift/AppKit, macOS only), while Twitty was MIT OR Apache-2.0. Features are
 re-implemented from their public behaviour and documentation only. Do not open, paste or
 paraphrase their source.
+
+**Update (round 3):** Twitty is now AGPL-3.0-or-later, so code from cmux-gtk (AGPL), cmux (GPL)
+and Warp (AGPL) may be taken, with attribution in `licenses/NOTICE.md` and a header comment in
+each file. Rounds 1 and 2 were written from scratch under the rule above.
 
 ## What we take
 

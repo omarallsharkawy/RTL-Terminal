@@ -5,9 +5,11 @@
 all-features = true
 
 [licenses]
-# Permissive licenses compatible with distributing Twitty under MIT OR Apache-2.0.
+# Licenses compatible with distributing Twitty under AGPL-3.0-or-later. Twitty's own crates
+# are AGPL; dependencies stay permissive.
 allow = [
     "0BSD",
+    "AGPL-3.0-or-later",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",

@@ -222,13 +222,16 @@ CI runs fmt, clippy and tests on Linux and Windows, checks the minimum Rust vers
 
 ## License
 
-Twitty is licensed under either of
+Twitty is licensed under the [GNU Affero General Public License v3.0 or later](LICENSE) (AGPL-3.0-or-later). Releases up to 3.0.0 were licensed under MIT OR Apache-2.0; the change makes room for code taken from other open-source terminals.
 
-- [MIT license](LICENSE-MIT)
-- [Apache License, Version 2.0](LICENSE-APACHE)
+Twitty includes or adapts code from these projects, under their licenses (copies in [`licenses/`](licenses/)):
 
-at your option.
+- [cmux-gtk](https://github.com/douglas/cmux-gtk), AGPL-3.0-or-later ([`licenses/cmux-gtk.txt`](licenses/cmux-gtk.txt)), itself a Linux port of
+- [cmux](https://github.com/manaflow-ai/cmux), GPL-3.0-or-later ([`licenses/cmux.txt`](licenses/cmux.txt)).
+- [Warp](https://github.com/warpdotdev/warp), AGPL-3.0 with its UI framework under MIT ([`licenses/warp-AGPL.txt`](licenses/warp-AGPL.txt), [`licenses/warp-MIT.txt`](licenses/warp-MIT.txt)).
 
-Unless you explicitly state otherwise, any contribution you intentionally submit for inclusion in Twitty, as defined in the Apache-2.0 license, is dual licensed as above, without any additional terms or conditions.
+[`licenses/NOTICE.md`](licenses/NOTICE.md) lists which Twitty files contain code from each project.
+
+Unless you explicitly state otherwise, any contribution you intentionally submit for inclusion in Twitty is licensed under AGPL-3.0-or-later.
 
 The licenses cover the code. The Twitty name and logo are not licensed for use by forks or derivative products.

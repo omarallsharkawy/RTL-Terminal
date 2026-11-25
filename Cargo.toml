@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.90"
 authors = ["Omar Sharkawy"]
 description = "Twitty - Native Bidirectional RTL Terminal Emulator"
-license = "MIT OR Apache-2.0"
+license = "AGPL-3.0-or-later"
 repository = "https://github.com/omarallsharkawy/RTL-Terminal"
 
 [dependencies]

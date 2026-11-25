@@ -74,5 +74,5 @@ exact bytes that reproduce it (`printf '…'`).
 
 ## License
 
-By contributing you agree that your contribution is dual licensed under MIT OR Apache-2.0, as
+By contributing you agree that your contribution is licensed under AGPL-3.0-or-later, as
 described in the README.
