@@ -158,7 +158,7 @@ The config file is `~/.config/twitty/config.json` (`%APPDATA%\twitty\config.json
 | `cursor_style` | `block`, `beam` or `underline`. Programs that set their own cursor shape (vim insert mode, for example) still win. |
 | `cursor_blink` | `true` (default) blinks the cursor, `false` keeps it solid. Programs that ask for a blinking or steady cursor (`CSI n SP q`) override this. The cursor stays solid while you type and while the window is unfocused. |
 | `sidebar` | Where the workspace sidebar sits: `"right"` (default), `"left"`, or `"hidden"`. |
-| `sidebar_width` | Sidebar width in logical pixels (default `220`, clamped to `140`–`480`). |
+| `sidebar_width` | Maximum sidebar width in logical pixels (default `180`, clamped to `140`–`480`; also capped at 25% of the window width, down to `140`). |
 | `desktop_notifications` | `true` (default) sends desktop notifications via `notify-send` when an unfocused pane requests attention. |
 | `shell_integration` | `true` (default) loads Twitty's automatic bash/zsh/fish integration for OSC 133 command blocks and OSC 7 working directories. |
 | `restore_session` | `true` (default) restores tabs, splits, directories, titles, and SSH sessions saved on normal window close. |

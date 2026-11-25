@@ -70,6 +70,12 @@ impl std::str::FromStr for SidebarPosition {
     }
 }
 
+/// Default maximum sidebar width in logical pixels.
+pub const DEFAULT_SIDEBAR_WIDTH: f32 = 180.0;
+const MIN_SIDEBAR_WIDTH: f32 = 140.0;
+const MAX_SIDEBAR_WIDTH: f32 = 480.0;
+const MAX_SIDEBAR_SHARE: f32 = 0.25;
+
 /// Shared drawing and input geometry, in physical pixels. `legacy_content` is the pane
 /// area with a horizontal tab bar; a visible sidebar replaces that bar entirely.
 pub fn sidebar_layout(
@@ -82,9 +88,12 @@ pub fn sidebar_layout(
     if position == SidebarPosition::Hidden {
         return (legacy_content, None);
     }
+    let configured = (clamp_sidebar_width(logical_width) * scale).round();
+    let min_width = (MIN_SIDEBAR_WIDTH * scale).round();
+    let cap = (surface.w * MAX_SIDEBAR_SHARE).floor().max(min_width);
     // Preserve some terminal space even in a window smaller than the configured sidebar.
-    let width = (clamp_sidebar_width(logical_width) * scale)
-        .round()
+    let width = configured
+        .min(cap)
         .clamp(0.0, (surface.w - 80.0 * scale).max(0.0));
     if width == 0.0 {
         return (legacy_content, None);
@@ -101,9 +110,9 @@ pub fn sidebar_layout(
 
 pub fn clamp_sidebar_width(width: f32) -> f32 {
     if width.is_finite() {
-        width.clamp(140.0, 480.0)
+        width.clamp(MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH)
     } else {
-        220.0
+        DEFAULT_SIDEBAR_WIDTH
     }
 }
 

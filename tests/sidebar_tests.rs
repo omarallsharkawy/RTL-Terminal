@@ -28,7 +28,7 @@ use twitty::sidebar::{
 };
 use twitty::terminal::Terminal;
 use twitty::ui::chrome::{
-    ChromeAction, TopBarLayout, UiLanguage, WindowLayout, SEARCH_AR, SEARCH_EN,
+    ChromeAction, PaneHeaderLayout, TopBarLayout, UiLanguage, WindowLayout, SEARCH_AR, SEARCH_EN,
 };
 use twitty::ui::hit::{hit_test, Hit, HitGeometry};
 use unicode_segmentation::UnicodeSegmentation;
@@ -134,14 +134,14 @@ fn paths_abbreviate_home_by_component_and_clean_untrusted_text() {
 fn visible_sidebar_replaces_bar_and_scales_on_either_side() {
     let surface = Rect::new(0.0, 0.0, 1600.0, 1000.0);
     let old = Rect::new(0.0, 44.0, 1600.0, 956.0);
-    let (right, side) = sidebar_layout(surface, old, SidebarPosition::Right, 220.0, 2.0);
-    assert_eq!(right, Rect::new(0.0, 0.0, 1160.0, 1000.0));
-    assert_eq!(side, Some(Rect::new(1160.0, 0.0, 440.0, 1000.0)));
-    let (left, side) = sidebar_layout(surface, old, SidebarPosition::Left, 220.0, 2.0);
-    assert_eq!(left, Rect::new(440.0, 0.0, 1160.0, 1000.0));
-    assert_eq!(side, Some(Rect::new(0.0, 0.0, 440.0, 1000.0)));
+    let (right, side) = sidebar_layout(surface, old, SidebarPosition::Right, 180.0, 2.0);
+    assert_eq!(right, Rect::new(0.0, 0.0, 1240.0, 1000.0));
+    assert_eq!(side, Some(Rect::new(1240.0, 0.0, 360.0, 1000.0)));
+    let (left, side) = sidebar_layout(surface, old, SidebarPosition::Left, 180.0, 2.0);
+    assert_eq!(left, Rect::new(360.0, 0.0, 1240.0, 1000.0));
+    assert_eq!(side, Some(Rect::new(0.0, 0.0, 360.0, 1000.0)));
     assert_eq!(
-        sidebar_layout(surface, old, SidebarPosition::Hidden, 220.0, 2.0),
+        sidebar_layout(surface, old, SidebarPosition::Hidden, 180.0, 2.0),
         (old, None)
     );
     let tiny = Rect::new(0.0, 0.0, 100.0, 50.0);
@@ -155,11 +155,95 @@ fn visible_sidebar_replaces_bar_and_scales_on_either_side() {
             narrower,
             narrower_legacy,
             SidebarPosition::Right,
-            220.0,
+            180.0,
             1.0
         ),
         (narrower_legacy, None)
     );
+}
+
+#[test]
+fn sidebar_caps_at_quarter_width_preserves_minimums_and_leaves_room_to_split() {
+    let cfg = TwittyConfig::default();
+    assert_eq!(cfg.sidebar_width, 180.0);
+
+    // 951 px wide at scale 1.5: sidebar is capped at <= 25% and leaves >= 48 terminal columns.
+    let mut fonts = twitty::render::text::fonts::new_font_system();
+    let scale = 1.5;
+    let default_metrics = CellMetrics::measure(&mut fonts, None, cfg.font_size, scale);
+    let narrow_window = WindowLayout::new(
+        default_metrics,
+        (951.0, 1002.0),
+        2,
+        (SidebarPosition::Right, cfg.sidebar_width),
+        true,
+    );
+    let sidebar = narrow_window.sidebar.unwrap();
+    assert!(
+        sidebar.w <= 951.0 * 0.25,
+        "sidebar width {} exceeds 25% of 951",
+        sidebar.w
+    );
+    assert!(sidebar.w >= 140.0 * scale);
+    let pane = PaneHeaderLayout::new(narrow_window.content, scale, true);
+    let (cols, _) = default_metrics.grid_size(pane.grid);
+    assert!(
+        cols >= 48,
+        "expected at least 48 columns for a horizontal split, got {cols}"
+    );
+
+    // Configured width acts as a maximum: a larger configured width still respects the 25% cap.
+    let narrow = Rect::new(0.0, 0.0, 951.0, 1002.0);
+    let (_, capped) = sidebar_layout(narrow, narrow, SidebarPosition::Right, 300.0, scale);
+    assert_eq!(capped.unwrap().w, sidebar.w);
+
+    // Wide window (2560 px at scale 1.0) uses the full 180 logical px default.
+    let wide = Rect::new(0.0, 0.0, 2560.0, 1440.0);
+    let (wide_pane, wide_side) =
+        sidebar_layout(wide, wide, SidebarPosition::Right, cfg.sidebar_width, 1.0);
+    assert_eq!(wide_side.unwrap().w, 180.0);
+    assert_eq!(wide_pane.w, 2560.0 - 180.0);
+
+    // When 25% of the surface is below 140 logical px, the 140 logical px minimum holds.
+    let mid = Rect::new(0.0, 0.0, 500.0, 400.0);
+    let (mid_pane, mid_side) =
+        sidebar_layout(mid, mid, SidebarPosition::Left, cfg.sidebar_width, 1.0);
+    assert_eq!(mid_side.unwrap().w, 140.0);
+    assert_eq!(mid_pane.w, 360.0);
+
+    let mid_hidpi = Rect::new(0.0, 0.0, 600.0, 400.0);
+    let (mid_hidpi_pane, mid_hidpi_side) = sidebar_layout(
+        mid_hidpi,
+        mid_hidpi,
+        SidebarPosition::Right,
+        cfg.sidebar_width,
+        scale,
+    );
+    assert_eq!(mid_hidpi_side.unwrap().w, 140.0 * scale);
+    assert_eq!(mid_hidpi_pane.w, 600.0 - 140.0 * scale);
+
+    // When even 140 logical px would squeeze the terminal below 80 logical px, the 80 px rule wins.
+    let cramped = Rect::new(0.0, 0.0, 200.0, 400.0);
+    let (cramped_pane, cramped_side) = sidebar_layout(
+        cramped,
+        cramped,
+        SidebarPosition::Right,
+        cfg.sidebar_width,
+        1.0,
+    );
+    assert_eq!(cramped_pane.w, 80.0);
+    assert_eq!(cramped_side.unwrap().w, 120.0);
+
+    let cramped_hidpi = Rect::new(0.0, 0.0, 280.0, 400.0);
+    let (cramped_hidpi_pane, cramped_hidpi_side) = sidebar_layout(
+        cramped_hidpi,
+        cramped_hidpi,
+        SidebarPosition::Right,
+        cfg.sidebar_width,
+        scale,
+    );
+    assert_eq!(cramped_hidpi_pane.w, 80.0 * scale);
+    assert_eq!(cramped_hidpi_side.unwrap().w, 280.0 - 80.0 * scale);
 }
 
 #[test]
@@ -551,6 +635,7 @@ fn desktop_limit_is_per_pane_and_resets_at_three_seconds() {
 fn config_defaults_and_loading_clamp_sidebar_values() {
     let tmp = Scratch::new();
     assert_eq!(TwittyConfig::default().sidebar, "right");
+    assert_eq!(TwittyConfig::default().sidebar_width, 180.0);
     for (json, side, width) in [
         (r#"{"sidebar":"left","sidebar_width":20}"#, "left", 140.0),
         (
@@ -558,7 +643,7 @@ fn config_defaults_and_loading_clamp_sidebar_values() {
             "hidden",
             480.0,
         ),
-        (r#"{"sidebar":"invalid"}"#, "right", 220.0),
+        (r#"{"sidebar":"invalid"}"#, "right", 180.0),
     ] {
         tmp.write("config.json", json);
         let c = TwittyConfig::load_from(&tmp.0.join("config.json"));
@@ -576,7 +661,7 @@ fn config_defaults_and_loading_clamp_sidebar_values() {
     assert!(warnings
         .iter()
         .any(|w| w.contains("invalid sidebar value, using right")));
-    assert_eq!(twitty::layout::clamp_sidebar_width(f32::NAN), 220.0);
+    assert_eq!(twitty::layout::clamp_sidebar_width(f32::NAN), 180.0);
 }
 
 #[test]
@@ -834,7 +919,7 @@ fn active_and_inactive_workspace_titles_show_a_prefix_at_fractional_scale() {
         metrics,
         (951.0, 1002.0),
         2,
-        (SidebarPosition::Right, 220.0),
+        (SidebarPosition::Right, 180.0),
         true,
     )
     .sidebar
@@ -963,6 +1048,127 @@ fn status_pill_measures_the_whole_label_then_falls_back_to_the_icon() {
                 assert!(parts.state.right() < parts.title.x);
             } else {
                 assert!(captions.is_empty());
+            }
+        }
+    }
+}
+
+#[test]
+fn narrow_sidebar_cards_layout_without_overflow_or_overlap() {
+    let mut fonts = twitty::render::text::fonts::new_font_system();
+    let font = UiFont::default();
+    let palette = Palette::default();
+    let mut cache = LabelCache::default();
+
+    let mut working = Entry::new(
+        LIVE_TAB_TITLE,
+        Some(Path::new("/home/omar/Projects/twitty-lanes/n7")),
+        true,
+        None,
+        [Notice::new(
+            Some("Agent"),
+            "Running tests on narrow sidebar",
+        )],
+    )
+    .with_ports(vec![3000, 8080]);
+    working.branch = Some("feature/narrow-sidebar".into());
+
+    let mut needs_input = Entry::new(
+        "Build and deploy",
+        Some(Path::new("/tmp/workspace")),
+        false,
+        None,
+        [Notice::new(None, "Approve migration")],
+    )
+    .with_agent_status(Some(AgentStatus::new(AgentState::NeedsInput, None)))
+    .with_ports(vec![5173]);
+    needs_input.branch = Some("main".into());
+
+    let mut done = Entry::new(
+        "محرر عربي طويل جدا",
+        Some(Path::new("/home/omar/مشاريع/طرفية")),
+        false,
+        Some(0),
+        [],
+    );
+    done.branch = Some("ميزة".into());
+
+    let entries = vec![working, needs_input, done];
+
+    let overlaps = |a: Rect, b: Rect| {
+        a.w > 0.0
+            && a.h > 0.0
+            && b.w > 0.0
+            && b.h > 0.0
+            && a.x < b.right() - 0.01
+            && b.x < a.right() - 0.01
+            && a.y < b.bottom() - 0.01
+            && b.y < a.bottom() - 0.01
+    };
+
+    for scale in [1.0_f32, 1.5] {
+        let style = UiStyle::new(&palette, None, scale);
+        let mut ctx = DrawContext {
+            font_system: &mut fonts,
+            family: None,
+            palette: &palette,
+            metrics: CellMetrics { scale, ..metrics() },
+            is_srgb: false,
+        };
+        for logical_w in [140.0_f32, 158.0, 180.0] {
+            let area = Rect::new(200.0, 0.0, (logical_w * scale).round(), 600.0);
+            for side in [SidebarPosition::Left, SidebarPosition::Right] {
+                for language in [UiLanguage::English, UiLanguage::Arabic] {
+                    let cards = cache.cards(&font, ctx.font_system, entries.clone(), area, scale);
+                    let view = ScrollState::default().view(&cards, 0, area, scale, side, language);
+                    let scene = build(&mut ctx, &view, &mut cache, style, &font);
+
+                    for item in &view.items {
+                        assert!(item.rect.x >= area.x && item.rect.right() <= area.right());
+                        let parts = item.layout(&view);
+                        let row = [parts.unread, parts.title, parts.state, parts.close];
+                        for (i, &a) in row.iter().enumerate() {
+                            if a.w > 0.0 {
+                                assert!(
+                                    a.x >= item.rect.x - 0.01
+                                        && a.right() <= item.rect.right() + 0.01,
+                                    "title row overflow at {logical_w}@{scale} {side:?} {language:?}: {a:?} in {:?}",
+                                    item.rect
+                                );
+                            }
+                            for &b in &row[i + 1..] {
+                                assert!(
+                                    !overlaps(a, b),
+                                    "title row overlap at {logical_w}@{scale} {side:?} {language:?}: {a:?} vs {b:?}"
+                                );
+                            }
+                        }
+                        assert!(parts.title.w > 0.0);
+                        assert!(parts.state.w >= 16.0 * scale);
+                        assert!(
+                            parts.footer.x >= item.rect.x
+                                && parts.footer.right() <= item.rect.right()
+                        );
+                    }
+
+                    // NeedsInput ("Needs input" / "مستني إدخال") falls back to icon-only at 140 logical px.
+                    if logical_w == 140.0 {
+                        assert!(
+                            !view.items[1].layout(&view).state_has_label,
+                            "NeedsInput should be icon-only at 140 logical px ({language:?}@{scale})"
+                        );
+                    }
+
+                    for label in &scene.labels {
+                        assert!(
+                            label.bounds.left >= area.x.floor() as i32
+                                && label.bounds.right <= area.right().ceil() as i32,
+                            "label out of sidebar bounds at {logical_w}@{scale}: {:?} not in {:?}",
+                            label.bounds,
+                            area
+                        );
+                    }
+                }
             }
         }
     }

@@ -91,7 +91,7 @@ impl Window {
             needs_redraw: false,
             cursor_icon: CursorIcon::Default,
             sidebar: Placement::new(SidebarPosition::Right),
-            sidebar_width: 220.0,
+            sidebar_width: crate::layout::DEFAULT_SIDEBAR_WIDTH,
             top_bar: true,
             pane_headers: true,
             occluded: false,
@@ -1046,7 +1046,7 @@ mod tests {
                 self.metrics.content_rect(0, size),
                 self.metrics.content_rect(tabs, size),
                 self.sidebar.position,
-                220.0,
+                180.0,
                 1.0,
             )
             .0
@@ -1100,7 +1100,7 @@ mod tests {
         let two = ws.new_tab(&grid, &mut TestPanes).unwrap();
         for (side, size, origin) in [
             (SidebarPosition::Hidden, (80, 29), (0.0, 20.0)),
-            (SidebarPosition::Left, (58, 30), (220.0, 0.0)),
+            (SidebarPosition::Left, (62, 30), (180.0, 0.0)),
         ] {
             assert_eq!(grid.sidebar.toggle(), side);
             grid.sizes.set(0);
