@@ -307,6 +307,8 @@ impl SessionStore {
         };
         match Session::read_from(path) {
             Ok(session) => Some(session.prepare()),
+            // No saved session (first start, or the last shell was closed): start fresh quietly.
+            Err(err) if err.kind() == io::ErrorKind::NotFound => None,
             Err(err) => {
                 warn("could not restore", path, &err);
                 None
