@@ -569,7 +569,7 @@ mod tests {
 
         fn store(&self) -> SessionStore {
             SessionStore {
-                path: Some(self.0.join("twitty/session.json")),
+                path: Some(self.0.join("twitty").join("session.json")),
                 last_pane_closed: false,
             }
         }

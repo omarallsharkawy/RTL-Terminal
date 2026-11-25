@@ -49,13 +49,24 @@ impl Drop for TempDir {
 fn trust_store_ignores_relative_env_paths_and_refuses_unsafe_store_files() {
     use std::ffi::OsStr;
 
+    let home_dir = if cfg!(windows) {
+        r"C:\Users\u"
+    } else {
+        "/home/u"
+    };
+    let expected_home = PathBuf::from(home_dir)
+        .join(".local")
+        .join("state")
+        .join("twitty")
+        .join("trust.json");
+
     // Relative XDG_STATE_HOME must be ignored in favor of absolute HOME.
     assert_eq!(
         TrustStore::path_from(
             Some(OsStr::new("relative/state")),
-            Some(OsStr::new("/home/u"))
+            Some(OsStr::new(home_dir))
         ),
-        Some(PathBuf::from("/home/u/.local/state/twitty/trust.json"))
+        Some(expected_home)
     );
     // Relative HOME yields None.
     assert_eq!(

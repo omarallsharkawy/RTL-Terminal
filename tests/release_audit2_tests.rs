@@ -238,18 +238,26 @@ fn branch_watcher_resolves_off_thread_and_rejects_symlinks() {
             .expect("spawn branch watcher");
     watcher.watch(vec![repo.clone()]);
     let first = rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(Duration::from_secs(5))
         .expect("initial off-thread branch");
     assert_eq!(first.get(&repo).and_then(|b| b.as_deref()), Some("initial"));
 
-    tmp.write("repo/.git/HEAD", "ref: refs/heads/updated\n");
-    let second = rx
-        .recv_timeout(Duration::from_secs(2))
-        .expect("updated off-thread branch");
-    assert_eq!(
-        second.get(&repo).and_then(|b| b.as_deref()),
-        Some("updated")
-    );
+    // Atomically replace HEAD (matching real git) so the background poller never sees a
+    // truncated file, and wait until the updated branch is delivered within the deadline.
+    let head = repo.join(".git").join("HEAD");
+    let head_tmp = repo.join(".git").join("HEAD.new");
+    fs::write(&head_tmp, "ref: refs/heads/updated\n").unwrap();
+    fs::rename(&head_tmp, &head).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let update = rx
+            .recv_timeout(remaining)
+            .expect("updated off-thread branch");
+        if update.get(&repo).and_then(|b| b.as_deref()) == Some("updated") {
+            break;
+        }
+    }
     watcher.watch(Vec::new());
     drop(watcher);
 

@@ -211,9 +211,14 @@ fn bounded_line_reader_enforces_limit() {
 
 #[test]
 fn runtime_dir_and_socket_filename_selection() {
+    let xdg = if cfg!(windows) {
+        r"C:\run\user\1000"
+    } else {
+        "/run/user/1000"
+    };
     assert_eq!(
-        runtime_dir_from(Some(OsString::from("/run/user/1000")), 1000),
-        PathBuf::from("/run/user/1000/twitty")
+        runtime_dir_from(Some(OsString::from(xdg)), 1000),
+        PathBuf::from(xdg).join("twitty")
     );
     assert_eq!(
         runtime_dir_from(Some(OsString::from("")), 1000),
@@ -531,7 +536,7 @@ mod unix_tests {
 
         let cfg = ServerConfig {
             max_clients: 2,
-            read_timeout: Duration::from_millis(300),
+            read_timeout: Duration::from_millis(800),
             write_timeout: Duration::from_secs(2),
             max_line_bytes: 256,
         };
@@ -586,6 +591,12 @@ mod unix_tests {
         // Concurrent client limit: 2 held connections, 3rd is refused immediately.
         let hold1 = UnixStream::connect(&sock_path).unwrap();
         let hold2 = UnixStream::connect(&sock_path).unwrap();
+        hold1
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        hold2
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
         // Send a ping on each so both threads are definitely spawned and holding slots.
         let mut hold1_client = {
             let mut h = hold1;
@@ -625,8 +636,7 @@ mod unix_tests {
             assert!(resp.error.unwrap().contains("too many"));
         }
 
-        // Idle timeout (300 ms) frees slots even while the idle sockets remain open on client side.
-        std::thread::sleep(Duration::from_millis(450));
+        // Idle timeout frees slots even while the idle sockets remain open on client side.
         assert_eq!(
             read_bounded_line(&mut hold1_client, 4096).unwrap(),
             ReadLine::Eof
@@ -638,10 +648,21 @@ mod unix_tests {
         drop(hold1_client);
         drop(hold2_client);
 
-        // After idle slots are freed, a new client succeeds again.
-        let mut after = Client::connect_path(&sock_path).unwrap();
-        assert!(after.call("system.ping", json!({})).unwrap().ok);
-        drop(after);
+        // After idle slots are freed, a new client succeeds again. The worker thread closes the
+        // stream right before dropping its ClientSlot, so poll briefly for slot release.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let mut after = Client::connect_path(&sock_path).unwrap();
+            let resp = after.call("system.ping", json!({})).unwrap();
+            if resp.ok {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "new client still rejected after idle timeout: {resp:?}"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
 
         assert!(calls.load(Ordering::Relaxed) >= 6);
 

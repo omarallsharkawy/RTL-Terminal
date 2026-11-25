@@ -32,18 +32,30 @@ fn search_treats_regex_characters_literally() {
 
 mod config {
     use std::fs;
+    use std::path::PathBuf;
     use twitty::config::TwittyConfig;
 
-    fn dir(name: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("twitty-cfg-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&d);
-        fs::create_dir_all(&d).unwrap();
-        d
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(name: &str) -> Self {
+            let d = std::env::temp_dir().join(format!("twitty-cfg-{name}-{}", std::process::id()));
+            let _ = fs::remove_dir_all(&d);
+            fs::create_dir_all(&d).unwrap();
+            Self(d)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
     }
 
     #[test]
     fn broken_config_is_never_overwritten() {
-        let path = dir("broken").join("config.json");
+        let dir = TempDir::new("broken");
+        let path = dir.0.join("config.json");
         let broken = "{ \"font_size\": 16, \"theme\": \"dracula\", }";
         fs::write(&path, broken).unwrap();
         let mut config = TwittyConfig::load_from(&path);
@@ -54,7 +66,8 @@ mod config {
 
     #[test]
     fn out_of_range_values_are_clamped() {
-        let path = dir("range").join("config.json");
+        let dir = TempDir::new("range");
+        let path = dir.0.join("config.json");
         fs::write(&path, r#"{"font_size": 0.5, "background_opacity": 7}"#).unwrap();
         let config = TwittyConfig::load_from(&path);
         assert_eq!(config.font_size, 8.0);
@@ -63,7 +76,8 @@ mod config {
 
     #[test]
     fn save_round_trips_and_keeps_unknown_keys() {
-        let path = dir("round").join("nested").join("config.json");
+        let dir = TempDir::new("round");
+        let path = dir.0.join("nested").join("config.json");
         let mut config = TwittyConfig::default();
         config.extra.insert("future_key".into(), 42.into());
         config.font_size = 18.0;
@@ -94,11 +108,15 @@ fn shell_does_not_inherit_another_terminals_identity() {
 #[test]
 fn shell_starts_in_the_requested_directory_and_reports_it() {
     use std::time::{Duration, Instant};
-    use twitty::pty::Pty;
+    use twitty::pty::{Pty, SpawnOptions};
     let dir = std::env::temp_dir().canonicalize().unwrap();
-    std::env::set_var("TWITTY_SHELL", "sleep 5");
-    let pty = Pty::spawn_in(Some(&dir), 80, 24, || {}, || {}).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let options = SpawnOptions {
+        cwd: Some(dir.clone()),
+        command: vec!["sleep".into(), "5".into()],
+        ..SpawnOptions::default()
+    };
+    let pty = Pty::spawn_with(&options, 80, 24, || {}, || {}).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
     while pty.cwd().as_deref() != Some(dir.as_path()) && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
     }

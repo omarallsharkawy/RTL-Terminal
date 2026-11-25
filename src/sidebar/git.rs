@@ -32,6 +32,31 @@ fn small_file(path: &Path) -> Option<String> {
     (text.len() <= MAX_FILE as usize).then_some(text)
 }
 
+fn resolve_gitdir(dir: &Path, target: &Path) -> Option<PathBuf> {
+    use std::path::Component;
+
+    if target.is_absolute() {
+        return Some(target.components().collect());
+    }
+    // `dir` comes from `canonicalize()`, which on Windows has a `\\?\` verbatim prefix where
+    // Win32 does not normalize `/` or `..` segments. Resolve components explicitly.
+    let mut out = dir.to_path_buf();
+    for comp in target.components() {
+        match comp {
+            Component::Normal(part) => out.push(part),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out = out.canonicalize().ok()?;
+                if !out.pop() {
+                    return None;
+                }
+            }
+            Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+    Some(out)
+}
+
 pub fn branch(cwd: &Path) -> Option<String> {
     // OSC 7 paths are absolute; do not accidentally search relative to Twitty's own cwd.
     if !cwd.is_absolute() {
@@ -51,7 +76,7 @@ pub fn branch(cwd: &Path) -> Option<String> {
             if target.is_empty() {
                 return None;
             }
-            dir.join(target)
+            resolve_gitdir(dir, Path::new(target))?
         };
         let head = small_file(&gitdir.join("HEAD"))?;
         let head = head.trim();

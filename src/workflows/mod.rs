@@ -356,9 +356,15 @@ pub fn resolve_run_cwd(
 /// Resolve `relative` inside `project_root`, refusing absolute paths or any canonicalised target
 /// outside `project_root`.
 pub fn resolve_project_cwd(project_root: &Path, relative: &str) -> Result<PathBuf, String> {
+    use std::path::Component;
+
     let rel = Path::new(relative);
     let shown_rel = clean_text(relative, 256);
-    if rel.is_absolute() {
+    if rel.is_absolute()
+        || rel
+            .components()
+            .any(|c| matches!(c, Component::Prefix(_) | Component::RootDir))
+    {
         return Err(format!(
             "refusing workflow cwd {shown_rel:?}: must be relative to project root"
         ));
@@ -367,7 +373,26 @@ pub fn resolve_project_cwd(project_root: &Path, relative: &str) -> Result<PathBu
         let shown_root = clean_text(&project_root.to_string_lossy(), 256);
         format!("could not resolve project root {shown_root}: {err}")
     })?;
-    let joined = canon_root.join(rel);
+    // Push components one by one so Windows verbatim `\\?\` paths never receive unnormalized
+    // `/` separators or `.` / `..` segments that Win32 rejects on verbatim paths.
+    let mut joined = canon_root.clone();
+    for comp in rel.components() {
+        match comp {
+            Component::Normal(part) => joined.push(part),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                joined = fs::canonicalize(&joined).map_err(|err| {
+                    format!("workflow cwd {shown_rel:?} does not exist inside project root: {err}")
+                })?;
+                joined.pop();
+            }
+            Component::Prefix(_) | Component::RootDir => {
+                return Err(format!(
+                    "refusing workflow cwd {shown_rel:?}: must be relative to project root"
+                ));
+            }
+        }
+    }
     let canon_target = fs::canonicalize(&joined).map_err(|err| {
         format!("workflow cwd {shown_rel:?} does not exist inside project root: {err}")
     })?;

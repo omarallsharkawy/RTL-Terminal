@@ -341,20 +341,26 @@ fn discovery_refuses_symlinked_file_and_symlinked_dir() {
 
 #[test]
 fn trust_path_respects_xdg_state_home_and_fallback() {
-    let xdg = TrustStore::path_from(Some(OsStr::new("/var/state")), Some(OsStr::new("/home/u")));
-    assert_eq!(xdg, Some(PathBuf::from("/var/state/twitty/trust.json")));
+    let (xdg_dir, home_dir) = if cfg!(windows) {
+        (r"C:\var\state", r"C:\Users\u")
+    } else {
+        ("/var/state", "/home/u")
+    };
+    let expected_xdg = PathBuf::from(xdg_dir).join("twitty").join("trust.json");
+    let expected_home = PathBuf::from(home_dir)
+        .join(".local")
+        .join("state")
+        .join("twitty")
+        .join("trust.json");
 
-    let fallback = TrustStore::path_from(None, Some(OsStr::new("/home/u")));
-    assert_eq!(
-        fallback,
-        Some(PathBuf::from("/home/u/.local/state/twitty/trust.json"))
-    );
+    let xdg = TrustStore::path_from(Some(OsStr::new(xdg_dir)), Some(OsStr::new(home_dir)));
+    assert_eq!(xdg, Some(expected_xdg));
 
-    let empty_xdg = TrustStore::path_from(Some(OsStr::new("")), Some(OsStr::new("/home/u")));
-    assert_eq!(
-        empty_xdg,
-        Some(PathBuf::from("/home/u/.local/state/twitty/trust.json"))
-    );
+    let fallback = TrustStore::path_from(None, Some(OsStr::new(home_dir)));
+    assert_eq!(fallback, Some(expected_home.clone()));
+
+    let empty_xdg = TrustStore::path_from(Some(OsStr::new("")), Some(OsStr::new(home_dir)));
+    assert_eq!(empty_xdg, Some(expected_home));
 }
 
 #[test]
