@@ -391,13 +391,19 @@ impl Pty {
     }
 
     pub(crate) fn has_foreground_program(&self) -> bool {
-        if self.direct_program {
-            return true;
+        self.direct_program || self.shell_has_foreground_job()
+    }
+
+    #[cfg(unix)]
+    fn shell_has_foreground_job(&self) -> bool {
+        match (self.pid, self.master.process_group_leader()) {
+            (Some(shell), Some(group)) => group > 0 && group as u32 != shell,
+            _ => false,
         }
-        #[cfg(unix)]
-        if let (Some(shell), Some(group)) = (self.pid, self.master.process_group_leader()) {
-            return group > 0 && group as u32 != shell;
-        }
+    }
+
+    #[cfg(not(unix))]
+    fn shell_has_foreground_job(&self) -> bool {
         false
     }
 
