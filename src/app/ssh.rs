@@ -1,6 +1,8 @@
 //! Route SSH process and timer events to the pane's reconnect state.
 
-use super::{App, AppEvent};
+use std::time::Instant;
+
+use super::App;
 use crate::layout::PaneId;
 use crate::remote::{ConnectionState, BOOTSTRAP_FAILED, SSH_DISCONNECTED};
 use crate::session::spawn::start_remote_pty;
@@ -30,6 +32,9 @@ impl App {
 
         let lost = code == Some(SSH_DISCONNECTED);
         let delay = remote.disconnected(lost);
+        if let Some(delay) = delay {
+            remote.schedule_retry(Instant::now(), delay);
+        }
         let destination = clean_text(remote.target.destination(), 256);
         let status = match (lost, delay) {
             (_, Some(_)) => format!("Disconnected from {destination}, reconnecting… / اتقطع الاتصال…"),
@@ -39,13 +44,6 @@ impl App {
         pane.terminal
             .process_bytes(format!("\x18\x1b[0m\r\n{status}\r\n").as_bytes());
         self.window.request_redraw();
-        if let Some(delay) = delay {
-            let proxy = self.proxy.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(delay);
-                let _ = proxy.send_event(AppEvent::RetrySsh(id));
-            });
-        }
         true
     }
 
@@ -61,6 +59,50 @@ impl App {
             start_remote_pty(&self.proxy, pane);
             self.window.request_redraw();
         }
+    }
+
+    fn retry_ssh_generation(&mut self, id: PaneId, generation: u64) {
+        let Some(pane) = self.ws.pane_mut(id) else {
+            return;
+        };
+        if pane
+            .remote
+            .as_ref()
+            .is_some_and(|remote| remote.may_retry(generation))
+        {
+            start_remote_pty(&self.proxy, pane);
+            self.window.request_redraw();
+        }
+    }
+
+    /// Trigger any SSH reconnect retries whose deadline has arrived at `now`, returning the
+    /// earliest remaining deadline for `ControlFlow::WaitUntil`.
+    pub(super) fn poll_ssh_retries(&mut self, now: Instant) -> Option<Instant> {
+        let due: Vec<PaneId> = self
+            .ws
+            .panes()
+            .filter(|pane| {
+                pane.remote
+                    .as_ref()
+                    .and_then(|r| r.next_retry_deadline())
+                    .is_some_and(|at| now >= at)
+            })
+            .map(|pane| pane.id)
+            .collect();
+        for id in due {
+            let generation = self
+                .ws
+                .pane_mut(id)
+                .and_then(|pane| pane.remote.as_mut())
+                .and_then(|remote| remote.take_due_retry(now));
+            if let Some(generation) = generation {
+                self.retry_ssh_generation(id, generation);
+            }
+        }
+        self.ws
+            .panes()
+            .filter_map(|pane| pane.remote.as_ref()?.next_retry_deadline())
+            .min()
     }
 
     pub(super) fn manual_ssh_retry(&mut self, id: PaneId) -> bool {

@@ -105,11 +105,13 @@ impl PreeditState {
             self.last_area = None;
             return (None, None);
         };
-        let cw = ctx.metrics.char_width.min(pane.w);
-        let lh = ctx.metrics.line_height.min(pane.h);
-        let y = y.clamp(pane.y, pane.bottom() - lh);
+        let pane_w = pane.w.max(0.0);
+        let pane_h = pane.h.max(0.0);
+        let cw = ctx.metrics.char_width.max(0.0).min(pane_w);
+        let lh = ctx.metrics.line_height.max(0.0).min(pane_h);
+        let y = safe_clamp(y, pane.y, pane.bottom() - lh);
 
-        let mut area = (caret_x.clamp(pane.x, pane.right() - cw), cw);
+        let mut area = (safe_clamp(caret_x, pane.x, pane.right() - cw), cw);
         let mut origin = None;
         if self.is_active() {
             let rtl = !self.text.is_ascii();
@@ -124,21 +126,24 @@ impl PreeditState {
                 .map(|r| r.line_w)
                 .fold(0.0_f32, f32::max)
                 .max(cw);
-            let visible_width = width.min(pane.w);
-            let left = preedit_left(caret_x, extends_left, width)
-                .clamp(pane.x, pane.right() - visible_width);
+            let visible_width = width.min(pane_w);
+            let left = safe_clamp(
+                preedit_left(caret_x, extends_left, width),
+                pane.x,
+                pane.right() - visible_width,
+            );
             let prefix = if rtl { LRM.len() } else { 0 };
             let cursor_byte = self.cursor.map_or(self.text.len(), |c| c.0) + prefix;
             let cx = left + cursor_offset(&buffer, cursor_byte, width);
 
             let width = visible_width;
-            let t = ctx.metrics.stroke().min(width).min(lh);
+            let t = ctx.metrics.stroke().max(0.0).min(width).min(lh);
             let fg = ctx.color(ctx.palette.foreground);
             quads.push((left, y, width, lh, ctx.color(ctx.palette.background)));
             quads.push((left, y + lh - t, width, t, fg));
             cursor_quads.clear();
             cursor_quads.push((
-                cx.clamp(left, left + width - t),
+                safe_clamp(cx, left, left + width - t),
                 y,
                 t,
                 lh,
@@ -152,8 +157,8 @@ impl PreeditState {
         let rect = (
             area.0.round() as i32,
             y.round() as i32,
-            ((area.0 + area.1).round() - area.0.round()) as u32,
-            ((y + lh).round() - y.round()) as u32,
+            ((area.0 + area.1).round() - area.0.round()).max(0.0) as u32,
+            ((y + lh).round() - y.round()).max(0.0) as u32,
         );
         let moved = self.last_area != Some(rect);
         self.last_area = Some(rect);
@@ -163,5 +168,14 @@ impl PreeditState {
     /// The shaped preedit, once laid out.
     pub fn buffer(&self) -> Option<&Buffer> {
         self.buffer.as_ref()
+    }
+}
+
+/// Clamp `val` into `[min, max]` without panicking when `min > max` or inputs are non-finite.
+fn safe_clamp(val: f32, min: f32, max: f32) -> f32 {
+    if !val.is_finite() || !max.is_finite() || max <= min {
+        min
+    } else {
+        val.clamp(min, max)
     }
 }

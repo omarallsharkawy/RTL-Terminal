@@ -5,7 +5,7 @@ pub mod bootstrap;
 pub mod daemon;
 mod wire;
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -134,11 +134,13 @@ impl ConnectionState {
     }
 }
 
-pub(crate) struct RemotePane {
+pub struct RemotePane {
     pub target: Target,
     pub state: ConnectionState,
     pub waiting_for_enter: bool,
     attempts: usize,
+    retry_generation: u64,
+    retry_at: Option<(Instant, u64)>,
 }
 
 impl RemotePane {
@@ -148,16 +150,22 @@ impl RemotePane {
             state: ConnectionState::Connecting,
             waiting_for_enter: false,
             attempts: 0,
+            retry_generation: 0,
+            retry_at: None,
         }
     }
 
     pub fn connected(&mut self) {
         self.state = ConnectionState::Connected;
         self.attempts = 0;
+        self.retry_generation = self.retry_generation.wrapping_add(1);
+        self.retry_at = None;
     }
 
     pub fn disconnected(&mut self, retry: bool) -> Option<Duration> {
         self.state = ConnectionState::Disconnected;
+        self.retry_generation = self.retry_generation.wrapping_add(1);
+        self.retry_at = None;
         let delay = retry.then(|| retry_delay(self.attempts)).flatten();
         self.waiting_for_enter = delay.is_none();
         if delay.is_some() {
@@ -166,11 +174,46 @@ impl RemotePane {
         delay
     }
 
+    /// Schedule a reconnect retry at `now + delay` tagged with a fresh generation token.
+    pub fn schedule_retry(&mut self, now: Instant, delay: Duration) -> u64 {
+        self.retry_generation = self.retry_generation.wrapping_add(1);
+        self.retry_at = Some((now + delay, self.retry_generation));
+        self.retry_generation
+    }
+
+    /// Whether a scheduled retry with `generation` is still current.
+    pub fn may_retry(&self, generation: u64) -> bool {
+        self.state == ConnectionState::Disconnected && self.retry_generation == generation
+    }
+
+    /// Returns the retry generation once the scheduled retry deadline has elapsed at `now`.
+    pub fn take_due_retry(&mut self, now: Instant) -> Option<u64> {
+        let (at, generation) = self.retry_at?;
+        if !self.may_retry(generation) {
+            self.retry_at = None;
+            return None;
+        }
+        if now >= at {
+            self.retry_at = None;
+            Some(generation)
+        } else {
+            None
+        }
+    }
+
+    /// The pending retry deadline for `ControlFlow::WaitUntil`, if still current.
+    pub fn next_retry_deadline(&self) -> Option<Instant> {
+        let (at, generation) = self.retry_at?;
+        self.may_retry(generation).then_some(at)
+    }
+
     pub fn connecting(&mut self) {
         if self.waiting_for_enter {
             self.attempts = 0;
             self.waiting_for_enter = false;
         }
         self.state = ConnectionState::Connecting;
+        self.retry_generation = self.retry_generation.wrapping_add(1);
+        self.retry_at = None;
     }
 }

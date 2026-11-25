@@ -9,6 +9,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
 use alacritty_terminal::term::TermMode;
@@ -24,9 +25,7 @@ use crate::input::terminal_key_raw;
 use crate::layout::{PaneId, Rect, SplitDir};
 use crate::pty::SpawnOptions;
 use crate::session::pane::{Notification, Pane};
-use crate::session::workspace::{
-    GridGeometry, PaneFactory, Workspace, MIN_SPLIT_COLS, MIN_SPLIT_ROWS,
-};
+use crate::session::workspace::{GridGeometry, PaneFactory, SplitFailure, Workspace};
 use crate::shell_integration::{clean_text, MAX_NOTIFY_CHARS};
 use crate::sidebar::{entry_title, pick_tab_agent_status, AgentStatus, Entry, Notice};
 use crate::terminal::Terminal;
@@ -441,7 +440,11 @@ pub(crate) trait ControlHost {
     fn set_sidebar_visible(&mut self, visible: bool);
     fn toggle_sidebar(&mut self) -> bool;
     fn new_tab_with(&mut self, options: SpawnOptions) -> Option<PaneId>;
-    fn split_focused_with(&mut self, dir: SplitDir, options: SpawnOptions) -> Option<PaneId>;
+    fn split_focused_with(
+        &mut self,
+        dir: SplitDir,
+        options: SpawnOptions,
+    ) -> Result<PaneId, SplitFailure>;
     fn focus_pane_by_id(&mut self, id: PaneId) -> Result<usize, String>;
     fn set_active_tab(&mut self, index: usize);
     fn close_pane(&mut self, id: PaneId) -> bool;
@@ -456,6 +459,19 @@ pub(crate) trait ControlHost {
     fn new_ssh_tab(&mut self, _destination: &str, _name: Option<&str>) -> Result<Value, String> {
         Err("SSH tabs are not available here".into())
     }
+}
+
+/// Dispatch `req` only if `cancelled` has not been set (e.g. when the control caller already
+/// timed out before the event loop dequeued the request).
+pub(crate) fn dispatch_if_active(
+    host: &mut impl ControlHost,
+    req: Request,
+    cancelled: &AtomicBool,
+) -> Option<(Response, bool)> {
+    if cancelled.load(Ordering::Acquire) {
+        return None;
+    }
+    Some(dispatch_request(host, req))
 }
 
 /// Dispatch one parsed control [`Request`] against `host`, handling both Twitty's native `ctl`
@@ -767,9 +783,6 @@ fn exec_twitty_call(
                     }
                 }
             }
-            if pane_too_small(host.ws(), direction) {
-                return Err(split_failure_reason(host.ws(), direction).1);
-            }
             let options = SpawnOptions {
                 cwd,
                 command,
@@ -777,7 +790,7 @@ fn exec_twitty_call(
             };
             let id = host
                 .split_focused_with(direction, options)
-                .ok_or_else(|| split_failure_reason(host.ws(), direction).1)?;
+                .map_err(|err| err.message)?;
             Ok((json!({ "pane": id.0, "tab": host.ws().active() }), false))
         }
         MethodCall::Notify { pane, title, body } => {
@@ -788,39 +801,6 @@ fn exec_twitty_call(
         MethodCall::TabNewSsh { destination, name } => {
             Ok((host.new_ssh_tab(&destination, name.as_deref())?, false))
         }
-    }
-}
-
-/// Whether the focused pane is below the split minimum, judged from its current grid size.
-/// The workspace re-checks against the real layout when it splits.
-fn pane_too_small(ws: &Workspace, dir: SplitDir) -> bool {
-    split_failure_reason(ws, dir).0 == "pane_too_small"
-}
-
-fn split_failure_reason(ws: &Workspace, dir: SplitDir) -> (&'static str, String) {
-    let Some((cols, rows)) = ws.focused_id().and_then(|id| ws.pane(id)).map(|p| p.size) else {
-        return ("not_found", "no focused pane / لا توجد لوحة محددة".into());
-    };
-    let min_cols = MIN_SPLIT_COLS * 2;
-    let min_rows = MIN_SPLIT_ROWS * 2;
-    match dir {
-        SplitDir::Horizontal if cols < min_cols => (
-            "pane_too_small",
-            format!(
-                "cannot split pane horizontally: pane is too small ({cols}x{rows}; need at least {min_cols} columns) / لا يمكن تقسيم اللوحة أفقياً: اللوحة صغيرة جداً ({cols}x{rows}، يلزم {min_cols} عموداً على الأقل)"
-            ),
-        ),
-        SplitDir::Vertical if rows < min_rows => (
-            "pane_too_small",
-            format!(
-                "cannot split pane vertically: pane is too small ({cols}x{rows}; need at least {min_rows} rows) / لا يمكن تقسيم اللوحة رأسياً: اللوحة صغيرة جداً ({cols}x{rows}، يلزم {min_rows} صفاً على الأقل)"
-            ),
-        ),
-        _ => (
-            "internal",
-            "could not split pane: failed to start shell / تعذر تقسيم اللوحة: فشل تشغيل الصدفة"
-                .into(),
-        ),
     }
 }
 
@@ -1349,18 +1329,14 @@ fn handle_cmux_split(
         return Response::cmux_err(id, "not_found", "No workspace selected");
     }
 
-    if pane_too_small(host.ws(), dir) {
-        let (code, msg) = split_failure_reason(host.ws(), dir);
-        return Response::cmux_err(id, code, msg);
-    }
     let options = SpawnOptions {
         cwd,
         command,
         env: Vec::new(),
     };
-    let Some(new_id) = host.split_focused_with(dir, options) else {
-        let (code, msg) = split_failure_reason(host.ws(), dir);
-        return Response::cmux_err(id, code, msg);
+    let new_id = match host.split_focused_with(dir, options) {
+        Ok(id) => id,
+        Err(err) => return Response::cmux_err(id, err.code, err.message),
     };
     let tab_idx = host.ws().active();
     let tab_id = host.ws().tabs()[tab_idx].id;
@@ -1989,6 +1965,14 @@ impl HeadlessHost {
         self.ws.focused_id().map(|p| p.0)
     }
 
+    pub fn dispatch_if_active(
+        &mut self,
+        req: Request,
+        cancelled: &AtomicBool,
+    ) -> Option<(Response, bool)> {
+        dispatch_if_active(self, req, cancelled)
+    }
+
     pub fn sidebar_visible(&self) -> bool {
         self.sidebar_visible
     }
@@ -2089,18 +2073,27 @@ impl ControlHost for HeadlessHost {
         Some(id)
     }
 
-    fn split_focused_with(&mut self, dir: SplitDir, options: SpawnOptions) -> Option<PaneId> {
+    fn split_focused_with(
+        &mut self,
+        dir: SplitDir,
+        options: SpawnOptions,
+    ) -> Result<PaneId, SplitFailure> {
+        if !self.ws.can_split_focused(&HeadlessGrid, dir) {
+            return Err(self.ws.split_failure_reason(&HeadlessGrid, dir));
+        }
         let mut factory = HeadlessFactory {
             options,
             tab_id: 0,
             spawned: Vec::new(),
         };
-        let (_, new_id) = self.ws.split_focused(&HeadlessGrid, &mut factory, dir)?;
+        let Some((_, new_id)) = self.ws.split_focused(&HeadlessGrid, &mut factory, dir) else {
+            return Err(self.ws.split_failure_reason(&HeadlessGrid, dir));
+        };
         self.ws.apply_layout(&HeadlessGrid);
         for (pid, tid, opts) in factory.spawned {
             self.spawned.push((pid.0, tid, opts));
         }
-        Some(new_id)
+        Ok(new_id)
     }
 
     fn focus_pane_by_id(&mut self, id: PaneId) -> Result<usize, String> {
@@ -2199,7 +2192,20 @@ impl ControlHost for HeadlessHost {
 
     fn command_run(&mut self, name: &str, pane: Option<u64>) -> Result<(Value, bool), String> {
         let target = resolve_twitty_pane(self, pane)?;
-        if crate::commands::action(name).is_some() {
+        if let Some(action) = crate::commands::action(name) {
+            match action {
+                crate::input::InputAction::SplitRight => {
+                    self.focus_pane_by_id(target)?;
+                    self.split_focused_with(SplitDir::Horizontal, SpawnOptions::default())
+                        .map_err(|err| err.message)?;
+                }
+                crate::input::InputAction::SplitDown => {
+                    self.focus_pane_by_id(target)?;
+                    self.split_focused_with(SplitDir::Vertical, SpawnOptions::default())
+                        .map_err(|err| err.message)?;
+                }
+                _ => {}
+            }
             Ok((json!({ "command": name, "pane": target.0 }), false))
         } else {
             Err(format!("unknown command: {name}"))

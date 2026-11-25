@@ -226,7 +226,7 @@ impl App {
                 } else {
                     SplitDir::Vertical
                 };
-                self.split_focused(dir);
+                let _ = self.split_focused(dir);
                 self.refresh_pointer_hover();
                 false
             }
@@ -256,6 +256,9 @@ impl App {
         }
         let line_height = self.window.line_height().unwrap_or(20.0);
         let lines = wheel_lines(delta, line_height);
+        if !lines.is_finite() || lines == 0.0 {
+            return;
+        }
         if self.review_wheel(lines) {
             return;
         }
@@ -269,7 +272,10 @@ impl App {
         if self.modifiers.control_key() {
             // Ctrl (+ Shift) + wheel: one zoom (opacity) step per notch. Trackpads send
             // many tiny deltas, so they are summed into notches first.
-            let steps = self.zoom_steps.add(lines / LINES_PER_WHEEL_NOTCH);
+            let steps = self
+                .zoom_steps
+                .add(lines / LINES_PER_WHEEL_NOTCH)
+                .clamp(-100, 100);
             if steps == 0 {
                 return;
             }

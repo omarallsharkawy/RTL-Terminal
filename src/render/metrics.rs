@@ -36,10 +36,24 @@ impl CellMetrics {
         font_size: f32,
         scale: f32,
     ) -> Self {
-        let font_size = font_size.clamp(8.0, 48.0);
+        let font_size = if font_size.is_finite() {
+            font_size.clamp(8.0, 48.0)
+        } else {
+            14.0
+        };
+        let scale = if scale.is_finite() {
+            scale.clamp(0.25, 16.0)
+        } else {
+            1.0
+        };
         let font_px = font_size * scale;
-        let line_height = (font_px * LINE_HEIGHT_FACTOR).round();
+        let line_height = (font_px * LINE_HEIGHT_FACTOR).round().max(1.0);
         let char_width = measure_char_width(font_system, family, font_px, line_height);
+        let char_width = if char_width.is_finite() {
+            char_width.max(1.0)
+        } else {
+            1.0
+        };
         CellMetrics {
             font_size,
             scale,

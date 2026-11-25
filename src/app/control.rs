@@ -3,6 +3,7 @@
 //! and cmux v2/v1) dispatch cleanly against [`App`] state.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::Instant;
 
@@ -10,11 +11,12 @@ use serde_json::{json, Value};
 
 use super::{App, AppEvent};
 use crate::commands;
-use crate::control::cmux::{dispatch_request, ControlHost};
+use crate::control::cmux::{dispatch_if_active, ControlHost};
 use crate::control::{ControlServer, Request, Response, REQUEST_TIMEOUT};
+use crate::input::InputAction;
 use crate::layout::{PaneId, SplitDir};
 use crate::pty::SpawnOptions;
-use crate::session::workspace::Workspace;
+use crate::session::workspace::{SplitFailure, Workspace};
 use crate::ui::notifications::NotificationHistory;
 use crate::workflows::WorkflowSet;
 
@@ -28,13 +30,21 @@ impl App {
         let handler = Arc::new(move |req: Request| -> Response {
             let id = req.id.clone();
             let (tx, rx) = mpsc::channel();
-            if proxy.send_event(AppEvent::Control(req, tx)).is_err() {
+            let cancelled = Arc::new(AtomicBool::new(false));
+            if proxy
+                .send_event(AppEvent::Control(req, tx, Arc::clone(&cancelled)))
+                .is_err()
+            {
                 return Response::err(id, "application event loop closed");
             }
             match rx.recv_timeout(REQUEST_TIMEOUT) {
                 Ok(resp) => resp,
-                Err(mpsc::RecvTimeoutError::Timeout) => Response::err(id, "request timed out"),
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    cancelled.store(true, Ordering::Release);
+                    Response::err(id, "request timed out")
+                }
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    cancelled.store(true, Ordering::Release);
                     Response::err(id, "application closed before replying")
                 }
             }
@@ -66,8 +76,11 @@ impl App {
         &mut self,
         req: Request,
         reply: mpsc::Sender<Response>,
+        cancelled: Arc<AtomicBool>,
     ) -> bool {
-        let (response, should_exit) = dispatch_request(self, req);
+        let Some((response, should_exit)) = dispatch_if_active(self, req, &cancelled) else {
+            return false;
+        };
         let _ = reply.send(response);
         should_exit
     }
@@ -111,7 +124,11 @@ impl ControlHost for App {
         App::new_tab_with(self, options)
     }
 
-    fn split_focused_with(&mut self, dir: SplitDir, options: SpawnOptions) -> Option<PaneId> {
+    fn split_focused_with(
+        &mut self,
+        dir: SplitDir,
+        options: SpawnOptions,
+    ) -> Result<PaneId, SplitFailure> {
         App::split_focused_with(self, dir, options)
     }
 
@@ -175,7 +192,19 @@ impl ControlHost for App {
                     .focused_id()
                     .ok_or_else(|| "no focused pane".to_owned())?,
             };
-            let should_exit = self.run_action(target, action);
+            let should_exit = match action {
+                InputAction::SplitRight => {
+                    self.split_focused(SplitDir::Horizontal)
+                        .map_err(|err| err.message)?;
+                    false
+                }
+                InputAction::SplitDown => {
+                    self.split_focused(SplitDir::Vertical)
+                        .map_err(|err| err.message)?;
+                    false
+                }
+                other => self.run_action(target, other),
+            };
             return Ok((json!({ "command": name, "pane": target.0 }), should_exit));
         }
         let target = match pane {

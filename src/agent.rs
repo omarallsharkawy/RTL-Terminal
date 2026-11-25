@@ -30,10 +30,12 @@ pub fn agent_argv(agent: &[String], prompt: &str) -> Vec<String> {
     let mut argv = agent.to_vec();
     let program = agent
         .first()
-        .and_then(|p| Path::new(p).file_name())
+        .and_then(|p| p.rsplit(['/', '\\']).next())
+        .and_then(|base| Path::new(base).file_stem())
         .and_then(|n| n.to_str())
-        .unwrap_or("");
-    match program {
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    match program.as_str() {
         // Without -i / --prompt these run the prompt once and exit.
         "gemini" => argv.push("-i".into()),
         "opencode" => argv.push("--prompt".into()),
@@ -51,7 +53,9 @@ pub fn resolve_agent(
 ) -> Option<Vec<String>> {
     if let Some(cmd) = configured {
         let argv: Vec<String> = cmd.split_whitespace().map(str::to_string).collect();
-        return (!argv.is_empty()).then_some(argv);
+        if !argv.is_empty() {
+            return Some(argv);
+        }
     }
     let dirs: Vec<PathBuf> = std::env::split_paths(path?).collect();
     KNOWN_AGENTS
@@ -120,7 +124,7 @@ pub fn agent_prompt(
 }
 
 /// Choose a CommonMark fence that cannot be closed by any line inside `context`.
-fn safe_fence(context: &str) -> String {
+pub fn safe_fence(context: &str) -> String {
     if !context.contains("```") {
         return "```".to_string();
     }

@@ -486,7 +486,10 @@ impl App {
         if let Err(err) = store.save_default() {
             self.close_palette();
             if let Some(pane_id) = self.focused_id() {
-                self.show_pane_warning(pane_id, &format!("could not save trust store: {err}"));
+                self.show_pane_warning(
+                    pane_id,
+                    &format!("could not save trust store: {err} / تعذر حفظ سجل الثقة"),
+                );
             }
             return;
         }
@@ -690,7 +693,7 @@ impl App {
     pub(super) fn run_workflow(&mut self, id: PaneId, workflow: &Workflow) -> Result<(), String> {
         if !workflow.trusted {
             return Err(format!(
-                "refusing to run untrusted project command {:?}",
+                "refusing to run untrusted project command {:?} / رفض تشغيل أمر مشروع غير موثوق",
                 workflow.spec.name
             ));
         }
@@ -711,23 +714,32 @@ impl App {
                     env: Vec::new(),
                 };
                 let spawned = if self.can_split_focused(SplitDir::Horizontal) {
-                    self.split_focused_with(SplitDir::Horizontal, options)
+                    self.split_focused_with(SplitDir::Horizontal, options).ok()
                 } else if self.can_split_focused(SplitDir::Vertical) {
-                    self.split_focused_with(SplitDir::Vertical, options)
+                    self.split_focused_with(SplitDir::Vertical, options).ok()
                 } else {
                     self.new_tab_with(options)
                 };
                 if spawned.is_none() {
-                    return Err("failed to start custom command".into());
+                    return Err("failed to start custom command / تعذر تشغيل الأمر المخصص".into());
                 }
                 Ok(())
             }
         }
     }
 
-    fn show_pane_warning(&mut self, id: PaneId, message: &str) {
-        let note = format!("\r\n\x1b[33mTwitty: {message}\x1b[0m\r\n");
+    pub(super) fn show_pane_warning(&mut self, id: PaneId, message: &str) {
+        let Some(note) = format_pane_warning(message) else {
+            return;
+        };
         self.term(id, |t| t.process_bytes(note.as_bytes()));
         self.window.request_redraw();
     }
+}
+
+/// Sanitize a user-facing pane warning (which may embed paths or config values) so it cannot
+/// inject terminal control sequences.
+pub fn format_pane_warning(message: &str) -> Option<String> {
+    let clean = crate::shell_integration::clean_text(message, 512);
+    (!clean.is_empty()).then(|| format!("\r\n\x1b[33mTwitty: {clean}\x1b[0m\r\n"))
 }
