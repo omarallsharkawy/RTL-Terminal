@@ -1,7 +1,6 @@
 //! The command palette: Arabic and English matching, its keys, and its overlay.
 use cosmic_text::FontSystem;
 use twitty::color::Palette;
-use twitty::commands;
 use twitty::layout::{PaneId, Rect};
 use twitty::render::scene::context::DrawContext;
 use twitty::render::scene::frame::{build_frame, FrameOptions};
@@ -9,16 +8,20 @@ use twitty::render::scene::palette::{label_width, panel_rect, PaletteItem, Palet
 use twitty::render::scene::preedit::PreeditState;
 use twitty::render::{CellMetrics, PaneFrame, RowCache};
 use twitty::terminal::Terminal;
-use twitty::ui::palette::{fold, matches, PaletteCmd, PaletteState};
+use twitty::ui::palette::{fold, matches, PaletteCmd, PaletteEntry, PaletteId, PaletteState};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
 fn first(query: &str) -> &'static str {
-    let all = commands::all();
+    let all = PaletteEntry::builtins();
     let hits = matches(&all, query);
-    all[*hits
+    match all[*hits
         .first()
         .unwrap_or_else(|| panic!("no match for {query:?}"))]
-    .name
+    .id
+    {
+        PaletteId::Builtin(name) => name,
+        PaletteId::Custom(_) => panic!("expected built-in command"),
+    }
 }
 
 #[test]
@@ -43,14 +46,14 @@ fn arabic_queries_ignore_tashkeel_and_hamza_forms() {
 
 #[test]
 fn empty_query_lists_everything_and_nonsense_nothing() {
-    let all = commands::all();
+    let all = PaletteEntry::builtins();
     assert_eq!(matches(&all, "  ").len(), all.len());
     assert!(matches(&all, "zzzqqq").is_empty());
 }
 
 #[test]
 fn keys_drive_selection_and_run() {
-    let all = commands::all();
+    let all = PaletteEntry::builtins();
     let mut p = PaletteState::default();
     let none = ModifiersState::empty();
     for c in "zoom".chars() {
@@ -72,7 +75,7 @@ fn keys_drive_selection_and_run() {
     assert_eq!(p.selected, 2, "wraps to the last");
     assert_eq!(
         p.key(&all, &Key::Named(NamedKey::Enter), None, none),
-        PaletteCmd::Run(all[hits[2]].name)
+        PaletteCmd::Run(all[hits[2]].id.clone())
     );
     assert_eq!(
         p.key(&all, &Key::Named(NamedKey::Escape), None, none),
@@ -82,7 +85,7 @@ fn keys_drive_selection_and_run() {
 
 #[test]
 fn editing_the_query() {
-    let all = commands::all();
+    let all = PaletteEntry::builtins();
     let mut p = PaletteState::default();
     p.push_text("split\u{7} down");
     assert_eq!(p.query, "split down", "control characters dropped");

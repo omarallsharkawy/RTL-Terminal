@@ -12,7 +12,6 @@ use serde_json::{json, Value};
 use twitty::agent::{agent_prompt, clean_context};
 use twitty::app::clean_title;
 use twitty::color::Palette;
-use twitty::commands;
 use twitty::control::cli::{format_list, parse_args};
 use twitty::control::protocol::{
     bound_read_text, parse_request_line, read_bounded_line, MethodCall, ReadLine, MAX_LINE_BYTES,
@@ -33,7 +32,7 @@ use twitty::render::{CellMetrics, PaneFrame, RowCache};
 use twitty::sidebar::git::BranchCache;
 use twitty::sidebar::{Entry, Notice, ScrollState};
 use twitty::terminal::Terminal;
-use twitty::ui::palette::{PaletteCmd, PaletteState};
+use twitty::ui::palette::{PaletteCmd, PaletteEntry, PaletteState};
 use winit::event::ElementState;
 use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey};
 
@@ -306,7 +305,7 @@ fn palette_shortcut_works_on_arabic_layout_and_modifiers_do_not_inject_text() {
     }
 
     // Alt/Super/Ctrl chords never inject stray characters into the palette query; Esc closes.
-    let all = commands::all();
+    let all = PaletteEntry::builtins();
     let mut state = PaletteState::default();
     for mods in [
         ModifiersState::CONTROL,

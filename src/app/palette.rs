@@ -1,44 +1,95 @@
-//! The command palette: opening it, the keys and text typed while it is open, and running
-//! the chosen command. Its notifications mode lists the notification history through the
-//! same state and drawing, and jumps to the pane of the chosen one.
+//! The command palette: opening it, the keys, mouse clicks and text typed while it is open, and
+//! acting on the chosen row.
+//!
+//! It lists one thing at a time ([`PaletteMode`]):
+//! - **Commands:** the built-in ones and the custom ones (`workflows`: `config.json` and the
+//!   project's `.twitty/commands.json`). Choosing an untrusted project command first shows the
+//!   trust confirmation with the file's full command list.
+//! - **Notifications:** the notification history, newest first; choosing one jumps to its pane.
 //!
 //! While the palette is open it owns all keyboard, IME and pointer input so nothing can reach
 //! panes or the PTY behind it. Clicking outside the palette closes it and consumes the click
 //! (never starting a selection, pasting, or switching tabs).
 
-use std::time::SystemTime;
+use std::path::PathBuf;
+use std::time::{Instant, SystemTime};
+
+use alacritty_terminal::term::TermMode;
 use winit::event::{KeyEvent, MouseButton};
 
 use super::App;
 use crate::commands;
 use crate::input::{key_shortcut, InputAction};
-use crate::layout::PaneId;
+use crate::layout::{PaneId, SplitDir};
+use crate::pty::{Pty, SpawnOptions};
 use crate::render::scene::palette::{PaletteHit, PaletteItem, PaletteView};
 use crate::ui::notifications::{jump_target, palette_item};
-use crate::ui::palette::{matches, visible_window, PaletteCmd, PaletteMode, PaletteState};
+use crate::ui::palette::{
+    matches, visible_window, PaletteCmd, PaletteEntry, PaletteId, PaletteMode, PaletteState,
+};
+use crate::workflows::{
+    encode_insert, resolve_run_cwd, run_shell_argv, trust_confirm_view, CommandMode, ConfirmCmd,
+    TrustConfirmState, TrustStore, Workflow, WorkflowSet,
+};
+
+pub(super) struct OpenPalette {
+    state: PaletteState,
+    /// Custom commands found when the palette opened (commands mode).
+    workflows: WorkflowSet,
+    /// Built-in and custom commands, in palette order.
+    entries: Vec<PaletteEntry>,
+    pending_trust: Option<PendingTrust>,
+}
+
+struct PendingTrust {
+    workflow_index: usize,
+    confirm: TrustConfirmState,
+}
 
 impl App {
     pub(super) fn palette_open(&self) -> bool {
         self.palette.is_some()
     }
 
+    /// Working directory of pane `id`: the shell's own first, else OSC 7.
+    pub(super) fn pane_cwd(&self, id: PaneId) -> Option<PathBuf> {
+        let pane = self.ws.pane(id)?;
+        pane.pty
+            .as_ref()
+            .and_then(Pty::cwd)
+            .or_else(|| pane.meta.cwd.clone())
+    }
+
     /// Open the palette listing `mode` (a no-op when it already does, so `command.run
     /// palette.open` never closes it).
     pub(super) fn open_palette(&mut self, mode: PaletteMode) {
-        if self.palette.as_ref().is_some_and(|p| p.mode == mode) {
+        if self.palette.as_ref().is_some_and(|p| p.state.mode == mode) {
             return;
         }
         self.reset_pointer_gesture();
-        self.palette = Some(PaletteState {
-            mode,
-            ..PaletteState::default()
+        let (workflows, entries) = if mode == PaletteMode::Commands {
+            let cwd = self.focused_id().and_then(|id| self.pane_cwd(id));
+            let workflows = WorkflowSet::load(&self.config.commands, cwd.as_deref());
+            let entries = workflows.palette_entries();
+            (workflows, entries)
+        } else {
+            (WorkflowSet::default(), Vec::new())
+        };
+        self.palette = Some(OpenPalette {
+            state: PaletteState {
+                mode,
+                ..PaletteState::default()
+            },
+            workflows,
+            entries,
+            pending_trust: None,
         });
         self.sync_palette();
     }
 
     /// The palette's own shortcuts: open `mode`, or close the palette when it already lists it.
     fn toggle_palette_mode(&mut self, mode: PaletteMode) {
-        if self.palette.as_ref().is_some_and(|p| p.mode == mode) {
+        if self.palette.as_ref().is_some_and(|p| p.state.mode == mode) {
             self.close_palette();
         } else {
             self.open_palette(mode);
@@ -56,24 +107,36 @@ impl App {
     pub(super) fn notification_list_open(&self) -> bool {
         self.palette
             .as_ref()
-            .is_some_and(|p| p.mode == PaletteMode::Notifications)
+            .is_some_and(|p| p.state.mode == PaletteMode::Notifications)
     }
 
-    /// Hand the current query and results to the renderer.
+    /// Hand the current query and results (or the trust confirmation) to the renderer.
     pub(super) fn sync_palette(&mut self) {
-        let Some(state) = &self.palette else {
+        let Some(open) = &self.palette else {
             return;
         };
+        if let Some(pending) = &open.pending_trust {
+            let view = match open.workflows.project() {
+                Some(project) => trust_confirm_view(project, pending.confirm.scroll),
+                None => PaletteView::default(),
+            };
+            self.window.set_command_palette(Some(view));
+            self.window.request_redraw();
+            return;
+        }
+        let state = &open.state;
         let (rows, placeholder): (Vec<PaletteItem>, _) = match state.mode {
             PaletteMode::Commands => {
-                let all = commands::all();
-                let rows = matches(&all, &state.query)
+                let rows = matches(&open.entries, &state.query)
                     .into_iter()
-                    .map(|i| PaletteItem {
-                        title_en: all[i].title_en.to_string(),
-                        title_ar: all[i].title_ar.to_string(),
-                        shortcut: all[i].shortcut.map(str::to_string),
-                        dimmed: false,
+                    .map(|i| {
+                        let entry = &open.entries[i];
+                        PaletteItem {
+                            title_en: entry.title_en.clone(),
+                            title_ar: entry.title_ar.clone(),
+                            shortcut: entry.shortcut.clone(),
+                            dimmed: false,
+                        }
                     })
                     .collect();
                 (rows, None)
@@ -102,12 +165,13 @@ impl App {
                 dimmed: true,
             });
         }
-        self.window.set_command_palette(Some(PaletteView {
+        let view = PaletteView {
             query: state.query.clone(),
             items,
             selected,
             placeholder,
-        }));
+        };
+        self.window.set_command_palette(Some(view));
         self.window.request_redraw();
     }
 
@@ -130,53 +194,51 @@ impl App {
             _ => {}
         }
         let modifiers = self.modifiers;
-        let Some(state) = self.palette.as_mut() else {
+        let Some(open) = self.palette.as_mut() else {
             return false;
         };
+
+        if let Some(pending) = open.pending_trust.as_mut() {
+            let cmd_count = open.workflows.project().map_or(0, |p| p.commands.len());
+            match pending.confirm.key(&event.logical_key, cmd_count) {
+                ConfirmCmd::None => self.sync_palette(),
+                ConfirmCmd::Cancel => {
+                    open.pending_trust = None;
+                    self.sync_palette();
+                }
+                ConfirmCmd::Trust => self.confirm_pending_trust(),
+            }
+            return false;
+        }
+
         let (key, text) = (&event.logical_key, event.text.as_deref());
-        let mut target: Option<PaneId> = None;
-        let cmd = match state.mode {
-            PaletteMode::Commands => state.key(&commands::all(), key, text, modifiers),
+        match open.state.mode {
+            PaletteMode::Commands => match open.state.key(&open.entries, key, text, modifiers) {
+                PaletteCmd::Run(id) => return self.activate_palette_id(id),
+                PaletteCmd::Close => self.close_palette(),
+                PaletteCmd::None | PaletteCmd::Choose(_) => self.sync_palette(),
+            },
             PaletteMode::Notifications => {
                 let list = self.notification_history.newest_first();
-                let cmd = state.key_in(&list, key, text, modifiers);
-                if let PaletteCmd::Choose(i) = cmd {
-                    target = list
-                        .get(i)
-                        .and_then(|e| jump_target(e, |id| self.ws.pane(id).is_some()));
+                match open.state.key_in(&list, key, text, modifiers) {
+                    // A notification: jump to its pane, unless that pane is gone.
+                    PaletteCmd::Choose(i) => {
+                        let target = list
+                            .get(i)
+                            .and_then(|e| jump_target(e, |id| self.ws.pane(id).is_some()));
+                        self.jump_or_stay(target);
+                    }
+                    PaletteCmd::Close => self.close_palette(),
+                    PaletteCmd::None | PaletteCmd::Run(_) => self.sync_palette(),
                 }
-                cmd
             }
-        };
-        match cmd {
-            PaletteCmd::None => self.sync_palette(),
-            PaletteCmd::Close => self.close_palette(),
-            PaletteCmd::Run(name) => return self.run_palette_command(name),
-            // A notification: jump to its pane, unless that pane is gone.
-            PaletteCmd::Choose(_) => self.jump_or_stay(target),
         }
         false
     }
 
-    /// Close the palette and run command `name`; choosing "palette.open" just closes it.
-    fn run_palette_command(&mut self, name: &str) -> bool {
-        self.close_palette();
-        name != "palette.open" && self.run_command(name)
-    }
-
-    fn jump_or_stay(&mut self, target: Option<PaneId>) {
-        match target {
-            Some(id) => {
-                self.close_palette();
-                self.jump_to_pane(id);
-            }
-            None => self.sync_palette(),
-        }
-    }
-
     /// A mouse press while the palette is open. Clicking outside closes the palette and consumes
-    /// the click so nothing reaches panes or tabs; left-clicking a row chooses it. Returns true
-    /// when the window should close.
+    /// the click so nothing reaches panes or tabs; left-clicking a row chooses it (in the trust
+    /// confirmation, the first row trusts). Returns true when the window should close.
     pub(super) fn on_palette_mouse_press(&mut self, button: MouseButton) -> bool {
         let (x, y) = self.pointer.pos;
         let row = match self.window.palette_hit(x, y) {
@@ -187,16 +249,25 @@ impl App {
             PaletteHit::Item(row) if button == MouseButton::Left => row,
             PaletteHit::Inside | PaletteHit::Item(_) => return false,
         };
-        let Some(state) = self.palette.as_ref() else {
+        let Some(open) = self.palette.as_ref() else {
             return false;
         };
+        if open.pending_trust.is_some() {
+            if row == 0 {
+                self.confirm_pending_trust();
+            }
+            return false;
+        }
+        let state = &open.state;
         match state.mode {
             PaletteMode::Commands => {
-                let all = commands::all();
-                let results = matches(&all, &state.query);
+                let results = matches(&open.entries, &state.query);
                 let shown = visible_window(results.len(), state.selected);
                 match results.get(shown.start + row) {
-                    Some(&i) => self.run_palette_command(all[i].name),
+                    Some(&i) => {
+                        let id = open.entries[i].id.clone();
+                        self.activate_palette_id(id)
+                    }
                     None => false,
                 }
             }
@@ -204,10 +275,8 @@ impl App {
                 let list = self.notification_history.newest_first();
                 let results = matches(&list, &state.query);
                 let shown = visible_window(results.len(), state.selected);
-                let target = results
-                    .get(shown.start + row)
-                    .and_then(|&i| jump_target(list[i], |id| self.ws.pane(id).is_some()));
-                if results.get(shown.start + row).is_some() {
+                if let Some(&i) = results.get(shown.start + row) {
+                    let target = jump_target(list[i], |id| self.ws.pane(id).is_some());
                     self.jump_or_stay(target);
                 }
                 false
@@ -215,18 +284,93 @@ impl App {
         }
     }
 
-    /// Text committed by an input method while the palette is open (Arabic typing).
-    pub(super) fn palette_text(&mut self, text: &str) {
-        if let Some(state) = self.palette.as_mut() {
-            state.push_text(text);
-            self.sync_palette();
+    /// Run the chosen command palette entry. Returns true when the window should close.
+    fn activate_palette_id(&mut self, id: PaletteId) -> bool {
+        match id {
+            PaletteId::Builtin(name) => {
+                self.close_palette();
+                // Choosing "palette.open" from the palette just closes it.
+                name != "palette.open" && self.run_command(name)
+            }
+            PaletteId::Custom(index) => {
+                let Some(open) = self.palette.as_mut() else {
+                    return false;
+                };
+                let Some(workflow) = open.workflows.get(index).cloned() else {
+                    self.close_palette();
+                    return false;
+                };
+                if !workflow.trusted {
+                    open.pending_trust = Some(PendingTrust {
+                        workflow_index: index,
+                        confirm: TrustConfirmState::default(),
+                    });
+                    self.sync_palette();
+                    return false;
+                }
+                self.close_palette();
+                if let Some(pane_id) = self.focused_id() {
+                    if let Err(err) = self.run_workflow(pane_id, &workflow) {
+                        self.show_pane_warning(pane_id, &err);
+                    }
+                }
+                false
+            }
         }
     }
 
-    /// Focus pane `id`, switching to its tab.
-    fn jump_to_pane(&mut self, id: PaneId) {
-        if self.focus_pane_by_id(id).is_ok() {
-            self.window.request_redraw();
+    /// Trust the project file shown in the confirmation (keyed by directory and the hash of the
+    /// content that was read and shown) and run the chosen command.
+    fn confirm_pending_trust(&mut self) {
+        let Some((project, mut workflow)) = self.palette.as_ref().and_then(|open| {
+            let pending = open.pending_trust.as_ref()?;
+            let project = open.workflows.project()?.clone();
+            let workflow = open.workflows.get(pending.workflow_index)?.clone();
+            Some((project, workflow))
+        }) else {
+            self.close_palette();
+            return;
+        };
+
+        let mut store = TrustStore::load_default();
+        store.trust(&project.root, &project.sha256);
+        if let Err(err) = store.save_default() {
+            self.close_palette();
+            if let Some(pane_id) = self.focused_id() {
+                self.show_pane_warning(pane_id, &format!("could not save trust store: {err}"));
+            }
+            return;
+        }
+        workflow.trusted = true;
+        self.close_palette();
+        if let Some(pane_id) = self.focused_id() {
+            if let Err(err) = self.run_workflow(pane_id, &workflow) {
+                self.show_pane_warning(pane_id, &err);
+            }
+        }
+    }
+
+    fn jump_or_stay(&mut self, target: Option<PaneId>) {
+        match target {
+            Some(id) => {
+                self.close_palette();
+                if self.focus_pane_by_id(id).is_ok() {
+                    self.window.request_redraw();
+                }
+            }
+            // A closed pane: nothing to jump to, the list stays open.
+            None => self.sync_palette(),
+        }
+    }
+
+    /// Text committed by an input method while the palette is open (Arabic typing).
+    pub(super) fn palette_text(&mut self, text: &str) {
+        if let Some(open) = self.palette.as_mut() {
+            if open.pending_trust.is_some() {
+                return;
+            }
+            open.state.push_text(text);
+            self.sync_palette();
         }
     }
 
@@ -246,12 +390,57 @@ impl App {
         }
     }
 
-    /// Run a command by its stable name on the focused pane. Returns true when the window
-    /// should close.
+    /// Run a built-in command by its stable name on the focused pane. Returns true when the
+    /// window should close.
     pub(super) fn run_command(&mut self, name: &str) -> bool {
         match (commands::action(name), self.focused_id()) {
             (Some(action), Some(id)) => self.run_action(id, action),
             _ => false,
         }
+    }
+
+    /// Run a trusted custom workflow command on pane `id`.
+    pub(super) fn run_workflow(&mut self, id: PaneId, workflow: &Workflow) -> Result<(), String> {
+        if !workflow.trusted {
+            return Err(format!(
+                "refusing to run untrusted project command {:?}",
+                workflow.spec.name
+            ));
+        }
+        match workflow.spec.mode {
+            CommandMode::Insert => {
+                let bracketed = self.mode_of(id).contains(TermMode::BRACKETED_PASTE);
+                let bytes = encode_insert(&workflow.spec.command, bracketed);
+                self.send_input(id, &bytes);
+                self.cursor_blink.reset(Instant::now());
+                Ok(())
+            }
+            CommandMode::Run => {
+                let pane_cwd = self.pane_cwd(id);
+                let cwd = resolve_run_cwd(workflow, pane_cwd.as_deref())?;
+                let options = SpawnOptions {
+                    cwd,
+                    command: run_shell_argv(&workflow.spec.command),
+                    env: Vec::new(),
+                };
+                let spawned = if self.ws.can_split_focused(SplitDir::Horizontal) {
+                    self.split_focused_with(SplitDir::Horizontal, options)
+                } else if self.ws.can_split_focused(SplitDir::Vertical) {
+                    self.split_focused_with(SplitDir::Vertical, options)
+                } else {
+                    self.new_tab_with(options)
+                };
+                if spawned.is_none() {
+                    return Err("failed to start custom command".into());
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn show_pane_warning(&mut self, id: PaneId, message: &str) {
+        let note = format!("\r\n\x1b[33mTwitty: {message}\x1b[0m\r\n");
+        self.term(id, |t| t.process_bytes(note.as_bytes()));
+        self.window.request_redraw();
     }
 }

@@ -1,8 +1,9 @@
 //! The command palette (Ctrl+Shift+P): a query, the items that match it, and the keys that
 //! drive it. Window-free; drawing is `render::scene::palette`.
 //!
-//! The palette lists one source of items at a time ([`PaletteMode`]): the commands, or the
-//! notification history (`ui::notifications`). Any [`Searchable`] list works the same way.
+//! The palette lists one source of items at a time ([`PaletteMode`]): the commands (built-in
+//! and custom, as [`PaletteEntry`]s), or the notification history (`ui::notifications`). Any
+//! [`Searchable`] list works the same way.
 //!
 //! Matching works in Arabic and English alike: every word of the query must appear in the
 //! command's name, English title or Arabic title, after folding case and the Arabic letters
@@ -35,6 +36,52 @@ pub struct PaletteState {
     pub mode: PaletteMode,
 }
 
+/// Identifier of one command palette entry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PaletteId {
+    Builtin(&'static str),
+    /// Index into the window's custom commands (`workflows::WorkflowSet`).
+    Custom(usize),
+}
+
+/// One searchable entry in the command palette.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PaletteEntry {
+    pub id: PaletteId,
+    /// Extra search text (stable command name, command line, description…).
+    pub name: String,
+    pub title_en: String,
+    pub title_ar: String,
+    /// Shortcut or small tag shown beside the English title.
+    pub shortcut: Option<String>,
+}
+
+impl PaletteEntry {
+    pub fn from_command(command: &Command) -> Self {
+        Self {
+            id: PaletteId::Builtin(command.name),
+            name: command.name.to_owned(),
+            title_en: command.title_en.to_owned(),
+            title_ar: command.title_ar.to_owned(),
+            shortcut: command.shortcut.map(str::to_owned),
+        }
+    }
+
+    pub fn from_commands(commands: &[Command]) -> Vec<Self> {
+        commands.iter().map(Self::from_command).collect()
+    }
+
+    pub fn builtins() -> Vec<Self> {
+        Self::from_commands(&crate::commands::all())
+    }
+}
+
+impl Searchable for PaletteEntry {
+    fn search_fields(&self) -> Vec<&str> {
+        vec![&self.title_en, &self.title_ar, &self.name]
+    }
+}
+
 /// An item the palette can list: matched against the query through its fields.
 pub trait Searchable {
     /// Texts the query is matched against (titles in each language, names…).
@@ -58,8 +105,8 @@ impl<T: Searchable + ?Sized> Searchable for &T {
 pub enum PaletteCmd {
     None,
     Close,
-    /// Run the command with this name and close.
-    Run(&'static str),
+    /// Activate the chosen command palette entry.
+    Run(PaletteId),
     /// Item `index` of the listed items was chosen (modes other than commands).
     Choose(usize),
 }
@@ -80,13 +127,13 @@ impl PaletteState {
     /// anything.
     pub fn key(
         &mut self,
-        commands: &[Command],
+        entries: &[PaletteEntry],
         key: &Key,
         text: Option<&str>,
         modifiers: ModifiersState,
     ) -> PaletteCmd {
-        match self.key_in(commands, key, text, modifiers) {
-            PaletteCmd::Choose(i) => PaletteCmd::Run(commands[i].name),
+        match self.key_in(entries, key, text, modifiers) {
+            PaletteCmd::Choose(i) => PaletteCmd::Run(entries[i].id.clone()),
             cmd => cmd,
         }
     }

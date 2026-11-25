@@ -39,6 +39,13 @@ pub struct TwittyConfig {
     /// Command run by "Ask an agent", e.g. "claude" or "codex". Unset: the first one installed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_command: Option<String>,
+    /// Custom commands ("workflows") listed in the command palette (always trusted).
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "crate::workflows::deserialize_config_commands"
+    )]
+    pub commands: Vec<crate::workflows::WorkflowSpec>,
     /// Keys this version does not know about are kept so saving never drops them.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
@@ -64,6 +71,7 @@ impl Default for TwittyConfig {
             shell_integration: true,
             restore_session: true,
             agent_command: None,
+            commands: Vec::new(),
             extra: serde_json::Map::new(),
             keep_file: false,
         }

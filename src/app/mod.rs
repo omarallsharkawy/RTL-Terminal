@@ -64,7 +64,7 @@ pub struct App {
     /// The window has keyboard focus (notifications from the focused pane are then seen).
     window_focused: bool,
     /// The command palette, while it is open (keys and IME text go to it).
-    palette: Option<crate::ui::palette::PaletteState>,
+    palette: Option<palette::OpenPalette>,
     /// Local control socket server (`twitty ctl`), when enabled.
     control: Option<ControlServer>,
     /// The last notifications of this window, for the palette's notifications mode.

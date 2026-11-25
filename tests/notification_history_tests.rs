@@ -15,7 +15,9 @@ use twitty::render::{CellMetrics, RowCache};
 use twitty::ui::notifications::{
     age_label, jump_target, palette_item, HistoryEntry, NotificationHistory, MAX_HISTORY,
 };
-use twitty::ui::palette::{matches, visible_window, PaletteCmd, PaletteState, MAX_RESULTS};
+use twitty::ui::palette::{
+    matches, visible_window, PaletteCmd, PaletteEntry, PaletteId, PaletteState, MAX_RESULTS,
+};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
 fn t(secs: u64) -> SystemTime {
@@ -231,16 +233,17 @@ fn notifications_command_and_shortcut() {
     let all = commands::all();
     assert_eq!(all[matches(&all, "الاشعارات")[0]].name, "notifications.list");
     // The commands palette still runs commands by name.
+    let entries = PaletteEntry::builtins();
     let mut state = PaletteState::default();
     state.push_text("notifications");
     assert_eq!(
         state.key(
-            &all,
+            &entries,
             &Key::Named(NamedKey::Enter),
             None,
             ModifiersState::empty()
         ),
-        PaletteCmd::Run("notifications.list")
+        PaletteCmd::Run(PaletteId::Builtin("notifications.list"))
     );
 }
 
