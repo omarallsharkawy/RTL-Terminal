@@ -10,3 +10,4 @@ pub mod palette;
 pub mod preedit;
 pub mod row_quads;
 pub mod sidebar;
+pub mod window_chrome;

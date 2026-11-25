@@ -9,8 +9,10 @@ use twitty::input::InputAction;
 use twitty::layout::PaneId;
 use twitty::render::scene::context::DrawContext;
 use twitty::render::scene::frame::{build_frame, FrameOptions};
-use twitty::render::scene::palette::{label_width, panel_rect, PaletteItem, PaletteView};
+use twitty::render::scene::palette::{label_width, PaletteItem, PaletteLayout, PaletteView};
 use twitty::render::scene::preedit::PreeditState;
+use twitty::render::text::ui::UiFont;
+use twitty::render::ui_style::UiStyle;
 use twitty::render::{CellMetrics, RowCache};
 use twitty::ui::notifications::{
     age_label, jump_target, palette_item, HistoryEntry, NotificationHistory, MAX_HISTORY,
@@ -323,7 +325,12 @@ fn dimmed_rows_and_long_text_are_drawn_inside_the_panel() {
         selected: 0,
         placeholder: Some("Filter notifications… / دوّر في الإشعارات…".into()),
     };
-    frame.add_palette(&mut ctx, &view);
+    frame.add_palette(
+        &mut ctx,
+        UiStyle::new(&palette, None, metrics.scale),
+        &UiFont::default(),
+        &view,
+    );
     let runs = frame.text_runs(&[], &cache, &ime);
     let overlay = &runs[runs.len() - 5..];
     assert!(overlay[0]
@@ -331,7 +338,7 @@ fn dimmed_rows_and_long_text_are_drawn_inside_the_panel() {
         .lines
         .iter()
         .any(|l| l.text().contains("دوّر في الإشعارات")));
-    let panel = panel_rect(9.0, 23.0, surface, 2);
+    let panel = PaletteLayout::new(1.0, surface, 2).panel;
     // The long Arabic text was cut to fit beside its tab and age, and still reads RTL.
     let (meta, arabic) = (&overlay[1], &overlay[2]);
     let arabic_text = arabic.buffer.lines[0].text();
@@ -341,7 +348,7 @@ fn dimmed_rows_and_long_text_are_drawn_inside_the_panel() {
     let meta_right = meta.left + label_width(meta.buffer);
     assert!(meta_right < arabic.left, "the two sides do not overlap");
     let arabic_right = arabic.left + label_width(arabic.buffer);
-    assert!((arabic_right - (panel.right() - 9.0)).abs() < 1.0);
+    assert!((arabic_right - (panel.right() - 16.0)).abs() < 1.0);
     // The dimmed row is fainter than the normal unselected text.
     let (dim_en, dim_ar) = (&overlay[3], &overlay[4]);
     assert_eq!(dim_en.color, dim_ar.color);

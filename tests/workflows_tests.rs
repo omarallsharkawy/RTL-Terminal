@@ -15,6 +15,8 @@ use twitty::layout::{PaneId, Rect};
 use twitty::render::scene::context::DrawContext;
 use twitty::render::scene::frame::{build_frame, FrameOptions};
 use twitty::render::scene::preedit::PreeditState;
+use twitty::render::text::ui::UiFont;
+use twitty::render::ui_style::UiStyle;
 use twitty::render::{CellMetrics, PaneFrame, RowCache};
 use twitty::terminal::Terminal;
 use twitty::ui::palette::{matches, PaletteCmd, PaletteId, PaletteState};
@@ -653,7 +655,12 @@ fn trust_confirmation_shows_bilingual_prompt_and_full_command_list_and_renders()
     let mut cache = RowCache::default();
     let mut ime = PreeditState::default();
     let mut frame = build_frame(&mut ctx, &opts, &mut cache, &mut ime, &[], &panes, &[]);
-    frame.add_palette(&mut ctx, &view);
+    frame.add_palette(
+        &mut ctx,
+        UiStyle::new(&palette, None, metrics.scale),
+        &UiFont::default(),
+        &view,
+    );
     assert!(!frame.text_runs(&panes, &cache, &ime).is_empty());
 }
 

@@ -336,3 +336,62 @@ fn golden_search_highlight() {
         ..Default::default()
     });
 }
+
+#[test]
+fn sdf_shapes_render_rounded_border_shadow_and_capsule() {
+    use twitty::render::shapes::{Border, Shadow, Shape, ShapeLayers};
+
+    let _gpu = GPU.lock().unwrap_or_else(|p| p.into_inner());
+    let mut target = match Offscreen::new(64, 48) {
+        Ok(target) => target,
+        Err(err) if !env_flag("TWITTY_REQUIRE_GOLDEN") => {
+            eprintln!("shape pixels skipped: {err:#}");
+            return;
+        }
+        Err(err) => panic!("shape pixels require an offscreen adapter: {err:#}"),
+    };
+    let layers = ShapeLayers {
+        chrome: vec![Shape::rounded(
+            Rect::new(0.0, 0.0, 64.0, 48.0),
+            0.0,
+            [0.4, 0.4, 0.4, 1.0],
+        )],
+        overlay: vec![
+            Shape::RoundedRect {
+                rect: Rect::new(12.0, 8.0, 36.0, 24.0),
+                radii: [8.0, 0.0, 4.0, 6.0],
+                fill: [0.1, 0.2, 0.9, 1.0],
+                border: Some(Border {
+                    width: 2.0,
+                    color: [0.9, 0.2, 0.1, 1.0],
+                }),
+                shadow: Some(Shadow {
+                    blur: 6.0,
+                    offset: [2.0, 4.0],
+                    color: [0.0, 0.0, 0.0, 0.5],
+                }),
+            },
+            Shape::Capsule {
+                from: [22.5, 20.5],
+                to: [34.5, 20.5],
+                width: 2.0,
+                color: [1.0, 1.0, 1.0, 0.5],
+            },
+        ],
+    };
+    let pixels = target
+        .render_layers((&[], &layers), [], &mut font_system(), [0.0; 4], 1.0)
+        .unwrap();
+    let pixel = |x: usize, y: usize| &pixels[(y * 64 + x) * 4..][..4];
+    let fill = pixel(30, 25);
+    assert!(fill[2] > 220 && fill[0] < 40);
+    let border = pixel(30, 8);
+    assert!(border[0] > 220 && border[2] < 40);
+    assert_eq!(pixel(12, 8), pixel(2, 2), "large corner is cut away");
+    assert_eq!(pixel(47, 8), border, "sharp corner reaches the edge");
+    let shadow_near = pixel(30, 34)[0];
+    let shadow_far = pixel(30, 39)[0];
+    assert!(shadow_near < shadow_far && shadow_far < pixel(30, 44)[0]);
+    let blended = pixel(28, 20);
+    assert!(blended[0].abs_diff(140) <= 2 && blended[2].abs_diff(242) <= 2);
+}

@@ -14,6 +14,7 @@ use crate::input::mouse::{
 };
 use crate::input::pointer::{cursor_icon_for, PressTarget};
 use crate::layout::{ratio_at, Divider, PaneId, SplitDir};
+use crate::ui::chrome::ChromeAction;
 use crate::ui::hit::Hit;
 
 impl App {
@@ -31,7 +32,13 @@ impl App {
     pub(super) fn on_cursor_moved(&mut self, x: f64, y: f64) {
         self.pointer.pos = (x, y);
         if self.palette_open() {
-            self.window.set_cursor_icon(CursorIcon::Default);
+            let hit = self.window.palette_hit(x, y);
+            let icon = if matches!(hit, crate::render::scene::palette::PaletteHit::Item(_)) {
+                CursorIcon::Pointer
+            } else {
+                CursorIcon::Default
+            };
+            self.window.set_cursor_icon(icon);
             return;
         }
         if let Some(divider) = self.pointer.drag.clone() {
@@ -41,6 +48,7 @@ impl App {
         let hit = self.window.hit_test(&self.ws, x, y);
         let over_sidebar = self.window.sidebar_contains(&self.ws, x, y);
         let captured = self.pointer.capture.is_some();
+        self.update_chrome_hover(&hit, captured);
         if over_sidebar {
             self.window.set_cursor_icon(CursorIcon::Default);
         } else if let Some(icon) = cursor_icon_for(&hit, captured, self.window.cursor_icon()) {
@@ -66,7 +74,7 @@ impl App {
             pane.terminal.update_selection(col, row, side);
             self.window.request_redraw();
         }
-        if over_sidebar {
+        if over_sidebar || matches!(hit, Hit::Chrome(_) | Hit::ChromeBackground) {
             // A selection may extend to its pane's edge, but programs only receive the
             // release of their captured press, using the last reported pane cell.
             self.clear_link_hover(id);
@@ -89,7 +97,18 @@ impl App {
         }
     }
 
-    /// Returns true when a clicked palette command closed the last pane and the window should exit.
+    pub(super) fn on_cursor_left(&mut self) {
+        self.window.set_chrome_hover(None);
+        if self.pointer.capture.is_none() && self.pointer.drag.is_none() {
+            self.pointer.pos = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+            if let Some(id) = self.pointer.hover.take() {
+                self.clear_link_hover(id);
+            }
+            self.window.set_cursor_icon(CursorIcon::Default);
+        }
+    }
+
+    /// Returns true when the press closed the last pane and the window should exit.
     pub(super) fn on_mouse_input(&mut self, button: MouseButton, pressed: bool) -> bool {
         if self.palette_open() {
             return pressed && self.on_palette_mouse_press(button);
@@ -100,6 +119,12 @@ impl App {
         let target = if pressed {
             let (x, y) = self.pointer.pos;
             let hit = self.window.hit_test(&self.ws, x, y);
+            if let Hit::Chrome(action) = hit {
+                return button == MouseButton::Left
+                    && self.pointer.capture.is_none()
+                    && self.pointer.drag.is_none()
+                    && self.click_chrome(action);
+            }
             match self.pointer.press(hit, button) {
                 PressTarget::Tab(i) => {
                     if self.window.sidebar_contains(&self.ws, x, y) && i != self.ws.active() {
@@ -124,6 +149,43 @@ impl App {
             self.handle_mouse_button(id, button, code, pressed);
         }
         false
+    }
+
+    fn click_chrome(&mut self, action: ChromeAction) -> bool {
+        match action {
+            ChromeAction::Sidebar => self.run_command("sidebar.toggle"),
+            ChromeAction::Search => self.run_command("palette.open"),
+            ChromeAction::Diff => self.run_command("review.toggle"),
+            ChromeAction::Notifications => self.run_command("notifications.list"),
+            ChromeAction::FocusPane(id) => {
+                self.focus_pane(id);
+                false
+            }
+            ChromeAction::SplitRight(id) | ChromeAction::SplitDown(id) => {
+                self.focus_pane(id);
+                let dir = if matches!(action, ChromeAction::SplitRight(_)) {
+                    SplitDir::Horizontal
+                } else {
+                    SplitDir::Vertical
+                };
+                self.split_focused(dir);
+                self.refresh_pointer_hover();
+                false
+            }
+            ChromeAction::Close(id) => {
+                let exit = self.close_pane(id);
+                self.refresh_pointer_hover();
+                exit
+            }
+        }
+    }
+
+    fn update_chrome_hover(&mut self, hit: &Hit, captured: bool) {
+        let hover = match hit {
+            Hit::Chrome(action) if !captured => Some(*action),
+            _ => None,
+        };
+        self.window.set_chrome_hover(hover);
     }
 
     pub(super) fn on_wheel(&mut self, delta: MouseScrollDelta) {
@@ -259,16 +321,18 @@ impl App {
             self.clear_link_hover(id);
         }
         self.window.set_cursor_icon(CursorIcon::Default);
+        self.window.set_chrome_hover(None);
         self.release_held_buttons();
         self.pointer.cancel();
     }
 
     pub(super) fn refresh_pointer_hover(&mut self) {
-        if self.pointer.capture.is_some() || self.pointer.drag.is_some() {
+        if self.palette_open() || self.pointer.capture.is_some() || self.pointer.drag.is_some() {
             return;
         }
         let (x, y) = self.pointer.pos;
         let hit = self.window.hit_test(&self.ws, x, y);
+        self.update_chrome_hover(&hit, false);
         let (target, left) = self.pointer.moved(&hit);
         if let Some(id) = left {
             self.clear_link_hover(id);

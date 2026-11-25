@@ -56,3 +56,9 @@ No cmux/Warp names, logos or brand colours.
 
 All chrome scales with the window's scale factor and respects light themes (tokens derive from
 the theme, never hard-coded dark).
+
+The shared APIs are `render::ui_style::UiStyle`, `render::shapes::{Shape, ShapeLayers}`,
+`render::icons::Icon` and `render::text::ui::{UiFont, UiLabel, UiSize, UiWeight}`. Use
+`UiStyle::px` for logical dimensions and `DrawContext::color` for shape colors. Add UI shapes to
+`Frame::shapes.chrome` or `Frame::shapes.overlay` in paint order. Glyphon runs after both layers,
+so clip text runs behind an overlay with `scene::frame::bounds_around`.

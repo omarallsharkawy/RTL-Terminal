@@ -26,6 +26,7 @@ pub enum AppEvent {
     Control(Request, mpsc::Sender<Response>),
     /// Listening TCP ports of each pane's processes, from the port scanner thread.
     Ports(HashMap<PaneId, Vec<u16>>),
+    GitDiff(u64, Option<crate::ui::git_diff::DiffStat>),
 }
 
 /// Longest title kept from a program, in characters.
@@ -116,6 +117,7 @@ impl App {
                 MarkKind::CommandEnd { exit } => {
                     meta.running = false;
                     meta.last_exit = exit;
+                    self.git_diff.refresh(id);
                 }
                 MarkKind::PromptStart | MarkKind::CommandStart => {}
             },

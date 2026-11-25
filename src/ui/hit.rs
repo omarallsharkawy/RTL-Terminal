@@ -1,5 +1,6 @@
 //! What lies under the pointer: a tab, the tab bar, a divider or a pane.
 
+use super::chrome::ChromeAction;
 use crate::layout::{dividers, layout, Divider, Node, PaneId, Rect};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -8,6 +9,8 @@ pub enum Hit {
     TabBar,
     Divider(Divider),
     Pane(PaneId),
+    Chrome(ChromeAction),
+    ChromeBackground,
     Nothing,
 }
 
@@ -27,7 +30,7 @@ pub struct HitGeometry {
 
 /// Hit test `(x, y)` against the tab bar and the active tab's split tree `root`.
 pub fn hit_test(g: &HitGeometry, root: Option<&Node>, x: f64, y: f64) -> Hit {
-    if y < g.tab_bar_height as f64 {
+    if y >= (g.content.y - g.tab_bar_height) as f64 && y < g.content.y as f64 {
         return match g.tabs.iter().position(|t| t.contains(x, y)) {
             Some(i) => Hit::Tab(i),
             None => Hit::TabBar,

@@ -10,8 +10,10 @@ use cosmic_text::FontSystem;
 
 use super::encode_pass;
 use super::quad_pipeline::QuadRenderer;
+use super::shape_pipeline::ShapeRenderer;
 use super::text_pipeline::TextPipeline;
 use crate::render::scene::frame::TextRun;
+use crate::render::shapes::ShapeLayers;
 use crate::render::style::Quad;
 
 /// Format of the offscreen target. Non-sRGB, like the window surface the app prefers, so
@@ -23,6 +25,7 @@ pub struct Offscreen {
     device: wgpu::Device,
     queue: wgpu::Queue,
     quads: QuadRenderer,
+    shapes: ShapeRenderer,
     text: TextPipeline,
     texture: wgpu::Texture,
     width: u32,
@@ -98,6 +101,8 @@ impl Offscreen {
 
         let quads = QuadRenderer::new(&device, FORMAT);
         quads.update_screen_size(&queue, width as f32, height as f32);
+        let shapes = ShapeRenderer::new(&device, FORMAT);
+        shapes.resize(&queue, width, height);
         let text = TextPipeline::new(&device, &queue, FORMAT, (width, height));
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("twitty offscreen target"),
@@ -117,6 +122,7 @@ impl Offscreen {
             device,
             queue,
             quads,
+            shapes,
             text,
             texture,
             width,
@@ -140,8 +146,27 @@ impl Offscreen {
         background: [f32; 4],
         opacity: f32,
     ) -> anyhow::Result<Vec<u8>> {
+        self.render_layers(
+            (quads, &ShapeLayers::default()),
+            runs,
+            font_system,
+            background,
+            opacity,
+        )
+    }
+
+    /// Draw plain quads, shape layers and then glyphon text, as the window renderer does.
+    pub fn render_layers<'a>(
+        &mut self,
+        geometry: (&[Quad], &ShapeLayers),
+        runs: impl IntoIterator<Item = TextRun<'a>>,
+        font_system: &mut FontSystem,
+        background: [f32; 4],
+        opacity: f32,
+    ) -> anyhow::Result<Vec<u8>> {
         let (device, queue) = (&self.device, &self.queue);
-        self.quads.set_rects(device, queue, quads);
+        self.quads.set_rects(device, queue, geometry.0);
+        self.shapes.prepare(device, queue, geometry.1);
         self.text.prepare(device, queue, font_system, runs)?;
 
         let view = self
@@ -153,8 +178,7 @@ impl Offscreen {
         encode_pass(
             &mut encoder,
             &view,
-            &self.quads,
-            &self.text,
+            (&self.quads, &self.shapes, &self.text),
             background,
             opacity,
         )?;

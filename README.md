@@ -91,6 +91,11 @@ cargo build --release
 
 With a single pane, Alt+Arrow goes to the program (fish, readline word jumps); with a single tab, so do Ctrl+Tab and Ctrl+PageUp/PageDown.
 
+The top bar opens the sidebar, command palette and notification history. It shows the focused
+local Git worktree’s changed line counts and opens review when `review.toggle` is available. Pane
+headers show the program or agent and offer split and close buttons. Tabs move to the sidebar
+when it is visible.
+
 ### Configuration
 
 The config file is `~/.config/twitty/config.json` (`%APPDATA%\twitty\config.json` on Windows). Every key is optional:
@@ -107,6 +112,9 @@ The config file is `~/.config/twitty/config.json` (`%APPDATA%\twitty\config.json
 | --- | --- |
 | `font_size` | 8 to 48 |
 | `font_family` | Font for the terminal grid, e.g. `JetBrains Mono`. Unset, or not installed: the system monospace font. Arabic uses an embedded Noto Naskh Arabic when no system font covers it. |
+| `ui_font_family` | Proportional chrome font. Defaults to the system sans, with bundled Noto Naskh Arabic for fallback. |
+| `ui_accent` | Chrome accent in `#rgb` or `#rrggbb`. Defaults to the theme cursor color. |
+| `top_bar`, `pane_headers` | Both default to `true`. Set either to `false` to hide it. |
 | `background_opacity` | 0.2 (very see-through) to 1.0 (solid) |
 | `cursor_style` | `block`, `beam` or `underline`. Programs that set their own cursor shape (vim insert mode, for example) still win. |
 | `cursor_blink` | `true` (default) blinks the cursor, `false` keeps it solid. Programs that ask for a blinking or steady cursor (`CSI n SP q`) override this. The cursor stays solid while you type and while the window is unfocused. |

@@ -12,13 +12,17 @@ use super::cursor::{
     cursor_cell_width, cursor_left, cursor_quads, effective_cursor_shape,
     geometry_under_block_cursor,
 };
-use super::palette::{palette_overlay, OverlayText, PaletteView};
+use super::palette::{palette_overlay, PaletteView};
 use super::preedit::{bounds_outside, ImeArea, PreeditState};
-use crate::layout::Rect;
+use super::window_chrome::{self, ChromeView};
+use crate::layout::{PaneId, Rect};
 use crate::render::metrics::CellMetrics;
 use crate::render::row::cache::RowCache;
 use crate::render::row::{hash_row, CachedRow, RowCursor};
+use crate::render::shapes::ShapeLayers;
 use crate::render::style::Quad;
+use crate::render::text::ui::{UiFont, UiLabel};
+use crate::render::ui_style::UiStyle;
 use crate::render::{PaneFrame, TabLabel};
 
 /// Renderer state a frame depends on besides what it is drawn with.
@@ -49,6 +53,9 @@ pub struct Frame {
     /// geometry, decorations) and block marks and badges, then the preedit box,
     /// unfocused panes' cursors, the focused cursor (or preedit caret), status bars, dividers.
     pub quads: Vec<Quad>,
+    pub shapes: ShapeLayers,
+    chrome_labels: Vec<UiLabel>,
+    pane_clips: Vec<(PaneId, TextBounds)>,
     /// Window clear color (the theme background) in surface space.
     pub background: [f32; 4],
     /// The candidate popup area, when it moved since it was last reported.
@@ -67,7 +74,7 @@ pub struct Frame {
     foreground: glyphon::Color,
     surface: (f32, f32),
     /// Overlays drawn above everything (the command palette).
-    overlay: Vec<OverlayText>,
+    overlay: Vec<UiLabel>,
     /// Area the overlay covers: other text is clipped out of it, since all text is drawn
     /// after all quads and would otherwise show through the overlay's background.
     overlay_rect: Option<Rect>,
@@ -242,6 +249,9 @@ pub fn build_frame(
 
     Frame {
         quads,
+        shapes: ShapeLayers::default(),
+        chrome_labels: Vec::new(),
+        pane_clips: Vec::new(),
         background,
         ime_area,
         tab_titles,
@@ -259,9 +269,52 @@ pub fn build_frame(
 }
 
 impl Frame {
+    /// Draw the toolbar and pane headers. The `PaneFrame` rectangles already describe grids.
+    pub fn add_chrome(
+        &mut self,
+        ctx: &mut DrawContext,
+        style: UiStyle,
+        font: &UiFont,
+        view: &ChromeView,
+    ) {
+        self.chrome_labels = window_chrome::draw(ctx, style, font, view, &mut self.shapes.chrome);
+        self.pane_clips.extend(view.panes.iter().filter_map(|pane| {
+            let edge = if pane.attention {
+                2.0
+            } else if pane.focused && pane.layout.header.h > 0.0 {
+                1.0
+            } else {
+                return None;
+            };
+            let edge = style.px(edge).ceil();
+            let grid = pane.layout.grid;
+            let top_inset = (edge - pane.layout.header.h).max(0.0);
+            let clip = Rect::new(
+                grid.x + edge,
+                grid.y + top_inset,
+                (grid.w - 2.0 * edge).max(0.0),
+                (grid.h - edge - top_inset).max(0.0),
+            );
+            Some((pane.id, rect_bounds(clip)))
+        }));
+    }
+
     /// Draw the command palette above everything else.
-    pub fn add_palette(&mut self, ctx: &mut DrawContext, view: &PaletteView) {
-        let (outer, texts) = palette_overlay(ctx, view, self.surface, &mut self.quads);
+    pub fn add_palette(
+        &mut self,
+        ctx: &mut DrawContext,
+        style: UiStyle,
+        font: &UiFont,
+        view: &PaletteView,
+    ) {
+        let (outer, texts) = palette_overlay(
+            ctx,
+            style,
+            font,
+            view,
+            self.surface,
+            &mut self.shapes.overlay,
+        );
         self.overlay.extend(texts);
         self.overlay_rect = outer;
     }
@@ -303,8 +356,14 @@ impl Frame {
                 color: *color,
             });
         }
+        let pane_bounds = |pane: &PaneFrame| {
+            self.pane_clips
+                .iter()
+                .find_map(|&(id, bounds)| (id == pane.id).then_some(bounds))
+                .unwrap_or_else(|| rect_bounds(pane.rect))
+        };
         for ((pane, status), badges) in panes.iter().zip(&self.statuses).zip(&self.badges) {
-            let bounds = rect_bounds(pane.rect);
+            let bounds = pane_bounds(pane);
             let rows = pane.lines.len();
             for r in 0..rows {
                 if status.is_some() && r + 1 == rows {
@@ -358,8 +417,11 @@ impl Frame {
         }
         if let Some((left, top, _)) = self.preedit_box {
             let (width, height) = self.surface;
-            let bounds = self
-                .ime_bounds
+            let bounds = panes
+                .iter()
+                .find(|pane| pane.focused)
+                .map(pane_bounds)
+                .or(self.ime_bounds)
                 .unwrap_or_else(|| rect_bounds(Rect::new(0.0, 0.0, width, height)));
             if let Some(buffer) = ime.buffer() {
                 runs.push(TextRun {
@@ -381,6 +443,7 @@ impl Frame {
                 color: label.color,
             });
         }
+        runs.extend(self.chrome_labels.iter().map(ui_run));
         if let Some(hole) = self.overlay_rect {
             runs = runs
                 .into_iter()
@@ -391,15 +454,17 @@ impl Frame {
                 })
                 .collect();
         }
-        for text in &self.overlay {
-            runs.push(TextRun {
-                buffer: &text.buffer,
-                left: text.left,
-                top: text.top,
-                bounds: text.bounds,
-                color: text.color,
-            });
-        }
+        runs.extend(self.overlay.iter().map(ui_run));
         runs
+    }
+}
+
+fn ui_run(text: &UiLabel) -> TextRun<'_> {
+    TextRun {
+        buffer: &text.buffer,
+        left: text.left,
+        top: text.top,
+        bounds: text.bounds,
+        color: text.color,
     }
 }

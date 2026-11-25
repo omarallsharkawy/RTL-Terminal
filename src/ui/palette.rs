@@ -219,10 +219,14 @@ impl PaletteState {
 /// The results shown when `selected` is the selected one of `len`: at most [`MAX_RESULTS`],
 /// scrolled so the selection stays visible.
 pub fn visible_window(len: usize, selected: usize) -> std::ops::Range<usize> {
+    visible_window_in(len, selected, MAX_RESULTS)
+}
+
+pub fn visible_window_in(len: usize, selected: usize, capacity: usize) -> std::ops::Range<usize> {
     let start = selected
         .min(len.saturating_sub(1))
-        .saturating_sub(MAX_RESULTS - 1);
-    start..len.min(start + MAX_RESULTS)
+        .saturating_sub(capacity.saturating_sub(1));
+    start..len.min(start + capacity)
 }
 
 /// Indices of the items matching `query`, best first. An empty query lists them all in

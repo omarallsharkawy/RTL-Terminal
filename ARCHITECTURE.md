@@ -36,10 +36,10 @@ the cursor, backgrounds, selection, mouse hits and IME follow the text the user 
            render/row   ── visual extent of each cell, hit testing, caret anchor, row cache
                                          │
                                          ▼
-           render/scene ── quads (backgrounds, box drawing, cursor, chrome) + text runs  [CPU]
+           render/scene ── terminal quads + chrome shapes + clipped text runs           [CPU]
                                          │
                                          ▼
-           render/gpu   ── wgpu quad pipeline + glyphon text pipeline                    [GPU]
+           render/gpu   ── wgpu quad and shape pipelines, then glyphon text              [GPU]
 ```
 
 Everything above `render/gpu` runs without a GPU and is covered by tests in `tests/`.
@@ -57,8 +57,11 @@ Everything above `render/gpu` runs without a GPU and is covered by tests in `tes
 | `pty.rs` | Shell discovery, environment, PTY spawning, a writer thread so large pastes never block the UI. | `portable-pty` |
 | `render/text/` | Fonts, bidi helpers, and `RowShaper`, which turns a row of cells into shaped segments. | `cosmic-text` |
 | `render/row/` | A shaped row: per-cell visual extents, mouse hit testing, caret placement, and the per-pane `RowCache`. | `render/text` |
-| `render/scene/` | The frame on the CPU: row quads, box drawing, cursor, tab bar, status line, IME preedit, block decorations, sidebar, command palette, z-order. | `render/row`, `render/style` |
-| `render/gpu/` | wgpu device and surface, the quad pipeline (`quad.wgsl`) and glyphon's text pipeline. | `wgpu`, `glyphon` |
+| `render/scene/` | CPU frame composition. Terminal quads, window chrome, sidebars and overlays are layered before glyphon draws. Palette bounds cut a hole in the text runs behind the panel. | `render/row`, `render/style`, `render/shapes` |
+| `render/shapes.rs`, `render/icons.rs`, `render/ui_style.rs`, `render/text/ui.rs` | Shared UI foundation. Physical-pixel shapes and icons, scalable theme tokens and single-line proportional UI labels with Arabic fallback and grapheme-safe truncation. | `color`, `layout`, `cosmic-text` |
+| `ui/chrome.rs`, `ui/hit.rs` | Shared toolbar, tab strip and pane header geometry. The same pane grid rect drives drawing, terminal hit testing and PTY sizes. | `layout`, `render/metrics` |
+| `ui/git_diff.rs`, `app/git_diff.rs` | Bounded Git numstat parsing and subprocess I/O. The app schedules one in-flight scan for the focused local pane and discards stale results. | `std::process`, `rustix` on Linux |
+| `render/gpu/` | wgpu device and surface. Plain quads draw first, then one instanced SDF draw per nonempty shape layer, then glyphon text. Shapes use premultiplied alpha. | `wgpu`, `glyphon` |
 | `color.rs`, `config.rs` | Themes and palette resolution; `config.json` loading, clamping and atomic saving. | — |
 | `links.rs`, `blink.rs`, `ime.rs` | URL detection and opening, cursor blink timing, IME helpers. | — |
 | `shell_integration.rs` | Parses the OSC signals shells and agents send (OSC 7 cwd, OSC 9/99/777 notifications, OSC 133/633 command marks) into bounded, cleaned `ShellEvent`s. | `links` |
@@ -117,6 +120,9 @@ or link-hover state change.
   Each named remote session has a detached host process holding its shell PTY. The attach client
   relays raw input and window sizes. Multiple attachments use the smallest grid while attached.
 - **Notifications:** each `notify-send` runs on its own short thread (at most 8 at once).
+- **Git diff:** while the top bar has room for the badge, the focused local pane queues a
+  scan on cwd change, command completion and every 3 s. Each scan gets a 2 s subprocess
+  budget, at most 1 MiB of numstat output, and up to 4096 file records.
 
 ## Shell signals
 
@@ -145,7 +151,7 @@ shown, sent to `notify-send`, returned over the control socket or put into an ag
 | Terminal behavior | `Terminal::new` + `process_bytes` + `snapshot` |
 | Bidi shaping, extents, hit testing, quads | `RowShaper` with a real `FontSystem`, no GPU |
 | Whole CPU frame | `scene::frame::build_frame` headless |
-| GPU pipelines | Exercised by running the app; see CONTRIBUTING.md for the manual checklist |
+| GPU pipelines | Offscreen llvmpipe golden frames and pixel assertions in `tests/golden_tests.rs` |
 
 ## Where to start
 

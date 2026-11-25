@@ -61,6 +61,7 @@ pub(crate) struct PaneMeta {
     pub last_command: Option<String>,
     /// Per-pane agent status (working / needs input / done) and optional last message.
     pub agent_status: Option<AgentStatus>,
+    agent_input_seen: bool,
     /// Bounded key/value status entries reported for this pane.
     pub status_entries: Vec<StatusEntry>,
 }
@@ -109,7 +110,22 @@ impl PaneMeta {
         self.refresh_agent_status();
     }
 
+    fn waiting_for_input(&self) -> bool {
+        self.agent_status
+            .as_ref()
+            .is_some_and(|status| status.state == AgentState::NeedsInput)
+    }
+
+    pub fn needs_attention(&self) -> bool {
+        self.attention.is_some() || (self.waiting_for_input() && !self.agent_input_seen)
+    }
+
+    pub fn mark_agent_input_seen(&mut self) {
+        self.agent_input_seen = self.waiting_for_input();
+    }
+
     fn refresh_agent_status(&mut self) {
+        let was_waiting = self.waiting_for_input();
         let mut best: Option<AgentStatus> = None;
         for entry in &self.status_entries {
             let Some(state) = AgentState::from_status(&entry.key, &entry.value) else {
@@ -126,6 +142,9 @@ impl PaneMeta {
             }
         }
         self.agent_status = best;
+        if self.waiting_for_input() != was_waiting {
+            self.agent_input_seen = false;
+        }
     }
 }
 

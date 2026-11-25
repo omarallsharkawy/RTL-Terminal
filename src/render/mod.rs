@@ -9,11 +9,14 @@
 //! `Renderer` ties them together for the app.
 
 pub mod gpu;
+pub mod icons;
 pub mod metrics;
 pub mod row;
 pub mod scene;
+pub mod shapes;
 pub mod style;
 pub mod text;
+pub mod ui_style;
 
 pub use gpu::text_pipeline::text_color_mode;
 pub use metrics::CellMetrics;
@@ -32,16 +35,19 @@ use cosmic_text::FontSystem;
 use std::sync::Arc;
 use winit::window::Window;
 
-use crate::color::Palette;
+use crate::color::{Palette, Rgba};
 use crate::layout::{PaneId, Rect};
 use crate::terminal::{CursorState, LineData};
 use gpu::Gpu;
 use scene::context::DrawContext;
 use scene::frame::{build_frame, FrameOptions};
-use scene::palette::PaletteView;
+use scene::palette::{PaletteLayout, PaletteView};
 use scene::preedit::PreeditState;
 use scene::sidebar::LabelCache;
+use scene::window_chrome::ChromeView;
 use text::fonts::{installed_family, new_font_system};
+use text::ui::UiFont;
+use ui_style::UiStyle;
 
 /// Everything the renderer needs to draw one pane.
 pub struct PaneFrame {
@@ -75,6 +81,8 @@ pub(crate) struct Renderer {
     /// Configured terminal font family (leaked once per change; `None` = monospace).
     font_family: Option<&'static str>,
     palette: Palette,
+    ui_accent: Option<Rgba>,
+    ui_font: UiFont,
     metrics: CellMetrics,
     is_srgb: bool,
     /// Whether the window has keyboard focus.
@@ -107,6 +115,8 @@ impl Renderer {
             font_system: new_font_system(),
             font_family: None,
             palette: Palette::default(),
+            ui_accent: None,
+            ui_font: UiFont::default(),
             metrics: CellMetrics {
                 font_size: initial_font_size,
                 scale,
@@ -166,9 +176,17 @@ impl Renderer {
         self.cursor_blink_on = on;
     }
 
-    /// Where each tab of the tab bar goes (empty with fewer than two tabs).
-    pub fn tab_rects(&self, tab_count: usize) -> Vec<Rect> {
-        self.metrics.tab_rects(tab_count, self.config.width as f32)
+    pub fn surface_size(&self) -> (f32, f32) {
+        (self.config.width as f32, self.config.height as f32)
+    }
+
+    pub(crate) fn set_ui_style(&mut self, family: Option<&str>, accent: Option<Rgba>) {
+        self.ui_font = UiFont::new(&mut self.font_system, family);
+        self.ui_accent = accent;
+    }
+
+    pub(crate) fn palette_rows(&self, max: usize) -> usize {
+        PaletteLayout::new(self.metrics.scale, self.surface_size(), max).rows()
     }
 
     /// Recompute cell metrics from the font size and scale factor.
@@ -229,22 +247,7 @@ impl Renderer {
         let Some(view) = &self.palette_view else {
             return scene::palette::PaletteHit::Outside;
         };
-        let surface = (self.config.width as f32, self.config.height as f32);
-        let panel = scene::palette::panel_rect(
-            self.metrics.char_width,
-            self.metrics.line_height,
-            surface,
-            view.items.len().max(1),
-        );
-        let edge = self.metrics.scale.round().max(1.0);
-        scene::palette::hit_test(
-            panel,
-            self.metrics.line_height,
-            edge,
-            view.items.len(),
-            x,
-            y,
-        )
+        PaletteLayout::new(self.metrics.scale, self.surface_size(), view.items.len()).hit(x, y)
     }
 
     /// Set (or clear with `None`) the IME composition drawn inline at the cursor.
@@ -270,17 +273,6 @@ impl Renderer {
         self.metrics().divider_gap()
     }
 
-    /// Height of the tab bar (shown only with two or more tabs).
-    pub fn tab_bar_height(&self, tab_count: usize) -> f32 {
-        self.metrics().tab_bar_height(tab_count)
-    }
-
-    /// The window area below the tab bar, where panes are laid out.
-    pub fn content_rect(&self, tab_count: usize) -> Rect {
-        let size = (self.config.width as f32, self.config.height as f32);
-        self.metrics().content_rect(tab_count, size)
-    }
-
     /// Grid size (cols, rows) of a pane occupying `rect`.
     pub(crate) fn compute_grid_size(&self, rect: Rect) -> (usize, usize) {
         self.metrics().grid_size(rect)
@@ -301,11 +293,10 @@ impl Renderer {
     /// Draw the tab bar (with two or more tabs), every pane and the dividers between them.
     pub fn render(
         &mut self,
-        tabs: &[TabLabel],
+        chrome: &ChromeView,
         panes: &[PaneFrame],
         dividers: &[Rect],
         sidebar: Option<&crate::sidebar::View>,
-        attention: &[Rect],
     ) -> anyhow::Result<()> {
         let Some(surface_texture) = self.gpu.acquire(&self.config, &self.window) else {
             return Ok(());
@@ -329,18 +320,19 @@ impl Renderer {
             &opts,
             &mut self.row_cache,
             &mut self.ime,
-            if sidebar.is_some() { &[] } else { tabs },
+            &[],
             panes,
             dividers,
         );
-        frame.add_attention(&ctx, attention);
         if let Some(view) = sidebar {
             frame.add_sidebar(&mut ctx, view, &mut self.sidebar_labels);
         } else {
             self.sidebar_labels.clear();
         }
+        let style = UiStyle::new(&self.palette, self.ui_accent, self.metrics.scale);
+        frame.add_chrome(&mut ctx, style, &self.ui_font, chrome);
         if let Some(view) = &self.palette_view {
-            frame.add_palette(&mut ctx, view);
+            frame.add_palette(&mut ctx, style, &self.ui_font, view);
         }
         if let Some((x, y, w, h)) = frame.ime_area {
             self.window.set_ime_cursor_area(
@@ -351,7 +343,7 @@ impl Renderer {
         let runs = frame.text_runs(panes, &self.row_cache, &self.ime);
         self.gpu.draw(
             surface_texture,
-            &frame.quads,
+            (&frame.quads, &frame.shapes),
             runs,
             &mut self.font_system,
             frame.background,

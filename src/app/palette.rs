@@ -29,7 +29,7 @@ use crate::pty::{Pty, SpawnOptions};
 use crate::render::scene::palette::{PaletteHit, PaletteItem, PaletteView};
 use crate::ui::notifications::{jump_target, palette_item};
 use crate::ui::palette::{
-    matches, visible_window, PaletteCmd, PaletteEntry, PaletteId, PaletteMode, PaletteState,
+    matches, visible_window_in, PaletteCmd, PaletteEntry, PaletteId, PaletteMode, PaletteState,
 };
 use crate::ui::search_all::{
     jump_target as search_target, PaneInfo, Query, SearchAll, SearchHit, PLACEHOLDER, SLICE,
@@ -112,6 +112,7 @@ impl App {
     pub(super) fn close_palette(&mut self) {
         if self.palette.take().is_some() {
             self.window.set_command_palette(None);
+            self.refresh_pointer_hover();
             self.window.request_redraw();
         }
     }
@@ -121,6 +122,10 @@ impl App {
         self.palette
             .as_ref()
             .is_some_and(|p| p.state.mode == PaletteMode::Notifications)
+    }
+
+    fn palette_capacity(&self) -> usize {
+        self.window.palette_rows(crate::ui::palette::MAX_RESULTS)
     }
 
     /// Hand the current query and results (or the trust confirmation) to the renderer.
@@ -175,7 +180,7 @@ impl App {
                 Some(PLACEHOLDER.to_string()),
             ),
         };
-        let shown = visible_window(rows.len(), state.selected);
+        let shown = visible_window_in(rows.len(), state.selected, self.palette_capacity());
         let selected = state.selected.min(rows.len().saturating_sub(1)) - shown.start;
         let mut items: Vec<PaletteItem> = rows[shown].to_vec();
         if items.is_empty() && state.mode == PaletteMode::Notifications && state.query.is_empty() {
@@ -292,7 +297,8 @@ impl App {
         match state.mode {
             PaletteMode::Commands => {
                 let results = matches(&open.entries, &state.query);
-                let shown = visible_window(results.len(), state.selected);
+                let shown =
+                    visible_window_in(results.len(), state.selected, self.palette_capacity());
                 match results.get(shown.start + row) {
                     Some(&i) => {
                         let id = open.entries[i].id.clone();
@@ -304,7 +310,8 @@ impl App {
             PaletteMode::Notifications => {
                 let list = self.notification_history.newest_first();
                 let results = matches(&list, &state.query);
-                let shown = visible_window(results.len(), state.selected);
+                let shown =
+                    visible_window_in(results.len(), state.selected, self.palette_capacity());
                 if let Some(&i) = results.get(shown.start + row) {
                     let target = jump_target(list[i], |id| self.ws.pane(id).is_some());
                     self.jump_or_stay(target);
@@ -313,7 +320,7 @@ impl App {
             }
             PaletteMode::Search => {
                 let hits = open.search.hits();
-                let shown = visible_window(hits.len(), state.selected);
+                let shown = visible_window_in(hits.len(), state.selected, self.palette_capacity());
                 let hit = hits.get(shown.start + row).cloned();
                 self.jump_to_hit(hit);
                 false

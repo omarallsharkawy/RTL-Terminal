@@ -49,11 +49,15 @@ impl App {
     }
 
     pub(super) fn pane_rect(&self, id: PaneId) -> Option<Rect> {
-        self.ws.pane_rect(self.window.grid()?, id)
+        self.ws
+            .pane_rect(self.window.grid()?, id)
+            .map(|rect| self.window.pane_layout(rect).grid)
     }
 
     pub(super) fn pane_at(&self, x: f64, y: f64) -> Option<PaneId> {
-        self.ws.pane_at(self.window.grid()?, x, y)
+        self.ws
+            .pane_at(self.window.grid()?, x, y)
+            .filter(|&id| self.pane_rect(id).is_some_and(|rect| rect.contains(x, y)))
     }
 
     /// Give every pane of every tab the grid its rectangle allows.
@@ -62,6 +66,7 @@ impl App {
             return;
         };
         self.ws.apply_layout(r);
+        self.refresh_pointer_hover();
         self.window.request_redraw();
     }
 
@@ -124,6 +129,7 @@ impl App {
         if self.window_focused {
             if let Some(pane) = self.ws.pane_mut(new) {
                 pane.meta.attention = None;
+                pane.meta.mark_agent_input_seen();
             }
         }
         if self.window.is_focused() {
