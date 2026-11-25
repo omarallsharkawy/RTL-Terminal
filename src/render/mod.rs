@@ -35,12 +35,13 @@ use cosmic_text::FontSystem;
 use std::sync::Arc;
 use winit::window::Window;
 
+use crate::blocks::cards::BlockHover;
 use crate::color::{Palette, Rgba};
 use crate::layout::{PaneId, Rect};
 use crate::terminal::{CursorState, LineData};
 use gpu::Gpu;
 use scene::context::DrawContext;
-use scene::frame::{build_frame, FrameOptions};
+use scene::frame::{build_frame, build_frame_with_cards, FrameOptions};
 use scene::palette::{PaletteLayout, PaletteView};
 use scene::preedit::PreeditState;
 use scene::sidebar::LabelCache;
@@ -103,6 +104,10 @@ pub(crate) struct Renderer {
     /// The code review panel, while it is open.
     review_view: Option<crate::review::panel::View>,
     review_labels: scene::review::ReviewCache,
+    /// Render OSC 133 command blocks as rounded cards with a hover toolbar.
+    block_cards: bool,
+    /// Block card (and optional toolbar button) currently hovered by the pointer.
+    block_hover: Option<BlockHover>,
 }
 
 impl Renderer {
@@ -139,6 +144,8 @@ impl Renderer {
             palette_view: None,
             review_view: None,
             review_labels: Default::default(),
+            block_cards: true,
+            block_hover: None,
         };
         renderer.update_metrics();
         Ok(renderer)
@@ -237,6 +244,16 @@ impl Renderer {
         self.focused = focused;
     }
 
+    /// Enable or disable command block cards (default true).
+    pub(crate) fn set_block_cards(&mut self, enabled: bool) {
+        self.block_cards = enabled;
+    }
+
+    /// Update the hovered block card / toolbar button.
+    pub(crate) fn set_block_hover(&mut self, hover: Option<BlockHover>) {
+        self.block_hover = hover;
+    }
+
     /// Forget the cached rows of a closed pane.
     pub(crate) fn forget_pane(&mut self, id: PaneId) {
         self.row_cache.forget(id);
@@ -325,15 +342,31 @@ impl Renderer {
             palette: &self.palette,
             is_srgb: self.is_srgb,
         };
-        let mut frame = build_frame(
-            &mut ctx,
-            &opts,
-            &mut self.row_cache,
-            &mut self.ime,
-            &[],
-            panes,
-            dividers,
-        );
+        let style = UiStyle::new(&self.palette, self.ui_accent, self.metrics.scale);
+        let mut frame = if self.block_cards {
+            build_frame_with_cards(
+                &mut ctx,
+                &opts,
+                &mut self.row_cache,
+                &mut self.ime,
+                &[],
+                panes,
+                dividers,
+                style,
+                &self.ui_font,
+                self.block_hover,
+            )
+        } else {
+            build_frame(
+                &mut ctx,
+                &opts,
+                &mut self.row_cache,
+                &mut self.ime,
+                &[],
+                panes,
+                dividers,
+            )
+        };
         if let Some(view) = sidebar {
             frame.add_sidebar(&mut ctx, view, &mut self.sidebar_labels);
         } else {
@@ -344,7 +377,6 @@ impl Renderer {
         } else {
             self.review_labels.clear();
         }
-        let style = UiStyle::new(&self.palette, self.ui_accent, self.metrics.scale);
         frame.add_chrome(&mut ctx, style, &self.ui_font, chrome);
         if let Some(view) = &self.palette_view {
             frame.add_palette(&mut ctx, style, &self.ui_font, view);

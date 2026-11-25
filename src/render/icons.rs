@@ -20,6 +20,10 @@ pub enum Icon {
     Terminal,
     Agent,
     Diff,
+    Copy,
+    CopyCommand,
+    Rerun,
+    Zoom,
 }
 
 impl Icon {
@@ -139,6 +143,40 @@ impl Icon {
                 icon.stroke(out, [3.9, 5.8], [12.1, 5.8]);
                 icon.stroke(out, [8.0, 2.9], [8.0, 8.7]);
                 icon.stroke(out, [3.9, 12.5], [12.1, 12.5]);
+            }
+            Self::Copy => {
+                icon.outline(out, [5.4, 2.6, 8.0, 8.4], 1.5);
+                icon.outline(out, [2.6, 5.0, 8.0, 8.4], 1.5);
+            }
+            Self::CopyCommand => {
+                icon.outline(out, [2.5, 3.0, 11.0, 10.0], 1.8);
+                line(out, &[[5.0, 6.2], [7.2, 8.0], [5.0, 9.8]]);
+                icon.stroke(out, [9.0, 6.6], [11.2, 6.6]);
+                icon.stroke(out, [9.0, 9.4], [11.2, 9.4]);
+            }
+            Self::Rerun => {
+                line(
+                    out,
+                    &[
+                        [4.3, 5.9],
+                        [5.6, 4.0],
+                        [8.0, 3.3],
+                        [10.7, 4.2],
+                        [12.4, 6.5],
+                        [12.4, 9.5],
+                        [10.7, 11.8],
+                        [8.0, 12.7],
+                        [5.4, 11.9],
+                        [4.1, 10.1],
+                    ],
+                );
+                line(out, &[[3.3, 3.8], [4.3, 5.9], [6.6, 5.4]]);
+            }
+            Self::Zoom => {
+                line(out, &[[9.2, 3.5], [12.5, 3.5], [12.5, 6.8]]);
+                icon.stroke(out, [12.1, 3.9], [9.2, 6.8]);
+                line(out, &[[3.5, 9.2], [3.5, 12.5], [6.8, 12.5]]);
+                icon.stroke(out, [3.9, 12.1], [6.8, 9.2]);
             }
         }
     }

@@ -10,6 +10,11 @@ impl InputAction {
             self,
             InputAction::NewTab
                 | InputAction::ClosePane
+                | InputAction::CloseOtherPanes
+                | InputAction::TogglePaneZoom
+                | InputAction::FlashPane
+                | InputAction::RenameTab
+                | InputAction::JumpUnread
                 | InputAction::NextTab
                 | InputAction::PrevTab
                 | InputAction::SplitRight

@@ -68,17 +68,17 @@ fn keys_drive_selection_and_run() {
     }
     assert_eq!(p.query, "zoom");
     let hits = matches(&all, "zoom");
-    assert_eq!(hits.len(), 3);
+    assert_eq!(hits.len(), 4);
     let down = Key::Named(NamedKey::ArrowDown);
     let up = Key::Named(NamedKey::ArrowUp);
     p.key(&all, &down, None, none);
     assert_eq!(p.selected, 1);
     p.key(&all, &up, None, none);
     p.key(&all, &up, None, none);
-    assert_eq!(p.selected, 2, "wraps to the last");
+    assert_eq!(p.selected, 3, "wraps to the last");
     assert_eq!(
         p.key(&all, &Key::Named(NamedKey::Enter), None, none),
-        PaletteCmd::Run(all[hits[2]].id.clone())
+        PaletteCmd::Run(all[hits[3]].id.clone())
     );
     assert_eq!(
         p.key(&all, &Key::Named(NamedKey::Escape), None, none),

@@ -66,11 +66,19 @@ pub(crate) struct Closed {
     pub focused: Option<PaneId>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct CloseOthers {
+    keep: PaneId,
+    panes: Vec<PaneId>,
+    pub confirm: bool,
+}
+
 #[derive(Default)]
 pub(crate) struct Workspace {
     panes: HashMap<PaneId, Pane>,
     tabs: Vec<Tab>,
     active: usize,
+    zoomed: bool,
     next_id: u64,
     next_tab_id: u64,
 }
@@ -121,9 +129,24 @@ impl Workspace {
             .is_some_and(|t| matches!(t.root, Node::Leaf(_)))
     }
 
-    /// Pane `id` belongs to the active tab (so it is on screen).
+    /// Pane `id` is on screen in the active tab.
     pub fn is_visible(&self, id: PaneId) -> bool {
+        if let Some(zoomed) = self.zoomed_pane() {
+            return id == zoomed;
+        }
         self.active_tab().is_some_and(|t| t.root.contains(id))
+    }
+
+    pub(crate) fn zoomed_pane(&self) -> Option<PaneId> {
+        self.focused_id().filter(|_| self.zoomed)
+    }
+
+    pub(crate) fn toggle_pane_zoom(&mut self) -> bool {
+        if self.active_tab().is_none() || self.single_pane() {
+            return false;
+        }
+        self.zoomed = !self.zoomed;
+        true
     }
 
     /// The label of tab `index`: its custom title, else its focused pane's title, else "Tab N".
@@ -183,14 +206,21 @@ impl Workspace {
 
     /// Where each pane of the active tab goes.
     pub(crate) fn active_layout(&self, geo: &impl GridGeometry) -> Vec<(PaneId, Rect)> {
+        let content = geo.content_rect(self.tabs.len());
+        if let Some(id) = self.zoomed_pane() {
+            return vec![(id, content)];
+        }
         match self.active_tab() {
-            Some(tab) => layout(&tab.root, geo.content_rect(self.tabs.len()), geo.gap()),
+            Some(tab) => layout(&tab.root, content, geo.gap()),
             None => Vec::new(),
         }
     }
 
     /// The dividers between the panes of the active tab.
     pub(crate) fn active_dividers(&self, geo: &impl GridGeometry) -> Vec<Divider> {
+        if self.zoomed {
+            return Vec::new();
+        }
         match self.active_tab() {
             Some(tab) => dividers(&tab.root, geo.content_rect(self.tabs.len()), geo.gap()),
             None => Vec::new(),
@@ -216,8 +246,10 @@ impl Workspace {
         let content = geo.content_rect(self.tabs.len());
         let gap = geo.gap();
         let mut sizes = Vec::new();
+        let zoomed = self.zoomed_pane();
         for tab in &self.tabs {
             for (id, rect) in layout(&tab.root, content, gap) {
+                let rect = if zoomed == Some(id) { content } else { rect };
                 sizes.push((id, geo.grid_size(rect)));
             }
         }
@@ -313,16 +345,18 @@ impl Workspace {
             focused: id,
         });
         self.active = self.tabs.len() - 1;
+        self.zoomed = false;
         Some(id)
     }
 
     /// Whether the focused pane is large enough to split in `dir`.
-    pub(crate) fn can_split_focused(&self, dir: SplitDir) -> bool {
-        let Some((cols, rows)) = self
-            .focused_id()
-            .and_then(|id| self.panes.get(&id))
-            .map(|p| p.size)
-        else {
+    pub(crate) fn can_split_focused(&self, geo: &impl GridGeometry, dir: SplitDir) -> bool {
+        let Some((cols, rows)) = self.active_tab().and_then(|tab| {
+            layout(&tab.root, geo.content_rect(self.tabs.len()), geo.gap())
+                .into_iter()
+                .find(|(id, _)| *id == tab.focused)
+                .map(|(_, rect)| geo.grid_size(rect))
+        }) else {
             return false;
         };
         match dir {
@@ -339,7 +373,7 @@ impl Workspace {
         factory: &mut impl PaneFactory,
         dir: SplitDir,
     ) -> Option<(PaneId, PaneId)> {
-        if !self.can_split_focused(dir) {
+        if !self.can_split_focused(geo, dir) {
             return None;
         }
         let tab = self.tabs.get(self.active)?;
@@ -359,6 +393,7 @@ impl Workspace {
         self.panes.insert(new_id, pane);
         self.tabs[self.active].root = root;
         self.tabs[self.active].focused = new_id;
+        self.zoomed = false;
         Some((focused, new_id))
     }
 
@@ -369,6 +404,9 @@ impl Workspace {
         let tab_index = self.tabs.iter().position(|t| t.root.contains(id))?;
         let previous = self.focused_id();
         let tab_changed = tab_index != self.active;
+        if previous != Some(id) {
+            self.zoomed = false;
+        }
         self.active = tab_index;
         self.tabs[tab_index].focused = id;
         Some((tab_index, previous, tab_changed))
@@ -382,27 +420,39 @@ impl Workspace {
         }
         let old = tab.focused;
         tab.focused = id;
+        self.zoomed = false;
         Some(old)
     }
 
     /// Tab index and id of the pane whose unseen notification is the oldest.
     pub(crate) fn oldest_attention(&self) -> Option<(usize, PaneId)> {
-        self.tabs
-            .iter()
-            .enumerate()
-            .flat_map(|(index, tab)| tab.root.leaves().into_iter().map(move |id| (index, id)))
-            .filter_map(|(index, id)| {
-                let at = self.pane(id)?.meta.attention.as_ref()?.at;
-                Some((at, index, id))
-            })
+        self.attention_targets()
             .min_by_key(|&(at, ..)| at)
             .map(|(_, index, id)| (index, id))
     }
 
+    pub(crate) fn newest_attention(&self) -> Option<PaneId> {
+        self.attention_targets()
+            .max_by_key(|&(at, ..)| at)
+            .map(|(_, _, id)| id)
+    }
+
+    fn attention_targets(
+        &self,
+    ) -> impl Iterator<Item = (std::time::SystemTime, usize, PaneId)> + '_ {
+        self.tabs.iter().enumerate().flat_map(move |(index, tab)| {
+            tab.root.leaves().into_iter().filter_map(move |id| {
+                let at = self.pane(id)?.meta.attention.as_ref()?.at;
+                Some((at, index, id))
+            })
+        })
+    }
+
     /// The pane next to the focused one in direction `dir`.
     pub fn neighbor(&self, geo: &impl GridGeometry, dir: FocusDir) -> Option<PaneId> {
-        let from = self.focused_id()?;
-        neighbor(&self.active_layout(geo), from, dir)
+        let tab = self.active_tab()?;
+        let panes = layout(&tab.root, geo.content_rect(self.tabs.len()), geo.gap());
+        neighbor(&panes, tab.focused, dir)
     }
 
     /// Make tab `index` active. False when it does not exist or is already active.
@@ -411,6 +461,7 @@ impl Workspace {
             return false;
         }
         self.active = index;
+        self.zoomed = false;
         true
     }
 
@@ -457,10 +508,59 @@ impl Workspace {
             self.active = self.tabs.len().saturating_sub(1);
         }
         self.panes.remove(&id);
+        self.clear_invalid_zoom(previous);
         Some(Closed {
             previous: previous.filter(|p| self.panes.contains_key(p)),
             focused: self.focused_id(),
         })
+    }
+
+    pub(crate) fn other_panes(&self) -> Option<CloseOthers> {
+        let tab = self.active_tab()?;
+        let panes: Vec<_> = tab
+            .root
+            .leaves()
+            .into_iter()
+            .filter(|id| *id != tab.focused)
+            .collect();
+        if panes.is_empty() {
+            return None;
+        }
+        let confirm = panes
+            .iter()
+            .any(|id| self.panes.get(id).is_some_and(Pane::has_running_program));
+        Some(CloseOthers {
+            keep: tab.focused,
+            panes,
+            confirm,
+        })
+    }
+
+    /// Close the panes shown in the confirmation, if the focused pane and its siblings still match.
+    pub(crate) fn close_others(
+        &mut self,
+        plan: CloseOthers,
+        confirmed: bool,
+    ) -> Option<Vec<PaneId>> {
+        let current = self.other_panes()?;
+        if current.keep != plan.keep
+            || current.panes != plan.panes
+            || (current.confirm && !confirmed)
+        {
+            return None;
+        }
+        for id in &current.panes {
+            self.panes.remove(id);
+        }
+        self.tabs[self.active].root = Node::Leaf(current.keep);
+        self.zoomed = false;
+        Some(current.panes)
+    }
+
+    fn clear_invalid_zoom(&mut self, previous: Option<PaneId>) {
+        if previous != self.focused_id() || self.single_pane() {
+            self.zoomed = false;
+        }
     }
 
     /// Close every pane in tab `index`. Returns the removed pane ids and the resulting focus
@@ -481,6 +581,7 @@ impl Workspace {
         if self.active >= self.tabs.len() {
             self.active = self.tabs.len().saturating_sub(1);
         }
+        self.clear_invalid_zoom(previous);
         Some((
             removed,
             Closed {
@@ -703,15 +804,15 @@ mod tests {
         let mut ws = Workspace::new();
         let mut shells = FakeShells::default();
         ws.new_tab(&narrow, &mut shells).unwrap();
-        assert!(!ws.can_split_focused(SplitDir::Horizontal));
-        assert!(ws.can_split_focused(SplitDir::Vertical));
+        assert!(!ws.can_split_focused(&narrow, SplitDir::Horizontal));
+        assert!(ws.can_split_focused(&narrow, SplitDir::Vertical));
         assert!(ws
             .split_focused(&narrow, &mut shells, SplitDir::Vertical)
             .is_some());
         ws.apply_layout(&narrow);
         // After the vertical split each half is 13-14 rows: too small in both directions.
-        assert!(!ws.can_split_focused(SplitDir::Horizontal));
-        assert!(!ws.can_split_focused(SplitDir::Vertical));
+        assert!(!ws.can_split_focused(&narrow, SplitDir::Horizontal));
+        assert!(!ws.can_split_focused(&narrow, SplitDir::Vertical));
     }
 
     #[test]
@@ -743,5 +844,160 @@ mod tests {
         );
         assert_eq!(ws.active(), 1);
         assert_eq!(ws.focused_id(), Some(PaneId(3)));
+    }
+
+    #[test]
+    fn pane_zoom_maximizes_and_restores_on_toggle_or_focus_move() {
+        let g = Grid { w: 800.0, h: 400.0 };
+        let mut ws = Workspace::new();
+        let mut shells = FakeShells::default();
+        let a = ws.new_tab(&g, &mut shells).unwrap();
+        assert!(!ws.toggle_pane_zoom(), "single pane cannot zoom");
+        assert_eq!(ws.zoomed_pane(), None);
+
+        let (_, b) = ws
+            .split_focused(&g, &mut shells, SplitDir::Horizontal)
+            .unwrap();
+        ws.apply_layout(&g);
+        assert_eq!(ws.active_layout(&g).len(), 2);
+        let b_split_size = ws.pane(b).unwrap().size;
+
+        assert!(ws.toggle_pane_zoom());
+        assert_eq!(ws.zoomed_pane(), Some(b));
+        assert!(ws.is_visible(b));
+        assert!(!ws.is_visible(a));
+        assert!(ws.active_dividers(&g).is_empty());
+        assert_eq!(ws.active_layout(&g), vec![(b, g.content_rect(1))]);
+        ws.apply_layout(&g);
+        assert!(ws.pane(b).unwrap().size.0 > b_split_size.0);
+
+        // Toggle restores split layout and pane size.
+        assert!(ws.toggle_pane_zoom());
+        assert_eq!(ws.zoomed_pane(), None);
+        assert!(ws.is_visible(a));
+        assert_eq!(ws.active_layout(&g).len(), 2);
+        assert_eq!(ws.active_dividers(&g).len(), 1);
+        ws.apply_layout(&g);
+        assert_eq!(ws.pane(b).unwrap().size, b_split_size);
+
+        // Moving focus while zoomed restores unzoomed layout.
+        assert!(ws.toggle_pane_zoom());
+        assert_eq!(ws.neighbor(&g, FocusDir::Left), Some(a));
+        assert_eq!(ws.focus_pane(a), Some(b));
+        assert_eq!(ws.zoomed_pane(), None);
+        assert_eq!(ws.active_layout(&g).len(), 2);
+
+        // Opening or switching tabs while zoomed also restores.
+        assert!(ws.toggle_pane_zoom());
+        let c = ws.new_tab(&g, &mut shells).unwrap();
+        assert_eq!(ws.zoomed_pane(), None);
+        assert_eq!(ws.focused_id(), Some(c));
+    }
+
+    #[test]
+    fn jump_to_newest_unread_across_tabs() {
+        use crate::session::pane::Notification;
+        use std::time::{Duration, SystemTime};
+
+        let g = Grid { w: 800.0, h: 400.0 };
+        let mut ws = Workspace::new();
+        let mut shells = FakeShells::default();
+        let p1 = ws.new_tab(&g, &mut shells).unwrap();
+        let (_, p2) = ws
+            .split_focused(&g, &mut shells, SplitDir::Horizontal)
+            .unwrap();
+        let p3 = ws.new_tab(&g, &mut shells).unwrap();
+        let p4 = ws.new_tab(&g, &mut shells).unwrap();
+
+        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        ws.pane_mut(p1).unwrap().meta.attention = Some(Notification {
+            title: None,
+            body: "oldest".into(),
+            at: base + Duration::from_secs(10),
+        });
+        ws.pane_mut(p3).unwrap().meta.attention = Some(Notification {
+            title: Some("Agent".into()),
+            body: "newest".into(),
+            at: base + Duration::from_secs(30),
+        });
+        ws.pane_mut(p2).unwrap().meta.attention = Some(Notification {
+            title: None,
+            body: "middle".into(),
+            at: base + Duration::from_secs(20),
+        });
+
+        assert_eq!(ws.active(), 2);
+        assert_eq!(ws.focused_id(), Some(p4));
+        assert_eq!(ws.oldest_attention(), Some((0, p1)));
+        assert_eq!(ws.newest_attention(), Some(p3));
+
+        let (tab_idx, prev, changed) = ws.focus_any_pane(p3).unwrap();
+        assert_eq!((tab_idx, prev, changed), (1, Some(p4), true));
+        ws.pane_mut(p3).unwrap().meta.attention = None;
+        assert_eq!(ws.newest_attention(), Some(p2));
+
+        let (tab_idx, _, changed) = ws.focus_any_pane(p2).unwrap();
+        assert_eq!((tab_idx, changed), (0, true));
+        ws.pane_mut(p2).unwrap().meta.attention = None;
+        assert_eq!(ws.newest_attention(), Some(p1));
+    }
+
+    #[test]
+    fn close_others_confirmation_rule() {
+        let g = Grid { w: 800.0, h: 400.0 };
+        let mut ws = Workspace::new();
+        let mut shells = FakeShells::default();
+        let a = ws.new_tab(&g, &mut shells).unwrap();
+        assert_eq!(ws.other_panes(), None, "single pane has no others");
+
+        let (_, b) = ws
+            .split_focused(&g, &mut shells, SplitDir::Horizontal)
+            .unwrap();
+        let (_, c) = ws
+            .split_focused(&g, &mut shells, SplitDir::Vertical)
+            .unwrap();
+        assert_eq!(ws.focused_id(), Some(c));
+
+        // Idle siblings require no confirmation.
+        let plan = ws.other_panes().unwrap();
+        assert!(!plan.confirm);
+        assert_eq!(plan.panes, vec![a, b]);
+
+        // Running command in another pane requires confirmation.
+        ws.pane_mut(a).unwrap().meta.running = true;
+        let plan = ws.other_panes().unwrap();
+        assert!(plan.confirm);
+        assert_eq!(
+            ws.close_others(
+                CloseOthers {
+                    keep: plan.keep,
+                    panes: plan.panes.clone(),
+                    confirm: plan.confirm,
+                },
+                false
+            ),
+            None,
+            "unconfirmed close refused while another pane runs a program"
+        );
+        let removed = ws.close_others(plan, true).unwrap();
+        assert_eq!(removed, vec![a, b]);
+        assert!(ws.single_pane());
+        assert_eq!(ws.focused_id(), Some(c));
+        assert!(ws.pane(a).is_none() && ws.pane(b).is_none() && ws.pane(c).is_some());
+
+        // Alternate screen program (e.g. vim) in another pane also requires confirmation.
+        let (_, d) = ws
+            .split_focused(&g, &mut shells, SplitDir::Horizontal)
+            .unwrap();
+        ws.pane_mut(c)
+            .unwrap()
+            .terminal
+            .process_bytes(b"\x1b[?1049h");
+        let plan = ws.other_panes().unwrap();
+        assert!(plan.confirm);
+        assert_eq!(ws.focused_id(), Some(d));
+        let removed = ws.close_others(plan, true).unwrap();
+        assert_eq!(removed, vec![c]);
+        assert!(ws.single_pane());
     }
 }

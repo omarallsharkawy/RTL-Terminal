@@ -210,6 +210,12 @@ impl Pane {
         }
     }
 
+    pub(crate) fn has_running_program(&self) -> bool {
+        self.meta.running
+            || self.mode().contains(TermMode::ALT_SCREEN)
+            || self.pty.as_ref().is_some_and(Pty::has_foreground_program)
+    }
+
     pub fn mode(&self) -> TermMode {
         self.terminal.mode()
     }

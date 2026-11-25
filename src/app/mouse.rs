@@ -6,7 +6,10 @@ use winit::event::{MouseButton, MouseScrollDelta};
 use winit::keyboard::ModifiersState;
 use winit::window::CursorIcon;
 
+use std::time::Instant;
+
 use super::App;
+use crate::blocks::cards::{hit_test_cards, BlockButton, BlockHover};
 use crate::input::encode_mouse_for_mode;
 use crate::input::mouse::{
     button_code, button_report, motion_report, wheel_action, wheel_lines, WheelAction,
@@ -61,7 +64,10 @@ impl App {
         if let Some(old) = left {
             self.clear_link_hover(old);
         }
-        let Some(id) = target else { return };
+        let Some(id) = target else {
+            self.window.set_block_hover(None);
+            return;
+        };
         let Some(rect) = self.pane_rect(id) else {
             return;
         };
@@ -79,9 +85,30 @@ impl App {
         if over_sidebar || matches!(hit, Hit::Chrome(_) | Hit::ChromeBackground) {
             // A selection may extend to its pane's edge, but programs only receive the
             // release of their captured press, using the last reported pane cell.
+            self.window.set_block_hover(None);
             self.clear_link_hover(id);
             return;
         }
+        if !captured && hit == Hit::Pane(id) {
+            let bh = self
+                .block_card_hit(id, x, y)
+                .map(|(block, button)| BlockHover {
+                    pane: id,
+                    block,
+                    button,
+                });
+            self.window.set_block_hover(bh);
+            if bh.is_some_and(|h| h.button.is_some()) {
+                self.clear_link_hover(id);
+                self.window.set_cursor_icon(CursorIcon::Pointer);
+                return;
+            }
+        } else {
+            self.window.set_block_hover(None);
+        }
+        let Some(pane) = self.ws.pane_mut(id) else {
+            return;
+        };
         pane.ui.mouse_side = side;
         let changed = (col, row) != (pane.ui.mouse_col, pane.ui.mouse_row);
         (pane.ui.mouse_col, pane.ui.mouse_row) = (col, row);
@@ -101,6 +128,7 @@ impl App {
 
     pub(super) fn on_cursor_left(&mut self) {
         self.window.set_chrome_hover(None);
+        self.window.set_block_hover(None);
         if self.pointer.capture.is_none() && self.pointer.drag.is_none() {
             self.pointer.pos = (f64::NEG_INFINITY, f64::NEG_INFINITY);
             if let Some(id) = self.pointer.hover.take() {
@@ -129,6 +157,18 @@ impl App {
                     && self.pointer.capture.is_none()
                     && self.pointer.drag.is_none()
                     && self.click_chrome(action);
+            }
+            if button == MouseButton::Left
+                && self.pointer.capture.is_none()
+                && self.pointer.drag.is_none()
+            {
+                if let Hit::Pane(id) = hit {
+                    if let Some((block_id, Some(btn))) = self.block_card_hit(id, x, y) {
+                        self.focus_pane(id);
+                        self.run_block_button(id, block_id, btn);
+                        return false;
+                    }
+                }
             }
             match self.pointer.press(hit, button) {
                 PressTarget::Tab(i) => {
@@ -330,6 +370,7 @@ impl App {
         }
         self.window.set_cursor_icon(CursorIcon::Default);
         self.window.set_chrome_hover(None);
+        self.window.set_block_hover(None);
         self.release_held_buttons();
         self.pointer.cancel();
     }
@@ -350,7 +391,26 @@ impl App {
             self.window.set_cursor_icon(icon);
         }
         if let Some(id) = target {
+            if hit == Hit::Pane(id) {
+                let bh = self
+                    .block_card_hit(id, x, y)
+                    .map(|(block, button)| BlockHover {
+                        pane: id,
+                        block,
+                        button,
+                    });
+                self.window.set_block_hover(bh);
+                if bh.is_some_and(|h| h.button.is_some()) {
+                    self.clear_link_hover(id);
+                    self.window.set_cursor_icon(CursorIcon::Pointer);
+                    return;
+                }
+            } else {
+                self.window.set_block_hover(None);
+            }
             self.update_link_hover(id);
+        } else {
+            self.window.set_block_hover(None);
         }
     }
 
@@ -439,6 +499,67 @@ impl App {
             }
             if let Some(p) = self.ws.pane_mut(id) {
                 p.ui.mouse_button_down = None;
+            }
+        }
+    }
+
+    /// Hit-test `(x, y)` against visible command block cards in pane `id`.
+    fn block_card_hit(&self, id: PaneId, x: f64, y: f64) -> Option<(u64, Option<BlockButton>)> {
+        if !self.config.block_cards || self.mode_of(id).intersects(TermMode::MOUSE_MODE) {
+            return None;
+        }
+        let pane = self.ws.pane(id)?;
+        let rect = self.pane_rect(id)?;
+        let metrics = self.window.metrics()?;
+        let decor = pane.blocks.decor(&pane.terminal);
+        if decor.is_empty() {
+            return None;
+        }
+        let rows = pane.size.1;
+        let has_status = pane.ui.search_query.is_some() || pane.ui.hover_target.is_some();
+        let hidden_row = has_status.then(|| rows.checked_sub(1)).flatten();
+        hit_test_cards(rect, metrics, rows, &decor, hidden_row, x, y)
+    }
+
+    /// Execute a floating toolbar button action for `block_id` in pane `id`.
+    fn run_block_button(&mut self, id: PaneId, block_id: u64, button: BlockButton) {
+        match button {
+            BlockButton::CopyCommand => {
+                let cmd = self
+                    .ws
+                    .pane(id)
+                    .and_then(|p| p.blocks.block_by_id(block_id))
+                    .and_then(|b| b.command.as_deref())
+                    .map(crate::blocks::rerun_text)
+                    .filter(|s| !s.is_empty());
+                if let Some(cmd) = cmd {
+                    self.clipboard.set_text(cmd);
+                }
+            }
+            BlockButton::CopyOutput => {
+                let text = self
+                    .ws
+                    .pane(id)
+                    .and_then(|p| p.blocks.block_text_by_id(block_id, &p.terminal));
+                if let Some(text) = text {
+                    self.clipboard.set_text(text.output);
+                }
+            }
+            BlockButton::AskAgent => self.ask_agent_about_block(id, block_id),
+            BlockButton::Rerun => {
+                let cmd = self
+                    .ws
+                    .pane(id)
+                    .and_then(|p| p.blocks.block_by_id(block_id))
+                    .and_then(|b| b.command.clone());
+                if let Some(cmd) = cmd {
+                    let bracketed = self.mode_of(id).contains(TermMode::BRACKETED_PASTE);
+                    let bytes = crate::blocks::encode_rerun(&cmd, bracketed);
+                    if !bytes.is_empty() {
+                        self.send_input(id, &bytes);
+                        self.cursor_blink.reset(Instant::now());
+                    }
+                }
             }
         }
     }

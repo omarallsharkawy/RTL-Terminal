@@ -144,6 +144,7 @@ pub struct Pty {
     /// Ends the shell when the pane is closed (the reader thread keeps the PTY open otherwise).
     killer: Box<dyn ChildKiller + Send + Sync>,
     program_name: Option<String>,
+    direct_program: bool,
     /// Process id of the shell, to find its working directory and listening ports (Linux only).
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pid: Option<u32>,
@@ -343,6 +344,7 @@ impl Pty {
             writer,
             killer,
             program_name,
+            direct_program: !options.command.is_empty(),
             pid,
         })
     }
@@ -354,6 +356,17 @@ impl Pty {
 
     pub(crate) fn program_name(&self) -> Option<&str> {
         self.program_name.as_deref()
+    }
+
+    pub(crate) fn has_foreground_program(&self) -> bool {
+        if self.direct_program {
+            return true;
+        }
+        #[cfg(unix)]
+        if let (Some(shell), Some(group)) = (self.pid, self.master.process_group_leader()) {
+            return group > 0 && group as u32 != shell;
+        }
+        false
     }
 
     /// The shell's current working directory, so a new tab or split can open in it.

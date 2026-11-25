@@ -136,6 +136,7 @@ pub(crate) fn encode_pass(
         occlusion_query_set: None,
         multiview_mask: None,
     });
+    shapes.render_underlay(&mut pass);
     quads.render(&mut pass);
     shapes.render(&mut pass);
     text.render(&mut pass)

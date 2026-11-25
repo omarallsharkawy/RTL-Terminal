@@ -40,7 +40,34 @@ impl App {
             None
         };
         let prompt = agent_prompt(&context, command.as_deref(), exit, cwd.as_deref());
-        let note = match self.start_agent(cwd, &prompt) {
+        self.launch_agent(id, cwd, &prompt);
+    }
+
+    /// Ask an agent specifically about command block `block_id` in pane `id` (from the card
+    /// toolbar's Ask Agent button).
+    pub(super) fn ask_agent_about_block(&mut self, id: PaneId, block_id: u64) {
+        let Some(pane) = self.ws.pane(id) else {
+            return;
+        };
+        let Some(block) = pane.blocks.block_text_by_id(block_id, &pane.terminal) else {
+            return;
+        };
+        let cwd = if pane.remote.is_none() {
+            pane.meta.cwd.clone()
+        } else {
+            None
+        };
+        let prompt = agent_prompt(
+            &block.output,
+            block.command.as_deref(),
+            block.exit,
+            cwd.as_deref(),
+        );
+        self.launch_agent(id, cwd, &prompt);
+    }
+
+    fn launch_agent(&mut self, id: PaneId, cwd: Option<PathBuf>, prompt: &str) {
+        let note = match self.start_agent(cwd, prompt) {
             Ok(_) => return,
             Err(AgentStartError::NotFound) => {
                 "\r\n\x1b[33mTwitty: no coding agent found (claude, codex, gemini, \
@@ -77,9 +104,9 @@ impl App {
         };
         // Prefer a side-by-side split; when the sidebar or existing splits leave the pane too
         // narrow for MIN_SPLIT_COLS, fall back to a stacked split, then a new tab.
-        let spawned = if self.ws.can_split_focused(SplitDir::Horizontal) {
+        let spawned = if self.can_split_focused(SplitDir::Horizontal) {
             self.split_focused_with(SplitDir::Horizontal, options)
-        } else if self.ws.can_split_focused(SplitDir::Vertical) {
+        } else if self.can_split_focused(SplitDir::Vertical) {
             self.split_focused_with(SplitDir::Vertical, options)
         } else {
             self.new_tab_with(options)

@@ -28,6 +28,8 @@ pub struct TwittyConfig {
     pub ui_accent: Option<String>,
     pub top_bar: bool,
     pub pane_headers: bool,
+    /// Render OSC 133 command blocks on the main screen as rounded cards with a hover toolbar.
+    pub block_cards: bool,
     /// Blink the cursor, unless the running program asks for a steady one (DECSCUSR).
     pub cursor_blink: bool,
     /// Where the workspace sidebar sits: "right", "left" or "hidden".
@@ -82,6 +84,7 @@ impl Default for TwittyConfig {
             ui_accent: None,
             top_bar: true,
             pane_headers: true,
+            block_cards: true,
             cursor_blink: true,
             sidebar: "right".into(),
             sidebar_width: 220.0,

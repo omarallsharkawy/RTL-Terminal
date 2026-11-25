@@ -41,6 +41,10 @@ commands! {
     "tab.new", "New tab", "تاب جديد", Some("Ctrl+Shift+T") => InputAction::NewTab;
     "tab.next", "Next tab", "التاب التالي", Some("Ctrl+Tab") => InputAction::NextTab;
     "tab.prev", "Previous tab", "التاب السابق", Some("Ctrl+Shift+Tab") => InputAction::PrevTab;
+    "tab.rename", "Rename tab…", "غيّر اسم التاب…", Some("Ctrl+Shift+N") => InputAction::RenameTab;
+    "pane.zoom", "Toggle pane zoom", "كبّر اللوحة أو رجّع حجمها", Some("Ctrl+Shift+Z") => InputAction::TogglePaneZoom;
+    "pane.flash", "Flash focused pane", "ومّض إطار اللوحة النشطة", Some("Ctrl+Shift+H") => InputAction::FlashPane;
+    "pane.close-others", "Close other panes", "اقفل باقي اللوحات", Some("Ctrl+Shift+K") => InputAction::CloseOtherPanes;
     "pane.close", "Close pane", "قفل اللوحة", Some("Ctrl+Shift+W") => InputAction::ClosePane;
     "split.right", "Split right", "قسّم يمين", Some("Ctrl+Shift+E") => InputAction::SplitRight;
     "split.down", "Split down", "قسّم تحت", Some("Ctrl+Shift+O") => InputAction::SplitDown;
@@ -51,6 +55,7 @@ commands! {
     "sidebar.toggle", "Toggle sidebar", "إظهار/إخفاء الشريط الجانبي", Some("Ctrl+Shift+B") => InputAction::ToggleSidebar;
     "attention.next", "Go to next notification", "روح للإشعار اللي بعده", Some("Ctrl+Shift+U") => InputAction::NextAttention;
     "notifications.list", "Notifications", "الإشعارات", Some("Ctrl+Shift+I") => InputAction::NotificationList;
+    "notifications.jump-unread", "Jump to newest unread notification", "روح لأحدث إشعار غير مقروء", Some("Ctrl+Shift+J") => InputAction::JumpUnread;
     "block.prev", "Previous command block", "البلوك اللي قبله", Some("Ctrl+Shift+Up") => InputAction::PrevBlock;
     "block.next", "Next command block", "البلوك اللي بعده", Some("Ctrl+Shift+Down") => InputAction::NextBlock;
     "block.copy-output", "Copy command output", "انسخ ناتج الأمر", Some("Ctrl+Shift+Y") => InputAction::CopyBlockOutput;
