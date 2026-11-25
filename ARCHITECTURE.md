@@ -71,6 +71,7 @@ Everything above `render/gpu` runs without a GPU and is covered by tests in `tes
 | `ui/search_all.rs` | "Search all terminals", the palette's search mode: scans each pane's text lines (`Terminal::for_each_text_line`, newest first, bounded), folds them like the palette, shares at most 200 results between panes, cuts each line around its match. The scan runs in 8 ms slices from `about_to_wait`, resuming each pane by absolute line; the jump goes through `Terminal::focus_search_at` to the scrollback search highlight. | `terminal`, `ui/palette` |
 | `control/` | The control socket (`$XDG_RUNTIME_DIR/twitty/twitty-<pid>.sock`, 0600 in a 0700 dir) speaking newline-delimited JSON (`twitty ctl` + cmux v2 JSON-RPC + minimal v1 text hook commands), `twitty claude-hook`, and the `twitty ctl/send/notify/list/read` client. | `session`, `sidebar`, `input`, `ui` |
 | `agent.rs` | "Ask an agent": picks a local agent CLI, builds its argv and a fenced prompt from the selection, block or screen. | — |
+| `review/` | The code review panel's model: `git` loads the focused repo's changes (fixed args, `-C <repo>`, timeout, 2 MiB) and untracked files on a worker thread (`AppEvent::Review`); `diff` parses unified diffs into files, hunks and numbered lines within bounds; `rows` flattens them for scrolling; `layout` places the panel (45 % of the window, min 360 px) and hit-tests it; `comment` formats a line comment and picks the agent pane; `panel` is the state machine (keys, clicks, comment box) producing a `View`. Hooks in `app/review.rs`; drawn by `render/scene/review.rs` with the row shaper. | `agent`, `shell_integration`, `sidebar::git` |
 | `ports.rs` | Listening TCP ports per pane for the sidebar: pure `/proc` parsing and a scanner thread. | — |
 | `remote/`, `app/ssh.rs` | Validates SSH identities, verifies and installs the versioned helper over OpenSSH, and reconnects an ordinary pane PTY on transport failure. | `session`, `pty` |
 | `remote/daemon/`, `bin/twitty-remote.rs` | GUI-free Linux helper. Owns persistent login-shell PTYs and a 256 KiB output tail per session. Attachments use framed terminal bytes, resize and exit messages on a private Unix socket. | `portable-pty`, `rustix` |
@@ -117,6 +118,7 @@ or link-hover state change.
   Each named remote session has a detached host process holding its shell PTY. The attach client
   relays raw input and window sizes. Multiple attachments use the smallest grid while attached.
 - **Notifications:** each `notify-send` runs on its own short thread (at most 8 at once).
+- **Review panel:** one load at a time on a `twitty-review` thread (a second request reruns it after), plus a watchdog thread per git command that kills it after 20 s or when its output passes the bound. Results come back as `AppEvent::Review` tagged with a load number; stale ones are dropped, and one that arrives while a comment is being typed waits for the comment box to close.
 
 ## Shell signals
 

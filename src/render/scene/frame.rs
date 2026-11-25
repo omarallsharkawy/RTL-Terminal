@@ -55,6 +55,8 @@ pub struct Frame {
     pub ime_area: Option<ImeArea>,
     tab_titles: Vec<(Buffer, Rect, glyphon::Color)>,
     sidebar_labels: Vec<super::sidebar::Label>,
+    /// Labels of the code review panel.
+    review_texts: Vec<super::review::ReviewText>,
     /// Per pane: the status line text and its top y.
     statuses: Vec<Option<(Buffer, f32)>>,
     /// Per pane: the badges of its command blocks.
@@ -246,6 +248,7 @@ pub fn build_frame(
         ime_area,
         tab_titles,
         sidebar_labels: Vec::new(),
+        review_texts: Vec::new(),
         statuses,
         badges,
         preedit_box,
@@ -278,13 +281,26 @@ impl Frame {
         self.sidebar_labels = scene.labels;
     }
 
+    /// The code review panel, beside the panes (they are laid out to leave it room).
+    pub fn add_review(
+        &mut self,
+        ctx: &mut DrawContext,
+        view: &crate::review::panel::View,
+        cache: &mut super::review::ReviewCache,
+    ) {
+        let scene = super::review::build(ctx, view, cache);
+        self.quads.extend(scene.quads);
+        self.review_texts = scene.texts;
+    }
+
     pub fn add_attention(&mut self, ctx: &DrawContext, rects: &[Rect]) {
         self.quads
             .extend(super::sidebar::attention_quads(ctx, rects));
     }
 
     /// Every text run, in drawing order: tab titles, per-pane rows (the last one hidden under
-    /// a status line) and status line, preedit, sidebar labels, then the command palette.
+    /// a status line) and status line, preedit, sidebar labels, the review panel, then the
+    /// command palette.
     pub fn text_runs<'a>(
         &'a self,
         panes: &[PaneFrame],
@@ -380,6 +396,17 @@ impl Frame {
                 bounds: label.bounds,
                 color: label.color,
             });
+        }
+        for text in &self.review_texts {
+            for seg in &text.row.segments {
+                runs.push(TextRun {
+                    buffer: &seg.buffer,
+                    left: text.left + seg.seg_x,
+                    top: text.top,
+                    bounds: text.bounds,
+                    color: fg,
+                });
+            }
         }
         if let Some(hole) = self.overlay_rect {
             runs = runs

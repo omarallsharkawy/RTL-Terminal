@@ -16,6 +16,7 @@ pub mod ports;
 pub mod pty;
 pub mod remote;
 pub mod render;
+pub mod review;
 pub mod session;
 pub mod shell_integration;
 pub mod sidebar;

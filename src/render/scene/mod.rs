@@ -8,5 +8,6 @@ pub mod cursor;
 pub mod frame;
 pub mod palette;
 pub mod preedit;
+pub mod review;
 pub mod row_quads;
 pub mod sidebar;

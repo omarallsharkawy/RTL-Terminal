@@ -41,7 +41,9 @@ impl App {
         let hit = self.window.hit_test(&self.ws, x, y);
         let over_sidebar = self.window.sidebar_contains(&self.ws, x, y);
         let captured = self.pointer.capture.is_some();
-        if over_sidebar {
+        if let Some(icon) = self.review_cursor(x, y).filter(|_| !captured) {
+            self.window.set_cursor_icon(icon);
+        } else if over_sidebar {
             self.window.set_cursor_icon(CursorIcon::Default);
         } else if let Some(icon) = cursor_icon_for(&hit, captured, self.window.cursor_icon()) {
             self.window.set_cursor_icon(icon);
@@ -94,6 +96,9 @@ impl App {
         if self.palette_open() {
             return pressed && self.on_palette_mouse_press(button);
         }
+        if pressed && self.review_mouse_press(button) {
+            return false;
+        }
         let Some(code) = button_code(button) else {
             return false;
         };
@@ -132,6 +137,9 @@ impl App {
         }
         let line_height = self.window.line_height().unwrap_or(20.0);
         let lines = wheel_lines(delta, line_height);
+        if self.review_wheel(lines) {
+            return;
+        }
         if self
             .window
             .scroll_sidebar(&self.ws, self.pointer.pos.0, self.pointer.pos.1, lines)

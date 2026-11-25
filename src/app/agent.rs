@@ -1,5 +1,7 @@
 //! "Ask an agent" (Ctrl+Shift+A): a split running a coding-agent CLI with the pane's output.
 
+use std::path::PathBuf;
+
 use super::App;
 use crate::agent::{agent_argv, agent_prompt, resolve_agent};
 use crate::layout::{PaneId, SplitDir};
@@ -37,19 +39,40 @@ impl App {
         } else {
             None
         };
-        let path = std::env::var_os("PATH");
-        let Some(agent) = resolve_agent(self.config.agent_command.as_deref(), path.as_deref())
-        else {
-            let note = "\r\n\x1b[33mTwitty: no coding agent found (claude, codex, gemini, \
-                        opencode, grok). Set \"agent_command\" in config.json.\x1b[0m\r\n";
-            self.term(id, |t| t.process_bytes(note.as_bytes()));
-            self.window.request_redraw();
-            return;
-        };
         let prompt = agent_prompt(&context, command.as_deref(), exit, cwd.as_deref());
+        let note = match self.start_agent(cwd, &prompt) {
+            Ok(_) => return,
+            Err(AgentStartError::NotFound) => {
+                "\r\n\x1b[33mTwitty: no coding agent found (claude, codex, gemini, \
+                 opencode, grok). Set \"agent_command\" in config.json.\x1b[0m\r\n"
+            }
+            Err(AgentStartError::Failed) => {
+                "\r\n\x1b[33mTwitty: failed to start the coding agent.\x1b[0m\r\n"
+            }
+        };
+        self.term(id, |t| t.process_bytes(note.as_bytes()));
+        self.window.request_redraw();
+    }
+
+    /// Start the configured (or first installed) coding agent with `prompt` as its first
+    /// message, in a split of the focused pane (or a new tab when there is no room). Returns
+    /// the agent's program name.
+    pub(super) fn start_agent(
+        &mut self,
+        cwd: Option<PathBuf>,
+        prompt: &str,
+    ) -> Result<String, AgentStartError> {
+        let path = std::env::var_os("PATH");
+        let agent = resolve_agent(self.config.agent_command.as_deref(), path.as_deref())
+            .ok_or(AgentStartError::NotFound)?;
+        let name = agent
+            .first()
+            .and_then(|p| std::path::Path::new(p).file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let options = SpawnOptions {
             cwd,
-            command: agent_argv(&agent, &prompt),
+            command: agent_argv(&agent, prompt),
             env: Vec::new(),
         };
         // Prefer a side-by-side split; when the sidebar or existing splits leave the pane too
@@ -61,12 +84,17 @@ impl App {
         } else {
             self.new_tab_with(options)
         };
-        if spawned.is_none() {
-            let note = "\r\n\x1b[33mTwitty: failed to start the coding agent.\x1b[0m\r\n";
-            self.term(id, |t| t.process_bytes(note.as_bytes()));
-            self.window.request_redraw();
-        }
+        spawned.map(|_| name).ok_or(AgentStartError::Failed)
     }
+}
+
+/// Why no agent was started.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum AgentStartError {
+    /// No agent CLI is installed and none is configured.
+    NotFound,
+    /// The agent's pane could not be opened.
+    Failed,
 }
 
 /// The visible screen as plain text in logical order.

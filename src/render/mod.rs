@@ -92,6 +92,9 @@ pub(crate) struct Renderer {
     ime: PreeditState,
     /// The command palette, while it is open.
     palette_view: Option<PaletteView>,
+    /// The code review panel, while it is open.
+    review_view: Option<crate::review::panel::View>,
+    review_labels: scene::review::ReviewCache,
 }
 
 impl Renderer {
@@ -124,6 +127,8 @@ impl Renderer {
             sidebar_labels: LabelCache::default(),
             ime: Default::default(),
             palette_view: None,
+            review_view: None,
+            review_labels: Default::default(),
         };
         renderer.update_metrics();
         Ok(renderer)
@@ -222,6 +227,11 @@ impl Renderer {
     /// Show the command palette (`Some`) or hide it.
     pub(crate) fn set_command_palette(&mut self, view: Option<PaletteView>) {
         self.palette_view = view;
+    }
+
+    /// Show the code review panel (`Some`) or hide it.
+    pub(crate) fn set_review(&mut self, view: Option<crate::review::panel::View>) {
+        self.review_view = view;
     }
 
     /// Hit-test physical pixel `(x, y)` against the open command palette, if any.
@@ -338,6 +348,11 @@ impl Renderer {
             frame.add_sidebar(&mut ctx, view, &mut self.sidebar_labels);
         } else {
             self.sidebar_labels.clear();
+        }
+        if let Some(view) = &self.review_view {
+            frame.add_review(&mut ctx, view, &mut self.review_labels);
+        } else {
+            self.review_labels.clear();
         }
         if let Some(view) = &self.palette_view {
             frame.add_palette(&mut ctx, view);
