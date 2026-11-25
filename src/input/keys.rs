@@ -62,6 +62,8 @@ pub enum InputAction {
     CopyBlockOutput,
     /// Ask a coding agent about the selected (or last) command block.
     AskAgent,
+    /// Show or hide the code review panel (the focused repository's uncommitted changes).
+    ToggleReview,
 }
 
 /// One key event with everything the encoders look at. Window-free, so the `*_raw` entry
@@ -329,6 +331,7 @@ fn ctrl_shift_shortcut(key_code: KeyCode) -> Option<InputAction> {
         KeyCode::KeyU => InputAction::NextAttention,
         KeyCode::KeyY => InputAction::CopyBlockOutput,
         KeyCode::KeyA => InputAction::AskAgent,
+        KeyCode::KeyR => InputAction::ToggleReview,
         KeyCode::ArrowUp => InputAction::PrevBlock,
         KeyCode::ArrowDown => InputAction::NextBlock,
         KeyCode::Digit1 => InputAction::SelectTab(0),

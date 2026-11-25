@@ -49,6 +49,8 @@ pub(super) struct Window {
     notifications: crate::notify::DesktopNotifier,
     /// Listening TCP ports per pane, from the last port scan.
     ports: HashMap<PaneId, Vec<u16>>,
+    /// The code review panel is open (it takes the right part of the pane area).
+    review_open: bool,
 }
 
 impl Window {
@@ -63,6 +65,7 @@ impl Window {
             branches: BranchCache::default(),
             notifications: crate::notify::DesktopNotifier::default(),
             ports: HashMap::new(),
+            review_open: false,
         }
     }
 
@@ -133,16 +136,50 @@ impl Window {
     }
 
     fn layout(&self, tab_count: usize) -> (Rect, Option<Rect>) {
+        let (content, sidebar, _) = self.layout_with_review(tab_count);
+        (content, sidebar)
+    }
+
+    /// Panes, sidebar and review panel areas. The panel takes the right part of what the
+    /// sidebar leaves to the panes.
+    fn layout_with_review(&self, tab_count: usize) -> (Rect, Option<Rect>, Option<Rect>) {
         let Some(r) = &self.renderer else {
-            return (Rect::new(0.0, 0.0, 0.0, 0.0), None);
+            return (Rect::new(0.0, 0.0, 0.0, 0.0), None, None);
         };
-        sidebar_layout(
-            r.content_rect(0),
+        let surface = r.content_rect(0);
+        let scale = r.metrics().scale;
+        let (content, sidebar) = sidebar_layout(
+            surface,
             r.content_rect(tab_count),
             self.sidebar.position,
             self.sidebar_width,
-            r.metrics().scale,
-        )
+            scale,
+        );
+        if !self.review_open {
+            return (content, sidebar, None);
+        }
+        let (content, review) = crate::review::layout::split_content(content, surface.w, scale);
+        (content, sidebar, review)
+    }
+
+    /// Open or close the review panel's area (the caller lays the panes out again).
+    pub(super) fn set_review_open(&mut self, open: bool) {
+        self.review_open = open;
+        if !open {
+            self.set_review(None);
+        }
+    }
+
+    /// Where the review panel is drawn, while it is open and fits.
+    pub(super) fn review_rect(&self, ws: &Workspace) -> Option<Rect> {
+        self.layout_with_review(ws.tabs().len()).2
+    }
+
+    /// Hand the review panel's view to the renderer (`None` hides it).
+    pub(super) fn set_review(&mut self, view: Option<crate::review::panel::View>) {
+        if let Some(ref mut r) = self.renderer {
+            r.set_review(view);
+        }
     }
 
     /// The sidebar is on screen.
@@ -311,7 +348,11 @@ impl Window {
             return Hit::Nothing;
         };
         let n = ws.tabs().len();
-        let (content, sidebar) = self.layout(n);
+        let (content, sidebar, review) = self.layout_with_review(n);
+        if review.is_some_and(|area| area.contains(x, y)) {
+            // The review panel handles its own pointer input (`App::review_mouse_press`).
+            return Hit::Nothing;
+        }
         if let Some(area) = sidebar {
             if area.contains(x, y) {
                 let view = self.sidebar_scroll.view(
@@ -535,6 +576,8 @@ impl App {
             }
         }
         self.sync_port_watch();
+        let review = self.review_view();
+        self.window.set_review(review);
         let (tabs, panes, dividers) = self.frame();
         let visible = self.cursor_blink.visible();
         self.window

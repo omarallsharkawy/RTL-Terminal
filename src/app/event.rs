@@ -26,6 +26,11 @@ pub enum AppEvent {
     Control(Request, mpsc::Sender<Response>),
     /// Listening TCP ports of each pane's processes, from the port scanner thread.
     Ports(HashMap<PaneId, Vec<u16>>),
+    /// The review panel's changes, loaded on a worker thread (tagged with its load number).
+    Review(
+        u64,
+        Result<crate::review::Snapshot, crate::review::LoadError>,
+    ),
 }
 
 /// Longest title kept from a program, in characters.
@@ -103,6 +108,7 @@ impl App {
             return;
         };
         pane.blocks.on_event(&event, &pane.terminal, Instant::now());
+        let command_ended = matches!(event.signal, Signal::Mark(MarkKind::CommandEnd { .. }));
         let meta = &mut pane.meta;
         match event.signal {
             Signal::Cwd(path) => meta.cwd = Some(path),
@@ -119,6 +125,9 @@ impl App {
                 }
                 MarkKind::PromptStart | MarkKind::CommandStart => {}
             },
+        }
+        if command_ended {
+            self.review_command_ended(id);
         }
         self.window.request_redraw();
     }

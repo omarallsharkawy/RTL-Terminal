@@ -88,6 +88,7 @@ cargo build --release
 | Split right / split down | Ctrl+Shift+E / Ctrl+Shift+O |
 | Focus the pane to the left / right / above / below | Alt+Arrow keys, or click the pane |
 | Resize a split | Drag the divider |
+| Review changes (the focused repository's uncommitted diff, beside the panes) | Ctrl+Shift+R |
 
 With a single pane, Alt+Arrow goes to the program (fish, readline word jumps); with a single tab, so do Ctrl+Tab and Ctrl+PageUp/PageDown.
 
@@ -215,6 +216,15 @@ Environment variables set on spawned panes (inherited `TWITTY_*` and `CMUX_*` va
 | `CMUX_SOCKET_PATH` | Control socket path (when `cmux_compat` and `control_socket` are enabled) |
 | `CMUX_WORKSPACE_ID` | Stable id of the pane's tab |
 | `CMUX_SURFACE_ID` | Current pane id |
+
+### Review changes
+
+`Ctrl+Shift+R` (or "Review changes / راجع التغييرات" in the command palette) opens a panel on the right with the uncommitted changes of the focused pane's git repository (`git diff HEAD` plus untracked files), refreshed when it opens, when a command ends in that pane, and with its ↻ button or `r`. Click it (or open it) to give it the keyboard; Esc gives the keyboard back.
+
+- Up/Down (or j/k), PageUp/PageDown, Home/End scroll; `n` / `p` jump to the next / previous file; Enter or a click on a file folds it.
+- Click a line number (or press `c`, or Enter on a line) to comment on it. Enter types `path:line: comment (line: "…")` into the coding agent's input in this tab (the focused pane if it runs one, else the first pane running `claude`, `codex`, `gemini`, `opencode`, `grok` or your `agent_command`) as a paste, without a newline: nothing is sent until you press Enter there. With no agent pane, a second Enter starts one with the comment.
+- **Commit** types `git commit` into the focused pane, without running it.
+- Arabic in diff lines is shown as the terminal shows it. Bounded: 2 MiB of diff, 200 files, 20 000 lines; binary and very large files are one line each.
 
 ### Claude Code integration
 

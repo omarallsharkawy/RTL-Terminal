@@ -55,6 +55,7 @@ commands! {
     "block.next", "Next command block", "البلوك اللي بعده", Some("Ctrl+Shift+Down") => InputAction::NextBlock;
     "block.copy-output", "Copy command output", "انسخ ناتج الأمر", Some("Ctrl+Shift+Y") => InputAction::CopyBlockOutput;
     "agent.ask", "Ask an agent about this output", "اسأل وكيل عن الناتج ده", Some("Ctrl+Shift+A") => InputAction::AskAgent;
+    "review.toggle", "Review changes", "راجع التغييرات", Some("Ctrl+Shift+R") => InputAction::ToggleReview;
     "edit.copy", "Copy", "نسخ", Some("Ctrl+Shift+C") => InputAction::Copy;
     "edit.paste", "Paste", "لصق", Some("Ctrl+Shift+V") => InputAction::Paste;
     "search.open", "Find in scrollback", "بحث", Some("Ctrl+Shift+F") => InputAction::Search;

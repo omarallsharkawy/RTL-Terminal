@@ -8,6 +8,7 @@
 //! - `palette`: the command palette and its notifications and search-all modes.
 //! - `ports`: the listening-ports scanner behind the sidebar.
 //! - `agent`: "Ask an agent" about the output.
+//! - `review`: the code review panel (uncommitted changes, comments to an agent).
 //! - `mouse`: pointer, mouse reporting, divider dragging and the wheel.
 //! - `selection`: mouse selection and the clipboard.
 
@@ -19,6 +20,7 @@ mod mouse;
 mod palette;
 mod panes;
 mod ports;
+mod review;
 mod selection;
 mod ssh;
 mod window;
@@ -73,6 +75,8 @@ pub struct App {
     notification_history: crate::ui::notifications::NotificationHistory,
     /// The thread scanning listening ports while the sidebar is shown.
     ports: ports::PortWatch,
+    /// The code review panel.
+    review: crate::review::ReviewPanel,
 }
 
 impl App {
@@ -105,6 +109,7 @@ impl App {
             control: None,
             notification_history: Default::default(),
             ports: ports::PortWatch::default(),
+            review: Default::default(),
         }
     }
 
@@ -197,6 +202,7 @@ impl ApplicationHandler<AppEvent> for App {
                 }
             }
             AppEvent::Ports(ports) => self.on_ports(ports),
+            AppEvent::Review(generation, result) => self.on_review_loaded(generation, result),
         }
     }
 

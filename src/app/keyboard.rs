@@ -27,6 +27,9 @@ impl App {
         if self.palette_open() {
             return self.handle_palette_key(event);
         }
+        if let Some(close) = self.handle_review_key(event) {
+            return close;
+        }
         let Some(id) = self.focused_id() else {
             return false;
         };
@@ -79,6 +82,9 @@ impl App {
                 self.update_preedit(None);
                 if self.palette_open() {
                     self.palette_text(&text);
+                    return;
+                }
+                if self.review_text(&text) {
                     return;
                 }
                 let Some(id) = self.focused_id() else { return };
@@ -134,6 +140,7 @@ impl App {
             InputAction::NotificationList => self.open_palette(PaletteMode::Notifications),
             InputAction::SearchAll => self.open_palette(PaletteMode::Search),
             InputAction::AskAgent => self.ask_agent(id),
+            InputAction::ToggleReview => self.toggle_review(),
             InputAction::PrevBlock => self.navigate_blocks(id, BlockList::select_prev),
             InputAction::NextBlock => self.navigate_blocks(id, BlockList::select_next),
             InputAction::CopyBlockOutput => self.copy_block_output(id),
