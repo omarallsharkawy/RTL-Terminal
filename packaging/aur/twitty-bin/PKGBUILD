@@ -1,0 +1,64 @@
+# Maintainer: Omar Sharkawy <https://github.com/omarallsharkawy>
+pkgname=twitty-bin
+pkgver=3.0.0
+pkgrel=1
+pkgdesc='Native GPU-rendered terminal built for Arabic and bidirectional text (prebuilt binaries)'
+arch=('x86_64')
+url='https://github.com/omarallsharkawy/RTL-Terminal'
+license=('AGPL-3.0-or-later')
+# Runtime dependencies:
+# - DT_NEEDED (readelf -d): glibc (libc.so.6, libm.so.6), gcc-libs (libgcc_s.so.1)
+# - dlopen() by wgpu/winit/arboard: vulkan-icd-loader (libvulkan.so.1), mesa (libEGL.so.1),
+#   wayland (libwayland-client.so.0, libwayland-egl.so.1), libxkbcommon, libxkbcommon-x11,
+#   libx11, libxcb, libxcursor, libxi
+# - Desktop integration: hicolor-icon-theme
+depends=(
+  'gcc-libs'
+  'glibc'
+  'hicolor-icon-theme'
+  'libx11'
+  'libxcb'
+  'libxcursor'
+  'libxi'
+  'libxkbcommon'
+  'libxkbcommon-x11'
+  'mesa'
+  'vulkan-icd-loader'
+  'wayland'
+)
+optdepends=(
+  'libnotify: desktop notifications via notify-send'
+  'openssh: persistent SSH tabs (twitty ssh)'
+  'vulkan-driver: hardware-accelerated Vulkan rendering'
+)
+provides=('twitty')
+conflicts=('twitty' 'twitty-git')
+options=('!strip' '!debug')
+source_x86_64=("${pkgname}-${pkgver}-x86_64.tar.gz::${url}/releases/download/v${pkgver}/twitty-${pkgver}-linux-x86_64.tar.gz")
+# Replace with the release SHA-256 from SHA256SUMS.txt before publishing to the AUR.
+sha256sums_x86_64=('SKIP')
+
+package() {
+  cd "${srcdir}/twitty-${pkgver}-linux-x86_64"
+
+  install -Dm755 bin/twitty "${pkgdir}/usr/bin/twitty"
+  install -Dm755 bin/twitty-remote "${pkgdir}/usr/bin/twitty-remote"
+
+  install -Dm644 share/applications/twitty.desktop \
+    "${pkgdir}/usr/share/applications/twitty.desktop"
+  install -Dm644 share/metainfo/dev.twitty.Twitty.metainfo.xml \
+    "${pkgdir}/usr/share/metainfo/dev.twitty.Twitty.metainfo.xml"
+
+  local size
+  for size in 16 24 32 48 64 128 256 512; do
+    install -Dm644 "share/icons/hicolor/${size}x${size}/apps/twitty.png" \
+      "${pkgdir}/usr/share/icons/hicolor/${size}x${size}/apps/twitty.png"
+  done
+  install -Dm644 share/icons/hicolor/scalable/apps/twitty.svg \
+    "${pkgdir}/usr/share/icons/hicolor/scalable/apps/twitty.svg"
+
+  local f
+  for f in share/licenses/twitty/*; do
+    install -Dm644 "${f}" "${pkgdir}/usr/share/licenses/${pkgname}/$(basename "${f}")"
+  done
+}

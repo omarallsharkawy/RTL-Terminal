@@ -20,6 +20,14 @@ use crate::ui::hit::{hit_test, Hit, HitGeometry};
 use crate::ui::settings::{clamp_font_size, step_opacity};
 
 pub(super) const WINDOW_TITLE: &str = "Twitty · RTL Terminal";
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+))]
+pub(super) const WINDOW_APP_ID: &str = "twitty";
 
 impl GridGeometry for Window {
     fn content_rect(&self, tab_count: usize) -> Rect {
@@ -76,6 +84,18 @@ impl Window {
             .with_title(WINDOW_TITLE)
             .with_inner_size(winit::dpi::LogicalSize::new(960.0, 580.0))
             .with_transparent(true);
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd",
+        ))]
+        let window_attrs = {
+            use winit::platform::wayland::WindowAttributesExtWayland;
+            // Sets both Wayland xdg_toplevel app_id and X11 WM_CLASS to match twitty.desktop.
+            WindowAttributesExtWayland::with_name(window_attrs, WINDOW_APP_ID, WINDOW_APP_ID)
+        };
 
         let window = match event_loop.create_window(window_attrs) {
             Ok(w) => Arc::new(w),

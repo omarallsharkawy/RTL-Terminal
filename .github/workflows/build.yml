@@ -94,6 +94,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install SVG rasterizer
+        run: sudo apt-get update && sudo apt-get install -y librsvg2-bin
+
       - name: Setup Rust stable
         uses: dtolnay/rust-toolchain@stable
 
@@ -103,18 +106,104 @@ jobs:
       - name: Build release executable
         run: cargo build --release
 
-      - name: Package the asset
+      - name: Package the release tarball
         run: |
           version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
-          mkdir -p dist
-          tar -czf "dist/twitty-$version-linux-x86_64.tar.gz" -C target/release twitty twitty-remote
+          stage="dist/twitty-$version-linux-x86_64"
+          rm -rf "$stage"
+          mkdir -p "$stage/bin" \
+            "$stage/share/applications" \
+            "$stage/share/metainfo" \
+            "$stage/share/icons/hicolor/scalable/apps" \
+            "$stage/share/licenses/twitty"
+
+          install -m755 target/release/twitty "$stage/bin/twitty"
+          install -m755 target/release/twitty-remote "$stage/bin/twitty-remote"
+          install -m755 packaging/linux/install.sh "$stage/install.sh"
+          install -m644 LICENSE "$stage/LICENSE"
+          install -m644 README.md "$stage/README.md"
+
+          install -m644 packaging/linux/twitty.desktop "$stage/share/applications/twitty.desktop"
+          install -m644 packaging/linux/dev.twitty.Twitty.metainfo.xml \
+            "$stage/share/metainfo/dev.twitty.Twitty.metainfo.xml"
+          install -m644 docs/assets/twitty-mark.svg \
+            "$stage/share/icons/hicolor/scalable/apps/twitty.svg"
+
+          for size in 16 24 32 48 64 128 256 512; do
+            mkdir -p "$stage/share/icons/hicolor/${size}x${size}/apps"
+            rsvg-convert -w "$size" -h "$size" docs/assets/twitty-mark.svg \
+              -o "$stage/share/icons/hicolor/${size}x${size}/apps/twitty.png"
+          done
+
+          install -m644 LICENSE "$stage/share/licenses/twitty/LICENSE"
+          install -m644 assets/fonts/OFL.txt "$stage/share/licenses/twitty/OFL.txt"
+          for f in licenses/*; do
+            [ -f "$f" ] || continue
+            install -m644 "$f" "$stage/share/licenses/twitty/$(basename "$f")"
+          done
+
+          tar -czf "dist/twitty-$version-linux-x86_64.tar.gz" -C dist "twitty-$version-linux-x86_64"
+          rm -rf "$stage"
 
       - name: Upload Linux build artifact
         uses: actions/upload-artifact@v4
         with:
           name: twitty-linux
           if-no-files-found: error
-          path: dist/*
+          path: dist/twitty-*-linux-x86_64.tar.gz
+
+  build-appimage:
+    name: Build Linux AppImage
+    needs: build-linux
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Linux release tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: twitty-linux
+          path: ./linux-tarball
+
+      - name: Install desktop validation and SVG tools
+        run: sudo apt-get update && sudo apt-get install -y librsvg2-bin desktop-file-utils appstream
+
+      - name: Validate desktop integration files
+        run: |
+          desktop-file-validate packaging/linux/twitty.desktop
+          appstreamcli validate --no-net packaging/linux/dev.twitty.Twitty.metainfo.xml
+
+      - name: Download and verify appimagetool
+        run: |
+          APPIMAGETOOL_VERSION="1.9.1"
+          APPIMAGETOOL_SHA256="ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
+          curl -fsSL -o appimagetool-x86_64.AppImage \
+            "https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_VERSION}/appimagetool-x86_64.AppImage"
+          echo "${APPIMAGETOOL_SHA256}  appimagetool-x86_64.AppImage" | sha256sum -c -
+          chmod +x appimagetool-x86_64.AppImage
+
+      - name: Build x86_64 AppImage
+        run: |
+          tarball=$(ls linux-tarball/twitty-*-linux-x86_64.tar.gz)
+          mkdir -p extracted
+          tar -xzf "$tarball" -C extracted
+          unpacked=$(find extracted -mindepth 1 -maxdepth 1 -type d | head -n 1)
+          version=$(basename "$unpacked" | sed 's/^twitty-//; s/-linux-x86_64$//')
+          ./packaging/linux/build-appimage.sh \
+            --bin-dir "$unpacked/bin" \
+            --version "$version" \
+            --appimagetool ./appimagetool-x86_64.AppImage \
+            --rasterize \
+            --out "dist/twitty-${version}-linux-x86_64.AppImage"
+
+      - name: Upload Linux AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: twitty-appimage
+          if-no-files-found: error
+          path: dist/*.AppImage
 
   msrv:
     name: Minimum supported Rust (1.90)
@@ -230,7 +319,7 @@ jobs:
 
   release:
     name: Create GitHub Release
-    needs: [build-windows, build-linux, rust-quality, rust-security, fuzz, golden]
+    needs: [build-windows, build-linux, build-appimage, rust-quality, rust-security, fuzz, golden]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -242,6 +331,7 @@ jobs:
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
+          pattern: twitty-*
           path: ./artifacts
           merge-multiple: true
 

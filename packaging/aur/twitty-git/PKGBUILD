@@ -1,0 +1,98 @@
+# Maintainer: Omar Sharkawy <https://github.com/omarallsharkawy>
+pkgname=twitty-git
+pkgver=3.0.0
+pkgrel=1
+pkgdesc='Native GPU-rendered terminal built for Arabic and bidirectional text (git)'
+arch=('x86_64' 'aarch64')
+url='https://github.com/omarallsharkawy/RTL-Terminal'
+license=('AGPL-3.0-or-later')
+# Runtime dependencies:
+# - DT_NEEDED (readelf -d): glibc (libc.so.6, libm.so.6), gcc-libs (libgcc_s.so.1)
+# - dlopen() by wgpu/winit/arboard: vulkan-icd-loader (libvulkan.so.1), mesa (libEGL.so.1),
+#   wayland (libwayland-client.so.0, libwayland-egl.so.1), libxkbcommon, libxkbcommon-x11,
+#   libx11, libxcb, libxcursor, libxi
+# - Desktop integration: hicolor-icon-theme
+depends=(
+  'gcc-libs'
+  'glibc'
+  'hicolor-icon-theme'
+  'libx11'
+  'libxcb'
+  'libxcursor'
+  'libxi'
+  'libxkbcommon'
+  'libxkbcommon-x11'
+  'mesa'
+  'vulkan-icd-loader'
+  'wayland'
+)
+makedepends=(
+  'cargo'
+  'git'
+)
+optdepends=(
+  'libnotify: desktop notifications via notify-send'
+  'openssh: persistent SSH tabs (twitty ssh)'
+  'vulkan-driver: hardware-accelerated Vulkan rendering'
+)
+provides=('twitty')
+conflicts=('twitty' 'twitty-bin')
+options=('!lto')
+source=("${pkgname}::git+${url}.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "${srcdir}/${pkgname}"
+  if git describe --long --tags --abbrev=7 >/dev/null 2>&1; then
+    git describe --long --tags --abbrev=7 | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g'
+  else
+    printf 'r%s.%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+  fi
+}
+
+prepare() {
+  cd "${srcdir}/${pkgname}"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "${srcdir}/${pkgname}"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --release --locked --offline
+}
+
+check() {
+  cd "${srcdir}/${pkgname}"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo test --release --locked --offline
+}
+
+package() {
+  cd "${srcdir}/${pkgname}"
+
+  install -Dm755 target/release/twitty "${pkgdir}/usr/bin/twitty"
+  install -Dm755 target/release/twitty-remote "${pkgdir}/usr/bin/twitty-remote"
+
+  install -Dm644 packaging/linux/twitty.desktop \
+    "${pkgdir}/usr/share/applications/twitty.desktop"
+  install -Dm644 packaging/linux/dev.twitty.Twitty.metainfo.xml \
+    "${pkgdir}/usr/share/metainfo/dev.twitty.Twitty.metainfo.xml"
+
+  local size
+  for size in 16 24 32 48 64 128 256 512; do
+    install -Dm644 "packaging/linux/icons/hicolor/${size}x${size}/apps/twitty.png" \
+      "${pkgdir}/usr/share/icons/hicolor/${size}x${size}/apps/twitty.png"
+  done
+  install -Dm644 packaging/linux/icons/hicolor/scalable/apps/twitty.svg \
+    "${pkgdir}/usr/share/icons/hicolor/scalable/apps/twitty.svg"
+
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -Dm644 assets/fonts/OFL.txt "${pkgdir}/usr/share/licenses/${pkgname}/OFL.txt"
+  local f
+  for f in licenses/*; do
+    install -Dm644 "${f}" "${pkgdir}/usr/share/licenses/${pkgname}/$(basename "${f}")"
+  done
+}

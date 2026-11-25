@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=Twitty
+Name[ar]=تويتي
+GenericName=Terminal Emulator
+GenericName[ar]=محاكي طرفية
+Comment=Native GPU-rendered terminal built for Arabic and bidirectional text
+Comment[ar]=طرفية أصلية مسرّعة بالعتاد مصممة للنص العربي وثنائي الاتجاه
+Exec=twitty
+Icon=twitty
+Terminal=false
+Categories=System;TerminalEmulator;
+Keywords=shell;prompt;command;commandline;cmd;arabic;rtl;bidi;terminal;
+Keywords[ar]=طرفية;عربي;أوامر;شل;
+StartupNotify=true
+StartupWMClass=twitty

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.twitty.Twitty</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-or-later</project_license>
+  <name>Twitty</name>
+  <name xml:lang="ar">تويتي</name>
+  <summary>Native GPU-rendered terminal built for Arabic and bidirectional text</summary>
+  <summary xml:lang="ar">طرفية أصلية مسرّعة بالعتاد مصممة للنص العربي وثنائي الاتجاه</summary>
+  <developer id="dev.twitty">
+    <name>Omar Sharkawy</name>
+  </developer>
+  <description>
+    <p>
+      Twitty is a native, GPU-rendered terminal emulator built with Rust, wgpu,
+      cosmic-text, and alacritty_terminal that renders Arabic and bidirectional
+      text cleanly inside a fixed-width terminal grid without altering the bytes
+      exchanged with your shell and TUI programs.
+    </p>
+    <p>
+      Arabic letters join with full contextual shaping and harakat, sentences
+      flow right-to-left while prompts and terminal layout remain left-to-right,
+      and Latin words, commit hashes, and numbers inside Arabic stay intact.
+      Includes tabs, split panes, command blocks, a bilingual command palette,
+      scrollback search across panes, a control socket, and persistent SSH tabs.
+    </p>
+    <p xml:lang="ar">
+      تويتي هو محاكي طرفية أصلي مسرّع بالعتاد مبني بلغة Rust يعرض النص العربي
+      وثنائي الاتجاه بوضوح داخل شبكة الطرفية دون تعديل البيانات المتبادلة مع
+      الصدفة وبرامج سطر الأوامر.
+    </p>
+  </description>
+  <launchable type="desktop-id">twitty.desktop</launchable>
+  <url type="homepage">https://github.com/omarallsharkawy/RTL-Terminal</url>
+  <url type="bugtracker">https://github.com/omarallsharkawy/RTL-Terminal/issues</url>
+  <url type="vcs-browser">https://github.com/omarallsharkawy/RTL-Terminal</url>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Twitty rendering Arabic git output, mixed bidirectional text, and box-drawn tables</caption>
+      <image>https://raw.githubusercontent.com/omarallsharkawy/RTL-Terminal/main/docs/assets/screenshot.png</image>
+    </screenshot>
+  </screenshots>
+  <provides>
+    <binary>twitty</binary>
+    <binary>twitty-remote</binary>
+  </provides>
+  <categories>
+    <category>System</category>
+    <category>TerminalEmulator</category>
+  </categories>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="3.0.0" date="2026-10-11">
+      <description>
+        <p>Initial native Rust/wgpu release of Twitty with bidirectional Arabic rendering, split panes, tabs, scrollback, IME support, and Linux/Windows binaries.</p>
+      </description>
+    </release>
+  </releases>
+</component>

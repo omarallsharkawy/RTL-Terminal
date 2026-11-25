@@ -44,14 +44,38 @@ Arabic letters join, sentences flow right-to-left, and English words, hashes and
 
 ### Linux
 
+Works on Wayland and X11. Each release ships a `SHA256SUMS.txt`.
+
+**Arch Linux (AUR)** — once published:
+
+```bash
+yay -S twitty-bin    # prebuilt release binaries
+# or build from source:
+yay -S twitty-git
+```
+
+**AppImage (portable, no install required):**
+
+Download `twitty-<version>-linux-x86_64.AppImage` from the [latest release](https://github.com/omarallsharkawy/RTL-Terminal/releases/latest), make it executable, and run it:
+
+```bash
+chmod +x twitty-*-linux-x86_64.AppImage
+./twitty-*-linux-x86_64.AppImage
+```
+
+Host Vulkan/OpenGL drivers are used directly (no GPU drivers are bundled inside the AppImage), and `twitty-remote` is bundled alongside `twitty` for persistent SSH tabs.
+
+**Release tarball (with desktop entry and icons):**
+
 Download `twitty-<version>-linux-x86_64.tar.gz` from the [latest release](https://github.com/omarallsharkawy/RTL-Terminal/releases/latest), then:
 
 ```bash
 tar -xzf twitty-*-linux-x86_64.tar.gz
-install -m755 twitty twitty-remote ~/.local/bin/
+cd twitty-*-linux-x86_64
+./install.sh                  # installs to ~/.local (binaries, .desktop, icons, metainfo)
+# or system-wide:
+sudo ./install.sh --system    # installs to /usr/local
 ```
-
-Works on Wayland and X11.
 
 ### Windows
 
