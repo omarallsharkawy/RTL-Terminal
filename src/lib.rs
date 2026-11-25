@@ -14,6 +14,7 @@ pub mod links;
 pub mod notify;
 pub mod ports;
 pub mod pty;
+pub mod remote;
 pub mod render;
 pub mod session;
 pub mod shell_integration;

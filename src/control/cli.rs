@@ -3,6 +3,8 @@
 
 use serde_json::{json, Map, Value};
 
+use crate::remote::{validate_destination, validate_name};
+
 /// Parsed command-line action.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CliAction {
@@ -10,6 +12,10 @@ pub enum CliAction {
     RunGui,
     Help,
     Version,
+    Ssh {
+        destination: String,
+        name: Option<String>,
+    },
     Ctl {
         method: String,
         params: Value,
@@ -43,6 +49,7 @@ pub fn help_text() -> &'static str {
         "    twitty send [--pane N] TEXT             Type TEXT into a pane's PTY\n",
         "    twitty list                             List tabs and panes\n",
         "    twitty read [--pane N] [--lines N]      Read recent lines from a pane\n",
+        "    twitty ssh <destination> [--name NAME]  Open a persistent SSH tab\n",
         "    twitty --help | -h                      Show this help\n",
         "    twitty --version | -V                   Show version\n",
         "\n",
@@ -72,8 +79,26 @@ pub fn parse_args(args: &[String], env_pane: Option<&str>) -> Result<CliAction, 
         "send" => parse_send(rest, default_pane),
         "list" => parse_list(rest),
         "read" => parse_read(rest, default_pane),
+        "ssh" => parse_ssh(rest),
         other => Err(format!("unknown argument {other:?} (try `twitty --help`)")),
     }
+}
+
+fn parse_ssh(args: &[String]) -> Result<CliAction, String> {
+    let (destination, name) = match args {
+        [help] if matches!(help.as_str(), "-h" | "--help") => return Ok(CliAction::Help),
+        [destination] => (destination, None),
+        [destination, flag, name] if flag == "--name" => (destination, Some(name)),
+        _ => return Err("usage: twitty ssh <destination> [--name NAME]".into()),
+    };
+    validate_destination(destination)?;
+    if let Some(name) = name {
+        validate_name(name)?;
+    }
+    Ok(CliAction::Ssh {
+        destination: destination.clone(),
+        name: name.cloned(),
+    })
 }
 
 fn parse_ctl(args: &[String]) -> Result<CliAction, String> {
@@ -361,6 +386,10 @@ pub fn format_list(tabs: &Value, panes: &Value) -> String {
 pub fn build_params(action: &CliAction) -> Option<(&str, Value)> {
     match action {
         CliAction::Ctl { method, params } => Some((method.as_str(), params.clone())),
+        CliAction::Ssh { destination, name } => Some((
+            "tab.new-ssh",
+            json!({ "destination": destination, "name": name }),
+        )),
         CliAction::Notify { pane, title, body } => {
             let mut map = Map::new();
             if let Some(p) = pane {
@@ -495,7 +524,7 @@ pub fn run_cli(action: CliAction) -> i32 {
                 }
             }
         }
-        CliAction::Notify { .. } | CliAction::Send { .. } => {
+        CliAction::Notify { .. } | CliAction::Send { .. } | CliAction::Ssh { .. } => {
             let Some((method, params)) = build_params(&action) else {
                 return 1;
             };

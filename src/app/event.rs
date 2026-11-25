@@ -17,7 +17,9 @@ pub enum AppEvent {
     /// The shell of a pane wrote output; it is waiting in the pane's queue.
     PtyOutput(PaneId),
     Terminal(PaneId, TermEvent),
-    PtyExit(PaneId),
+    PtyExit(PaneId, Option<u32>),
+    SshAttached(PaneId),
+    RetrySsh(PaneId),
     /// Clear the highlight of a copied selection, unless a newer selection was started.
     ClearSelection(PaneId, u64),
     /// A request from the local control socket, with the channel to send its reply on.

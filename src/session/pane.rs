@@ -7,6 +7,7 @@ use crate::blocks::BlockList;
 use crate::input::mouse::{ClickCounter, StepAccumulator};
 use crate::layout::PaneId;
 use crate::pty::Pty;
+use crate::remote::RemotePane;
 use crate::terminal::Terminal;
 use crate::ui::selection::SelectionState;
 
@@ -15,6 +16,7 @@ pub(crate) struct Pane {
     /// Only touched on the event-loop thread: PTY output arrives as events, so no lock.
     pub terminal: Terminal,
     pub pty: Option<Pty>,
+    pub remote: Option<RemotePane>,
     /// Grid size last sent to the terminal and the PTY.
     pub size: (usize, usize),
     /// Window title set by the program (OSC 0/2).
@@ -96,6 +98,7 @@ impl Pane {
             id,
             terminal,
             pty,
+            remote: None,
             size,
             title: None,
             ui: PaneUi::default(),

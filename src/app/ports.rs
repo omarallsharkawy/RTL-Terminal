@@ -35,6 +35,7 @@ impl App {
             let mut roots: Vec<(PaneId, u32)> = self
                 .ws
                 .panes()
+                .filter(|pane| pane.remote.is_none())
                 .filter_map(|p| Some((p.id, p.pty.as_ref()?.pid()?)))
                 .collect();
             roots.sort_unstable();

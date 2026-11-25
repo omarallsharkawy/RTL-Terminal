@@ -63,7 +63,7 @@ Everything above `render/gpu` runs without a GPU and is covered by tests in `tes
 | `links.rs`, `blink.rs`, `ime.rs` | URL detection and opening, cursor blink timing, IME helpers. | — |
 | `shell_integration.rs` | Parses the OSC signals shells and agents send (OSC 7 cwd, OSC 9/99/777 notifications, OSC 133/633 command marks) into bounded, cleaned `ShellEvent`s. | `links` |
 | `session/shell_setup.rs`, `assets/shell/` | Injects Twitty's bash/zsh/fish integration scripts into shells it starts, so they send the marks without user setup. | — |
-| `session/restore.rs` | Session restore: the versioned `session.json` (tab order, split trees and ratios, pane directories and titles, focus, sidebar) saved on a normal close and rebuilt with fresh shells on start. | `session` |
+| `session/restore.rs` | Versioned `session.json` saves tab order, splits, focus, sidebar, local pane directories and titles, and SSH session identities. Restores local shells and reattaches SSH panes. | `session`, `remote` |
 | `blocks/` | Command blocks: turns marks into a per-pane `BlockList` (prompt, command, output, exit, duration) anchored to absolute lines so blocks follow the text as it scrolls. | `shell_integration` |
 | `sidebar/` | The vertical tab sidebar model: one entry per tab with cwd, git branch (read from `.git/HEAD`, bounded), running state, last exit and the latest notification. | `session` |
 | `notify.rs` | Desktop notifications through `notify-send` (argv, never a shell), throttled per pane. | — |
@@ -71,6 +71,8 @@ Everything above `render/gpu` runs without a GPU and is covered by tests in `tes
 | `control/` | The control socket (`$XDG_RUNTIME_DIR/twitty/twitty-<pid>.sock`, 0600 in a 0700 dir) speaking newline-delimited JSON, and the `twitty ctl/send/notify/list/read` client. | — |
 | `agent.rs` | "Ask an agent": picks a local agent CLI, builds its argv and a fenced prompt from the selection, block or screen. | — |
 | `ports.rs` | Listening TCP ports per pane for the sidebar: pure `/proc` parsing and a scanner thread. | — |
+| `remote/`, `app/ssh.rs` | Validates SSH identities, verifies and installs the versioned helper over OpenSSH, and reconnects an ordinary pane PTY on transport failure. | `session`, `pty` |
+| `remote/daemon/`, `bin/twitty-remote.rs` | GUI-free Linux helper. Owns persistent login-shell PTYs and a 256 KiB output tail per session. Attachments use framed terminal bytes, resize and exit messages on a private Unix socket. | `portable-pty`, `rustix` |
 
 Dependencies point downwards only: nothing in `render/`, `terminal.rs`, `input/` or `ui/` knows
 about winit windows or the app.
@@ -110,6 +112,9 @@ or link-hover state change.
 - **Control server:** one accept thread plus at most 16 short-lived client threads, with read,
   write and request timeouts. Requests reach the main thread as `AppEvent::Control` and the
   reply comes back over a channel, so all state is still touched on the main thread only.
+- **SSH:** bootstrap runs in the pane's local PTY process, which becomes OpenSSH after verification.
+  Each named remote session has a detached host process holding its shell PTY. The attach client
+  relays raw input and window sizes. Multiple attachments use the smallest grid while attached.
 - **Notifications:** each `notify-send` runs on its own short thread (at most 8 at once).
 
 ## Shell signals

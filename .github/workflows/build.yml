@@ -107,7 +107,7 @@ jobs:
         run: |
           version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
           mkdir -p dist
-          tar -czf "dist/twitty-$version-linux-x86_64.tar.gz" -C target/release twitty
+          tar -czf "dist/twitty-$version-linux-x86_64.tar.gz" -C target/release twitty twitty-remote
 
       - name: Upload Linux build artifact
         uses: actions/upload-artifact@v4

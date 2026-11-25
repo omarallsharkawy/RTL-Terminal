@@ -12,6 +12,7 @@ use crate::control::protocol::{bound_read_text, MAX_READ_BYTES};
 use crate::control::{ControlServer, MethodCall, Request, Response, REQUEST_TIMEOUT};
 use crate::layout::PaneId;
 use crate::pty::{Pty, SpawnOptions};
+use crate::remote::Target;
 use crate::shell_integration::clean_text;
 use crate::workflows::WorkflowSet;
 
@@ -220,6 +221,15 @@ impl App {
                     .new_tab_with(options)
                     .ok_or_else(|| "failed to open new tab".to_owned())?;
                 Ok((json!({ "pane": id.0, "tab": self.ws.active() }), false))
+            }
+            MethodCall::TabNewSsh { destination, name } => {
+                let target = Target::for_tab(&destination, name.as_deref())?;
+                let name = target.name().to_owned();
+                let id = self.new_ssh_tab(target).ok_or("failed to open SSH tab")?;
+                Ok((
+                    json!({ "pane": id.0, "tab": self.ws.active(), "name": name }),
+                    false,
+                ))
             }
             MethodCall::PaneSplit {
                 pane,

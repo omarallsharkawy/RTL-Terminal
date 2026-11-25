@@ -5,6 +5,7 @@ pub mod git;
 use std::path::{Path, PathBuf};
 
 use crate::layout::{Rect, SidebarPosition};
+use crate::remote::ConnectionState;
 use crate::shell_integration::{clean_text, MAX_NOTIFY_CHARS};
 use crate::ui::hit::Hit;
 
@@ -81,6 +82,7 @@ pub struct Entry {
     pub notification: Option<Notice>,
     /// Listening TCP ports of the tab's processes, sorted.
     pub ports: Vec<u16>,
+    pub remote_state: Option<ConnectionState>,
 }
 
 impl Entry {
@@ -103,6 +105,7 @@ impl Entry {
             attention_count,
             notification,
             ports: Vec::new(),
+            remote_state: None,
         }
     }
 

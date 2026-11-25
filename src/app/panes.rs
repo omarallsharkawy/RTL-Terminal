@@ -7,10 +7,15 @@ use std::time::Instant;
 use super::App;
 use crate::layout::{FocusDir, PaneId, Rect, SplitDir};
 use crate::pty::SpawnOptions;
+use crate::remote::Target;
 use crate::session::spawn::ShellFactory;
 
 impl App {
     pub(super) fn start_session(&mut self) {
+        if let Some(ssh) = self.startup_ssh.take() {
+            self.new_ssh_tab(ssh);
+            return;
+        }
         if let Some(session) = self.startup_session.take() {
             let was_visible = self.window.sidebar_visible();
             self.window.set_sidebar_visible(session.sidebar_visible);
@@ -51,13 +56,26 @@ impl App {
         self.new_tab_with(SpawnOptions::default());
     }
 
-    pub(super) fn new_tab_with(&mut self, mut options: SpawnOptions) -> Option<PaneId> {
+    pub(super) fn new_tab_with(&mut self, options: SpawnOptions) -> Option<PaneId> {
+        self.new_tab_with_process(options, None)
+    }
+
+    pub(super) fn new_ssh_tab(&mut self, target: Target) -> Option<PaneId> {
+        self.new_tab_with_process(SpawnOptions::default(), Some(target))
+    }
+
+    fn new_tab_with_process(
+        &mut self,
+        mut options: SpawnOptions,
+        remote: Option<Target>,
+    ) -> Option<PaneId> {
         let r = self.window.grid()?;
         let previous = self.focused_id();
         self.attach_control_env(&mut options);
         let mut shells = ShellFactory::new(&self.proxy, self.config.cursor_blink)
             .with_shell_integration(self.config.shell_integration);
         shells.options = options;
+        shells.remote = remote;
         let id = self.ws.new_tab(r, &mut shells)?;
         self.reset_pointer_gesture();
         // A second tab shows the tab bar, which shrinks every pane.

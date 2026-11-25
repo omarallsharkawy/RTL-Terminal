@@ -259,14 +259,17 @@ pub fn build(ctx: &mut DrawContext, view: &View, cache: &mut LabelCache) -> Scen
                 ));
             row.y += m.line_height;
         }
-        let cwd = entry
-            .cwd
-            .as_deref()
-            .map(|p| display_path(p, home.as_deref()))
-            .unwrap_or_else(|| "—".into());
+        let detail = match entry.remote_state {
+            Some(state) => state.label().to_owned(),
+            None => entry
+                .cwd
+                .as_deref()
+                .map(|p| display_path(p, home.as_deref()))
+                .unwrap_or_else(|| "—".into()),
+        };
         scene
             .labels
-            .push(cache.get(ctx, cwd, row.w, Trim::Start).place(
+            .push(cache.get(ctx, detail, row.w, Trim::Start).place(
                 row,
                 clip,
                 view.right_aligned,

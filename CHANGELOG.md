@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Persistent SSH tabs on Linux with `twitty ssh` and `tab.new-ssh`. Remote shells survive dropped connections, replay recent output on reattach, and reopen from session restore. The sidebar shows the destination and connection state.
 - License: Twitty is now AGPL-3.0-or-later (it was MIT OR Apache-2.0 up to 3.0.0), so it can include code from cmux-gtk, cmux and Warp. Their licenses are in `licenses/`.
 - Session restore reopens tabs and splits with fresh shells in their saved directories and restores focus, pane titles, and sidebar visibility. Closing the last pane clears the saved session. Set `restore_session` to `false` to start fresh on launch.
 - Custom commands ("workflows") in the command palette (`Ctrl+Shift+P`), loaded from `"commands"` in `config.json` and per-project `.twitty/commands.json` files (walked up from the focused pane's cwd, bounded to `$HOME` / root and 32 levels). Supports English and Arabic titles, `"insert"` (no newline, bracketed paste aware) and `"run"` (new split/tab via `$SHELL -c`, cwd confined to the project root) modes, per-file SHA-256 trust persisted in `$XDG_STATE_HOME/twitty/trust.json`, and `command.list` / `command.run` integration on the control socket (which never runs or trusts untrusted project commands).

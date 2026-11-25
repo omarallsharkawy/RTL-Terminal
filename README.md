@@ -48,7 +48,7 @@ Download `twitty-<version>-linux-x86_64.tar.gz` from the [latest release](https:
 
 ```bash
 tar -xzf twitty-*-linux-x86_64.tar.gz
-install -m755 twitty ~/.local/bin/twitty
+install -m755 twitty twitty-remote ~/.local/bin/
 ```
 
 Works on Wayland and X11.
@@ -136,14 +136,28 @@ An unknown name prints a warning and falls back to `tokyo-night`.
 ### Session restore
 
 Closing the window saves the tabs, split sizes, pane directories and titles, focus, and sidebar
-visibility. Twitty restores them on the next launch by starting fresh shells. A missing directory
-uses the shell's default directory. The session file contains no scrollback, commands,
-environment variables, or input. Exiting or closing the last pane clears the saved session.
+visibility. Twitty starts fresh local shells and reattaches to saved SSH sessions on the next
+launch. A missing local directory uses the shell's default directory. The session file contains
+no scrollback, commands, environment variables, or input. Exiting or closing the last pane
+clears the saved session.
 
 Set `"restore_session": false` in `config.json` to start with a fresh window each time. Window
 close still saves the layout. The file is `$XDG_STATE_HOME/twitty/session.json`, with
 `~/.local/state/twitty/session.json` as the Unix fallback, or
 `%LOCALAPPDATA%\twitty\session.json` on Windows. Twitty restores up to 32 tabs and 64 panes.
+
+### Persistent SSH tabs
+
+Run `twitty ssh user@host --name work` on Linux. Use an SSH config alias in place of
+`user@host` if you prefer. From a Twitty shell with `TWITTY_SOCKET` set, the command adds a
+tab to that window. Otherwise it opens a new window. Omitting `--name` generates a session
+name. The control socket also accepts `tab.new-ssh` with `destination` and optional `name`.
+
+Keep `twitty-remote` next to `twitty`. Twitty checks and uploads it over SSH to a compatible
+Linux host with the same CPU architecture. Closing the tab or losing the SSH connection
+leaves the remote shell running. Twitty replays up to 256 KiB on reattach and offers Enter
+to retry after five failed reconnect attempts. In an SSH login on the remote host, run
+`~/.cache/twitty/bin/twitty-remote-<version> list` or use `kill work` to end that session.
 
 ### Custom commands (workflows)
 

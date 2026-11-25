@@ -54,6 +54,9 @@ impl App {
     /// Working directory of pane `id`: the shell's own first, else OSC 7.
     pub(super) fn pane_cwd(&self, id: PaneId) -> Option<PathBuf> {
         let pane = self.ws.pane(id)?;
+        if pane.remote.is_some() {
+            return None;
+        }
         pane.pty
             .as_ref()
             .and_then(Pty::cwd)
