@@ -77,8 +77,9 @@ fn session() -> (Terminal, BlockList) {
                 \x1b]133;A\x07$ \x1b]133;B\x07cat ملف\r\n\x1b]133;C\x07لا يوجد\r\n\x1b]133;D;1\x07\
                 \x1b]133;A\x07$ ";
     term.process_bytes(text.as_bytes());
+    let now = Instant::now();
     for event in term.take_shell_events() {
-        blocks.on_event(&event, &term, Instant::now());
+        blocks.on_event(&event, &term, now);
     }
     (term, blocks)
 }
@@ -142,18 +143,25 @@ fn gutters_separators_and_badge() {
         .max_by(|a, b| a.left.total_cmp(&b.left))
         .unwrap();
     let grid_right = 8.0 + 40.0 * 9.0;
+    let badge_area_left = grid_right - 9.0 * 6.0;
     assert!(
-        badge.left > grid_right - 9.0 * 6.0 && badge.left < grid_right,
+        badge.left > badge_area_left && badge.left < grid_right,
         "{}",
         badge.left
     );
     for run in on_row.iter().filter(|r| r.left < badge.left) {
         assert!(run.bounds.right as f32 <= badge.left, "row text clipped");
     }
-    assert!(
-        runs.iter().filter(|r| r.top == row_y(0)).count() == 1,
-        "no badge on `ls`"
-    );
+    // Font advances can make the shaper emit several grid-aligned runs for `$ ls`.
+    let ls_runs: Vec<_> = runs.iter().filter(|r| r.top == row_y(0)).collect();
+    assert!(!ls_runs.is_empty(), "missing `ls` row text");
+    for run in ls_runs {
+        assert!(
+            run.left < badge_area_left,
+            "unexpected `ls` badge at {}",
+            run.left
+        );
+    }
 }
 
 #[test]

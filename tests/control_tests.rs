@@ -433,7 +433,7 @@ mod unix_tests {
         cleanup_stale_sockets, current_uid, ensure_runtime_dir, find_newest_socket_in,
         socket_path_in, verify_dir,
     };
-    use twitty::control::server::{ControlServer, ServerConfig};
+    use twitty::control::server::{ControlServer, Handler, ServerConfig};
 
     struct TempDir(PathBuf);
 
@@ -525,7 +525,7 @@ mod unix_tests {
         let calls = Arc::new(AtomicUsize::new(0));
         let calls_clone = Arc::clone(&calls);
 
-        let handler = Arc::new(move |req: Request| {
+        let handler: Handler = Arc::new(move |req: Request| {
             calls_clone.fetch_add(1, Ordering::Relaxed);
             match req.method.as_str() {
                 "system.ping" => Response::ok(req.id, json!({"version": "test", "pid": 123})),
@@ -536,12 +536,11 @@ mod unix_tests {
 
         let cfg = ServerConfig {
             max_clients: 2,
-            read_timeout: Duration::from_millis(800),
-            write_timeout: Duration::from_secs(2),
             max_line_bytes: 256,
+            ..ServerConfig::default()
         };
 
-        let server = ControlServer::start_in_dir(&dir, handler, cfg).unwrap();
+        let server = ControlServer::start_in_dir(&dir, Arc::clone(&handler), cfg).unwrap();
         let sock_path = server.path().unwrap().to_path_buf();
         assert!(sock_path.exists());
 
@@ -598,7 +597,7 @@ mod unix_tests {
             .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();
         // Send a ping on each so both threads are definitely spawned and holding slots.
-        let mut hold1_client = {
+        let hold1_client = {
             let mut h = hold1;
             h.write_all(b"{\"id\":1,\"method\":\"system.ping\"}\n")
                 .unwrap();
@@ -609,7 +608,7 @@ mod unix_tests {
             ));
             r
         };
-        let mut hold2_client = {
+        let hold2_client = {
             let mut h = hold2;
             h.write_all(b"{\"id\":2,\"method\":\"system.ping\"}\n")
                 .unwrap();
@@ -636,39 +635,30 @@ mod unix_tests {
             assert!(resp.error.unwrap().contains("too many"));
         }
 
-        // Idle timeout frees slots even while the idle sockets remain open on client side.
-        assert_eq!(
-            read_bounded_line(&mut hold1_client, 4096).unwrap(),
-            ReadLine::Eof
-        );
-        assert_eq!(
-            read_bounded_line(&mut hold2_client, 4096).unwrap(),
-            ReadLine::Eof
-        );
+        assert_eq!(calls.load(Ordering::Relaxed), 5);
         drop(hold1_client);
         drop(hold2_client);
-
-        // After idle slots are freed, a new client succeeds again. The worker thread closes the
-        // stream right before dropping its ClientSlot, so poll briefly for slot release.
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        loop {
-            let mut after = Client::connect_path(&sock_path).unwrap();
-            let resp = after.call("system.ping", json!({})).unwrap();
-            if resp.ok {
-                break;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "new client still rejected after idle timeout: {resp:?}"
-            );
-            std::thread::sleep(Duration::from_millis(20));
-        }
-
-        assert!(calls.load(Ordering::Relaxed) >= 6);
 
         // Dropping the server removes the socket file.
         drop(server);
         assert!(!sock_path.exists());
+
+        // Exercise the short idle timeout separately so it cannot expire a held slot before
+        // the concurrency check above. An EOF on both clients proves the idle slot was reused.
+        let idle_cfg = ServerConfig {
+            max_clients: 1,
+            read_timeout: Duration::from_millis(800),
+            ..ServerConfig::default()
+        };
+        let idle_server = ControlServer::start_in_dir(&dir, handler, idle_cfg).unwrap();
+        for _ in 0..2 {
+            let client = UnixStream::connect(idle_server.path().unwrap()).unwrap();
+            client
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut reader = BufReader::new(client);
+            assert_eq!(read_bounded_line(&mut reader, 4096).unwrap(), ReadLine::Eof);
+        }
     }
 
     #[test]

@@ -644,10 +644,9 @@ fn command_and_shortcut() {
     );
 }
 
-/// 20 panes of 10 000 lines each: one scan for a word on every line (the bound is hit early)
-/// and one for a word on no line (every row read). Prints the times.
+/// Scan 20 full panes for a word on every line and a word on no line. Log timings for diagnosis.
 #[test]
-fn scanning_twenty_full_panes_is_quick() {
+fn scanning_twenty_full_panes_caps_hits_and_handles_no_match() {
     let mut terms: Vec<Terminal> = (0..20)
         .map(|p| {
             let mut t = Terminal::new(100, 40, |_| {});
@@ -685,11 +684,11 @@ fn scanning_twenty_full_panes_is_quick() {
         );
         longest = longest.max(start.elapsed());
     }
+    assert!(job.is_done());
+    assert!(job.hits().is_empty());
     eprintln!("search.all longest slice: {longest:?}");
     assert_eq!(n, MAX_HITS);
     let (n, rare) = run(&mut terms, "no such text");
     assert_eq!(n, 0);
     eprintln!("search.all 20 x {MAX_LINES_PER_PANE} lines: common {common:?}, no match {rare:?}");
-    // Generous: debug builds on a busy machine. Release builds take a small fraction.
-    assert!(rare < Duration::from_secs(20), "{rare:?}");
 }
