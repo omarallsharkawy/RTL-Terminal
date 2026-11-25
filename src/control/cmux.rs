@@ -46,6 +46,7 @@ pub const SUPPORTED_METHODS: &[&str] = &[
     "command.run",
     "tab.list",
     "tab.new",
+    "tab.new-ssh",
     "pane.send-text",
     "pane.read",
     "notify",
@@ -502,8 +503,8 @@ pub(crate) fn dispatch_request(host: &mut impl ControlHost, req: Request) -> (Re
         ),
 
         // ---- Existing Twitty ctl methods (kept unchanged) ----
-        "command.list" | "command.run" | "tab.list" | "tab.new" | "pane.send-text"
-        | "pane.read" | "notify" => dispatch_twitty_native(host, &req),
+        "command.list" | "command.run" | "tab.list" | "tab.new" | "tab.new-ssh"
+        | "pane.send-text" | "pane.read" | "notify" => dispatch_twitty_native(host, &req),
 
         // ---- Overlapping methods: pane.list, pane.focus, pane.split ----
         "pane.list" => {

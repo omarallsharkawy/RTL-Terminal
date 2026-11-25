@@ -1160,3 +1160,25 @@ mod unix_tests {
         );
     }
 }
+
+#[test]
+fn ssh_tab_method_reaches_the_native_dispatcher() {
+    let mut host = HeadlessHost::new();
+    let (resp, exit) = host.dispatch(Request {
+        id: json!(1),
+        method: "tab.new-ssh".into(),
+        params: json!({ "destination": "dev@example.org", "name": "t1" }),
+    });
+    assert!(!exit);
+    assert!(!resp.ok);
+    // Known to the control socket (not "unknown method"); a headless host just can't open it.
+    assert_ne!(resp.error_code.as_deref(), Some("unknown_method"));
+    let wire: Value = serde_json::to_value(&resp).unwrap();
+    assert!(wire["error"].as_str().unwrap().contains("SSH tabs"));
+    let (bad, _) = host.dispatch(Request {
+        id: json!(2),
+        method: "tab.new-ssh".into(),
+        params: json!({ "destination": "-oProxyCommand=x" }),
+    });
+    assert!(!bad.ok);
+}

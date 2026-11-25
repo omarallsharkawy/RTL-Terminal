@@ -27,6 +27,17 @@ if [[ -n "${__TWITTY_BASH_RCFILE-}" ]]; then
     fi
 fi
 
+# Twitty's `claude` wrapper (config `claude_hooks`) goes first on PATH again, after the
+# startup files above may have prepended their own directories.
+if [[ -n "${TWITTY_CLAUDE_DIR-}" ]]; then
+    __twitty_path=":${PATH-}:"
+    __twitty_path=${__twitty_path//":$TWITTY_CLAUDE_DIR:"/:}
+    __twitty_path=${__twitty_path#:}
+    __twitty_path=${__twitty_path%:}
+    PATH="$TWITTY_CLAUDE_DIR${__twitty_path:+:$__twitty_path}"
+    builtin unset __twitty_path
+fi
+
 # Whether something the user loaded already marks prompts with OSC 133 (another terminal's
 # integration, VS Code's, a hand-written PS1): then nothing is added, so no mark is doubled.
 __twitty_marked_elsewhere() {

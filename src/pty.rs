@@ -48,6 +48,7 @@ pub const INHERITED_TERMINAL_VARS: &[&str] = &[
     // Twitty's own shell integration (`session::shell_setup`), from a Twitty this one was
     // started in: set again for the shells that get it.
     "TWITTY_BIN",
+    "TWITTY_CLAUDE_DIR",
     "TWITTY_SHELL_INTEGRATION",
     "__TWITTY_BASH_LOGIN",
     "__TWITTY_BASH_RCFILE",

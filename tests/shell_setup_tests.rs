@@ -414,3 +414,44 @@ fn fish_reports_commands_and_directories() {
     );
     assert_cwd(&out, &dir);
 }
+
+/// Startup files that prepend their own directories (`~/.local/bin`) must not push Twitty's
+/// `claude` wrapper directory back: the integration puts it first again, exactly once.
+#[test]
+fn claude_wrapper_dir_stays_first_on_path_after_startup_files() {
+    let rc =
+        "export TWITTY_CLAUDE_DIR=/twitty-wrap\nexport PATH=\"/user-bin:/twitty-wrap:$PATH\"\n";
+    let check = "echo \"P=$PATH\"\nexit\n";
+    for (shell, rcfile) in [("bash", ".bashrc"), ("zsh", ".zshrc")] {
+        let Some(program) = find(shell) else {
+            eprintln!("{shell} not installed, skipped");
+            continue;
+        };
+        let home = TempDir::new(&format!("{shell}-claude-path"));
+        fs::write(home.0.join(rcfile), rc).unwrap();
+        let out = run_shell(&program, &[], &home.0, check);
+        let line = out
+            .lines()
+            .filter_map(|l| l.split("P=").nth(1))
+            .next_back()
+            .unwrap_or_else(|| panic!("{shell}: no PATH line in {out:?}"));
+        let dirs: Vec<&str> = line.trim().split(':').collect();
+        assert_eq!(dirs[0], "/twitty-wrap", "{shell}: {line}");
+        assert_eq!(dirs[1], "/user-bin", "{shell}: {line}");
+        assert_eq!(
+            dirs.iter().filter(|d| **d == "/twitty-wrap").count(),
+            1,
+            "{shell}: {line}"
+        );
+    }
+}
+
+/// Scripts live in a subdirectory named by their content, so an updated Twitty never runs
+/// an older copy left in the runtime directory.
+#[test]
+fn script_directory_is_named_by_the_scripts_content() {
+    let version = twitty::session::shell_setup::scripts_version();
+    assert_eq!(version.len(), 12);
+    assert!(version.chars().all(|c| c.is_ascii_hexdigit()), "{version}");
+    assert_eq!(version, twitty::session::shell_setup::scripts_version());
+}

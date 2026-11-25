@@ -17,6 +17,15 @@ if set -q __TWITTY_FISH_XDG_DATA_DIRS
     set -e __TWITTY_FISH_XDG_DATA_DIRS
 end
 
+# Twitty's `claude` wrapper (config `claude_hooks`) goes first on PATH again once config.fish
+# (which runs after this file) is done: at the first prompt.
+if set -q TWITTY_CLAUDE_DIR; and status is-interactive
+    function __twitty_claude_path --on-event fish_prompt
+        functions -e __twitty_claude_path
+        set -gx PATH $TWITTY_CLAUDE_DIR (string match -v -- $TWITTY_CLAUDE_DIR $PATH)
+    end
+end
+
 # Another integration that marks prompts (iTerm2's, VS Code's): nothing is added. fish 4
 # marks prompts itself; Twitty ignores the repeated marks.
 if status is-interactive; and not set -q __twitty_si_loaded; and not set -q ITERM_SHELL_INTEGRATION_INSTALLED; and not set -q VSCODE_SHELL_INTEGRATION

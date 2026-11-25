@@ -35,6 +35,11 @@ if [[ -n ${__TWITTY_ZSH_BOOTSTRAP-} && ${1-} == .z(shenv|profile|shrc|login) ]];
     else
         ZDOTDIR=$__twitty_zdotdir_ours
     fi
+    # Twitty's `claude` wrapper (config `claude_hooks`) goes first on PATH again after each
+    # startup file, which may have prepended its own directories.
+    if [[ -n ${TWITTY_CLAUDE_DIR-} ]]; then
+        path=("$TWITTY_CLAUDE_DIR" ${path:#$TWITTY_CLAUDE_DIR})
+    fi
     # Hooks go in after the user's .zshrc, so they run around the user's own.
     [[ $1 == .zshrc ]] || return 0
 fi

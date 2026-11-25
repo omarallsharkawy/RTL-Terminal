@@ -3,8 +3,9 @@
 //! (OSC 7), without the user changing their startup files.
 //!
 //! The scripts (`assets/shell/`) are written to a private per-user directory
-//! (`$XDG_RUNTIME_DIR/twitty/shell`, else `~/.cache/twitty/shell`, mode 0700) the first time a
-//! shell is started, each atomically. Then:
+//! (`$XDG_RUNTIME_DIR/twitty/shell/<digest>`, else `~/.cache/twitty/shell/<digest>`, mode 0700,
+//! where `<digest>` names this build's scripts) the first time a shell is started, each
+//! atomically. Then:
 //!
 //! - bash runs with `--rcfile twitty.bash`. That file reads `~/.bashrc` (or, for `bash -l`,
 //!   `/etc/profile` and the first of `~/.bash_profile`, `~/.bash_login`, `~/.profile`) and
@@ -210,17 +211,35 @@ pub fn default_dir() -> Option<PathBuf> {
     Some(base.join("twitty").join("shell"))
 }
 
-/// The script directory, written once per process (and again if it disappeared, e.g. when
-/// the runtime directory was cleaned at logout).
+/// A short digest of the scripts this build writes. Each build keeps its scripts in its own
+/// subdirectory, so an updated Twitty never runs an older copy left in the runtime directory,
+/// and two different versions running at once don't overwrite each other's scripts.
+pub fn scripts_version() -> String {
+    let mut all = Vec::new();
+    for (name, body) in files() {
+        all.extend_from_slice(name.to_string_lossy().as_bytes());
+        all.push(0);
+        all.extend_from_slice(body.as_bytes());
+        all.push(0);
+    }
+    crate::workflows::sha256_hex(&all)[..12].to_string()
+}
+
+/// The script directory (`default_dir()/<scripts_version()>`), written on first use in this
+/// process and again if it disappeared (e.g. the runtime directory was cleaned at logout).
 fn script_dir() -> Option<PathBuf> {
     static DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
-    let dir = DIR.get_or_init(default_dir).clone()?;
-    let ready = dir.join("twitty.bash").is_file();
+    static INSTALLED: OnceLock<()> = OnceLock::new();
+    let dir = DIR
+        .get_or_init(|| default_dir().map(|d| d.join(scripts_version())))
+        .clone()?;
+    let ready = INSTALLED.get().is_some() && dir.join("twitty.bash").is_file();
     if !ready {
         if let Err(e) = install(&dir) {
             tracing::warn!("shell integration unavailable: {}: {e}", dir.display());
             return None;
         }
+        let _ = INSTALLED.set(());
     }
     Some(dir)
 }
@@ -322,6 +341,13 @@ pub fn apply_claude_wrapper(options: &mut SpawnOptions) {
         .or_else(|| std::env::var("PATH").ok());
     let new_path = prepend_path(&dir, existing.as_deref());
     options.env.push(("PATH".into(), new_path));
+    // Startup files often prepend their own directories (~/.local/bin) to PATH; the shell
+    // integration puts this directory first again after they ran.
+    if let Some(dir) = dir.to_str() {
+        options
+            .env
+            .push(("TWITTY_CLAUDE_DIR".into(), dir.to_owned()));
+    }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(exe_str) = exe.to_str() {
             options.env.push(("TWITTY_BIN".into(), exe_str.to_owned()));
