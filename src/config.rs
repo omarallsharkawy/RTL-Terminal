@@ -92,7 +92,7 @@ impl Default for TwittyConfig {
             block_cards: true,
             cursor_blink: true,
             sidebar: "right".into(),
-            sidebar_width: 220.0,
+            sidebar_width: crate::layout::DEFAULT_SIDEBAR_WIDTH,
             desktop_notifications: true,
             control_socket: true,
             cmux_compat: true,

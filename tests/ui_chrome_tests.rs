@@ -224,12 +224,12 @@ fn grid_geometry_accounts_for_headers_and_sidebar() {
         let metrics = metrics(scale);
         let size = (800.0 * scale, 600.0 * scale);
         let with_sidebar =
-            WindowLayout::new(metrics, size, 2, (SidebarPosition::Right, 220.0), true);
+            WindowLayout::new(metrics, size, 2, (SidebarPosition::Right, 180.0), true);
         assert_eq!(with_sidebar.top_bar.h, 36.0 * scale);
         assert_eq!(with_sidebar.sidebar.unwrap().y, 36.0 * scale);
         assert!(with_sidebar.tabs.is_empty());
         assert_eq!(with_sidebar.tab_bar.h, 0.0);
-        let with_tabs = WindowLayout::new(metrics, size, 2, (SidebarPosition::Hidden, 220.0), true);
+        let with_tabs = WindowLayout::new(metrics, size, 2, (SidebarPosition::Hidden, 180.0), true);
         assert_eq!(with_tabs.tabs.len(), 2);
         assert_eq!(with_tabs.tabs[0].y, 40.0 * scale);
         assert_eq!(with_tabs.content.y, 68.0 * scale);
@@ -237,7 +237,7 @@ fn grid_geometry_accounts_for_headers_and_sidebar() {
         assert_eq!(pane.header.h, 28.0 * scale);
         assert_eq!(pane.grid.y, 64.0 * scale);
         assert_eq!(pane.grid.bottom(), with_sidebar.content.bottom());
-        assert_eq!(metrics.grid_size(pane.grid), (56, 26));
+        assert_eq!(metrics.grid_size(pane.grid), (60, 26));
         let no_chrome =
             WindowLayout::new(metrics, size, 0, (SidebarPosition::Hidden, 220.0), false);
         let pane = PaneHeaderLayout::new(no_chrome.content, scale, false);
