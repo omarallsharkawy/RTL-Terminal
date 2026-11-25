@@ -340,6 +340,7 @@ fn ensure_state_dir(parent: &Path) -> io::Result<()> {
                     fs::create_dir_all(grandparent)?;
                 }
             }
+            #[cfg_attr(not(unix), allow(unused_mut))]
             let mut builder = DirBuilder::new();
             #[cfg(unix)]
             {

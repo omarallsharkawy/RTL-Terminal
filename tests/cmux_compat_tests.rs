@@ -2,6 +2,9 @@
 //! mapping, `CMUX_*` environment handling, `claude` wrapper pass-through/injection, `claude-hook`
 //! JSON parsing, and per-pane sidebar agent status rendering (including Arabic text).
 
+// Some imports are only used by the Unix-only socket tests below.
+#![cfg_attr(not(unix), allow(unused_imports))]
+
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 

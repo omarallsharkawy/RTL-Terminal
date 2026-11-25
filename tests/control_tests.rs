@@ -1,6 +1,9 @@
 //! Window-free tests for the control socket protocol, path/permission checks, server round trips,
 //! size limits, CLI argument parsing and `Terminal::recent_lines`.
 
+// Some imports are only used by the Unix-only socket tests below.
+#![cfg_attr(not(unix), allow(unused_imports))]
+
 use std::ffi::OsString;
 use std::io::Cursor;
 use std::path::PathBuf;
