@@ -1,4 +1,4 @@
-//! Save the workspace layout and restart fresh shells in the recorded directories.
+//! Save the workspace layout and restart local shells or reattach to remote sessions.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::layout::{Node, PaneId, SplitDir, MIN_RATIO};
 use crate::pty::Pty;
+use crate::remote::Target;
 use crate::session::workspace::{GridGeometry, PaneFactory, Tab, Workspace};
 use crate::shell_integration::clean_text;
 
@@ -43,6 +44,10 @@ enum SavedNode {
         cwd: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         title: Option<String>,
+    },
+    Ssh {
+        #[serde(flatten)]
+        target: Target,
     },
     Split {
         direction: Direction,
@@ -145,6 +150,13 @@ impl SavedTab {
                     self.focused = self.nodes.len();
                 }
                 let pane = workspace.pane(*id).expect("every leaf has a pane");
+                if let Some(remote) = &pane.remote {
+                    let index = self.nodes.len();
+                    self.nodes.push(SavedNode::Ssh {
+                        target: remote.target.clone(),
+                    });
+                    return index;
+                }
                 // The shell's own directory first, like new tabs: OSC 7 is only as fresh as the
                 // last prompt (`cd /tmp && server` never reports /tmp) and may name a remote host.
                 let cwd = pane
@@ -173,7 +185,10 @@ impl SavedTab {
     }
 
     fn validate(&self) -> io::Result<()> {
-        if !matches!(self.nodes.get(self.focused), Some(SavedNode::Pane { .. })) {
+        if !matches!(
+            self.nodes.get(self.focused),
+            Some(SavedNode::Pane { .. } | SavedNode::Ssh { .. })
+        ) {
             return Err(invalid("tab has no valid focused pane"));
         }
         let mut parents = vec![false; self.nodes.len()];
@@ -207,15 +222,8 @@ impl SavedTab {
     ) -> Node {
         loop {
             match &self.nodes[index] {
-                SavedNode::Pane { cwd, title } => {
-                    let cwd = cwd
-                        .as_deref()
-                        .map(Path::new)
-                        .filter(|p| p.is_absolute() && p.is_dir());
-                    panes.push(PaneSettings {
-                        cwd: cwd.map(Path::to_path_buf),
-                        title: title.as_deref().map(session_title),
-                    });
+                SavedNode::Pane { .. } | SavedNode::Ssh { .. } => {
+                    panes.push(PaneSettings::from_node(&self.nodes[index]));
                     let id = PaneId(panes.len() as u64);
                     if index == self.focused {
                         *focused = Some(id);
@@ -246,9 +254,31 @@ impl SavedTab {
     }
 }
 
-struct PaneSettings {
-    cwd: Option<PathBuf>,
-    title: Option<String>,
+enum PaneSettings {
+    Local {
+        cwd: Option<PathBuf>,
+        title: Option<String>,
+    },
+    Ssh(Target),
+}
+
+impl PaneSettings {
+    fn from_node(node: &SavedNode) -> Self {
+        match node {
+            SavedNode::Pane { cwd, title } => {
+                let cwd = cwd
+                    .as_deref()
+                    .map(Path::new)
+                    .filter(|p| p.is_absolute() && p.is_dir());
+                Self::Local {
+                    cwd: cwd.map(Path::to_path_buf),
+                    title: title.as_deref().map(session_title),
+                }
+            }
+            SavedNode::Ssh { target } => Self::Ssh(target.clone()),
+            SavedNode::Split { .. } => unreachable!("only leaf nodes have pane settings"),
+        }
+    }
 }
 
 pub(crate) struct PreparedSession {
@@ -266,19 +296,21 @@ impl PreparedSession {
         for (index, tab) in self.tabs.into_iter().enumerate() {
             factory.set_tab_id(tab.id);
             let restored = workspace.restore_tab(tab, tab_count, geo, |id, cols, rows| {
-                let settings = &self.panes[id.0 as usize - 1];
-                let pane = factory
-                    .spawn(id, cols, rows, settings.cwd.clone())
-                    .or_else(|| {
-                        settings.cwd.as_ref()?;
-                        factory.spawn(id, cols, rows, None)
-                    });
-                pane.map(|mut pane| {
-                    // Leave meta.cwd to OSC 7. Otherwise a restored path would hide later
-                    // directory changes from the PTY fallback when OSC 7 is unavailable.
-                    pane.title.clone_from(&settings.title);
-                    pane
-                })
+                match &self.panes[id.0 as usize - 1] {
+                    PaneSettings::Ssh(target) => {
+                        factory.spawn_remote(id, cols, rows, target.clone())
+                    }
+                    PaneSettings::Local { cwd, title } => {
+                        let mut pane =
+                            factory.spawn(id, cols, rows, cwd.clone()).or_else(|| {
+                                cwd.as_ref()?;
+                                factory.spawn(id, cols, rows, None)
+                            })?;
+                        // Leave meta.cwd to OSC 7 so later directory changes stay visible.
+                        pane.title.clone_from(title);
+                        Some(pane)
+                    }
+                }
             });
             if restored && index == self.active_tab {
                 active = workspace.tabs().len() - 1;
@@ -502,6 +534,10 @@ fn write_temp_file(mut file: File, bytes: &[u8]) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    mod ssh {
+        include!("../../tests/support/ssh_session_restore.rs");
+    }
+
     use super::*;
     use crate::layout::Rect;
     use crate::session::pane::Pane;

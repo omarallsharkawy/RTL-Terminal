@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 use crate::layout::{dividers, layout, neighbor, Divider, FocusDir, Node, PaneId, Rect, SplitDir};
 use crate::pty::Pty;
+use crate::remote::Target;
 use crate::session::pane::Pane;
 
 /// A pane is only split when both halves keep at least this many columns / rows.
@@ -33,6 +34,16 @@ pub(crate) trait PaneFactory {
     /// `None` when the shell could not be started.
     fn spawn(&mut self, id: PaneId, cols: usize, rows: usize, cwd: Option<PathBuf>)
         -> Option<Pane>;
+
+    fn spawn_remote(
+        &mut self,
+        _id: PaneId,
+        _cols: usize,
+        _rows: usize,
+        _target: Target,
+    ) -> Option<Pane> {
+        None
+    }
 }
 
 /// A tab: a tree of split panes and the one that has keyboard focus.
@@ -128,7 +139,13 @@ impl Workspace {
         self.tabs
             .get(index)
             .and_then(|t| self.panes.get(&t.focused))
-            .and_then(|p| p.title.clone())
+            .and_then(|p| {
+                p.title.clone().or_else(|| {
+                    p.remote.as_ref().map(|ssh| {
+                        crate::shell_integration::clean_text(ssh.target.destination(), 256)
+                    })
+                })
+            })
             .filter(|t| !t.is_empty())
             .unwrap_or_else(|| format!("Tab {}", index + 1))
     }
@@ -272,6 +289,7 @@ impl Workspace {
     fn focused_cwd(&self) -> Option<PathBuf> {
         self.focused_id()
             .and_then(|f| self.panes.get(&f))
+            .filter(|pane| pane.remote.is_none())
             .and_then(|p| p.pty.as_ref())
             .and_then(Pty::cwd)
     }

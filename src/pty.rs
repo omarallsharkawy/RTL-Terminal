@@ -208,6 +208,30 @@ impl Pty {
         F: FnMut() + Send + 'static,
         E: FnMut() + Send + 'static,
     {
+        Self::spawn_with_status(
+            options,
+            cols,
+            rows,
+            move |_, wake| {
+                if wake {
+                    on_output();
+                }
+            },
+            move |_| on_exit(),
+        )
+    }
+
+    pub(crate) fn spawn_with_status<F, E>(
+        options: &SpawnOptions,
+        cols: u16,
+        rows: u16,
+        mut on_output: F,
+        mut on_exit: E,
+    ) -> Result<Self>
+    where
+        F: FnMut(&[u8], bool) + Send + 'static,
+        E: FnMut(Option<u32>) + Send + 'static,
+    {
         let cwd = options.cwd.as_deref();
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -302,15 +326,14 @@ impl Pty {
                 match reader.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
-                        if queue.push(&buf[..n]) {
-                            on_output();
-                        }
+                        let bytes = &buf[..n];
+                        let wake = queue.push(bytes);
+                        on_output(bytes, wake);
                     }
                     Err(_) => break,
                 }
             }
-            let _ = child.wait();
-            on_exit();
+            on_exit(child.wait().ok().map(|status| status.exit_code()));
         });
 
         Ok(Self {

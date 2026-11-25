@@ -5,6 +5,7 @@ pub mod git;
 use std::path::{Path, PathBuf};
 
 use crate::layout::{Rect, SidebarPosition};
+use crate::remote::ConnectionState;
 use crate::shell_integration::{clean_text, MAX_NOTIFY_CHARS};
 use crate::ui::hit::Hit;
 
@@ -171,6 +172,7 @@ pub struct Entry {
     pub ports: Vec<u16>,
     /// Agent status (working / needs input / done) reported for a pane in this tab.
     pub agent_status: Option<AgentStatus>,
+    pub remote_state: Option<ConnectionState>,
 }
 
 impl Entry {
@@ -194,6 +196,7 @@ impl Entry {
             notification,
             ports: Vec::new(),
             agent_status: None,
+            remote_state: None,
         }
     }
 

@@ -45,6 +45,14 @@ impl App {
             .ws
             .pane(id)
             .is_some_and(|p| p.ui.search_query.is_some());
+        if !search_open
+            && event.state.is_pressed()
+            && self.modifiers.is_empty()
+            && event.logical_key == Key::Named(NamedKey::Enter)
+            && self.manual_ssh_retry(id)
+        {
+            return false;
+        }
         // Esc clears a selected block instead of reaching the shell.
         if !search_open && is_plain_escape(event, self.modifiers) && self.clear_block_selection(id)
         {

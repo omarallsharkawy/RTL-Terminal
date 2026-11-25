@@ -150,6 +150,13 @@ impl ControlHost for App {
         self.refresh_window_title();
     }
 
+    fn new_ssh_tab(&mut self, destination: &str, name: Option<&str>) -> Result<Value, String> {
+        let target = crate::remote::Target::for_tab(destination, name)?;
+        let name = target.name().to_owned();
+        let id = App::new_ssh_tab(self, target).ok_or("failed to open SSH tab")?;
+        Ok(json!({ "pane": id.0, "tab": self.ws.active(), "name": name }))
+    }
+
     fn command_list(&self) -> Value {
         let cwd = self.focused_id().and_then(|id| App::pane_cwd(self, id));
         let set = WorkflowSet::load(&self.config.commands, cwd.as_deref());

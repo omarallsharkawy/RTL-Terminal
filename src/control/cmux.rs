@@ -448,6 +448,10 @@ pub(crate) trait ControlHost {
     fn refresh_title(&mut self);
     fn command_list(&self) -> Value;
     fn command_run(&mut self, name: &str, pane: Option<u64>) -> Result<(Value, bool), String>;
+    /// Open a persistent SSH tab (`tab.new-ssh`); hosts without a window refuse.
+    fn new_ssh_tab(&mut self, _destination: &str, _name: Option<&str>) -> Result<Value, String> {
+        Err("SSH tabs are not available here".into())
+    }
 }
 
 /// Dispatch one parsed control [`Request`] against `host`, handling both Twitty's native `ctl`
@@ -773,6 +777,9 @@ fn exec_twitty_call(
             let target = resolve_twitty_pane(host, pane)?;
             host.notify(target, title, body, true);
             Ok((json!({ "pane": target.0 }), false))
+        }
+        MethodCall::TabNewSsh { destination, name } => {
+            Ok((host.new_ssh_tab(&destination, name.as_deref())?, false))
         }
     }
 }

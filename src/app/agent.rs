@@ -32,7 +32,11 @@ impl App {
                 meta.last_exit,
             ),
         };
-        let cwd = meta.cwd.clone();
+        let cwd = if pane.remote.is_none() {
+            meta.cwd.clone()
+        } else {
+            None
+        };
         let path = std::env::var_os("PATH");
         let Some(agent) = resolve_agent(self.config.agent_command.as_deref(), path.as_deref())
         else {

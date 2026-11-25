@@ -20,6 +20,7 @@ mod palette;
 mod panes;
 mod ports;
 mod selection;
+mod ssh;
 mod window;
 
 pub use event::{clean_title, AppEvent};
@@ -56,6 +57,7 @@ pub struct App {
     config_dirty: bool,
     session: SessionStore,
     startup_session: Option<PreparedSession>,
+    startup_ssh: Option<crate::remote::Target>,
     /// An IME composition (preedit) is on screen.
     preedit_active: bool,
     cursor_blink: BlinkState,
@@ -93,6 +95,7 @@ impl App {
             config_dirty: false,
             session,
             startup_session,
+            startup_ssh: None,
             preedit_active: false,
             cursor_blink: BlinkState::new(BLINK_INTERVAL),
             zoom_steps: StepAccumulator::default(),
@@ -103,6 +106,12 @@ impl App {
             notification_history: Default::default(),
             ports: ports::PortWatch::default(),
         }
+    }
+
+    pub fn with_startup_ssh(mut self, target: crate::remote::Target) -> Self {
+        self.startup_ssh = Some(target);
+        self.startup_session = None;
+        self
     }
 
     fn focused_id(&self) -> Option<PaneId> {
@@ -174,11 +183,13 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::Terminal(id, event) => self.on_terminal_event(id, event),
             // The shell of a pane exited (`exit`, crash, or closed by the OS): close that pane,
             // and the window once nothing is left.
-            AppEvent::PtyExit(id) => {
-                if self.close_pane(id) {
+            AppEvent::PtyExit(id, status) => {
+                if !self.on_ssh_exit(id, status) && self.close_pane(id) {
                     event_loop.exit();
                 }
             }
+            AppEvent::SshAttached(id) => self.on_ssh_attached(id),
+            AppEvent::RetrySsh(id) => self.retry_ssh(id),
             AppEvent::ClearSelection(id, generation) => self.on_clear_selection(id, generation),
             AppEvent::Control(request, reply) => {
                 if self.on_control_request(request, reply) {

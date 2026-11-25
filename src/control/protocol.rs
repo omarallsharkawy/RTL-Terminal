@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::layout::SplitDir;
+use crate::remote::{validate_destination, validate_name};
 use crate::shell_integration::{clean_text, MAX_NOTIFY_CHARS};
 
 /// Maximum length of one NDJSON line (excluding the trailing newline), in bytes (1 MiB).
@@ -287,6 +288,10 @@ pub enum MethodCall {
         cwd: Option<PathBuf>,
         command: Vec<String>,
     },
+    TabNewSsh {
+        destination: String,
+        name: Option<String>,
+    },
     PaneSplit {
         pane: Option<u64>,
         direction: SplitDir,
@@ -356,6 +361,18 @@ impl MethodCall {
                 let cwd = optional_cwd(params)?;
                 let command = optional_command(params)?;
                 Ok(Self::TabNew { cwd, command })
+            }
+            "tab.new-ssh" => {
+                let destination = required_str(params, "destination")?;
+                let name = optional_str(params, "name")?;
+                validate_destination(destination)?;
+                if let Some(name) = name {
+                    validate_name(name)?;
+                }
+                Ok(Self::TabNewSsh {
+                    destination: destination.into(),
+                    name: name.map(str::to_owned),
+                })
             }
             "pane.split" => {
                 let pane = optional_u64(params, "pane")?;

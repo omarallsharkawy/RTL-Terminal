@@ -471,9 +471,12 @@ fn sidebar_entries(ws: &Workspace, ports: &HashMap<PaneId, Vec<u16>>) -> Vec<Ent
                 .filter_map(|id| ws.pane(id)?.meta.agent_status.as_ref())
                 .collect();
             let agent_status = pick_tab_agent_status(focused_status, other_statuses);
-            Entry::new(
+            let remote = sidebar_remote(ws, tab);
+            let mut entry = Entry::new(
                 &sidebar_title(ws, index),
-                focused.and_then(|p| p.meta.cwd.as_deref()),
+                focused
+                    .filter(|_| remote.is_none())
+                    .and_then(|p| p.meta.cwd.as_deref()),
                 focused.is_some_and(|p| p.meta.running),
                 focused.and_then(|p| p.meta.last_exit),
                 notifications
@@ -481,7 +484,9 @@ fn sidebar_entries(ws: &Workspace, ports: &HashMap<PaneId, Vec<u16>>) -> Vec<Ent
                     .map(|n| Notice::new(n.title.as_deref(), &n.body)),
             )
             .with_ports(tab_ports)
-            .with_agent_status(agent_status)
+            .with_agent_status(agent_status);
+            entry.remote_state = remote.map(|remote| remote.state);
+            entry
         })
         .collect()
 }
@@ -495,12 +500,24 @@ pub(super) fn sidebar_title(ws: &Workspace, index: usize) -> String {
     {
         return custom;
     }
+    if let Some(remote) = tab.and_then(|tab| sidebar_remote(ws, tab)) {
+        return crate::shell_integration::clean_text(remote.target.destination(), 256);
+    }
     let pane = tab.and_then(|tab| ws.pane(tab.focused));
     entry_title(
         pane.and_then(|p| p.title.as_deref()),
         pane.and_then(|p| p.pty.as_ref()?.program_name()),
         index,
     )
+}
+
+fn sidebar_remote<'a>(
+    ws: &'a Workspace,
+    tab: &crate::session::workspace::Tab,
+) -> Option<&'a crate::remote::RemotePane> {
+    std::iter::once(tab.focused)
+        .chain(tab.root.leaves())
+        .find_map(|id| ws.pane(id)?.remote.as_ref())
 }
 
 impl App {
