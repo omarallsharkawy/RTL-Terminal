@@ -58,6 +58,7 @@ commands! {
     "edit.copy", "Copy", "نسخ", Some("Ctrl+Shift+C") => InputAction::Copy;
     "edit.paste", "Paste", "لصق", Some("Ctrl+Shift+V") => InputAction::Paste;
     "search.open", "Find in scrollback", "بحث", Some("Ctrl+Shift+F") => InputAction::Search;
+    "search.all", "Search all terminals", "دوّر في كل الترمينالات", Some("Ctrl+Shift+G") => InputAction::SearchAll;
     "zoom.in", "Zoom in", "تكبير", Some("Ctrl+=") => InputAction::ZoomIn;
     "zoom.out", "Zoom out", "تصغير", Some("Ctrl+-") => InputAction::ZoomOut;
     "zoom.reset", "Reset zoom", "الحجم الأصلي", Some("Ctrl+0") => InputAction::ZoomReset;

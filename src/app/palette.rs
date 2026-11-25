@@ -6,6 +6,9 @@
 //!   project's `.twitty/commands.json`). Choosing an untrusted project command first shows the
 //!   trust confirmation with the file's full command list.
 //! - **Notifications:** the notification history, newest first; choosing one jumps to its pane.
+//! - **Search:** the lines of every pane matching the query (`ui::search_all`, scanned a slice
+//!   at a time once typing pauses); choosing one jumps to its pane and line, highlighted by the
+//!   scrollback search.
 //!
 //! While the palette is open it owns all keyboard, IME and pointer input so nothing can reach
 //! panes or the PTY behind it. Clicking outside the palette closes it and consumes the click
@@ -16,6 +19,7 @@ use std::time::{Instant, SystemTime};
 
 use alacritty_terminal::term::TermMode;
 use winit::event::{KeyEvent, MouseButton};
+use winit::keyboard::{Key, ModifiersState, NamedKey};
 
 use super::App;
 use crate::commands;
@@ -26,6 +30,9 @@ use crate::render::scene::palette::{PaletteHit, PaletteItem, PaletteView};
 use crate::ui::notifications::{jump_target, palette_item};
 use crate::ui::palette::{
     matches, visible_window, PaletteCmd, PaletteEntry, PaletteId, PaletteMode, PaletteState,
+};
+use crate::ui::search_all::{
+    jump_target as search_target, PaneInfo, Query, SearchAll, SearchHit, PLACEHOLDER, SLICE,
 };
 use crate::workflows::{
     encode_insert, resolve_run_cwd, run_shell_argv, trust_confirm_view, CommandMode, ConfirmCmd,
@@ -39,6 +46,8 @@ pub(super) struct OpenPalette {
     /// Built-in and custom commands, in palette order.
     entries: Vec<PaletteEntry>,
     pending_trust: Option<PendingTrust>,
+    /// Results of searching every pane (search mode).
+    search: SearchAll,
 }
 
 struct PendingTrust {
@@ -83,6 +92,7 @@ impl App {
             workflows,
             entries,
             pending_trust: None,
+            search: SearchAll::default(),
         });
         self.sync_palette();
     }
@@ -112,6 +122,10 @@ impl App {
 
     /// Hand the current query and results (or the trust confirmation) to the renderer.
     pub(super) fn sync_palette(&mut self) {
+        if let Some(open) = self.palette.as_mut() {
+            let ws = &self.ws;
+            open.search.retain_open(|id| ws.pane(id).is_some());
+        }
         let Some(open) = &self.palette else {
             return;
         };
@@ -153,6 +167,10 @@ impl App {
                     Some("Filter notifications… / دوّر في الإشعارات…".to_string()),
                 )
             }
+            PaletteMode::Search => (
+                open.search.rows(&state.query),
+                Some(PLACEHOLDER.to_string()),
+            ),
         };
         let shown = visible_window(rows.len(), state.selected);
         let selected = state.selected.min(rows.len().saturating_sub(1)) - shown.start;
@@ -191,6 +209,10 @@ impl App {
                 self.toggle_palette_mode(PaletteMode::Notifications);
                 return false;
             }
+            Some(InputAction::SearchAll) => {
+                self.toggle_palette_mode(PaletteMode::Search);
+                return false;
+            }
             _ => {}
         }
         let modifiers = self.modifiers;
@@ -212,6 +234,10 @@ impl App {
         }
 
         let (key, text) = (&event.logical_key, event.text.as_deref());
+        if open.state.mode == PaletteMode::Search {
+            self.search_all_key(key, text, modifiers);
+            return false;
+        }
         match open.state.mode {
             PaletteMode::Commands => match open.state.key(&open.entries, key, text, modifiers) {
                 PaletteCmd::Run(id) => return self.activate_palette_id(id),
@@ -232,6 +258,7 @@ impl App {
                     PaletteCmd::None | PaletteCmd::Run(_) => self.sync_palette(),
                 }
             }
+            PaletteMode::Search => {}
         }
         false
     }
@@ -279,6 +306,13 @@ impl App {
                     let target = jump_target(list[i], |id| self.ws.pane(id).is_some());
                     self.jump_or_stay(target);
                 }
+                false
+            }
+            PaletteMode::Search => {
+                let hits = open.search.hits();
+                let shown = visible_window(hits.len(), state.selected);
+                let hit = hits.get(shown.start + row).cloned();
+                self.jump_to_hit(hit);
                 false
             }
         }
@@ -370,8 +404,145 @@ impl App {
                 return;
             }
             open.state.push_text(text);
+            if open.state.mode == PaletteMode::Search {
+                open.search.query_changed(&open.state.query, Instant::now());
+            }
             self.sync_palette();
         }
+    }
+
+    // ---- search all terminals ----
+
+    /// A key in search mode: arrows choose, Enter jumps (running a waiting scan first so it
+    /// answers the query on screen), typing schedules a new scan.
+    fn search_all_key(&mut self, key: &Key, text: Option<&str>, modifiers: ModifiersState) {
+        let pending = self.palette.as_ref().is_some_and(|p| p.search.is_pending());
+        if pending && *key == Key::Named(NamedKey::Enter) {
+            self.finish_search_all();
+        }
+        let Some(open) = self.palette.as_mut() else {
+            return;
+        };
+        let before = open.state.query.clone();
+        match open
+            .state
+            .key_list(open.search.hits().len(), key, text, modifiers)
+        {
+            PaletteCmd::Choose(i) => {
+                let hit = open.search.hits().get(i).cloned();
+                self.jump_to_hit(hit);
+            }
+            PaletteCmd::Close => self.close_palette(),
+            PaletteCmd::None | PaletteCmd::Run(_) => {
+                if open.state.query != before {
+                    open.search.query_changed(&open.state.query, Instant::now());
+                }
+                self.sync_palette();
+            }
+        }
+    }
+
+    /// Start the waiting scan once it is due, then run it a slice at a time (input and
+    /// drawing go on in between). Returns when it wants to run again.
+    pub(super) fn poll_search_all(&mut self, now: Instant) -> Option<Instant> {
+        let search = &self.palette.as_ref()?.search;
+        if let Some(due) = search.due() {
+            if due > now {
+                return Some(due);
+            }
+            self.start_search_all();
+        }
+        self.step_search_all(Some(now + SLICE));
+        let pending = self.palette.as_ref()?.search.is_pending();
+        pending.then(Instant::now)
+    }
+
+    /// Start or finish the scan now, in one go (Enter while results are still coming).
+    fn finish_search_all(&mut self) {
+        if self
+            .palette
+            .as_ref()
+            .is_some_and(|p| p.search.due().is_some())
+        {
+            self.start_search_all();
+        }
+        self.step_search_all(None);
+    }
+
+    /// Start a scan of every pane of every tab for the palette's query: tabs in order, each
+    /// pane's newest lines first.
+    fn start_search_all(&mut self) {
+        let Some(open) = self.palette.as_ref() else {
+            return;
+        };
+        let Some(query) = Query::new(&open.state.query) else {
+            return;
+        };
+        let mut panes = Vec::new();
+        for (tab, t) in self.ws.tabs().iter().enumerate() {
+            let tab_title = super::window::sidebar_title(&self.ws, tab);
+            let leaves = t.root.leaves();
+            let split = leaves.len() > 1;
+            for id in leaves {
+                let pane_title = self.ws.pane(id).filter(|_| split).and_then(|pane| {
+                    let program = pane.pty.as_ref().and_then(Pty::program_name);
+                    pane.title.as_deref().or(program).map(str::to_owned)
+                });
+                panes.push(PaneInfo {
+                    pane: id,
+                    tab,
+                    tab_title: tab_title.clone(),
+                    pane_title,
+                });
+            }
+        }
+        if let Some(open) = self.palette.as_mut() {
+            open.search.start(query, panes);
+        }
+    }
+
+    /// Run the scan in progress until `deadline` (or to its end) and list what it found.
+    fn step_search_all(&mut self, deadline: Option<Instant>) {
+        let Some(open) = self.palette.as_mut() else {
+            return;
+        };
+        let Some(job) = open.search.job_mut() else {
+            return;
+        };
+        let ws = &mut self.ws;
+        job.run_until(
+            |id, step| step(ws.pane_mut(id).map(|p| &mut p.terminal)),
+            deadline,
+        );
+        open.search.update();
+        self.sync_palette();
+    }
+
+    /// Jump to a search result: its tab and pane, scrolled to its line, which the pane's
+    /// scrollback search highlights (its bar stays open: Enter goes on to older matches, Esc
+    /// back to the shell). A result whose pane was closed is dropped and the list stays.
+    fn jump_to_hit(&mut self, hit: Option<SearchHit>) {
+        let ws = &self.ws;
+        let Some(hit) = hit
+            .as_ref()
+            .and_then(|h| search_target(h, |id| ws.pane(id).is_some()))
+            .cloned()
+        else {
+            self.sync_palette();
+            return;
+        };
+        self.close_palette();
+        if self.focus_pane_by_id(hit.pane).is_err() {
+            return;
+        }
+        self.clear_selection(hit.pane);
+        if let Some(pane) = self.ws.pane_mut(hit.pane) {
+            let line = &hit.line;
+            pane.ui.search_query = Some(line.needle.clone());
+            pane.terminal
+                .focus_search_at(&line.needle, line.pos, line.row, line.column);
+        }
+        self.window.request_redraw();
     }
 
     /// Record a notification from pane `id` in the history; it counts as seen when the user

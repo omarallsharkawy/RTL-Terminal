@@ -211,6 +211,46 @@ pub struct LineView {
     pub remap_seq: u64,
 }
 
+/// Where a line read by [`Terminal::for_each_text_line`] is, to find it again later.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextLinePos {
+    /// A main-screen line by absolute number (see `blocks::anchor`), valid while the tracker's
+    /// `epoch` and `remap_seq` are unchanged.
+    Main {
+        line: AbsLine,
+        epoch: u64,
+        remap_seq: u64,
+    },
+    /// A row of the alternate screen (0 = top), which has no scrollback.
+    Alt(i32),
+}
+
+/// One character of a text line: a cell's own character (`mark` false) or one of the combining
+/// marks drawn on it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TextChar {
+    /// As stored in the cell (Arabic presentation forms are not decomposed).
+    pub c: char,
+    pub mark: bool,
+    /// Row within the logical line (0 = its first row) and column of the cell.
+    pub row: u16,
+    pub col: u16,
+    /// The cell is a double-width character.
+    pub wide: bool,
+}
+
+/// How far a [`Terminal::for_each_text_line`] call got.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TextScan {
+    /// Rows read.
+    pub rows: usize,
+    /// The row to go on from when it stopped early; `None` once the rows ran out.
+    pub next: Option<TextLinePos>,
+}
+
+/// Most rows joined into one logical line by [`Terminal::for_each_text_line`].
+pub const MAX_JOINED_ROWS: usize = 16;
+
 #[derive(Clone, Debug)]
 pub struct CursorState {
     pub col: usize,
@@ -991,6 +1031,174 @@ impl Terminal {
     /// Drop the query and all highlights.
     pub fn clear_search(&mut self) {
         self.search = None;
+    }
+
+    /// Call `f` with each logical line (soft-wrapped rows joined, at most [`MAX_JOINED_ROWS`])
+    /// of the shown screen and its scrollback, newest first: from the row at `from` (the
+    /// bottom row when `None`) upwards, at most `max_rows` rows, until `f` returns false. Blank
+    /// lines are skipped, trailing blanks dropped, control and bidi control characters left
+    /// out. Turns on absolute line numbers for the main screen, so the positions handed out
+    /// (and [`TextScan::next`], to go on later) stay valid while output scrolls.
+    pub fn for_each_text_line(
+        &mut self,
+        from: Option<TextLinePos>,
+        max_rows: usize,
+        mut f: impl FnMut(TextLinePos, &[TextChar]) -> bool,
+    ) -> TextScan {
+        let alt = self.is_alt_screen();
+        if !alt {
+            self.lines.enable(self.term.grid(), false);
+            self.sync_lines();
+        }
+        let done = TextScan {
+            rows: 0,
+            next: None,
+        };
+        let bottom = match from {
+            None => self.term.bottommost_line().0,
+            Some(pos) => match self.text_point(pos, 0, 0) {
+                Some(point) => point.line.0,
+                None => return done,
+            },
+        };
+        let grid = self.term.grid();
+        let top = self.term.topmost_line().0;
+        let lowest = top.max(bottom - max_rows.min(i32::MAX as usize) as i32 + 1);
+        let last = Column(self.cols - 1);
+        let wraps = |line: i32| grid[Line(line)][last].flags.contains(CellFlags::WRAPLINE);
+        let (abs_top, epoch, remap_seq) =
+            (self.lines.top(), self.lines.epoch(), self.lines.remap_seq());
+        let pos_of = |line: i32| {
+            if alt {
+                TextLinePos::Alt(line)
+            } else {
+                TextLinePos::Main {
+                    line: abs_top + AbsLine::from(line),
+                    epoch,
+                    remap_seq,
+                }
+            }
+        };
+        let shown = |c: char| {
+            !c.is_control() && !is_bidi_control(c) && !matches!(c, '\u{2028}' | '\u{2029}')
+        };
+        let spacer = CellFlags::WIDE_CHAR_SPACER | CellFlags::LEADING_WIDE_CHAR_SPACER;
+        let mut chars: Vec<TextChar> = Vec::with_capacity(self.cols * 2);
+        let mut end = bottom;
+        while end >= lowest {
+            let mut start = end;
+            while start > lowest
+                && wraps(start - 1)
+                && ((end - start) as usize) < MAX_JOINED_ROWS - 1
+            {
+                start -= 1;
+            }
+            chars.clear();
+            for line in start..=end {
+                let row = &grid[Line(line)];
+                for c in 0..self.cols {
+                    let cell = &row[Column(c)];
+                    if cell.flags.intersects(spacer) {
+                        continue;
+                    }
+                    let (row, col) = ((line - start) as u16, c as u16);
+                    let wide = cell.flags.contains(CellFlags::WIDE_CHAR);
+                    // A cell that holds no visible text still takes its column.
+                    let base = if shown(cell.c) { cell.c } else { ' ' };
+                    chars.push(TextChar {
+                        c: base,
+                        mark: false,
+                        row,
+                        col,
+                        wide,
+                    });
+                    for &z in drawn_marks(cell).iter().filter(|&&z| shown(z)) {
+                        chars.push(TextChar {
+                            c: z,
+                            mark: true,
+                            row,
+                            col,
+                            wide,
+                        });
+                    }
+                }
+            }
+            while chars.last().is_some_and(|t| !t.mark && t.c == ' ') {
+                chars.pop();
+            }
+            let go_on = chars.is_empty() || f(pos_of(start), &chars);
+            end = start - 1;
+            if !go_on {
+                break;
+            }
+        }
+        TextScan {
+            rows: (bottom - end) as usize,
+            next: (end >= lowest).then(|| pos_of(end)),
+        }
+    }
+
+    /// Grid point of `row` rows below the line at `pos` and `column`, while it is still where
+    /// it was when `pos` was handed out.
+    fn text_point(&self, pos: TextLinePos, row: usize, column: usize) -> Option<Point> {
+        let line = match pos {
+            TextLinePos::Main {
+                line,
+                epoch,
+                remap_seq,
+            } => {
+                let view = self.line_view()?;
+                if view.epoch != epoch || view.remap_seq != remap_seq || line < view.oldest {
+                    return None;
+                }
+                i32::try_from(line - self.lines.top()).ok()?
+            }
+            TextLinePos::Alt(line) if self.is_alt_screen() => line,
+            TextLinePos::Alt(_) => return None,
+        };
+        let line = line.checked_add(i32::try_from(row).ok()?)?;
+        if line < self.term.topmost_line().0 || line > self.term.bottommost_line().0 {
+            return None;
+        }
+        (column < self.cols).then(|| Point::new(Line(line), Column(column)))
+    }
+
+    /// Make the match of `needle` (literal and case-insensitive, like [`Terminal::search`])
+    /// that starts at `row`/`column` of the line at `pos` the focused search match, and scroll
+    /// it into view. When that line is gone or no longer holds `needle` there, the newest
+    /// match of `needle` is focused instead. Returns false when nothing matches at all.
+    pub fn focus_search_at(
+        &mut self,
+        needle: &str,
+        pos: TextLinePos,
+        row: usize,
+        column: usize,
+    ) -> bool {
+        let Ok(mut regex) = RegexSearch::new(&literal_pattern(needle)) else {
+            self.clear_search();
+            return false;
+        };
+        let found = self.text_point(pos, row, column).and_then(|start| {
+            let last = (start.line + MAX_JOINED_ROWS as i32).min(self.term.bottommost_line());
+            let end = Point::new(last, self.term.last_column());
+            RegexIter::new(start, end, Direction::Right, &self.term, &mut regex)
+                .next()
+                .filter(|m| *m.start() == start)
+        });
+        let Some(found) = found else {
+            self.clear_search();
+            self.term.scroll_display(Scroll::Bottom);
+            return self.search(needle, Direction::Left);
+        };
+        self.term.scroll_to_point(*found.start());
+        self.search = Some(SearchState {
+            query: needle.to_owned(),
+            regex: RefCell::new(regex),
+            focus: Some(found),
+            position: (0, 0),
+        });
+        self.count_matches();
+        true
     }
 
     /// Per viewport row, the inclusive column spans of visible matches and their level

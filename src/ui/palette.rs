@@ -2,8 +2,9 @@
 //! drive it. Window-free; drawing is `render::scene::palette`.
 //!
 //! The palette lists one source of items at a time ([`PaletteMode`]): the commands (built-in
-//! and custom, as [`PaletteEntry`]s), or the notification history (`ui::notifications`). Any
-//! [`Searchable`] list works the same way.
+//! and custom, as [`PaletteEntry`]s), the notification history (`ui::notifications`), or the
+//! lines of every terminal matching the query (`ui::search_all`). Any [`Searchable`] list
+//! works the same way; a list already matched elsewhere uses [`PaletteState::key_list`].
 //!
 //! Matching works in Arabic and English alike: every word of the query must appear in the
 //! command's name, English title or Arabic title, after folding case and the Arabic letters
@@ -26,6 +27,8 @@ pub enum PaletteMode {
     Commands,
     /// The notification history, newest first.
     Notifications,
+    /// Lines of every pane matching the query (`search.all`).
+    Search,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -147,6 +150,29 @@ impl PaletteState {
         modifiers: ModifiersState,
     ) -> PaletteCmd {
         let results = matches(items, &self.query);
+        self.key_results(&results, key, text, modifiers)
+    }
+
+    /// Handle one key press over `len` items that are already the results (matched elsewhere,
+    /// like the lines of `search.all`); Enter answers `Choose(index)`.
+    pub fn key_list(
+        &mut self,
+        len: usize,
+        key: &Key,
+        text: Option<&str>,
+        modifiers: ModifiersState,
+    ) -> PaletteCmd {
+        let results: Vec<usize> = (0..len).collect();
+        self.key_results(&results, key, text, modifiers)
+    }
+
+    fn key_results(
+        &mut self,
+        results: &[usize],
+        key: &Key,
+        text: Option<&str>,
+        modifiers: ModifiersState,
+    ) -> PaletteCmd {
         match key {
             Key::Named(NamedKey::Escape) => return PaletteCmd::Close,
             Key::Named(NamedKey::Enter) => {
@@ -242,18 +268,32 @@ fn word_score(field: &str, at: usize) -> usize {
 
 /// Case and Arabic spelling variants folded away, for matching.
 pub fn fold(text: &str) -> String {
-    text.chars()
-        .filter(|&c| !is_arabic_mark(c))
-        .flat_map(char::to_lowercase)
-        .map(|c| match c {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        fold_into(c, &mut out);
+    }
+    out
+}
+
+/// `c` folded as [`fold`] does, appended to `out` (nothing for tashkeel and tatweel).
+pub fn fold_into(c: char, out: &mut String) {
+    if c.is_ascii() {
+        out.push(c.to_ascii_lowercase());
+        return;
+    }
+    if is_arabic_mark(c) {
+        return;
+    }
+    for c in c.to_lowercase() {
+        out.push(match c {
             'أ' | 'إ' | 'آ' | 'ٱ' => 'ا',
             'ة' => 'ه',
             'ى' => 'ي',
             'ؤ' => 'و',
             'ئ' => 'ي',
             c => c,
-        })
-        .collect()
+        });
+    }
 }
 
 /// Tashkeel (harakat, shadda, sukun, superscript alef) and tatweel.
