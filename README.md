@@ -77,6 +77,7 @@ cargo build --release
 | Copy selection | Release the mouse, or Ctrl+Shift+C |
 | Paste | Ctrl+Shift+V, or middle-click |
 | Search scrollback | Ctrl+Shift+F, then type. Enter = older match, Shift+Enter = newer, Esc closes |
+| Search all terminals (every tab and pane, screen and scrollback) | Ctrl+Shift+G, then type 2+ characters (Arabic without tashkeel or with any alef form matches). Enter jumps to the line and highlights it; Esc closes |
 | Select word / line | Double-click / triple-click |
 | Select inside vim, Claude Code, etc. | Hold Shift while dragging |
 | Zoom in / out / reset | Ctrl+= / Ctrl+- / Ctrl+0, or Ctrl+wheel |

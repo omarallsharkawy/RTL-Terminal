@@ -124,6 +124,7 @@ impl App {
             InputAction::ToggleSidebar => self.toggle_sidebar(),
             InputAction::CommandPalette => self.open_palette(PaletteMode::Commands),
             InputAction::NotificationList => self.open_palette(PaletteMode::Notifications),
+            InputAction::SearchAll => self.open_palette(PaletteMode::Search),
             InputAction::AskAgent => self.ask_agent(id),
             InputAction::PrevBlock => self.navigate_blocks(id, BlockList::select_prev),
             InputAction::NextBlock => self.navigate_blocks(id, BlockList::select_next),

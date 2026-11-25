@@ -68,6 +68,7 @@ Everything above `render/gpu` runs without a GPU and is covered by tests in `tes
 | `sidebar/` | The vertical tab sidebar model: one entry per tab with cwd, git branch (read from `.git/HEAD`, bounded), running state, last exit and the latest notification. | `session` |
 | `notify.rs` | Desktop notifications through `notify-send` (argv, never a shell), throttled per pane. | — |
 | `commands.rs`, `ui/palette.rs` | The command table (name, English and Arabic titles, shortcut, action) and the palette state with Arabic-aware matching. | `input` |
+| `ui/search_all.rs` | "Search all terminals", the palette's search mode: scans each pane's text lines (`Terminal::for_each_text_line`, newest first, bounded), folds them like the palette, shares at most 200 results between panes, cuts each line around its match. The scan runs in 8 ms slices from `about_to_wait`, resuming each pane by absolute line; the jump goes through `Terminal::focus_search_at` to the scrollback search highlight. | `terminal`, `ui/palette` |
 | `control/` | The control socket (`$XDG_RUNTIME_DIR/twitty/twitty-<pid>.sock`, 0600 in a 0700 dir) speaking newline-delimited JSON, and the `twitty ctl/send/notify/list/read` client. | — |
 | `agent.rs` | "Ask an agent": picks a local agent CLI, builds its argv and a fenced prompt from the selection, block or screen. | — |
 | `ports.rs` | Listening TCP ports per pane for the sidebar: pure `/proc` parsing and a scanner thread. | — |

@@ -50,11 +50,11 @@ pub(crate) enum KeyRoute {
     Ignore,
 }
 
-/// Route a decoded key: layout shortcuts always run, everything else goes to the search bar
-/// while it is open.
+/// Route a decoded key: layout shortcuts (and searching all panes, which a jump leaves the
+/// search bar open for) always run, everything else goes to the search bar while it is open.
 pub(crate) fn route_key(action: Option<InputAction>, search_open: bool) -> KeyRoute {
     match action {
-        Some(a) if a.is_layout() => KeyRoute::Action(a),
+        Some(a) if a.is_layout() || a == InputAction::SearchAll => KeyRoute::Action(a),
         _ if search_open => KeyRoute::SearchBar,
         Some(a) => KeyRoute::Action(a),
         None => KeyRoute::Ignore,
@@ -75,6 +75,11 @@ mod tests {
         assert_eq!(
             route_key(Some(InputAction::Focus(FocusDir::Left)), true),
             KeyRoute::Action(InputAction::Focus(FocusDir::Left))
+        );
+        // A jump from "search all terminals" leaves the bar open; searching again still works.
+        assert_eq!(
+            route_key(Some(InputAction::SearchAll), true),
+            KeyRoute::Action(InputAction::SearchAll)
         );
     }
 

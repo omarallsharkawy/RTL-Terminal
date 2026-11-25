@@ -5,7 +5,7 @@
 //! - `window`: the window and renderer (every renderer call lives there).
 //! - `panes`: opening, splitting, focusing and closing tabs and panes.
 //! - `keyboard`: keys, input-method text, the search bar and shortcut actions.
-//! - `palette`: the command palette and its notifications mode.
+//! - `palette`: the command palette and its notifications and search-all modes.
 //! - `ports`: the listening-ports scanner behind the sidebar.
 //! - `agent`: "Ask an agent" about the output.
 //! - `mouse`: pointer, mouse reporting, divider dragging and the wheel.
@@ -208,7 +208,12 @@ impl ApplicationHandler<AppEvent> for App {
         if self.window.blink_differs(self.cursor_blink.visible()) {
             self.window.request_redraw();
         }
-        event_loop.set_control_flow(match self.cursor_blink.next_deadline() {
+        let search_due = self.poll_search_all(now);
+        let deadline = match (self.cursor_blink.next_deadline(), search_due) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+        event_loop.set_control_flow(match deadline {
             Some(deadline) => ControlFlow::WaitUntil(deadline),
             None => ControlFlow::Wait,
         });

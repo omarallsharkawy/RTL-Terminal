@@ -28,6 +28,8 @@ pub enum InputAction {
     Paste,
     /// Open interactive scrollback search.
     Search,
+    /// Search the text of every pane in every tab (the palette's search mode).
+    SearchAll,
     /// Open a new tab.
     NewTab,
     /// Close the focused pane (its tab, or the window, when it is the last one).
@@ -316,6 +318,7 @@ fn ctrl_shift_shortcut(key_code: KeyCode) -> Option<InputAction> {
         KeyCode::KeyC => InputAction::Copy,
         KeyCode::KeyV => InputAction::Paste,
         KeyCode::KeyF => InputAction::Search,
+        KeyCode::KeyG => InputAction::SearchAll,
         KeyCode::KeyT => InputAction::NewTab,
         KeyCode::KeyW => InputAction::ClosePane,
         KeyCode::KeyE => InputAction::SplitRight,
