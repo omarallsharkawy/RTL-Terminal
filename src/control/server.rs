@@ -276,8 +276,12 @@ mod imp {
             let spawned = thread::Builder::new()
                 .name("twitty-control-client".into())
                 .spawn(move || {
-                    let _slot = slot;
+                    // Keep one handle open until the slot is released, so a client that sees
+                    // the connection close can reconnect at once without being refused.
+                    let closer = stream.try_clone().ok();
                     handle_client(stream, handler, cfg, shutdown_client);
+                    drop(slot);
+                    drop(closer);
                 });
             if let Err(err) = spawned {
                 tracing::warn!("failed to spawn control client thread: {err}");
