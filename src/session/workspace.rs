@@ -128,6 +128,14 @@ impl Workspace {
 
     /// The label of tab `index`: its custom title, else its focused pane's title, else "Tab N".
     pub(crate) fn tab_title(&self, index: usize) -> String {
+        self.tab_title_for_ui(index, crate::ui::chrome::UiLanguage::English)
+    }
+
+    pub(crate) fn tab_title_for_ui(
+        &self,
+        index: usize,
+        language: crate::ui::chrome::UiLanguage,
+    ) -> String {
         if let Some(custom) = self
             .tabs
             .get(index)
@@ -147,7 +155,7 @@ impl Workspace {
                 })
             })
             .filter(|t| !t.is_empty())
-            .unwrap_or_else(|| format!("Tab {}", index + 1))
+            .unwrap_or_else(|| crate::sidebar::localized_entry_title(None, None, index, language))
     }
 
     /// Find the current 0-based index of the tab with stable `id`.
@@ -411,6 +419,17 @@ impl Workspace {
             return false;
         }
         self.active = index;
+        true
+    }
+
+    /// Move the active tab to another slot, preserving its identity and focused pane.
+    pub(crate) fn move_active_tab(&mut self, to: usize) -> bool {
+        if to >= self.tabs.len() || to == self.active {
+            return false;
+        }
+        let tab = self.tabs.remove(self.active);
+        self.tabs.insert(to, tab);
+        self.active = to;
         true
     }
 

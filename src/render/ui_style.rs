@@ -58,6 +58,14 @@ impl UiStyle {
         logical * self.scale
     }
 
+    /// A readable foreground on an accent supplied by either the theme or the user.
+    pub fn accent_text(self) -> Rgba {
+        let [r, g, b, _] = self.accent.to_linear();
+        let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        let value = if luminance > 0.179 { 0.0 } else { 1.0 };
+        Rgba::new(value, value, value, 1.0)
+    }
+
     pub fn accent_tint(self, surface: Rgba) -> Rgba {
         surface.mix(self.accent, 0.22)
     }

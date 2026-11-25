@@ -234,6 +234,7 @@ impl ApplicationHandler<AppEvent> for App {
             self.cursor_blink.next_deadline(),
             search_due,
             self.poll_git_diff(now),
+            self.window.poll_sidebar_animation(now),
         ]
         .into_iter()
         .flatten()

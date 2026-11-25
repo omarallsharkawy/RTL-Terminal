@@ -4,9 +4,12 @@ use crate::layout::{PaneId, Rect};
 use crate::render::icons::Icon;
 use crate::render::shapes::{Border, Shape};
 use crate::render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
-use crate::render::ui_style::{UiStyle, RADIUS_6};
+use crate::render::ui_style::{UiStyle, RADIUS_12, RADIUS_6};
 use crate::render::TabLabel;
-use crate::ui::chrome::{ChromeAction, PaneHeaderLayout, TopBarLayout, WindowLayout};
+use crate::ui::chrome::{
+    count_badge, ChromeAction, PaneHeaderLayout, SearchContents, SearchPlaceholder, TopBarLayout,
+    UiLanguage, WindowLayout, SEARCH_AR, SEARCH_EN, SEARCH_KEYCAP,
+};
 use crate::ui::git_diff::DiffStat;
 
 use super::context::DrawContext;
@@ -27,6 +30,8 @@ pub struct ChromeView<'a> {
     pub unread: usize,
     pub sidebar_visible: bool,
     pub hover: Option<ChromeAction>,
+    pub hover_tab: Option<usize>,
+    pub language: UiLanguage,
     pub panes: &'a [PaneHeaderView],
     pub tabs: &'a [TabLabel],
 }
@@ -91,30 +96,9 @@ impl Chrome<'_, '_> {
         let x = search_icon.right() + s.px(6.0);
         let room = (top.search.right() - s.px(8.0) - x).max(0.0);
         if room > s.px(10.0) {
-            let ar = "دوّر في الجلسات والوكلاء والملفات…";
-            let en_room = (room - s.px(8.0)).max(0.0) / 2.0;
-            let en = Rect::new(x, top.search.y, en_room, top.search.h);
-            let ar_rect = Rect::new(
-                top.search.right() - s.px(8.0) - en_room,
-                top.search.y,
-                en_room,
-                top.search.h,
-            );
-            self.label(
-                en,
-                "Search sessions, agents, files…",
-                UiSize::Caption,
-                UiWeight::Regular,
-                UiAlign::Left,
-                s.text_dim,
-            );
-            self.label(
-                ar_rect,
-                ar,
-                UiSize::Caption,
-                UiWeight::Regular,
-                UiAlign::Right,
-                s.text_dim,
+            self.search_contents(
+                Rect::new(x, top.search.y, room, top.search.h),
+                view.language,
             );
         }
         if let (Some(rect), Some(diff)) = (top.diff, view.diff) {
@@ -174,63 +158,171 @@ impl Chrome<'_, '_> {
                 );
             }
         }
-        if view.unread == 0 {
+        let rect = top.notifications;
+        if let Some(count) = count_badge(view.unread) {
+            if view.hover == Some(ChromeAction::Notifications) {
+                self.panel(rect, RADIUS_6, s.bg3);
+            }
+            let icon = self.leading_icon(rect);
+            Icon::Bell.draw(icon, self.ctx.color(s.text), self.shapes);
+            let x = icon.right();
+            let h = s.px(15.0).min(rect.h);
+            let badge = Rect::new(
+                x,
+                rect.y + (rect.h - h) / 2.0,
+                (rect.right() - x - s.px(1.0)).max(0.0),
+                h,
+            );
+            let buffer = self.font.shape(
+                self.ctx.font_system,
+                UiSize::Small,
+                UiWeight::Semibold,
+                s.scale,
+                &count,
+            );
+            if label_width(&buffer).ceil() <= badge.w {
+                self.panel(badge, RADIUS_12, s.accent);
+                self.labels.push(UiLabel::new(
+                    buffer,
+                    badge,
+                    UiAlign::Center,
+                    s.accent_text(),
+                ));
+            }
+        } else {
             self.button(
-                top.notifications,
+                rect,
                 Icon::Bell,
                 view.hover == Some(ChromeAction::Notifications),
                 false,
                 false,
             );
+        }
+    }
+
+    fn search_contents(&mut self, rect: Rect, language: UiLanguage) {
+        let s = self.style;
+        let en = self.font.shape(
+            self.ctx.font_system,
+            UiSize::Caption,
+            UiWeight::Regular,
+            s.scale,
+            SEARCH_EN,
+        );
+        let ar = self.font.shape(
+            self.ctx.font_system,
+            UiSize::Caption,
+            UiWeight::Regular,
+            s.scale,
+            SEARCH_AR,
+        );
+        let divider = self.font.shape(
+            self.ctx.font_system,
+            UiSize::Caption,
+            UiWeight::Regular,
+            s.scale,
+            "/",
+        );
+        let key = self.font.shape(
+            self.ctx.font_system,
+            UiSize::Small,
+            UiWeight::Regular,
+            s.scale,
+            SEARCH_KEYCAP,
+        );
+        let width = |buffer: &cosmic_text::Buffer| label_width(buffer).ceil() + 1.0;
+        let gap = s.px(5.0);
+        let key_w = width(&key) + 2.0 * gap;
+        let bilingual = width(&en) + width(&divider) + width(&ar) + 2.0 * gap;
+        let local_w = if language == UiLanguage::Arabic {
+            width(&ar)
         } else {
-            let rect = top.notifications;
-            self.panel(
-                rect,
-                RADIUS_6,
-                if view.hover == Some(ChromeAction::Notifications) {
-                    s.bg3
+            width(&en)
+        };
+        let choice = SearchContents::fit(rect.w, bilingual, local_w, key_w + gap);
+        let mut remaining = rect;
+        if choice.keycap {
+            let h = s.px(18.0).min(rect.h);
+            let key_rect = Rect::new(rect.right() - key_w, rect.y + (rect.h - h) / 2.0, key_w, h);
+            self.panel(key_rect, RADIUS_6, s.bg3);
+            self.labels
+                .push(UiLabel::new(key, key_rect, UiAlign::Center, s.text_dim));
+            remaining.w -= key_w + gap;
+        }
+        match choice.placeholder {
+            SearchPlaceholder::Bilingual => {
+                let mut x = rect.x;
+                for buffer in [en, divider, ar] {
+                    let w = width(&buffer);
+                    let label = Rect::new(x, rect.y, w, rect.h);
+                    self.labels
+                        .push(UiLabel::new(buffer, label, UiAlign::Left, s.text_dim));
+                    x += w + gap;
+                }
+            }
+            SearchPlaceholder::Local => {
+                let buffer = if language == UiLanguage::Arabic {
+                    ar
                 } else {
-                    s.accent_tint(s.bg1)
-                },
-            );
-            let icon = self.leading_icon(rect);
-            Icon::Bell.draw(icon, self.ctx.color(s.text), self.shapes);
-            let x = icon.right() + s.px(1.0);
-            let count = Rect::new(x, rect.y, (rect.right() - s.px(3.0) - x).max(0.0), rect.h);
-            self.label(
-                count,
-                &view.unread.to_string(),
-                UiSize::Small,
-                UiWeight::Semibold,
-                UiAlign::Center,
-                s.text,
-            );
+                    en
+                };
+                self.labels
+                    .push(UiLabel::new(buffer, remaining, UiAlign::Start, s.text_dim));
+            }
+            SearchPlaceholder::Hidden => {}
         }
     }
 
     fn tabs(&mut self, view: &ChromeView) {
         let s = self.style;
-        self.panel(view.layout.tab_bar, 0.0, s.bg1);
-        for (&rect, tab) in view.layout.tabs.iter().zip(view.tabs) {
-            if tab.active {
-                self.panel(rect, 0.0, s.bg2);
-                self.panel(
-                    Rect::new(rect.x, rect.y, rect.w, s.px(1.0).min(rect.h)),
-                    0.0,
-                    s.accent,
-                );
-            }
-            let pad = s.px(8.0);
-            let text = Rect::new(rect.x + pad, rect.y, (rect.w - 2.0 * pad).max(0.0), rect.h);
+        let layout = view.layout;
+        self.panel(layout.tab_bar, 0.0, s.bg1);
+        self.rule(layout.tab_bar);
+        for (i, (&rect, tab)) in layout.tabs.iter().zip(view.tabs).enumerate() {
+            let hovered = view.hover_tab == Some(i);
+            self.panel(
+                rect,
+                RADIUS_12,
+                if tab.active {
+                    s.accent_tint(s.bg3)
+                } else if hovered {
+                    s.bg3
+                } else {
+                    s.bg2
+                },
+            );
+            let close = layout.tab_close(rect);
+            let pad = s.px(8.0).min(rect.w / 4.0);
+            let text = Rect::new(
+                rect.x + pad,
+                rect.y,
+                (close.x - rect.x - pad).max(0.0),
+                rect.h,
+            );
             self.label(
                 text,
                 &tab.title,
                 UiSize::Body,
                 UiWeight::Semibold,
                 UiAlign::Start,
-                if tab.active { s.text } else { s.text_dim },
+                if tab.active || hovered {
+                    s.text
+                } else {
+                    s.text_dim
+                },
             );
+            if hovered {
+                let hot = view.hover == Some(ChromeAction::CloseTab(i));
+                self.button(close, Icon::Close, hot, false, true);
+            }
         }
+        self.button(
+            layout.new_tab,
+            Icon::Plus,
+            view.hover == Some(ChromeAction::NewTab),
+            false,
+            false,
+        );
     }
 
     fn pane(&mut self, pane: &PaneHeaderView, hover: Option<ChromeAction>) {

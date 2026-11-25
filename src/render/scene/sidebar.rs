@@ -1,18 +1,24 @@
-//! Workspace sidebar chrome. All program text goes through the same shaper as tab titles.
+//! Workspace cards, with proportional headings and messages and a monospace footer.
 
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, path::Path, rc::Rc};
 
-use cosmic_text::Buffer;
+use cosmic_text::{Buffer, FontSystem};
 use glyphon::TextBounds;
-use unicode_bidi::{bidi_class, BidiClass};
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::context::DrawContext;
 use crate::color::Rgba;
 use crate::layout::Rect;
+use crate::render::icons::Icon;
+use crate::render::shapes::{Border, Shape};
 use crate::render::style::Quad;
+use crate::render::text::shaper::shape_label;
+use crate::render::text::ui::{label_width, UiAlign, UiFont, UiSize, UiWeight};
+use crate::render::ui_style::{UiStyle, RADIUS_12, RADIUS_6, RADIUS_8};
 use crate::render::CellMetrics;
-use crate::sidebar::{display_path, AgentState, View};
+use crate::sidebar::cards::{fit_title, wrap_notice, Card, CardLayout, Item, View};
+use crate::sidebar::{display_path, AgentState, Entry};
+use crate::ui::chrome::count_badge;
 
 pub struct Label {
     pub buffer: Rc<Buffer>,
@@ -24,6 +30,7 @@ pub struct Label {
 
 pub struct Scene {
     pub quads: Vec<Quad>,
+    pub shapes: Vec<Shape>,
     pub labels: Vec<Label>,
 }
 
@@ -38,94 +45,110 @@ fn intersect(a: Rect, b: Rect) -> Rect {
     )
 }
 
-fn bounds(rect: Rect) -> TextBounds {
-    TextBounds {
-        left: rect.x.ceil() as i32,
-        top: rect.y.ceil() as i32,
-        right: rect.right().floor() as i32,
-        bottom: rect.bottom().floor() as i32,
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-enum Trim {
-    Start,
-    End,
-}
-
-#[derive(Clone)]
-struct ShapedLabel {
-    buffer: Rc<Buffer>,
-    width: f32,
-}
-
-impl ShapedLabel {
-    fn shape(ctx: &mut DrawContext, text: &str) -> Self {
-        let buffer = ctx.label(text);
-        let width = buffer.layout_runs().map(|r| r.line_w).fold(0.0, f32::max);
-        Self {
-            buffer: Rc::new(buffer),
-            width,
-        }
-    }
-
-    fn place(self, row: Rect, clip: Rect, right: bool, color: Rgba) -> Label {
-        Label {
-            buffer: self.buffer,
-            left: if right {
-                row.right() - self.width
-            } else {
-                row.x
-            },
-            top: row.y,
-            bounds: bounds(intersect(row, clip)),
-            color: color.to_glyphon(),
-        }
-    }
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
+enum Kind {
+    Title,
+    Message,
+    Small,
+    Footer,
+    Path,
+    Ports,
 }
 
 #[derive(Hash, PartialEq, Eq)]
 struct LabelKey {
     text: String,
     width: u32,
-    trim: Trim,
+    kind: Kind,
 }
 
-/// Keep the shaped labels used by the previous frame. Scroll offsets and colors do not
-/// affect shaping, and labels that leave the viewport are dropped at the end of the frame.
+/// Reuse shaping as cards move or animate. Only labels drawn in the last frame are retained.
 #[derive(Default)]
 pub struct LabelCache {
-    font: Option<(CellMetrics, Option<&'static str>)>,
-    labels: HashMap<LabelKey, (ShapedLabel, bool)>,
+    metrics: Option<(CellMetrics, Option<&'static str>)>,
+    labels: HashMap<LabelKey, (Rc<Buffer>, bool)>,
+    wrap_width: (f32, f32),
+    messages: HashMap<String, Vec<String>>,
 }
 
 impl LabelCache {
+    pub fn cards(
+        &mut self,
+        font: &UiFont,
+        fonts: &mut FontSystem,
+        entries: Vec<Entry>,
+        area: Rect,
+        scale: f32,
+    ) -> Vec<Card> {
+        let width = CardLayout::message_width(area, scale);
+        let mut previous = if self.wrap_width == (width, scale) {
+            std::mem::take(&mut self.messages)
+        } else {
+            self.messages.clear();
+            HashMap::new()
+        };
+        self.wrap_width = (width, scale);
+        entries
+            .into_iter()
+            .map(|entry| {
+                let message = entry.display_notice().map_or_else(Vec::new, |text| {
+                    self.messages
+                        .entry(text)
+                        .or_insert_with_key(|text| {
+                            previous.remove(text).unwrap_or_else(|| {
+                                wrap_notice(text, |line| {
+                                    let buffer = font.shape(
+                                        fonts,
+                                        UiSize::Caption,
+                                        UiWeight::Regular,
+                                        scale,
+                                        line,
+                                    );
+                                    label_width(&buffer).ceil() + 1.0 <= width
+                                })
+                            })
+                        })
+                        .clone()
+                });
+                Card { entry, message }
+            })
+            .collect()
+    }
+
     fn begin_frame(&mut self, ctx: &DrawContext) {
-        let font = Some((ctx.metrics, ctx.family));
-        if self.font != font {
+        let metrics = Some((ctx.metrics, ctx.family));
+        if self.metrics != metrics {
             self.labels.clear();
-            self.font = font;
+            self.metrics = metrics;
         }
-        for (_, used) in self.labels.values_mut() {
-            *used = false;
+        for (_, drawn) in self.labels.values_mut() {
+            *drawn = false;
         }
     }
 
-    fn get(&mut self, ctx: &mut DrawContext, text: String, width: f32, trim: Trim) -> ShapedLabel {
-        let (label, used) = self
+    fn get(
+        &mut self,
+        ctx: &mut DrawContext,
+        font: &UiFont,
+        kind: Kind,
+        text: &str,
+        width: f32,
+    ) -> Rc<Buffer> {
+        let (buffer, drawn) = self
             .labels
             .entry(LabelKey {
-                text,
+                text: text.to_owned(),
                 width: width.to_bits(),
-                trim,
+                kind,
             })
-            .or_insert_with_key(|key| (fit_label(ctx, &key.text, width, trim), true));
-        *used = true;
-        label.clone()
+            .or_insert_with(|| (Rc::new(shape(ctx, font, kind, text, width)), true));
+        *drawn = true;
+        Rc::clone(buffer)
     }
 
     pub fn clear(&mut self) {
         self.labels.clear();
+        self.messages.clear();
     }
 
     pub fn len(&self) -> usize {
@@ -137,225 +160,472 @@ impl LabelCache {
     }
 }
 
-fn rtl(text: &str) -> bool {
-    text.chars()
-        .find_map(|c| match bidi_class(c) {
-            BidiClass::L => Some(false),
-            BidiClass::R | BidiClass::AL => Some(true),
-            _ => None,
-        })
-        .unwrap_or(false)
-}
-
-fn fit_label(ctx: &mut DrawContext, text: &str, width: f32, trim: Trim) -> ShapedLabel {
-    let full = ShapedLabel::shape(ctx, text);
-    if full.width <= width {
-        return full;
-    }
-    let mut best = ShapedLabel::shape(ctx, "…");
-    if best.width > width {
-        return ShapedLabel::shape(ctx, "");
-    }
-    let mut cuts: Vec<_> = text.grapheme_indices(true).map(|(i, _)| i).collect();
-    cuts.push(text.len());
-    let count = cuts.len() - 1;
-    let rtl_base = rtl(text);
-    let (mut low, mut high) = (1, count);
-    while low < high {
-        let keep = (low + high) / 2;
-        let kept = match trim {
-            Trim::Start => &text[cuts[count - keep]..],
-            Trim::End => &text[..cuts[keep]],
-        };
-        // Preserve the original paragraph direction if removing the first strong character
-        // changes it. The mark is renderer-generated and needs no matching control character.
-        let mark = match (rtl_base, rtl(kept)) {
-            (true, false) => "\u{200f}",
-            (false, true) => "\u{200e}",
-            _ => "",
-        };
-        let candidate = match trim {
-            Trim::Start => format!("{mark}…{kept}"),
-            Trim::End => format!("{mark}{kept}…"),
-        };
-        let candidate = ShapedLabel::shape(ctx, &candidate);
-        if candidate.width <= width {
-            best = candidate;
-            low = keep + 1;
-        } else {
-            high = keep;
-        }
-    }
-    best
-}
-
-pub fn build(ctx: &mut DrawContext, view: &View, cache: &mut LabelCache) -> Scene {
-    cache.begin_frame(ctx);
-    let m = ctx.metrics;
-    let pad = (8.0 * m.scale).round();
-    let fg = ctx.palette.foreground;
-    let bg = ctx.palette.background;
-    let muted = fg.mix(bg, 0.3);
-    let accent = ctx.palette.ansi[4];
-    let area = view.area;
-    let mut scene = Scene {
-        quads: vec![(area.x, area.y, area.w, area.h, ctx.color(bg.mix(fg, 0.05)))],
-        labels: Vec::new(),
-    };
-    let home = std::env::var_os("HOME")
-        .filter(|s| !s.is_empty())
-        .map(std::path::PathBuf::from);
-    for item in &view.items {
-        let rect = item.rect;
-        let clip = intersect(rect, area);
-        if item.active {
-            scene
-                .quads
-                .push((clip.x, clip.y, clip.w, clip.h, ctx.color(bg.mix(fg, 0.12))));
-            let stroke = m.stroke().min(rect.w);
-            let x = if view.right_aligned {
-                rect.x
-            } else {
-                rect.right() - stroke
+fn shape(ctx: &mut DrawContext, font: &UiFont, kind: Kind, text: &str, width: f32) -> Buffer {
+    let scale = ctx.metrics.scale;
+    match kind {
+        Kind::Title => {
+            let mut shape = |text: &str| {
+                font.shape(
+                    ctx.font_system,
+                    UiSize::Body,
+                    UiWeight::Semibold,
+                    scale,
+                    text,
+                )
             };
-            scene
-                .quads
-                .push((x, clip.y, stroke, clip.h, ctx.color(accent)));
+            let fitted = fit_title(text, |text| label_width(&shape(text)).ceil() + 1.0 <= width);
+            shape(&fitted)
         }
-        let inner = Rect::new(
-            rect.x + pad,
-            rect.y + m.line_height * 0.25,
-            (rect.w - pad * 2.0).max(0.0),
-            m.line_height,
-        );
-        let entry = &item.entry;
-        let title = if entry.attention_count > 0 {
-            format!("● {} {}", entry.attention_count, entry.title)
-        } else {
-            entry.title.clone()
-        };
-        scene
-            .labels
-            .push(cache.get(ctx, title, inner.w, Trim::End).place(
-                inner,
-                clip,
-                view.right_aligned,
-                if entry.attention_count > 0 {
-                    accent
+        Kind::Message => font.shape(
+            ctx.font_system,
+            UiSize::Caption,
+            UiWeight::Regular,
+            scale,
+            text,
+        ),
+        Kind::Small => font.fit(
+            ctx.font_system,
+            UiSize::Small,
+            UiWeight::Semibold,
+            scale,
+            text,
+            (width - 1.0).max(0.0),
+        ),
+        Kind::Footer | Kind::Path | Kind::Ports => {
+            let size = UiSize::Small.px(scale);
+            let family = ctx.family;
+            let mut mono = |text: &str| {
+                shape_label(ctx.font_system, family, (size, (size * 1.5).ceil()), text)
+            };
+            let fits = |buffer: &Buffer| label_width(buffer).ceil() + 1.0 <= width;
+            let full = mono(text);
+            if fits(&full) {
+                return full;
+            }
+            if kind == Kind::Ports {
+                return mono("");
+            }
+            let ellipsis = mono("…");
+            if !fits(&ellipsis) {
+                return mono("");
+            }
+            let mut cuts: Vec<_> = text
+                .grapheme_indices(true)
+                .skip(1)
+                .map(|(i, _)| i)
+                .collect();
+            if kind == Kind::Path {
+                cuts.reverse();
+            }
+            let candidate = |cut| {
+                if kind == Kind::Path {
+                    path_tail(text, cut)
                 } else {
-                    fg
-                },
-            ));
-        let mut row = inner;
-        row.y += m.line_height;
-        if let Some(notice_text) = entry.display_notice() {
-            let notice_color = if entry.notification.is_some() {
-                accent
-            } else {
-                match entry.agent_status.as_ref().map(|s| s.state) {
-                    Some(AgentState::NeedsInput) => ctx.palette.ansi[3],
-                    Some(AgentState::Done) => ctx.palette.ansi[2],
-                    _ => accent,
+                    format!("{}…", &text[..cut])
                 }
             };
-            scene
-                .labels
-                .push(cache.get(ctx, notice_text, row.w, Trim::End).place(
-                    row,
-                    clip,
-                    view.right_aligned,
-                    notice_color,
-                ));
-            row.y += m.line_height;
-        }
-        let detail = match entry.remote_state {
-            Some(state) => state.label().to_owned(),
-            None => entry
-                .cwd
-                .as_deref()
-                .map(|p| display_path(p, home.as_deref()))
-                .unwrap_or_else(|| "—".into()),
-        };
-        scene
-            .labels
-            .push(cache.get(ctx, detail, row.w, Trim::Start).place(
-                row,
-                clip,
-                view.right_aligned,
-                muted,
-            ));
-        row.y += m.line_height;
-
-        // Reserve state space first so a long branch cannot hide running/exit indicators.
-        let mut states = Vec::new();
-        if let Some(agent) = &entry.agent_status {
-            let color = match agent.state {
-                AgentState::Working => accent,
-                AgentState::NeedsInput => ctx.palette.ansi[3],
-                AgentState::Done => ctx.palette.ansi[2],
-            };
-            states.push((agent.state.badge().to_string(), color));
-        } else if entry.running {
-            states.push(("●".to_string(), accent));
-        }
-        if let Some(exit) = entry.last_exit {
-            states.push(if exit == 0 {
-                ("✓".to_string(), ctx.palette.ansi[2])
+            let n = cuts.partition_point(|&cut| fits(&mono(&candidate(cut))));
+            if n == 0 {
+                ellipsis
             } else {
-                (format!("✗ {exit}"), ctx.palette.ansi[1])
-            });
-        }
-        let mut remaining = row.w;
-        let mut states: Vec<_> = states
-            .into_iter()
-            .rev()
-            .filter_map(|(text, color)| {
-                let label = cache.get(ctx, text, remaining, Trim::End);
-                if label.width == 0.0 {
-                    return None;
-                }
-                remaining = (remaining - label.width - m.char_width).max(0.0);
-                Some((label, color))
-            })
-            .collect();
-        if let Some(branch) = &entry.branch {
-            let branch = cache.get(ctx, format!("⎇ {branch}"), remaining, Trim::End);
-            if branch.width > 0.0 {
-                states.push((branch, muted));
+                mono(&candidate(cuts[n - 1]))
             }
         }
-        let total_width = states.iter().map(|(label, _)| label.width).sum::<f32>()
-            + states.len().saturating_sub(1) as f32 * m.char_width;
-        let mut x = if view.right_aligned {
-            row.right() - total_width
+    }
+}
+
+fn path_tail(text: &str, cut: usize) -> String {
+    let prefix = if text.starts_with("~/") && cut > 2 {
+        "~/…"
+    } else {
+        "…"
+    };
+    format!("{prefix}{}", &text[cut..])
+}
+
+pub fn build(
+    ctx: &mut DrawContext,
+    view: &View,
+    cache: &mut LabelCache,
+    style: UiStyle,
+    font: &UiFont,
+) -> Scene {
+    cache.begin_frame(ctx);
+    let area = view.area;
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let mut draw = Cards {
+        scene: Scene {
+            quads: vec![(area.x, area.y, area.w, area.h, ctx.color(style.bg1))],
+            shapes: Vec::new(),
+            labels: Vec::new(),
+        },
+        view,
+        cache,
+        ctx,
+        style,
+        font,
+    };
+    for item in &view.items {
+        draw.card(item, home.as_deref());
+    }
+    draw.new_tab();
+    draw.cache.labels.retain(|_, (_, drawn)| *drawn);
+    draw.scene
+}
+
+struct Cards<'a, 'b> {
+    scene: Scene,
+    view: &'a View,
+    cache: &'a mut LabelCache,
+    ctx: &'a mut DrawContext<'b>,
+    style: UiStyle,
+    font: &'a UiFont,
+}
+
+impl Cards<'_, '_> {
+    fn card(&mut self, item: &Item, home: Option<&Path>) {
+        let s = self.style;
+        let hovered = self.view.hover == Some(item.index);
+        let bg = if item.active {
+            s.accent
+        } else if hovered {
+            s.bg3
         } else {
-            row.x
+            s.bg2
         };
-        for (label, color) in states.into_iter().rev() {
-            let left = x;
-            x += label.width + m.char_width;
-            let mut placed = label.place(row, clip, false, color);
-            placed.left = left;
-            scene.labels.push(placed);
+        let fg = if item.active { s.accent_text() } else { s.text };
+        let dim = if item.active {
+            fg.mix(bg, 0.17)
+        } else {
+            s.text_dim
+        };
+        let faint = if item.active {
+            fg.mix(bg, 0.24)
+        } else {
+            s.text_dim.mix(bg, 0.12)
+        };
+        self.panel(item.rect, RADIUS_8, bg);
+        if self.view.drop_target == Some(item.index) {
+            if let Some(Shape::RoundedRect { border, .. }) = self.scene.shapes.last_mut() {
+                *border = Some(Border {
+                    width: s.px(1.0),
+                    color: self.ctx.color(s.accent),
+                });
+            }
         }
-        if !entry.ports.is_empty() {
-            row.y += m.line_height;
-            let ports = crate::ports::format_ports(&entry.ports);
-            scene
-                .labels
-                .push(cache.get(ctx, ports, row.w, Trim::End).place(
-                    row,
-                    clip,
-                    view.right_aligned,
-                    ctx.palette.ansi[6],
-                ));
+        let entry = &item.card.entry;
+        let parts = item.layout(self.view);
+        let align = if self.view.mirrored {
+            UiAlign::Right
+        } else {
+            UiAlign::Start
+        };
+        self.label(parts.title, Kind::Title, &entry.title, align, fg);
+        if let Some(count) = count_badge(entry.attention_count) {
+            let badge = center_height(parts.unread, s.px(16.0));
+            let (fill, text) = if item.active {
+                (fg, bg)
+            } else {
+                (s.accent, s.accent_text())
+            };
+            self.panel(badge, RADIUS_12, fill);
+            self.label(badge, Kind::Small, &count, UiAlign::Center, text);
+        }
+        if let Some(state) = entry.display_state() {
+            self.state(parts.state, state, bg, item.active);
+        }
+        if hovered
+            && parts.close.y >= self.view.area.y
+            && parts.close.bottom() <= self.view.area.bottom()
+        {
+            if self.view.close_hover {
+                self.panel(
+                    center_height(parts.close, parts.close.w),
+                    RADIUS_6,
+                    bg.mix(fg, 0.14),
+                );
+            }
+            self.icon(parts.close, Icon::Close, s.px(13.0), fg);
+        }
+        let lines = &item.card.message;
+        for (i, line) in lines.iter().enumerate() {
+            let h = parts.message.h / lines.len() as f32;
+            let row = Rect::new(
+                parts.message.x,
+                parts.message.y + i as f32 * h,
+                parts.message.w,
+                h,
+            );
+            self.label(row, Kind::Message, line, align, dim);
+        }
+        self.footer(parts.footer, entry, home, faint);
+    }
+
+    fn state(&mut self, rect: Rect, state: AgentState, bg: Rgba, selected: bool) {
+        let s = self.style;
+        let language = self.view.language;
+        let (icon, semantic, name) = match state {
+            AgentState::Working => (None, s.text, language.text("Working", "شغّال")),
+            AgentState::NeedsInput => (
+                Some(Icon::Warning),
+                s.warn,
+                language.text("Needs input", "مستني إدخال"),
+            ),
+            AgentState::Done => (Some(Icon::Check), s.ok, language.text("Done", "تم")),
+            AgentState::Error => (Some(Icon::Close), s.danger, language.text("Error", "خطأ")),
+        };
+        let rect = center_height(rect, s.px(16.0));
+        let surface = if selected { s.bg1 } else { bg };
+        let fill = surface.mix(semantic, 0.17);
+        let ink = semantic.mix(s.text, 0.28);
+        self.panel(rect, RADIUS_12, fill);
+        let glyph_width = s.px(16.0);
+        if rect.w < glyph_width {
+            return;
+        }
+        let with_text = rect.w >= s.px(50.0);
+        let mirror = self.view.mirrored;
+        let pad = if with_text {
+            s.px(4.0)
+        } else {
+            (rect.w - glyph_width) / 2.0
+        };
+        let (glyph, _) = take_side(rect, pad, mirror);
+        let (_, rest) = take_side(rect, glyph.w, mirror);
+        let (glyph, caption) = take_side(rest, glyph_width, mirror);
+        if let Some(icon) = icon {
+            self.icon(glyph, icon, s.px(12.0), ink);
+        } else if glyph.y >= self.view.area.y && glyph.bottom() <= self.view.area.bottom() {
+            for i in 0..3 {
+                let diameter = s.px(if i == self.view.dot_phase { 3.4 } else { 2.4 });
+                let x = glyph.x + s.px(3.0 + 5.0 * i as f32);
+                let y = glyph.y + glyph.h / 2.0;
+                let dot = Rect::new(x - diameter / 2.0, y - diameter / 2.0, diameter, diameter);
+                let color = if i == self.view.dot_phase {
+                    ink
+                } else {
+                    ink.mix(fill, 0.50)
+                };
+                self.panel(dot, 4.0, color);
+            }
+        }
+        if with_text {
+            let (_, caption) = take_side(caption, s.px(4.0), !mirror);
+            self.label(caption, Kind::Small, name, UiAlign::Center, ink);
         }
     }
-    cache.labels.retain(|_, (_, used)| *used);
-    scene
-        .labels
-        .retain(|l| l.bounds.left < l.bounds.right && l.bounds.top < l.bounds.bottom);
-    scene
+
+    fn footer(&mut self, rect: Rect, entry: &Entry, home: Option<&Path>, color: Rgba) {
+        if rect.w <= 0.0
+            || rect.h <= 0.0
+            || rect.bottom() <= self.view.area.y
+            || rect.y >= self.view.area.bottom()
+        {
+            return;
+        }
+        let s = self.style;
+        let mirror = self.view.mirrored;
+        let gap = s.px(4.0);
+        let remote = entry.remote_state.map(|state| {
+            use crate::remote::ConnectionState::*;
+            match state {
+                Connecting => self.view.language.text("Connecting", "جاري الاتصال"),
+                Connected => self.view.language.text("Connected", "متّصل"),
+                Disconnected => self.view.language.text("Disconnected", "الاتصال مقطوع"),
+            }
+        });
+        let detail = remote
+            .map(str::to_owned)
+            .or_else(|| entry.cwd.as_deref().map(|p| display_path(p, home)));
+        let mut rest = rect;
+        let mut port_rect = None;
+        if !entry.ports.is_empty() {
+            let ports = crate::ports::format_ports(&entry.ports);
+            let w = if entry.branch.is_none() && detail.is_none() {
+                rect.w
+            } else {
+                s.px(7.0 * ports.len() as f32).min(rect.w * 0.38)
+            };
+            let (port, remainder) = take_side(rest, w, !mirror);
+            rest = take_side(remainder, gap, !mirror).1;
+            port_rect = Some(port);
+        }
+        if let Some(branch) = &entry.branch {
+            let (icon, room) = take_side(rest, s.px(15.0), mirror);
+            self.icon(icon, Icon::GitBranch, s.px(12.0), color);
+            let width = if detail.is_some() {
+                s.px(7.0 * branch.chars().count() as f32).min(room.w * 0.47)
+            } else {
+                room.w
+            };
+            let (label, remainder) = take_side(room, width, mirror);
+            let align = if mirror {
+                UiAlign::Right
+            } else {
+                UiAlign::Start
+            };
+            self.label(label, Kind::Footer, branch, align, color);
+            rest = remainder;
+            if detail.is_some() {
+                let (dot, remainder) = take_side(rest, s.px(12.0), mirror);
+                self.label(dot, Kind::Footer, "•", UiAlign::Center, color);
+                rest = remainder;
+            }
+        }
+        if let Some(detail) = detail {
+            let align = if mirror {
+                UiAlign::Right
+            } else {
+                UiAlign::Start
+            };
+            self.label(
+                rest,
+                if remote.is_some() {
+                    Kind::Footer
+                } else {
+                    Kind::Path
+                },
+                &detail,
+                align,
+                color,
+            );
+        }
+        if let Some(port_rect) = port_rect {
+            let align = if mirror {
+                UiAlign::Left
+            } else {
+                UiAlign::Right
+            };
+            for limit in (1..=entry.ports.len().min(crate::ports::MAX_SHOWN)).rev() {
+                let text = crate::ports::format_ports_limit(&entry.ports, limit);
+                let result = self
+                    .cache
+                    .get(self.ctx, self.font, Kind::Ports, &text, port_rect.w);
+                if label_width(&result) > 0.0 {
+                    self.label(port_rect, Kind::Ports, &text, align, color);
+                    return;
+                }
+            }
+            if let Some(port) = entry.ports.iter().min() {
+                self.label(port_rect, Kind::Ports, &format!(":{port}"), align, color);
+            }
+        }
+    }
+
+    fn new_tab(&mut self) {
+        let s = self.style;
+        let rect = self.view.new_tab;
+        let fill = if self.view.new_tab_hover {
+            s.bg3
+        } else {
+            s.bg1
+        };
+        self.panel(rect, RADIUS_8, fill);
+        let mirror = self.view.mirrored;
+        let (_, inner) = take_side(rect, s.px(8.0), mirror);
+        let (icon, rest) = take_side(inner, s.px(16.0), mirror);
+        self.icon(icon, Icon::Plus, s.px(14.0), s.text_dim);
+        let (_, title) = take_side(rest, s.px(4.0), mirror);
+        let (_, title) = take_side(title, s.px(8.0), !mirror);
+        let align = if mirror {
+            UiAlign::Right
+        } else {
+            UiAlign::Start
+        };
+        self.label(
+            title,
+            Kind::Title,
+            self.view.language.text("New tab", "تاب جديد"),
+            align,
+            s.text_dim,
+        );
+    }
+
+    fn panel(&mut self, rect: Rect, radius: f32, color: Rgba) {
+        let area = intersect(rect, self.view.area);
+        if area.w <= 0.0 || area.h <= 0.0 {
+            return;
+        }
+        let r = self.style.px(radius);
+        let top = if rect.y < area.y { 0.0 } else { r };
+        let bottom = if rect.bottom() > area.bottom() {
+            0.0
+        } else {
+            r
+        };
+        self.scene.shapes.push(Shape::RoundedRect {
+            rect: area,
+            radii: [top, top, bottom, bottom],
+            fill: self.ctx.color(color),
+            border: None,
+            shadow: None,
+        });
+    }
+
+    fn icon(&mut self, rect: Rect, icon: Icon, size: f32, color: Rgba) {
+        let side = size.min(rect.w).min(rect.h);
+        let rect = Rect::new(
+            rect.x + (rect.w - side) / 2.0,
+            rect.y + (rect.h - side) / 2.0,
+            side,
+            side,
+        );
+        if rect.y >= self.view.area.y && rect.bottom() <= self.view.area.bottom() {
+            icon.draw(rect, self.ctx.color(color), &mut self.scene.shapes);
+        }
+    }
+
+    fn label(&mut self, row: Rect, kind: Kind, text: &str, align: UiAlign, color: Rgba) {
+        let clip = intersect(row, self.view.area);
+        if clip.w <= 0.0 || clip.h <= 0.0 || text.is_empty() {
+            return;
+        }
+        let buffer = self.cache.get(self.ctx, self.font, kind, text, row.w);
+        let room = (row.w - label_width(&buffer)).max(0.0);
+        let rtl = buffer.layout_runs().next().is_some_and(|run| run.rtl);
+        let x = match align {
+            UiAlign::Start if rtl => room,
+            UiAlign::Right => room,
+            UiAlign::Center => room / 2.0,
+            _ => 0.0,
+        };
+        let top = row.y + (row.h - buffer.metrics().line_height) / 2.0;
+        let bounds = TextBounds {
+            left: clip.x.ceil() as i32,
+            top: clip.y.ceil() as i32,
+            right: clip.right().floor() as i32,
+            bottom: clip.bottom().floor() as i32,
+        };
+        if bounds.left < bounds.right && bounds.top < bounds.bottom {
+            self.scene.labels.push(Label {
+                buffer,
+                left: (row.x + x).round(),
+                top: top.round(),
+                bounds,
+                color: color.to_glyphon(),
+            });
+        }
+    }
+}
+
+fn take_side(rect: Rect, width: f32, right: bool) -> (Rect, Rect) {
+    let width = width.min(rect.w);
+    let rest = rect.w - width;
+    if right {
+        (
+            Rect::new(rect.x + rest, rect.y, width, rect.h),
+            Rect::new(rect.x, rect.y, rest, rect.h),
+        )
+    } else {
+        (
+            Rect::new(rect.x, rect.y, width, rect.h),
+            Rect::new(rect.x + width, rect.y, rest, rect.h),
+        )
+    }
+}
+
+fn center_height(rect: Rect, h: f32) -> Rect {
+    Rect::new(rect.x, rect.y + (rect.h - h) / 2.0, rect.w, h)
 }
 
 /// Attention is visual only; it does not affect the terminal's logical grid or cell mapping.

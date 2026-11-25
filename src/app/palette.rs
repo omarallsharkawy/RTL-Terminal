@@ -566,8 +566,11 @@ impl App {
         let recorded =
             self.notification_history
                 .push(id, title, body, &tab_title, SystemTime::now(), seen);
-        if recorded && self.notification_list_open() {
-            self.sync_palette();
+        if recorded {
+            if self.notification_list_open() {
+                self.sync_palette();
+            }
+            self.window.request_redraw();
         }
     }
 

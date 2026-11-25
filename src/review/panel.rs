@@ -10,7 +10,7 @@ use unicode_width::UnicodeWidthChar;
 use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey};
 
 use super::comment::{CommentTarget, MAX_COMMENT_CHARS};
-use super::diff::{FileDiff, LineKind, OneLine};
+use super::diff::{FileDiff, FileStatus, LineKind, OneLine};
 use super::git::{LoadError, Snapshot};
 use super::layout::PanelHit;
 use super::rows::{
@@ -76,6 +76,7 @@ struct Editor {
 pub enum RowStyle {
     File {
         collapsed: bool,
+        status: FileStatus,
     },
     Note,
     Hunk,
@@ -105,8 +106,9 @@ pub struct ViewRow {
 pub struct View {
     pub rect: Rect,
     pub focused: bool,
-    /// Repository and branch.
+    /// Repository display name and optional branch.
     pub title: String,
+    pub branch: Option<String>,
     /// File count.
     pub summary: String,
     /// Added and removed lines over all files, when loaded.
@@ -685,17 +687,18 @@ impl ReviewPanel {
     pub fn view(&self, rect: Rect, page: usize) -> View {
         let page = page.max(1);
         let load = self.load_state();
-        let (title, summary, totals, gutter_cols) = match &self.snapshot {
+        let (title, branch, summary, totals, gutter_cols) = match &self.snapshot {
             Some(s) => {
-                let mut title = if s.name.is_empty() {
-                    "repository".to_owned()
+                let title = if s.name.is_empty() {
+                    "Repository / المستودع".to_owned()
                 } else {
                     s.name.clone()
                 };
-                if let Some(branch) = &s.branch {
-                    title.push_str("  ⎇ ");
-                    title.push_str(&crate::shell_integration::clean_text(branch, 256));
-                }
+                let branch = s
+                    .branch
+                    .as_deref()
+                    .map(|branch| crate::shell_integration::clean_text(branch, 256))
+                    .filter(|branch| !branch.is_empty());
                 let n = s.diff.file_count();
                 let summary = format!(
                     "{n} {} / {n} {}",
@@ -704,7 +707,8 @@ impl ReviewPanel {
                 );
                 let digits = s.diff.max_line_number().to_string().len().max(3);
                 (
-                    summary_title(title),
+                    display_text(&title, MAX_ROW_COLS),
+                    branch,
                     summary,
                     Some(s.diff.totals()),
                     2 * digits + 1,
@@ -712,6 +716,7 @@ impl ReviewPanel {
             }
             None => (
                 "Review changes / راجع التغييرات".to_owned(),
+                None,
                 String::new(),
                 None,
                 0,
@@ -749,6 +754,7 @@ impl ReviewPanel {
             rect,
             focused: self.is_focused(),
             title,
+            branch,
             summary,
             totals,
             commit_label: COMMIT_LABEL,
@@ -774,17 +780,11 @@ impl ReviewPanel {
                 ViewRow {
                     counts: Some((file.added, file.removed)),
                     ..plain(
-                        RowStyle::File { collapsed },
-                        format!(
-                            "{} {} {}",
-                            if collapsed { '▸' } else { '▾' },
-                            if file.untracked {
-                                'U'
-                            } else {
-                                file.status.letter()
-                            },
-                            display_text(&file.display_path(), MAX_ROW_COLS)
-                        ),
+                        RowStyle::File {
+                            collapsed,
+                            status: file.status,
+                        },
+                        display_text(&file.display_path(), MAX_ROW_COLS),
                     )
                 }
             }
@@ -852,10 +852,6 @@ impl ReviewPanel {
             ),
         }
     }
-}
-
-fn summary_title(title: String) -> String {
-    display_text(&title, MAX_ROW_COLS)
 }
 
 fn message(text: impl Into<String>) -> ViewRow {

@@ -17,12 +17,17 @@ use twitty::render::scene::context::DrawContext;
 use twitty::render::scene::frame::{build_frame, FrameOptions};
 use twitty::render::scene::preedit::PreeditState;
 use twitty::render::scene::sidebar::{attention_quads, build, LabelCache};
+use twitty::render::text::ui::{label_width, UiFont};
+use twitty::render::ui_style::UiStyle;
 use twitty::render::{CellMetrics, PaneFrame, RowCache, TabLabel};
+use twitty::sidebar::cards::{fit_title, wrap_notice, Card, CardLayout, Drag, ScrollState};
 use twitty::sidebar::git::{branch, BranchCache};
-use twitty::sidebar::{display_path, entry_title, Entry, Notice, Placement, ScrollState};
+use twitty::sidebar::{
+    display_path, entry_title, AgentState, AgentStatus, Entry, Notice, Placement,
+};
 use twitty::terminal::Terminal;
+use twitty::ui::chrome::{ChromeAction, UiLanguage};
 use twitty::ui::hit::{hit_test, Hit, HitGeometry};
-use unicode_segmentation::UnicodeSegmentation;
 
 struct Scratch(PathBuf);
 impl Scratch {
@@ -79,8 +84,6 @@ fn entry_keeps_focused_state_and_counts_other_panes_notifications() {
     assert_eq!(e.last_exit, Some(17));
     assert_eq!(e.attention_count, 2);
     assert_eq!(e.notification.as_ref().unwrap().label(), "جاهز: تم العمل");
-    assert_eq!(e.height(20.0), 90.0);
-    assert_eq!(entry().height(20.0), 70.0);
     assert_eq!(Notice::new(Some("\u{202e}"), "body").label(), "body");
     assert_eq!(Notice::new(Some("title"), "").label(), "title");
     let bounded = Entry::new(&"x".repeat(1000), None, false, None, []);
@@ -245,54 +248,148 @@ fn a_stationary_pointer_uses_the_current_pane_origin_for_links_and_mouse_reports
     }
 }
 
-#[test]
-fn scrolling_clamps_hits_and_reveals_keyboard_selection() {
-    let entries = vec![entry(); 8];
-    let area = Rect::new(600.0, 0.0, 200.0, 100.0);
-    let mut scroll = ScrollState::default();
-    scroll.update(&entries, 0, area, 20.0);
-    let v = scroll.view(&entries, 0, area, 20.0, SidebarPosition::Right);
-    assert!(v.right_aligned);
-    assert!(v.items[0].active);
-    assert_eq!(v.hit_test(610.0, 69.0), Some(0));
-    assert_eq!(v.pointer_hit(610.0, 69.0), Some(Hit::Tab(0)));
-    assert_eq!(v.hit_test(610.0, 70.0), Some(1));
-    assert_eq!(v.hit_test(599.0, 20.0), None);
-    assert_eq!(v.hit_test(800.0, 20.0), None);
-    scroll.scroll(85.0, &entries, area, 20.0);
-    let v = scroll.view(&entries, 0, area, 20.0, SidebarPosition::Right);
-    assert_eq!(v.hit_test(610.0, 0.0), Some(1));
-    assert_eq!(v.hit_test(610.0, 55.0), Some(2));
-    assert_eq!(v.hit_test(610.0, 100.0), None);
-    scroll.scroll(10000.0, &entries, area, 20.0);
-    let v = scroll.view(&entries, 0, area, 20.0, SidebarPosition::Right);
-    assert_eq!(v.hit_test(610.0, 99.0), Some(7));
-    scroll.update(&entries, 2, area, 20.0);
-    assert_eq!(
-        scroll
-            .view(&entries, 2, area, 20.0, SidebarPosition::Left)
-            .hit_test(610.0, 0.0),
-        Some(2)
-    );
-    // Closing tabs and shrinking the list cannot strand the scroll offset.
-    scroll.update(&entries[..1], 0, area, 20.0);
-    let v = scroll.view(&entries[..1], 0, area, 20.0, SidebarPosition::Left);
-    assert_eq!(v.hit_test(610.0, 0.0), Some(0));
-    assert_eq!(v.hit_test(610.0, 90.0), None);
-    assert_eq!(v.pointer_hit(610.0, 90.0), Some(Hit::TabBar));
-    assert_eq!(v.pointer_hit(800.0, 90.0), None);
-    assert!(!v.right_aligned);
+fn card(entry: Entry) -> Card {
+    let message = entry.display_notice().into_iter().collect();
+    Card { entry, message }
+}
+
+fn center(r: Rect) -> (f64, f64) {
+    (f64::from(r.x + r.w / 2.0), f64::from(r.y + r.h / 2.0))
 }
 
 #[test]
-fn notification_rows_participate_in_scrolling_and_hit_testing() {
-    let e = Entry::new("agent", None, false, Some(0), [Notice::new(None, "done")]);
-    let entries = [e, entry()];
-    let area = Rect::new(0.0, 0.0, 200.0, 200.0);
-    let v = ScrollState::default().view(&entries, 0, area, 20.0, SidebarPosition::Left);
-    assert_eq!(v.hit_test(10.0, 89.0), Some(0));
-    assert_eq!(v.hit_test(10.0, 90.0), Some(1));
-    assert_eq!(v.hit_test(10.0, 170.0), None);
+fn scrolling_clamps_hits_and_reveals_keyboard_selection() {
+    let entries = vec![card(entry()); 8];
+    let area = Rect::new(600.0, 0.0, 200.0, 100.0);
+    let mut scroll = ScrollState::default();
+    let view = |s: &mut ScrollState, active| {
+        s.view(
+            &entries,
+            active,
+            area,
+            1.0,
+            SidebarPosition::Right,
+            UiLanguage::English,
+        )
+    };
+    let first = view(&mut scroll, 0);
+    assert!(first.mirrored && first.items[0].active);
+    assert_eq!(first.hit_test(610.0, 41.0), Some(0));
+    assert_eq!(first.pointer_hit(610.0, 41.0), Some(Hit::Tab(0)));
+    assert_eq!(first.hit_test(610.0, 42.0), None);
+    assert_eq!(first.hit_test(610.0, 46.0), Some(1));
+    assert_eq!(first.hit_test(599.0, 20.0), None);
+    assert_eq!(first.hit_test(800.0, 20.0), None);
+    scroll.scroll(55.0, &first);
+    let middle = view(&mut scroll, 0);
+    assert_eq!(middle.hit_test(610.0, 0.0), Some(1));
+    assert_eq!(middle.hit_test(610.0, 55.0), Some(2));
+    assert_eq!(middle.hit_test(610.0, 100.0), None);
+    scroll.scroll(10000.0, &middle);
+    let last = view(&mut scroll, 0);
+    assert_eq!(last.hit_test(610.0, 59.0), Some(7));
+    let (x, y) = center(last.new_tab);
+    assert_eq!(
+        last.pointer_hit(x, y),
+        Some(Hit::Chrome(ChromeAction::NewTab))
+    );
+    let selected = view(&mut scroll, 2);
+    assert!(selected.items.iter().find(|i| i.index == 2).unwrap().active);
+
+    // Closing tabs and shrinking the list cannot strand the scroll offset.
+    let short = scroll.view(
+        &entries[..1],
+        0,
+        area,
+        1.0,
+        SidebarPosition::Left,
+        UiLanguage::English,
+    );
+    assert_eq!(short.hit_test(610.0, 8.0), Some(0));
+    assert_eq!(short.pointer_hit(610.0, 90.0), Some(Hit::TabBar));
+    assert_eq!(short.pointer_hit(800.0, 90.0), None);
+    assert!(!short.mirrored);
+}
+
+#[test]
+fn messages_change_card_heights_and_every_part_has_a_hit() {
+    let mut card_with_notice = card(
+        Entry::new(
+            "محرر",
+            Some(Path::new("/tmp")),
+            false,
+            None,
+            [Notice::new(None, "تم العمل")],
+        )
+        .with_agent_status(Some(AgentStatus::new(AgentState::NeedsInput, None))),
+    );
+    let single_height = CardLayout::height(&card_with_notice, 1.0);
+    card_with_notice.message.push("سطر تاني".to_owned());
+    let double_height = CardLayout::height(&card_with_notice, 1.0);
+    assert_eq!(double_height - single_height, 18.0);
+    assert_eq!(
+        CardLayout::height(&card_with_notice, 2.0),
+        2.0 * double_height
+    );
+    let mut no_notice = card_with_notice.clone();
+    no_notice.message.clear();
+    assert_eq!(single_height - CardLayout::height(&no_notice, 1.0), 18.0);
+
+    let area = Rect::new(0.0, 0.0, 220.0, 280.0);
+    let cards = [card_with_notice, no_notice];
+    for side in [SidebarPosition::Left, SidebarPosition::Right] {
+        let view = ScrollState::default().view(&cards, 0, area, 1.0, side, UiLanguage::Arabic);
+        let item = &view.items[0];
+        let layout = item.layout(&view);
+        assert_eq!(item.rect.h, double_height);
+        assert!(view.items[1].rect.y >= item.rect.bottom());
+        for rect in [
+            layout.title,
+            layout.unread,
+            layout.state,
+            layout.message,
+            layout.footer,
+        ] {
+            assert!(rect.w > 0.0 && rect.h > 0.0);
+            let (x, y) = center(rect);
+            assert_eq!(view.pointer_hit(x, y), Some(Hit::Tab(0)));
+        }
+        let (x, y) = center(layout.close);
+        assert_eq!(
+            view.pointer_hit(x, y),
+            Some(Hit::Chrome(ChromeAction::CloseTab(0)))
+        );
+        let (x, y) = center(view.new_tab);
+        assert_eq!(
+            view.pointer_hit(x, y),
+            Some(Hit::Chrome(ChromeAction::NewTab))
+        );
+        assert_eq!(
+            layout.unread.x > layout.close.x,
+            side == SidebarPosition::Right
+        );
+        let start = center(layout.title);
+        let drag = Drag::new(12, start.1);
+        assert_eq!(drag.target(&view, 0, (start.0, start.1 + 2.0)), None);
+        assert_eq!(drag.target(&view, 0, center(view.items[1].rect)), Some(1));
+        assert_eq!(drag.target(&view, 0, center(view.new_tab)), None);
+    }
+}
+
+#[test]
+fn title_and_message_fitting_use_whole_words() {
+    let fit = |s: &str| s.chars().count() <= 13;
+    assert_eq!(fit_title("Review and merge the change", fit), "Review and…");
+    assert_eq!(
+        fit_title("مراجعة ودمج التغييرات دلوقتي", fit),
+        "مراجعة ودمج…"
+    );
+    assert_eq!(fit_title("uninterruptedverylongtitle", fit), "…");
+    assert_eq!(
+        wrap_notice("Do more work and pass the tests", fit),
+        ["Do more work", "and pass the…"]
+    );
+    assert_eq!(wrap_notice("جاهز للدمج", fit), ["جاهز للدمج"]);
 }
 
 #[test]
@@ -504,8 +601,10 @@ fn title_and_notice_input_caps_keep_whole_graphemes() {
 
 #[test]
 fn arabic_labels_are_shaped_right_aligned_and_clipped_with_colored_states() {
-    let mut fs = FontSystem::new();
+    let mut fs = twitty::render::text::fonts::new_font_system();
     let palette = Palette::default();
+    let style = UiStyle::new(&palette, None, 1.0);
+    let font = UiFont::default();
     let mut ctx = DrawContext {
         font_system: &mut fs,
         family: None,
@@ -516,31 +615,40 @@ fn arabic_labels_are_shaped_right_aligned_and_clipped_with_colored_states() {
     let mut e = Entry::new(
         "محرر",
         Some(Path::new("/tmp/مشاريع")),
-        true,
+        false,
         Some(7),
         [Notice::new(Some("جاهز"), "تم")],
     );
     e.branch = Some("ميزة".into());
     let area = Rect::new(500.0, 0.0, 400.0, 200.0);
-    let view = ScrollState::default().view(&[e], 0, area, 22.0, SidebarPosition::Right);
-    let scene = build(&mut ctx, &view, &mut LabelCache::default());
-    let texts: Vec<_> = scene
-        .labels
-        .iter()
-        .map(|l| l.buffer.lines[0].text())
-        .collect();
-    assert_eq!(
-        texts,
-        ["● 1 محرر", "جاهز: تم", "/tmp/مشاريع", "⎇ ميزة", "●", "✗ 7"]
+    let mut cache = LabelCache::default();
+    let cards = cache.cards(&font, ctx.font_system, vec![e], area, 1.0);
+    let view = ScrollState::default().view(
+        &cards,
+        0,
+        area,
+        1.0,
+        SidebarPosition::Right,
+        UiLanguage::English,
     );
-    for l in scene.labels.iter().take(3) {
-        let width = l.buffer.layout_runs().map(|r| r.line_w).fold(0.0, f32::max);
-        assert!((l.left + width - (area.right() - 8.0)).abs() < 0.1);
-        assert!(l.buffer.layout_runs().any(|r| !r.glyphs.is_empty()));
-        assert!(l.bounds.left >= area.x as i32 && l.bounds.right <= area.right() as i32);
+    let scene = build(&mut ctx, &view, &mut cache, style, &font);
+    let label = |text| {
+        scene
+            .labels
+            .iter()
+            .find(|l| l.buffer.lines[0].text() == text)
+            .unwrap()
+    };
+    for text in ["محرر", "جاهز: تم", "ميزة"] {
+        let label = label(text);
+        assert!((label.left + label_width(&label.buffer) - label.bounds.right as f32).abs() <= 1.0);
+        assert!(label
+            .buffer
+            .layout_runs()
+            .any(|r| r.rtl && !r.glyphs.is_empty()));
+        assert!(label.bounds.left >= area.x as i32 && label.bounds.right <= area.right() as i32);
     }
-    // Full shaping preserves RTL glyph order for the plain Arabic notification.
-    let glyphs: Vec<_> = scene.labels[1]
+    let glyphs: Vec<_> = label("جاهز: تم")
         .buffer
         .layout_runs()
         .flat_map(|r| r.glyphs.iter())
@@ -548,24 +656,18 @@ fn arabic_labels_are_shaped_right_aligned_and_clipped_with_colored_states() {
     let leftmost = glyphs.iter().min_by(|a, b| a.x.total_cmp(&b.x)).unwrap();
     let rightmost = glyphs.iter().max_by(|a, b| a.x.total_cmp(&b.x)).unwrap();
     assert!(leftmost.start > rightmost.start);
-    assert!(glyphs.iter().any(|g| g.level.is_rtl()));
-    let red = palette.ansi[1];
-    assert_eq!(
-        scene.labels.last().unwrap().color,
-        glyphon::Color::rgb(
-            (red.r * 255.0) as u8,
-            (red.g * 255.0) as u8,
-            (red.b * 255.0) as u8
-        )
-    );
-    assert_eq!(scene.labels[1].top - scene.labels[0].top, 22.0);
-    assert!(scene.quads.iter().any(|q| q.0 == area.x && q.2 == 2.0));
+    let red = label("Error").color;
+    let [r, g, b, _] = red.as_rgba();
+    assert!(r > g && r > b);
+    assert!(scene.labels.iter().any(|l| l.buffer.lines[0].text() == "1"));
 }
 
 #[test]
-fn pixel_fitting_keeps_arabic_graphemes_and_the_original_bidi_direction() {
-    let mut fs = FontSystem::new();
+fn pixel_fitting_preserves_arabic_direction_on_both_sides() {
+    let mut fs = twitty::render::text::fonts::new_font_system();
     let palette = Palette::default();
+    let style = UiStyle::new(&palette, None, 1.0);
+    let font = UiFont::default();
     let mut ctx = DrawContext {
         font_system: &mut fs,
         family: None,
@@ -576,47 +678,50 @@ fn pixel_fitting_keeps_arabic_graphemes_and_the_original_bidi_direction() {
     let title = "بِسْمِ ".repeat(30);
     let body = "سَلَامٌ ".repeat(30);
     let path = format!("/{}proj-12", "مَسَارٌ/".repeat(30));
-    let path = Path::new(&path);
-    let entries = [Entry::new(
+    let e = Entry::new(
         &title,
-        Some(path),
+        Some(Path::new(&path)),
         false,
         None,
         [Notice::new(None, &body)],
-    )];
+    );
     let mut cache = LabelCache::default();
-    for width in [95.0, 115.0, 145.0] {
-        let area = Rect::new(400.0, 0.0, width, 200.0);
-        let view = ScrollState::default().view(&entries, 0, area, 22.0, SidebarPosition::Right);
-        let scene = build(&mut ctx, &view, &mut cache);
-        let title = format!("● 1 {}", entries[0].title);
-        let body = &entries[0].notification.as_ref().unwrap().body;
-        let original = [title.as_str(), body, path.to_str().unwrap()];
-        for (i, (label, original)) in scene.labels.iter().zip(original).enumerate() {
-            let text = label.buffer.lines[0].text();
-            let text = text.trim_start_matches('\u{200f}');
-            let kept = if i == 2 {
-                text.strip_prefix('…')
-            } else {
-                text.strip_suffix('…')
-            }
-            .unwrap();
-            let cut = if i == 2 {
-                assert!(original.ends_with(kept));
-                assert!(kept.ends_with("proj-12"));
-                original.len() - kept.len()
-            } else {
-                assert!(original.starts_with(kept));
-                kept.len()
-            };
-            assert!(original
-                .grapheme_indices(true)
-                .any(|(offset, _)| offset == cut));
-            let run = label.buffer.layout_runs().next().unwrap();
+    for side in [SidebarPosition::Left, SidebarPosition::Right] {
+        for width in [115.0, 145.0, 220.0] {
+            let area = Rect::new(400.0, 0.0, width, 200.0);
+            let cards = cache.cards(&font, ctx.font_system, vec![e.clone()], area, 1.0);
+            assert_eq!(cards[0].message.len(), 2);
+            let view = ScrollState::default().view(&cards, 0, area, 1.0, side, UiLanguage::Arabic);
+            let scene = build(&mut ctx, &view, &mut cache, style, &font);
+            let title_label = &scene.labels[0];
+            let text = title_label.buffer.lines[0].text();
+            let kept = text.strip_suffix('…').unwrap();
+            assert!(!kept.is_empty());
+            assert!(e.title[kept.len()..].starts_with(' '));
+            let run = title_label.buffer.layout_runs().next().unwrap();
             assert!(run.rtl);
-            assert!(run.line_w <= width - 16.0);
-            assert!((label.left + run.line_w - (area.right() - 8.0)).abs() < 0.1);
-            assert!(label.buffer.layout_runs().nth(1).is_none());
+            let ellipsis = run
+                .glyphs
+                .iter()
+                .find(|glyph| glyph.start == kept.len())
+                .unwrap();
+            assert!(
+                run.glyphs.iter().all(|g| g.x >= ellipsis.x),
+                "{text:?}: {:?}",
+                run.glyphs
+                    .iter()
+                    .map(|g| (g.start, g.x, g.w, g.level))
+                    .collect::<Vec<_>>()
+            );
+            assert!((title_label.left + run.line_w - title_label.bounds.right as f32).abs() <= 1.0);
+
+            let path = scene
+                .labels
+                .iter()
+                .find(|l| l.buffer.lines[0].text().ends_with("proj-12"))
+                .unwrap();
+            assert_eq!(path.buffer.metrics().font_size, 11.0);
+            assert!(path.buffer.lines[0].text().starts_with('…'));
         }
     }
 }
@@ -632,36 +737,39 @@ fn label_cache_reuses_shaping_until_text_width_or_font_changes() {
         metrics: metrics(),
         is_srgb: false,
     };
-    let entries = [Entry::new("محرر", None, false, None, [])];
+    let entries = [card(Entry::new("محرر", None, false, None, []))];
+    let style = UiStyle::new(&palette, None, 1.0);
+    let font = UiFont::default();
     let mut cache = LabelCache::default();
     let mut view = ScrollState::default().view(
         &entries,
         0,
         Rect::new(0.0, 0.0, 220.0, 120.0),
-        22.0,
+        1.0,
         SidebarPosition::Left,
+        UiLanguage::English,
     );
-    let first = build(&mut ctx, &view, &mut cache);
+    let first = build(&mut ctx, &view, &mut cache, style, &font);
     view.items[0].active = false;
-    let second = build(&mut ctx, &view, &mut cache);
+    let second = build(&mut ctx, &view, &mut cache, style, &font);
     assert!(Rc::ptr_eq(
         &first.labels[0].buffer,
         &second.labels[0].buffer
     ));
-    view.items[0].entry.title = "طرفية".into();
-    let third = build(&mut ctx, &view, &mut cache);
+    view.items[0].card.entry.title = "طرفية".into();
+    let third = build(&mut ctx, &view, &mut cache, style, &font);
     assert!(!Rc::ptr_eq(
         &second.labels[0].buffer,
         &third.labels[0].buffer
     ));
     view.items[0].rect.w = 180.0;
-    let fourth = build(&mut ctx, &view, &mut cache);
+    let fourth = build(&mut ctx, &view, &mut cache, style, &font);
     assert!(!Rc::ptr_eq(
         &third.labels[0].buffer,
         &fourth.labels[0].buffer
     ));
     ctx.metrics.font_size += 1.0;
-    let fifth = build(&mut ctx, &view, &mut cache);
+    let fifth = build(&mut ctx, &view, &mut cache, style, &font);
     assert!(!Rc::ptr_eq(
         &fourth.labels[0].buffer,
         &fifth.labels[0].buffer
@@ -787,13 +895,20 @@ fn headless_frame_keeps_legacy_chrome_until_sidebar_is_explicit() {
     assert_eq!(old.quads[0].3, 22.0);
     let mut frame = build_frame(&mut ctx, &opts, &mut cache, &mut ime, &[], &[], &[]);
     let view = ScrollState::default().view(
-        &[entry()],
+        &[card(entry())],
         0,
         Rect::new(580.0, 0.0, 220.0, 600.0),
-        22.0,
+        1.0,
         SidebarPosition::Right,
+        UiLanguage::English,
     );
-    frame.add_sidebar(&mut ctx, &view, &mut LabelCache::default());
+    frame.add_sidebar(
+        &mut ctx,
+        &view,
+        &mut LabelCache::default(),
+        UiStyle::new(&palette, None, 1.0),
+        &UiFont::default(),
+    );
     assert_eq!(frame.quads[0].0, 580.0);
     assert_eq!(frame.quads[0].2, 220.0);
     assert_eq!(frame.text_runs(&[], &cache, &ime).len(), 2);

@@ -1,13 +1,4 @@
-//! The code review panel on the CPU: quads and text runs from a `review::panel::View`.
-//!
-//! Every label, diff line included, is shaped by the terminal's own row shaper from cells
-//! built here, so Arabic and other right-to-left text in a diff line is laid out exactly as the
-//! terminal would show that line (per-line direction marks, isolated Latin runs, wide
-//! characters on two cells, box drawing as geometry). Shaped rows are cached by text and color
-//! across frames, so scrolling and blinking reshape only what changed.
-//!
-//! The drawing surface is small on purpose (`build`, `ReviewCache`, the colors in `Colors`):
-//! restyling (rounded shapes, UI fonts) only has to touch this file.
+//! Code review panel chrome and terminal-shaped diff rows.
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
@@ -23,12 +14,19 @@ use unicode_width::UnicodeWidthChar;
 use super::context::DrawContext;
 use crate::color::Rgba;
 use crate::layout::Rect;
+use crate::render::icons::Icon;
 use crate::render::metrics::CellMetrics;
 use crate::render::row::CachedRow;
+use crate::render::shapes::{Border, Shape};
 use crate::render::style::Quad;
+use crate::render::text::shaper::shape_label;
+use crate::render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
+use crate::render::ui_style::{UiStyle, RADIUS_6};
+use crate::review::diff::FileStatus;
 use crate::review::layout::PanelLayout;
 use crate::review::panel::{RowStyle, View};
 use crate::terminal::{CellData, LineData, MAX_DRAWN_MARKS};
+use crate::ui::chrome::UiLanguage;
 
 /// A shaped label of the panel and where it goes.
 pub struct ReviewText {
@@ -38,9 +36,11 @@ pub struct ReviewText {
     pub bounds: TextBounds,
 }
 
-/// The panel's quads (back to front) and labels.
+/// The panel's diff quads, chrome shapes and text runs.
 pub struct ReviewScene {
     pub quads: Vec<Quad>,
+    pub shapes: Vec<Shape>,
+    pub labels: Vec<UiLabel>,
     pub texts: Vec<ReviewText>,
 }
 
@@ -160,308 +160,470 @@ fn fg_bytes(fg: &AnsiColor) -> [u8; 3] {
     }
 }
 
-/// The panel's colors, all derived from the theme so light themes work.
-struct Colors {
-    panel: Rgba,
-    header: Rgba,
-    border: Rgba,
-    accent: Rgba,
-    text: Rgba,
-    dim: Rgba,
-    faint: Rgba,
-    file: Rgba,
-    hunk: Rgba,
-    add: Rgba,
-    add_gutter: Rgba,
-    del: Rgba,
-    del_gutter: Rgba,
-    green: Rgba,
-    red: Rgba,
-    warn: Rgba,
-    selected: Rgba,
-    button: Rgba,
-    commit: Rgba,
-    input: Rgba,
-}
-
-impl Colors {
-    fn new(ctx: &DrawContext) -> Self {
-        let p = ctx.palette;
-        let (fg, bg) = (p.foreground, p.background);
-        let (accent, green, red) = (p.ansi[4], p.ansi[2], p.ansi[1]);
-        Self {
-            panel: bg.mix(fg, 0.03),
-            header: bg.mix(fg, 0.07),
-            border: bg.mix(fg, 0.18),
-            accent,
-            text: fg,
-            dim: fg.mix(bg, 0.42),
-            faint: fg.mix(bg, 0.6),
-            file: bg.mix(fg, 0.10),
-            hunk: bg.mix(accent, 0.10),
-            add: bg.mix(green, 0.15),
-            add_gutter: bg.mix(green, 0.27),
-            del: bg.mix(red, 0.15),
-            del_gutter: bg.mix(red, 0.27),
-            green: green.mix(fg, 0.15),
-            red: red.mix(fg, 0.15),
-            warn: p.ansi[3],
-            selected: bg.mix(p.selection, 0.55),
-            button: bg.mix(fg, 0.13),
-            commit: bg.mix(accent, 0.32),
-            input: bg.mix(fg, 0.11),
-        }
-    }
-}
-
-fn clip(r: Rect, to: Rect) -> TextBounds {
-    TextBounds {
-        left: r.x.max(to.x).ceil() as i32,
-        top: r.y.max(to.y).ceil() as i32,
-        right: r.right().min(to.right()).floor() as i32,
-        bottom: r.bottom().min(to.bottom()).floor() as i32,
-    }
-}
-
-/// Lay out the panel described by `view`.
-pub fn build(ctx: &mut DrawContext, view: &View, cache: &mut ReviewCache) -> ReviewScene {
+pub fn build(
+    ctx: &mut DrawContext,
+    view: &View,
+    cache: &mut ReviewCache,
+    style: UiStyle,
+    font: &UiFont,
+    language: UiLanguage,
+) -> ReviewScene {
     cache.begin_frame(ctx);
     let m = ctx.metrics;
-    let colors = Colors::new(ctx);
-    let commit_cols = view.commit_label.chars().count();
     let layout = PanelLayout::new(
         view.rect,
         m.line_height,
         m.char_width,
         m.scale,
         view.notice.is_some(),
-        commit_cols,
+        view.commit_label.chars().count(),
     );
-    let (lh, cw) = (layout.line_height, layout.char_width);
-    let panel = view.rect;
-    let mut quads: Vec<Quad> = Vec::new();
-    let mut texts: Vec<ReviewText> = Vec::new();
-    let quad = |r: Rect, c: Rgba, quads: &mut Vec<Quad>| {
-        if r.w > 0.0 && r.h > 0.0 {
-            quads.push((r.x, r.y, r.w, r.h, ctx.color(c)));
-        }
+    let mut draw = ReviewDrawing {
+        ctx,
+        cache,
+        style,
+        font,
+        layout,
+        language,
+        scene: ReviewScene {
+            quads: Vec::new(),
+            shapes: Vec::new(),
+            labels: Vec::new(),
+            texts: Vec::new(),
+        },
     };
-
-    // Background, the line between panes and panel (accent while it has the keyboard), header.
-    quad(panel, colors.panel, &mut quads);
-    quad(layout.header, colors.header, &mut quads);
-    let edge = if view.focused {
-        colors.accent
-    } else {
-        colors.border
-    };
-    quad(
-        Rect::new(panel.x, panel.y, layout.border, panel.h),
-        edge,
-        &mut quads,
-    );
-    quad(
-        Rect::new(
-            layout.header.x,
-            layout.header.bottom(),
-            layout.header.w,
-            layout.border,
-        ),
-        colors.border,
-        &mut quads,
-    );
-    for button in [layout.refresh, layout.close] {
-        quad(button, colors.button, &mut quads);
+    draw.header(view);
+    for (i, row) in view.rows.iter().take(layout.page_rows()).enumerate() {
+        draw.row(i, row, view.gutter_cols);
     }
-    quad(layout.commit, colors.commit, &mut quads);
+    if let (Some(area), Some(notice)) = (layout.footer, &view.notice) {
+        draw.quad(area, style.bg2);
+        let mut text = area;
+        text.x += layout.pad;
+        text.w = (text.w - 2.0 * layout.pad).max(0.0);
+        draw.label(
+            text,
+            &notice.text,
+            UiSize::Caption,
+            UiWeight::Regular,
+            UiAlign::Start,
+            if notice.warn {
+                style.warn
+            } else {
+                style.text_dim
+            },
+        );
+    }
+    draw.cache.end_frame();
+    draw.scene
+}
 
-    // Body rows: backgrounds first.
-    let gutter_end = layout.gutter_left() + layout.gutter_width(view.gutter_cols);
-    let body = layout.body;
-    for (i, row) in view.rows.iter().enumerate() {
-        let top = layout.row_top(i);
-        if top >= body.bottom() {
-            break;
-        }
-        let h = lh.min(body.bottom() - top);
-        let full = Rect::new(body.x, top, body.w, h);
-        let gutter = Rect::new(body.x, top, (gutter_end + cw / 2.0 - body.x).max(0.0), h);
-        match row.style {
-            RowStyle::File { .. } => quad(full, colors.file, &mut quads),
-            RowStyle::Hunk => quad(full, colors.hunk, &mut quads),
-            RowStyle::Add => {
-                quad(full, colors.add, &mut quads);
-                quad(gutter, colors.add_gutter, &mut quads);
-            }
-            RowStyle::Del => {
-                quad(full, colors.del, &mut quads);
-                quad(gutter, colors.del_gutter, &mut quads);
-            }
-            RowStyle::CommentInput => {
-                let left = layout.text_left(view.gutter_cols) - cw / 2.0;
-                let bx = Rect::new(left, top, (body.right() - layout.pad - left).max(0.0), h);
-                quad(bx, colors.accent, &mut quads);
-                let t = layout.border;
-                quad(
-                    Rect::new(bx.x + t, bx.y + t, bx.w - 2.0 * t, bx.h - 2.0 * t),
-                    colors.input,
-                    &mut quads,
-                );
-            }
-            _ => {}
-        }
-        if row.selected {
-            quad(full, colors.selected, &mut quads);
-            let bar = (2.0 * layout.border).min(full.w);
-            quad(
-                Rect::new(body.x, top, bar, h),
-                if view.focused {
-                    colors.accent
-                } else {
-                    colors.border
-                },
-                &mut quads,
+struct ReviewDrawing<'a, 'b> {
+    ctx: &'a mut DrawContext<'b>,
+    cache: &'a mut ReviewCache,
+    style: UiStyle,
+    font: &'a UiFont,
+    layout: PanelLayout,
+    language: UiLanguage,
+    scene: ReviewScene,
+}
+
+impl ReviewDrawing<'_, '_> {
+    fn header(&mut self, view: &View) {
+        let s = self.style;
+        let l = self.layout;
+        let panel = l.panel;
+        self.quad(panel, s.bg1);
+        self.quad(l.header, s.bg2);
+        self.quad(
+            Rect::new(panel.x, panel.y, l.border.min(panel.w), panel.h),
+            if view.focused { s.accent } else { s.border },
+        );
+        self.quad(
+            Rect::new(
+                l.header.x,
+                l.header.bottom(),
+                l.header.w,
+                l.border.min((panel.bottom() - l.header.bottom()).max(0.0)),
+            ),
+            s.border,
+        );
+        let branch = view.branch.as_deref();
+        let branch_w = branch.map_or(0.0, |branch| {
+            let buffer = self.shape(branch, UiSize::Small, UiWeight::Semibold);
+            label_width(&buffer).ceil() + s.px(27.0)
+        });
+        let repo_label = if view.totals.is_none() {
+            self.language.text("Review changes", "راجع التغييرات")
+        } else {
+            &view.title
+        };
+        let repo_w =
+            label_width(&self.shape(repo_label, UiSize::Title, UiWeight::Semibold)).ceil() + 2.0;
+        let (repo, pill) = l.repository_and_branch(repo_w, branch_w);
+        self.label(
+            repo,
+            repo_label,
+            UiSize::Title,
+            UiWeight::Semibold,
+            UiAlign::Start,
+            s.text,
+        );
+        if let Some(branch) = branch.filter(|_| pill.w > 0.0) {
+            let pill = centered_height(pill, s.px(20.0));
+            self.panel(pill, RADIUS_6, s.bg3, None);
+            let icon = Rect::new(pill.x + s.px(4.0), pill.y, s.px(13.0).min(pill.w), pill.h);
+            self.icon(icon, Icon::GitBranch, 12.0, s.text_dim);
+            let text = Rect::new(
+                icon.right() + s.px(3.0),
+                pill.y,
+                (pill.right() - icon.right() - s.px(7.0)).max(0.0),
+                pill.h,
+            );
+            self.label(
+                text,
+                branch,
+                UiSize::Small,
+                UiWeight::Semibold,
+                UiAlign::Start,
+                s.text,
             );
         }
-    }
-    if let Some(footer) = layout.footer {
-        quad(footer, colors.header, &mut quads);
-        quad(
-            Rect::new(footer.x, footer.y, footer.w, layout.border),
-            colors.border,
-            &mut quads,
+
+        let mut summary = l.summary;
+        if let Some((added, removed)) = view.totals {
+            let used = self.counts(summary, (added, removed), false);
+            summary.x += used;
+            summary.w = (summary.w - used).max(0.0);
+        }
+        let label = match view.summary.split_once(" / ") {
+            Some((en, _)) if self.language == UiLanguage::English => en,
+            Some((_, ar)) => ar,
+            None => &view.summary,
+        };
+        self.label(
+            summary,
+            label,
+            UiSize::Caption,
+            UiWeight::Regular,
+            UiAlign::Start,
+            s.text_dim,
+        );
+        for (rect, icon) in [(l.refresh, Icon::Refresh), (l.close, Icon::Close)] {
+            self.panel(rect, RADIUS_6, s.bg3, None);
+            self.icon(rect, icon, 16.0, s.text);
+        }
+        self.panel(l.commit, RADIUS_6, s.accent, None);
+        self.label(
+            l.commit,
+            self.language.text("Commit", "كوميت"),
+            UiSize::Body,
+            UiWeight::Semibold,
+            UiAlign::Center,
+            s.accent_text(),
         );
     }
 
-    let mut label = |ctx: &mut DrawContext, text: &str, color: Rgba, x: f32, y: f32, area: Rect| {
-        if text.is_empty() {
+    fn row(&mut self, i: usize, row: &crate::review::panel::ViewRow, gutter_cols: usize) {
+        let s = self.style;
+        let l = self.layout;
+        let y = l.row_top(i);
+        let h = l.line_height.min((l.body.bottom() - y).max(0.0));
+        let full = Rect::new(l.body.x, y, l.body.w, h);
+        if h <= 0.0 {
             return;
         }
-        let row = cache.get(ctx, text, color);
-        let bounds = clip(area, panel);
+        let inner = Rect::new(l.gutter_left(), y, (full.w - 2.0 * l.pad).max(0.0), h);
+        let text_left = l.text_left(gutter_cols);
+        let code = Rect::new(text_left, y, (inner.right() - text_left).max(0.0), h);
+        match row.style {
+            RowStyle::File { collapsed, status } => self.file(inner, row, collapsed, status),
+            RowStyle::Hunk => {
+                self.panel(inset(inner, 0.0, s.px(1.0)), RADIUS_6, s.bg2, None);
+                self.label(
+                    inset(inner, s.px(6.0), 0.0),
+                    &row.text,
+                    UiSize::Caption,
+                    UiWeight::Regular,
+                    UiAlign::Left,
+                    s.text_dim,
+                );
+            }
+            RowStyle::Context | RowStyle::Add | RowStyle::Del => {
+                let tint = match row.style {
+                    RowStyle::Add => Some(s.ok),
+                    RowStyle::Del => Some(s.danger),
+                    _ => None,
+                };
+                let gutter = Rect::new(
+                    full.x,
+                    y,
+                    (text_left - s.px(3.0) - full.x).clamp(0.0, full.w),
+                    h,
+                );
+                if let Some(color) = tint {
+                    self.quad(full, s.bg1.mix(color, 0.16));
+                }
+                self.quad(gutter, tint.map_or(s.bg2, |color| s.bg2.mix(color, 0.19)));
+                let numbers = Rect::new(
+                    inner.x,
+                    y,
+                    (gutter.right().min(inner.right()) - inner.x).max(0.0),
+                    h,
+                );
+                self.mono(numbers, &row.gutter, s.text_faint);
+                self.mono(code, &row.text, s.text);
+            }
+            RowStyle::CommentInput => {
+                let field = inset(code, 0.0, s.px(1.0));
+                self.panel(field, RADIUS_6, s.bg2, Some(s.accent));
+                self.label(
+                    inset(field, s.px(6.0), 0.0),
+                    &row.text,
+                    UiSize::Caption,
+                    UiWeight::Regular,
+                    UiAlign::Start,
+                    s.text,
+                );
+            }
+            RowStyle::CommentHint => {
+                self.label(
+                    code,
+                    &row.text,
+                    UiSize::Small,
+                    UiWeight::Regular,
+                    UiAlign::Start,
+                    s.text_dim,
+                );
+            }
+            RowStyle::Message | RowStyle::Note => {
+                self.label(
+                    inner,
+                    &row.text,
+                    UiSize::Caption,
+                    UiWeight::Regular,
+                    UiAlign::Start,
+                    s.text_dim,
+                );
+            }
+        }
+        if row.selected {
+            self.panel(
+                inset(full, s.px(2.0), 0.0),
+                RADIUS_6,
+                Rgba::new(0.0, 0.0, 0.0, 0.0),
+                Some(s.accent),
+            );
+        }
+    }
+
+    fn file(
+        &mut self,
+        area: Rect,
+        row: &crate::review::panel::ViewRow,
+        collapsed: bool,
+        status: FileStatus,
+    ) {
+        let s = self.style;
+        self.panel(inset(area, 0.0, s.px(1.0)), RADIUS_6, s.bg3, None);
+        let chevron = Rect::new(area.x + s.px(4.0), area.y, s.px(16.0), area.h);
+        self.icon(
+            chevron,
+            if collapsed {
+                Icon::ChevronRight
+            } else {
+                Icon::ChevronDown
+            },
+            14.0,
+            s.text_dim,
+        );
+        let color = match status {
+            FileStatus::Added => s.ok,
+            FileStatus::Deleted => s.danger,
+            FileStatus::Modified => s.warn,
+            FileStatus::Renamed | FileStatus::Copied => s.accent,
+        };
+        let badge = centered_height(
+            Rect::new(chevron.right() + s.px(4.0), area.y, s.px(19.0), area.h),
+            s.px(16.0),
+        );
+        self.panel(badge, RADIUS_6, s.bg1.mix(color, 0.19), None);
+        self.label(
+            badge,
+            &status.letter().to_string(),
+            UiSize::Small,
+            UiWeight::Semibold,
+            UiAlign::Center,
+            color.mix(s.text, 0.30),
+        );
+
+        let left = badge.right() + s.px(7.0);
+        let content = Rect::new(
+            left,
+            area.y,
+            (area.right() - left - s.px(6.0)).max(0.0),
+            area.h,
+        );
+        let count_space = row
+            .counts
+            .map_or(0.0, |counts| self.counts(content, counts, true));
+        let path = Rect::new(
+            content.x,
+            content.y,
+            (content.w - count_space).max(0.0),
+            content.h,
+        );
+        if path.w > 0.0 {
+            let size = UiSize::Caption.px(s.scale);
+            let buffer = shape_label(
+                self.ctx.font_system,
+                self.ctx.family,
+                (size, (size * 1.5).ceil()),
+                &row.text,
+            );
+            self.scene
+                .labels
+                .push(UiLabel::new(buffer, path, UiAlign::Start, s.text));
+        }
+    }
+
+    fn counts(&mut self, rect: Rect, (added, removed): (usize, usize), right: bool) -> f32 {
+        let s = self.style;
+        let added = self.shape(&format!("+{added}"), UiSize::Small, UiWeight::Semibold);
+        let removed = self.shape(&format!("−{removed}"), UiSize::Small, UiWeight::Semibold);
+        let widths = [
+            label_width(&added).ceil() + 1.0,
+            label_width(&removed).ceil() + 1.0,
+        ];
+        let gap = s.px(6.0);
+        let total = widths[0] + widths[1] + gap;
+        if total + gap > rect.w {
+            return 0.0;
+        }
+        let x = if right { rect.right() - total } else { rect.x };
+        for (x, w, buffer, color) in [
+            (x, widths[0], added, s.ok),
+            (x + widths[0] + gap, widths[1], removed, s.danger),
+        ] {
+            let label = Rect::new(x, rect.y, w, rect.h);
+            self.scene.labels.push(UiLabel::new(
+                buffer,
+                label,
+                UiAlign::Left,
+                color.mix(s.text, 0.22),
+            ));
+        }
+        total + gap
+    }
+
+    fn shape(&mut self, text: &str, size: UiSize, weight: UiWeight) -> cosmic_text::Buffer {
+        self.font
+            .shape(self.ctx.font_system, size, weight, self.style.scale, text)
+    }
+
+    fn label(
+        &mut self,
+        rect: Rect,
+        text: &str,
+        size: UiSize,
+        weight: UiWeight,
+        align: UiAlign,
+        color: Rgba,
+    ) {
+        if rect.w <= 0.0 || rect.h <= 0.0 || text.is_empty() {
+            return;
+        }
+        let buffer = self.font.fit(
+            self.ctx.font_system,
+            size,
+            weight,
+            self.style.scale,
+            text,
+            (rect.w - 1.0).max(0.0),
+        );
+        self.scene
+            .labels
+            .push(UiLabel::new(buffer, rect, align, color));
+    }
+
+    fn mono(&mut self, rect: Rect, text: &str, color: Rgba) {
+        if rect.w <= 0.0 || rect.h <= 0.0 || text.is_empty() {
+            return;
+        }
+        let row = self.cache.get(self.ctx, text, color);
+        let bounds = TextBounds {
+            left: rect.x.ceil() as i32,
+            top: rect.y.ceil() as i32,
+            right: rect.right().floor() as i32,
+            bottom: rect.bottom().floor() as i32,
+        };
         if bounds.left >= bounds.right || bounds.top >= bounds.bottom {
             return;
         }
-        quads.extend(
-            row.quads
-                .iter()
-                .filter(|&&(qx, ..)| x + qx < area.right())
-                .map(|&(qx, qy, w, h, c)| (x + qx, y + qy, w.min(area.right() - x - qx), h, c)),
-        );
-        texts.push(ReviewText {
+        for &(x, y, w, h, color) in &row.quads {
+            let x = x + rect.x;
+            let y = y + rect.y;
+            let w = w.min(rect.right() - x);
+            let h = h.min(rect.bottom() - y);
+            if w > 0.0 && h > 0.0 {
+                self.scene.quads.push((x, y, w, h, color));
+            }
+        }
+        self.scene.texts.push(ReviewText {
             row,
-            left: x,
-            top: y,
+            left: rect.x,
+            top: rect.y,
             bounds,
         });
-    };
+    }
 
-    // Header: title, totals and file count, buttons.
-    label(
-        ctx,
-        &view.title,
-        colors.text,
-        layout.title.x,
-        layout.title.y,
-        layout.title,
-    );
-    let mut x = layout.summary.x;
-    if let Some((added, removed)) = view.totals {
-        let plus = format!("+{added}");
-        let minus = format!("−{removed}");
-        label(
-            ctx,
-            &plus,
-            colors.green,
-            x,
-            layout.summary.y,
-            layout.summary,
-        );
-        x += (plus.chars().count() + 1) as f32 * cw;
-        label(ctx, &minus, colors.red, x, layout.summary.y, layout.summary);
-        x += (minus.chars().count() + 2) as f32 * cw;
+    fn quad(&mut self, rect: Rect, color: Rgba) {
+        if rect.w > 0.0 && rect.h > 0.0 {
+            self.scene
+                .quads
+                .push((rect.x, rect.y, rect.w, rect.h, self.ctx.color(color)));
+        }
     }
-    let summary_area = Rect::new(
-        x,
-        layout.summary.y,
-        (layout.summary.right() - x).max(0.0),
-        lh,
-    );
-    label(
-        ctx,
-        &view.summary,
-        colors.dim,
-        x,
-        layout.summary.y,
-        summary_area,
-    );
-    for (button, glyph) in [(layout.refresh, "↻"), (layout.close, "✕")] {
-        let gx = button.x + ((button.w - cw) / 2.0).round();
-        label(ctx, glyph, colors.text, gx, button.y, button);
-    }
-    label(
-        ctx,
-        view.commit_label,
-        colors.text,
-        layout.commit.x + cw,
-        layout.commit.y,
-        layout.commit,
-    );
 
-    // Rows.
-    let text_left = layout.text_left(view.gutter_cols);
-    let inner_right = body.right() - layout.pad;
-    for (i, row) in view.rows.iter().enumerate() {
-        let top = layout.row_top(i);
-        if top >= body.bottom() {
-            break;
+    fn panel(&mut self, rect: Rect, radius: f32, fill: Rgba, edge: Option<Rgba>) {
+        if rect.w > 0.0 && rect.h > 0.0 {
+            self.scene.shapes.push(Shape::RoundedRect {
+                rect,
+                radii: [self.style.px(radius); 4],
+                fill: self.ctx.color(fill),
+                border: edge.map(|color| Border {
+                    width: self.style.px(1.0),
+                    color: self.ctx.color(color),
+                }),
+                shadow: None,
+            });
         }
-        let area = Rect::new(body.x, top, body.w, lh.min(body.bottom() - top));
-        let mut right = inner_right;
-        if let Some((added, removed)) = row.counts {
-            let plus = format!("+{added}");
-            let minus = format!("−{removed}");
-            let cols = plus.chars().count() + 1 + minus.chars().count();
-            let cx = inner_right - cols as f32 * cw;
-            label(ctx, &plus, colors.green, cx, top, area);
-            let mx = cx + (plus.chars().count() + 1) as f32 * cw;
-            label(ctx, &minus, colors.red, mx, top, area);
-            right = cx - cw;
-        }
-        let (left, color) = match row.style {
-            RowStyle::File { .. } => (layout.gutter_left(), colors.text),
-            RowStyle::Hunk => (layout.gutter_left(), colors.dim),
-            RowStyle::Note | RowStyle::Message => (layout.gutter_left(), colors.dim),
-            RowStyle::Context => (text_left, colors.text),
-            RowStyle::Add => (text_left, colors.text),
-            RowStyle::Del => (text_left, colors.text),
-            RowStyle::CommentInput => (text_left, colors.text),
-            RowStyle::CommentHint => (text_left, colors.faint),
-        };
-        if !row.gutter.is_empty() {
-            label(
-                ctx,
-                &row.gutter,
-                colors.faint,
-                layout.gutter_left(),
-                top,
-                area,
-            );
-        }
-        let text_area = Rect::new(left, area.y, (right - left).max(0.0), area.h);
-        label(ctx, &row.text, color, left, top, text_area);
     }
-    if let (Some(footer), Some(notice)) = (layout.footer, &view.notice) {
-        let color = if notice.warn { colors.warn } else { colors.dim };
-        let y = footer.y + ((footer.h - lh) / 2.0).round();
-        let area = Rect::new(
-            footer.x + layout.pad,
-            footer.y,
-            (footer.w - 2.0 * layout.pad).max(0.0),
-            footer.h,
+
+    fn icon(&mut self, rect: Rect, icon: Icon, size: f32, color: Rgba) {
+        let side = self.style.px(size).min(rect.w).min(rect.h);
+        let rect = Rect::new(
+            rect.x + (rect.w - side) / 2.0,
+            rect.y + (rect.h - side) / 2.0,
+            side,
+            side,
         );
-        label(ctx, &notice.text, color, area.x, y, area);
+        icon.draw(rect, self.ctx.color(color), &mut self.scene.shapes);
     }
-    cache.end_frame();
-    ReviewScene { quads, texts }
+}
+
+fn inset(rect: Rect, dx: f32, dy: f32) -> Rect {
+    let dx = dx.min(rect.w / 2.0);
+    let dy = dy.min(rect.h / 2.0);
+    Rect::new(
+        rect.x + dx,
+        rect.y + dy,
+        rect.w - 2.0 * dx,
+        rect.h - 2.0 * dy,
+    )
+}
+
+fn centered_height(rect: Rect, h: f32) -> Rect {
+    let h = h.min(rect.h);
+    Rect::new(rect.x, rect.y + (rect.h - h) / 2.0, rect.w, h)
 }

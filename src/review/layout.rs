@@ -97,42 +97,45 @@ impl PanelLayout {
             1.0
         };
         let (lh, cw) = (line_height.max(1.0), char_width.max(1.0));
+        let header_row = (26.0 * scale).max(lh);
         let border = scale.round().max(1.0);
         let pad = (8.0 * scale).round();
         let pad_v = (4.0 * scale).round();
         let left = panel.x + border;
         let inner_left = left + pad;
         let inner_right = (panel.right() - pad).max(inner_left);
-        let header_h = (2.0 * lh + 2.0 * pad_v).min(panel.h);
+        let header_h = (2.0 * header_row + 2.0 * pad_v).min(panel.h);
         let header = Rect::new(left, panel.y, (panel.w - border).max(0.0), header_h);
-        let title_y = panel.y + pad_v;
-        let summary_y = title_y + lh;
-        let button = lh;
-        let close = Rect::new((inner_right - button).max(inner_left), title_y, button, lh);
-        let refresh = Rect::new(
-            (close.x - button - (pad / 2.0).round()).max(inner_left),
-            title_y,
-            button,
-            lh,
-        );
-        let commit_w = (commit_cols as f32 + 2.0) * cw;
+        let title_y = (panel.y + pad_v).min(header.bottom());
+        let summary_y = (title_y + header_row).min(header.bottom());
+        let title_h = header_row.min(header.bottom() - title_y);
+        let summary_h = header_row.min(header.bottom() - summary_y);
+        let gap = (4.0 * scale).min((inner_right - inner_left) / 8.0);
+        let button = (24.0 * scale).min((inner_right - inner_left - gap).max(0.0) / 2.0);
+        let button_h = title_h.min(24.0 * scale);
+        let button_y = title_y + (title_h - button_h) / 2.0;
+        let close = Rect::new(inner_right - button, button_y, button, button_h);
+        let refresh = Rect::new(close.x - button - gap, button_y, button, button_h);
+        let commit_w =
+            ((commit_cols as f32 + 2.0) * 7.0 * scale).min((inner_right - inner_left) * 0.46);
+        let commit_h = summary_h.min(24.0 * scale);
         let commit = Rect::new(
-            (inner_right - commit_w).max(inner_left),
-            summary_y,
-            commit_w.min(inner_right - inner_left),
-            lh,
+            inner_right - commit_w,
+            summary_y + (summary_h - commit_h) / 2.0,
+            commit_w,
+            commit_h,
         );
         let title = Rect::new(
             inner_left,
             title_y,
             (refresh.x - pad - inner_left).max(0.0),
-            lh,
+            title_h,
         );
         let summary = Rect::new(
             inner_left,
             summary_y,
             (commit.x - pad - inner_left).max(0.0),
-            lh,
+            summary_h,
         );
         let body_top = (header.bottom() + border).min(panel.bottom());
         let footer_h = if footer { lh + 2.0 * pad_v } else { 0.0 };
@@ -161,6 +164,27 @@ impl PanelLayout {
             body,
             footer,
         }
+    }
+
+    pub fn repository_and_branch(&self, repo_width: f32, branch_width: f32) -> (Rect, Rect) {
+        let gap = self.pad / 2.0;
+        let branch_width = branch_width.min(self.title.w * 0.55);
+        if branch_width <= self.pad * 2.0 {
+            return (
+                self.title,
+                Rect::new(self.title.right(), self.title.y, 0.0, self.title.h),
+            );
+        }
+        let repo_w = repo_width.min((self.title.w - branch_width - gap).max(0.0));
+        (
+            Rect::new(self.title.x, self.title.y, repo_w, self.title.h),
+            Rect::new(
+                self.title.x + repo_w + gap,
+                self.title.y,
+                branch_width,
+                self.title.h,
+            ),
+        )
     }
 
     /// Whole rows the body shows (at least one).
