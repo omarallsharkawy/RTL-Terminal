@@ -9,7 +9,9 @@ use std::time::{Duration, Instant};
 
 use alacritty_terminal::term::TermMode;
 use serde_json::json;
-use twitty::agent::{agent_argv, resolve_agent};
+use twitty::agent::agent_argv;
+#[cfg(unix)]
+use twitty::agent::resolve_agent;
 use twitty::app::{
     accept_osc52_clipboard, format_pane_warning, format_startup_warnings, MAX_OSC52_CLIPBOARD_BYTES,
 };
@@ -35,7 +37,9 @@ use twitty::review::layout::PanelLayout;
 use twitty::review::panel::{cwd_in_repo, Load, ReviewPanel, COMMIT_LABEL};
 use twitty::review::Snapshot;
 use twitty::session::workspace::SplitFailure;
-use twitty::sidebar::git::{branch, BranchCache, BranchWatcher};
+#[cfg(unix)]
+use twitty::sidebar::git::branch;
+use twitty::sidebar::git::{BranchCache, BranchWatcher};
 use twitty::ui::chrome::UiLanguage;
 use twitty::ui::palette::PaletteState;
 use twitty::ui::search::{push_search_text, search_bar_text, MAX_SEARCH_QUERY_CHARS};

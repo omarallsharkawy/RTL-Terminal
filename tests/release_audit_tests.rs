@@ -17,7 +17,9 @@ use twitty::control::protocol::{read_bounded_line, MethodCall, ReadLine, Request
 use twitty::remote::bootstrap::{bootstrap, Error as BootstrapError, SshRunner};
 use twitty::remote::{validate_destination, Target};
 use twitty::terminal::Terminal;
-use twitty::workflows::{resolve_project_cwd, sha256_hex, TrustStore};
+#[cfg(unix)]
+use twitty::workflows::sha256_hex;
+use twitty::workflows::{resolve_project_cwd, TrustStore};
 
 struct TempDir(PathBuf);
 
