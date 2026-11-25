@@ -28,6 +28,10 @@ pub enum CliAction {
         pane: Option<u64>,
         lines: Option<usize>,
     },
+    ClaudeHook {
+        event: String,
+        pane: Option<u64>,
+    },
 }
 
 /// Usage help printed by `twitty --help`.
@@ -43,12 +47,15 @@ pub fn help_text() -> &'static str {
         "    twitty send [--pane N] TEXT             Type TEXT into a pane's PTY\n",
         "    twitty list                             List tabs and panes\n",
         "    twitty read [--pane N] [--lines N]      Read recent lines from a pane\n",
+        "    twitty claude-hook <event> [--pane N]   Handle a Claude Code hook (JSON on stdin)\n",
         "    twitty --help | -h                      Show this help\n",
         "    twitty --version | -V                   Show version\n",
         "\n",
         "ENVIRONMENT:\n",
         "    TWITTY_SOCKET    Path to the control socket (default: newest live socket)\n",
         "    TWITTY_PANE_ID   Default pane id for --pane when unset\n",
+        "    CMUX_SOCKET_PATH Alternate control socket path (cmux compatibility)\n",
+        "    CMUX_SURFACE_ID  Alternate default pane id (cmux compatibility)\n",
         "    TWITTY_SHELL     Override the default shell\n",
         "    TWITTY_LOG       Log level (error, warn, info, debug, trace)\n",
     )
@@ -72,6 +79,7 @@ pub fn parse_args(args: &[String], env_pane: Option<&str>) -> Result<CliAction, 
         "send" => parse_send(rest, default_pane),
         "list" => parse_list(rest),
         "read" => parse_read(rest, default_pane),
+        "claude-hook" => parse_claude_hook(rest, default_pane),
         other => Err(format!("unknown argument {other:?} (try `twitty --help`)")),
     }
 }
@@ -258,6 +266,45 @@ fn parse_read(args: &[String], default_pane: Option<u64>) -> Result<CliAction, S
     Ok(CliAction::Read { pane, lines })
 }
 
+fn parse_claude_hook(args: &[String], default_pane: Option<u64>) -> Result<CliAction, String> {
+    let mut pane = default_pane;
+    let mut event: Option<String> = None;
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = args[i].as_str();
+        if matches!(arg, "-h" | "--help") && event.is_none() {
+            return Ok(CliAction::Help);
+        }
+        if arg == "--pane" || arg == "-p" {
+            let val = args
+                .get(i + 1)
+                .ok_or_else(|| format!("missing value for {arg}"))?;
+            pane = Some(parse_u64_flag("--pane", val)?);
+            i += 2;
+            continue;
+        }
+        if let Some(val) = arg.strip_prefix("--pane=") {
+            pane = Some(parse_u64_flag("--pane", val)?);
+            i += 1;
+            continue;
+        }
+        if arg.starts_with('-') {
+            return Err(format!("unknown option {arg:?} for `claude-hook`"));
+        }
+        if event.is_some() {
+            return Err(format!("unexpected argument {arg:?} for `claude-hook`"));
+        }
+        event = Some(arg.to_owned());
+        i += 1;
+    }
+
+    let Some(event) = event else {
+        return Err("usage: twitty claude-hook <event> [--pane N]".into());
+    };
+    Ok(CliAction::ClaudeHook { event, pane })
+}
+
 fn parse_u64_flag(flag: &str, val: &str) -> Result<u64, String> {
     val.parse::<u64>()
         .map_err(|_| format!("invalid integer for {flag}: {val:?}"))
@@ -390,7 +437,11 @@ pub fn build_params(action: &CliAction) -> Option<(&str, Value)> {
             }
             Some(("pane.read", Value::Object(map)))
         }
-        CliAction::RunGui | CliAction::Help | CliAction::Version | CliAction::List => None,
+        CliAction::RunGui
+        | CliAction::Help
+        | CliAction::Version
+        | CliAction::List
+        | CliAction::ClaudeHook { .. } => None,
     }
 }
 
@@ -408,6 +459,9 @@ pub fn run_cli(action: CliAction) -> i32 {
         CliAction::Version => {
             println!("twitty {}", env!("CARGO_PKG_VERSION"));
             return 0;
+        }
+        CliAction::ClaudeHook { event, pane } => {
+            return crate::control::claude_hook::run_cli_hook(&event, pane);
         }
         _ => {}
     }
@@ -511,7 +565,9 @@ pub fn run_cli(action: CliAction) -> i32 {
                 }
             }
         }
-        CliAction::RunGui | CliAction::Help | CliAction::Version => 0,
+        CliAction::RunGui | CliAction::Help | CliAction::Version | CliAction::ClaudeHook { .. } => {
+            0
+        }
     }
 }
 

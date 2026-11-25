@@ -69,6 +69,94 @@ impl Notice {
     }
 }
 
+/// High-level agent activity state for a pane (from Claude Code hooks or cmux status calls).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AgentState {
+    Working,
+    NeedsInput,
+    Done,
+}
+
+impl AgentState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Working => "working",
+            Self::NeedsInput => "needs_input",
+            Self::Done => "done",
+        }
+    }
+
+    /// Short status label drawn in the sidebar state row.
+    pub fn badge(self) -> &'static str {
+        match self {
+            Self::Working => "● working",
+            Self::NeedsInput => "! needs input",
+            Self::Done => "✓ done",
+        }
+    }
+
+    /// Higher priority wins when summarizing a tab with multiple split panes.
+    pub fn priority(self) -> u8 {
+        match self {
+            Self::Done => 1,
+            Self::Working => 2,
+            Self::NeedsInput => 3,
+        }
+    }
+
+    /// Map a status key/value pair (e.g. from `workspace.set_status`) to an [`AgentState`].
+    pub fn from_status(key: &str, value: &str) -> Option<Self> {
+        let k = key.trim().to_ascii_lowercase();
+        let v = value.trim().to_ascii_lowercase();
+        if matches!(k.as_str(), "needs-input" | "needs_input") && !v.is_empty() {
+            return Some(Self::NeedsInput);
+        }
+        match v.as_str() {
+            "working" | "running" | "busy" | "thinking" | "in_progress" => Some(Self::Working),
+            "needs_input" | "needs-input" | "waiting" | "input" | "permission" | "attention" => {
+                Some(Self::NeedsInput)
+            }
+            "done" | "idle" | "finished" | "complete" | "completed" => Some(Self::Done),
+            _ => None,
+        }
+    }
+}
+
+/// Per-pane agent status shown in the sidebar and returned by control queries.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentStatus {
+    pub state: AgentState,
+    /// Optional cleaned message/label (e.g. last notification text).
+    pub text: Option<String>,
+}
+
+impl AgentStatus {
+    pub fn new(state: AgentState, text: Option<&str>) -> Self {
+        let text = text
+            .map(|s| clean_text(s, MAX_NOTIFY_CHARS))
+            .filter(|s| !s.is_empty());
+        Self { state, text }
+    }
+}
+
+/// Choose the highest-priority agent status to display for a tab, preferring `focused` on ties.
+pub fn pick_tab_agent_status<'a>(
+    focused: Option<&'a AgentStatus>,
+    others: impl IntoIterator<Item = &'a AgentStatus>,
+) -> Option<AgentStatus> {
+    let mut best = focused;
+    for candidate in others {
+        match best {
+            None => best = Some(candidate),
+            Some(cur) if candidate.state.priority() > cur.state.priority() => {
+                best = Some(candidate);
+            }
+            _ => {}
+        }
+    }
+    best.cloned()
+}
+
 /// One tab, with the focused pane's cwd/command state and notifications from *all* panes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {
@@ -81,6 +169,8 @@ pub struct Entry {
     pub notification: Option<Notice>,
     /// Listening TCP ports of the tab's processes, sorted.
     pub ports: Vec<u16>,
+    /// Agent status (working / needs input / done) reported for a pane in this tab.
+    pub agent_status: Option<AgentStatus>,
 }
 
 impl Entry {
@@ -103,6 +193,7 @@ impl Entry {
             attention_count,
             notification,
             ports: Vec::new(),
+            agent_status: None,
         }
     }
 
@@ -112,9 +203,23 @@ impl Entry {
         self
     }
 
+    /// The entry with this agent status (working / needs input / done).
+    pub fn with_agent_status(mut self, status: Option<AgentStatus>) -> Self {
+        self.agent_status = status;
+        self
+    }
+
+    /// Text for the notification line: the unseen notification first, else the agent status text.
+    pub fn display_notice(&self) -> Option<String> {
+        self.notification
+            .as_ref()
+            .map(Notice::label)
+            .or_else(|| self.agent_status.as_ref().and_then(|s| s.text.clone()))
+    }
+
     pub fn height(&self, line_height: f32) -> f32 {
         let lines = 3.5
-            + f32::from(u8::from(self.notification.is_some()))
+            + f32::from(u8::from(self.display_notice().is_some()))
             + f32::from(u8::from(!self.ports.is_empty()));
         line_height * lines
     }

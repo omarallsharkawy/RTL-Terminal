@@ -4,21 +4,34 @@
 use alacritty_terminal::term::TermMode;
 use std::time::Instant;
 
-use super::App;
+use super::{App, AppEvent};
+use crate::config::TwittyConfig;
 use crate::layout::{FocusDir, PaneId, Rect, SplitDir};
 use crate::pty::SpawnOptions;
 use crate::session::spawn::ShellFactory;
+use winit::event_loop::EventLoopProxy;
+
+fn shell_factory<'a>(
+    proxy: &'a EventLoopProxy<AppEvent>,
+    config: &TwittyConfig,
+    socket: Option<String>,
+    options: SpawnOptions,
+) -> ShellFactory<'a> {
+    let mut shells = ShellFactory::new(proxy, config.cursor_blink)
+        .with_shell_integration(config.shell_integration)
+        .with_control(socket, config.cmux_compat, config.claude_hooks);
+    shells.options = options;
+    shells
+}
 
 impl App {
     pub(super) fn start_session(&mut self) {
         if let Some(session) = self.startup_session.take() {
             let was_visible = self.window.sidebar_visible();
             self.window.set_sidebar_visible(session.sidebar_visible);
-            let mut options = SpawnOptions::default();
-            self.attach_control_env(&mut options);
-            let mut shells = ShellFactory::new(&self.proxy, self.config.cursor_blink)
-                .with_shell_integration(self.config.shell_integration);
-            shells.options = options;
+            let socket = self.control_socket_path();
+            let mut shells =
+                shell_factory(&self.proxy, &self.config, socket, SpawnOptions::default());
             self.ws = session.rebuild(&self.window, &mut shells);
             if let Some(id) = self.focused_id() {
                 self.focus_changed(None, id);
@@ -51,13 +64,11 @@ impl App {
         self.new_tab_with(SpawnOptions::default());
     }
 
-    pub(super) fn new_tab_with(&mut self, mut options: SpawnOptions) -> Option<PaneId> {
+    pub(super) fn new_tab_with(&mut self, options: SpawnOptions) -> Option<PaneId> {
         let r = self.window.grid()?;
         let previous = self.focused_id();
-        self.attach_control_env(&mut options);
-        let mut shells = ShellFactory::new(&self.proxy, self.config.cursor_blink)
-            .with_shell_integration(self.config.shell_integration);
-        shells.options = options;
+        let socket = self.control_socket_path();
+        let mut shells = shell_factory(&self.proxy, &self.config, socket, options);
         let id = self.ws.new_tab(r, &mut shells)?;
         self.reset_pointer_gesture();
         // A second tab shows the tab bar, which shrinks every pane.
@@ -74,13 +85,11 @@ impl App {
     pub(super) fn split_focused_with(
         &mut self,
         dir: SplitDir,
-        mut options: SpawnOptions,
+        options: SpawnOptions,
     ) -> Option<PaneId> {
         let r = self.window.grid()?;
-        self.attach_control_env(&mut options);
-        let mut shells = ShellFactory::new(&self.proxy, self.config.cursor_blink)
-            .with_shell_integration(self.config.shell_integration);
-        shells.options = options;
+        let socket = self.control_socket_path();
+        let mut shells = shell_factory(&self.proxy, &self.config, socket, options);
         let (old, new) = self.ws.split_focused(r, &mut shells, dir)?;
         self.apply_layout();
         self.focus_changed(Some(old), new);
@@ -188,6 +197,27 @@ impl App {
         };
         self.window.forget_pane(id);
         self.pointer.forget(id);
+        let Some(now) = closed.focused else {
+            self.close_palette();
+            self.session.last_pane_closed();
+            return true;
+        };
+        self.apply_layout();
+        self.focus_changed(closed.previous, now);
+        self.refresh_window_title();
+        false
+    }
+
+    /// Close all panes in tab `index`. Returns true when it was the last tab and the window
+    /// should close.
+    pub(super) fn close_tab(&mut self, index: usize) -> bool {
+        let Some((removed, closed)) = self.ws.close_tab(index) else {
+            return false;
+        };
+        for id in removed {
+            self.window.forget_pane(id);
+            self.pointer.forget(id);
+        }
         let Some(now) = closed.focused else {
             self.close_palette();
             self.session.last_pane_closed();

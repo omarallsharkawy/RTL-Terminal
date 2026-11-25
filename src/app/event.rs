@@ -124,6 +124,19 @@ impl App {
     /// A program in pane `id` asked for the user's attention. It is marked for the sidebar
     /// unless the user is already looking at that pane.
     pub(super) fn notify(&mut self, id: PaneId, title: Option<String>, body: String) {
+        self.notify_with_desktop(id, title, body, true);
+    }
+
+    /// Like [`App::notify`], allowing callers (such as `notification.create` with
+    /// `send_desktop: false`) to suppress the OS desktop notification while still recording
+    /// notification history and sidebar attention.
+    pub(super) fn notify_with_desktop(
+        &mut self,
+        id: PaneId,
+        title: Option<String>,
+        body: String,
+        send_desktop: bool,
+    ) {
         self.record_notification(id, title.as_deref(), &body);
         let Some(notice) = crate::notify::unseen_notice(
             self.window_focused,
@@ -142,15 +155,17 @@ impl App {
             body: notice.body.clone(),
             at: std::time::SystemTime::now(),
         });
-        self.window
-            .notify(self.config.desktop_notifications, id, &notice, || {
-                self.ws
-                    .tabs()
-                    .iter()
-                    .position(|t| t.root.contains(id))
-                    .map(|i| super::window::sidebar_title(&self.ws, i))
-                    .unwrap_or_default()
-            });
+        if send_desktop {
+            self.window
+                .notify(self.config.desktop_notifications, id, &notice, || {
+                    self.ws
+                        .tabs()
+                        .iter()
+                        .position(|t| t.root.contains(id))
+                        .map(|i| super::window::sidebar_title(&self.ws, i))
+                        .unwrap_or_default()
+                });
+        }
         self.window.request_redraw();
     }
 

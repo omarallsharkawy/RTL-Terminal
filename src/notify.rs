@@ -109,6 +109,9 @@ pub fn command(title: &str, body: &str) -> std::process::Command {
         .args(["--app-name=Twitty", "--", &title, &body])
         .env_remove("TWITTY_SOCKET")
         .env_remove("TWITTY_PANE_ID")
+        .env_remove("CMUX_SOCKET_PATH")
+        .env_remove("CMUX_WORKSPACE_ID")
+        .env_remove("CMUX_SURFACE_ID")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());

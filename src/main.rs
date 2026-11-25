@@ -8,7 +8,14 @@ use winit::event_loop::EventLoop;
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let env_pane = std::env::var("TWITTY_PANE_ID").ok();
+    let env_pane = std::env::var("TWITTY_PANE_ID")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| {
+            std::env::var("CMUX_SURFACE_ID")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+        });
     match parse_args(&args, env_pane.as_deref()) {
         Ok(CliAction::RunGui) => {}
         Ok(action) => {

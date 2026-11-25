@@ -5,8 +5,10 @@
 //! directory and accepts newline-delimited JSON requests. On other platforms the server and
 //! client compile to stubs.
 
+pub mod claude_hook;
 pub mod cli;
 pub mod client;
+pub mod cmux;
 pub mod paths;
 pub mod protocol;
 pub mod server;

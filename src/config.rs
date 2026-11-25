@@ -32,6 +32,13 @@ pub struct TwittyConfig {
     pub desktop_notifications: bool,
     /// Listen on a local socket so `twitty ctl` and agents can drive this window.
     pub control_socket: bool,
+    /// Expose cmux-compatible environment variables (`CMUX_SOCKET_PATH`, `CMUX_WORKSPACE_ID`,
+    /// `CMUX_SURFACE_ID`) when the control socket is enabled. Defaults to true.
+    pub cmux_compat: bool,
+    /// Prepend Twitty's `claude` wrapper to `PATH` inside Twitty shells so Claude Code reports
+    /// working / needs-input / done status and notifications over the control socket. Defaults
+    /// to true.
+    pub claude_hooks: bool,
     /// Load Twitty's shell integration (OSC 133 prompt marks, OSC 7 cwd) into bash, zsh and fish.
     pub shell_integration: bool,
     /// Restore the tabs and splits from the last window closed normally. Defaults to true.
@@ -68,6 +75,8 @@ impl Default for TwittyConfig {
             sidebar_width: 220.0,
             desktop_notifications: true,
             control_socket: true,
+            cmux_compat: true,
+            claude_hooks: true,
             shell_integration: true,
             restore_session: true,
             agent_command: None,

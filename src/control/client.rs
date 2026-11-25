@@ -17,6 +17,27 @@ mod imp {
     };
 
     const CLIENT_TIMEOUT: Duration = Duration::from_secs(15);
+    const MIN_CLIENT_TIMEOUT: Duration = Duration::from_millis(50);
+    const MAX_CLIENT_TIMEOUT: Duration = Duration::from_secs(60);
+
+    /// Read an optional client I/O timeout override from `TWITTY_CLI_TIMEOUT_MS` (milliseconds)
+    /// or `CMUXTERM_CLI_RESPONSE_TIMEOUT_SEC` (seconds), clamped to `[50 ms, 60 s]`.
+    pub fn timeout_from_env() -> Duration {
+        if let Ok(raw) = std::env::var("TWITTY_CLI_TIMEOUT_MS") {
+            if let Ok(ms) = raw.trim().parse::<u64>() {
+                return Duration::from_millis(ms).clamp(MIN_CLIENT_TIMEOUT, MAX_CLIENT_TIMEOUT);
+            }
+        }
+        if let Ok(raw) = std::env::var("CMUXTERM_CLI_RESPONSE_TIMEOUT_SEC") {
+            if let Ok(secs) = raw.trim().parse::<f64>() {
+                if secs.is_finite() && secs > 0.0 {
+                    let dur = Duration::from_secs_f64(secs.min(60.0));
+                    return dur.clamp(MIN_CLIENT_TIMEOUT, MAX_CLIENT_TIMEOUT);
+                }
+            }
+        }
+        CLIENT_TIMEOUT
+    }
 
     pub struct Client {
         stream: BufReader<UnixStream>,
@@ -27,16 +48,28 @@ mod imp {
     impl Client {
         /// Connect to an explicit socket path after verifying ownership and permissions.
         pub fn connect_path(path: impl Into<PathBuf>) -> io::Result<Self> {
+            Self::connect_path_with_timeout(path, timeout_from_env())
+        }
+
+        /// Connect to an explicit socket path with an explicit read/write timeout.
+        pub fn connect_path_with_timeout(
+            path: impl Into<PathBuf>,
+            timeout: Duration,
+        ) -> io::Result<Self> {
             let path = path.into();
             verify_socket(&path, current_uid()?)?;
             let stream = UnixStream::connect(&path)?;
-            Self::from_stream(path, stream)
+            Self::from_stream(path, stream, timeout)
         }
 
-        /// Connect using `$TWITTY_SOCKET` when set, else the newest live socket in the runtime
-        /// directory.
+        /// Connect using `$TWITTY_SOCKET` or `$CMUX_SOCKET_PATH` when set, else the newest live
+        /// socket in the runtime directory.
         pub fn connect_default() -> io::Result<Self> {
-            if let Some(env_path) = std::env::var_os("TWITTY_SOCKET").filter(|v| !v.is_empty()) {
+            let timeout = timeout_from_env();
+            let env_path = std::env::var_os("TWITTY_SOCKET")
+                .filter(|v| !v.is_empty())
+                .or_else(|| std::env::var_os("CMUX_SOCKET_PATH").filter(|v| !v.is_empty()));
+            if let Some(env_path) = env_path {
                 let path = PathBuf::from(env_path);
                 verify_socket(&path, current_uid()?)?;
                 let stream = UnixStream::connect(&path).map_err(|e| {
@@ -45,17 +78,17 @@ mod imp {
                         format!("could not connect to {}: {e}", path.display()),
                     )
                 })?;
-                return Self::from_stream(path, stream);
+                return Self::from_stream(path, stream, timeout);
             }
             let dir = default_runtime_dir()?;
             let uid = current_uid()?;
             let (path, stream) = connect_newest_in(&dir, uid)?;
-            Self::from_stream(path, stream)
+            Self::from_stream(path, stream, timeout)
         }
 
-        fn from_stream(path: PathBuf, stream: UnixStream) -> io::Result<Self> {
-            let _ = stream.set_read_timeout(Some(CLIENT_TIMEOUT));
-            let _ = stream.set_write_timeout(Some(CLIENT_TIMEOUT));
+        fn from_stream(path: PathBuf, stream: UnixStream, timeout: Duration) -> io::Result<Self> {
+            let _ = stream.set_read_timeout(Some(timeout));
+            let _ = stream.set_write_timeout(Some(timeout));
             Ok(Self {
                 stream: BufReader::new(stream),
                 path,
@@ -103,4 +136,4 @@ mod imp {
 }
 
 #[cfg(unix)]
-pub use imp::Client;
+pub use imp::{timeout_from_env, Client};

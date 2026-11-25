@@ -26,6 +26,9 @@ pub(crate) trait GridGeometry {
 
 /// Creates the terminal and shell of a new pane.
 pub(crate) trait PaneFactory {
+    /// Inform the factory which stable tab id the next spawned pane belongs to.
+    fn set_tab_id(&mut self, _tab_id: u64) {}
+
     /// A pane `id` with a `cols` x `rows` grid, its shell started in `cwd` when given.
     /// `None` when the shell could not be started.
     fn spawn(&mut self, id: PaneId, cols: usize, rows: usize, cwd: Option<PathBuf>)
@@ -35,6 +38,10 @@ pub(crate) trait PaneFactory {
 /// A tab: a tree of split panes and the one that has keyboard focus.
 #[derive(Clone, Debug)]
 pub struct Tab {
+    /// Stable monotonic tab id (exposed as `CMUX_WORKSPACE_ID`).
+    pub id: u64,
+    /// Optional user/control-socket custom title (overrides the focused pane's OSC title).
+    pub title: Option<String>,
     pub root: Node,
     pub focused: PaneId,
 }
@@ -54,6 +61,7 @@ pub(crate) struct Workspace {
     tabs: Vec<Tab>,
     active: usize,
     next_id: u64,
+    next_tab_id: u64,
 }
 
 impl Workspace {
@@ -107,14 +115,44 @@ impl Workspace {
         self.active_tab().is_some_and(|t| t.root.contains(id))
     }
 
-    /// The label of tab `index`: its focused pane's title, else "Tab N".
+    /// The label of tab `index`: its custom title, else its focused pane's title, else "Tab N".
     pub(crate) fn tab_title(&self, index: usize) -> String {
+        if let Some(custom) = self
+            .tabs
+            .get(index)
+            .and_then(|t| t.title.as_deref())
+            .filter(|t| !t.is_empty())
+        {
+            return custom.to_owned();
+        }
         self.tabs
             .get(index)
             .and_then(|t| self.panes.get(&t.focused))
             .and_then(|p| p.title.clone())
             .filter(|t| !t.is_empty())
             .unwrap_or_else(|| format!("Tab {}", index + 1))
+    }
+
+    /// Find the current 0-based index of the tab with stable `id`.
+    pub(crate) fn tab_index_by_id(&self, id: u64) -> Option<usize> {
+        self.tabs.iter().position(|t| t.id == id)
+    }
+
+    /// Stable tab id of the tab containing `pane`.
+    pub(crate) fn tab_id_of_pane(&self, pane: PaneId) -> Option<u64> {
+        self.tabs
+            .iter()
+            .find(|t| t.root.contains(pane))
+            .map(|t| t.id)
+    }
+
+    /// Set or clear the custom title of tab `index`. Returns false when out of range.
+    pub(crate) fn rename_tab(&mut self, index: usize, title: Option<String>) -> bool {
+        let Some(tab) = self.tabs.get_mut(index) else {
+            return false;
+        };
+        tab.title = title.filter(|t| !t.is_empty());
+        true
     }
 
     /// The title of the focused pane, if its program set one.
@@ -188,6 +226,11 @@ impl Workspace {
         PaneId(self.next_id)
     }
 
+    fn alloc_tab_id(&mut self) -> u64 {
+        self.next_tab_id += 1;
+        self.next_tab_id
+    }
+
     /// Install one startup tab, with fresh IDs already assigned across the restored tabs.
     /// If a shell cannot start, its sibling takes its space. Reserve failed IDs as their
     /// terminal events may already have been queued.
@@ -198,6 +241,11 @@ impl Workspace {
         geo: &impl GridGeometry,
         mut spawn: impl FnMut(PaneId, usize, usize) -> Option<Pane>,
     ) -> bool {
+        if tab.id == 0 {
+            tab.id = self.alloc_tab_id();
+        } else {
+            self.next_tab_id = self.next_tab_id.max(tab.id);
+        }
         let panes = layout(&tab.root, geo.content_rect(tab_count), geo.gap());
         let mut root = Some(tab.root);
         for (id, rect) in panes {
@@ -236,9 +284,13 @@ impl Workspace {
     ) -> Option<PaneId> {
         let (cols, rows) = geo.grid_size(geo.content_rect(self.tabs.len() + 1));
         let id = self.alloc_id();
+        let tab_id = self.alloc_tab_id();
+        factory.set_tab_id(tab_id);
         let pane = factory.spawn(id, cols, rows, self.focused_cwd())?;
         self.panes.insert(id, pane);
         self.tabs.push(Tab {
+            id: tab_id,
+            title: None,
             root: Node::Leaf(id),
             focused: id,
         });
@@ -273,6 +325,7 @@ impl Workspace {
             return None;
         }
         let tab = self.tabs.get(self.active)?;
+        let tab_id = tab.id;
         let focused = tab.focused;
         let mut root = tab.root.clone();
         let new_id = self.alloc_id();
@@ -283,6 +336,7 @@ impl Workspace {
             .find(|(id, _)| *id == new_id)
             .map(|(_, r)| r)?;
         let (cols, rows) = geo.grid_size(rect);
+        factory.set_tab_id(tab_id);
         let pane = factory.spawn(new_id, cols, rows, self.focused_cwd())?;
         self.panes.insert(new_id, pane);
         self.tabs[self.active].root = root;
@@ -365,7 +419,15 @@ impl Workspace {
                 } else {
                     tab.focused
                 };
-                self.tabs.insert(ti, Tab { root, focused });
+                self.tabs.insert(
+                    ti,
+                    Tab {
+                        id: tab.id,
+                        title: tab.title,
+                        root,
+                        focused,
+                    },
+                );
             }
             None => {
                 if ti < self.active {
@@ -381,6 +443,33 @@ impl Workspace {
             previous: previous.filter(|p| self.panes.contains_key(p)),
             focused: self.focused_id(),
         })
+    }
+
+    /// Close every pane in tab `index`. Returns the removed pane ids and the resulting focus
+    /// change, or `None` when `index` is out of range.
+    pub(crate) fn close_tab(&mut self, index: usize) -> Option<(Vec<PaneId>, Closed)> {
+        if index >= self.tabs.len() {
+            return None;
+        }
+        let previous = self.focused_id();
+        let tab = self.tabs.remove(index);
+        let removed = tab.root.leaves();
+        for id in &removed {
+            self.panes.remove(id);
+        }
+        if index < self.active {
+            self.active -= 1;
+        }
+        if self.active >= self.tabs.len() {
+            self.active = self.tabs.len().saturating_sub(1);
+        }
+        Some((
+            removed,
+            Closed {
+                previous: previous.filter(|p| self.panes.contains_key(p)),
+                focused: self.focused_id(),
+            },
+        ))
     }
 }
 

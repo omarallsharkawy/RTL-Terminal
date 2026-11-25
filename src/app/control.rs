@@ -1,6 +1,8 @@
-//! Event-loop side of the control socket: starts [`ControlServer`], attaches `TWITTY_SOCKET`
-//! to new pane environments, and dispatches incoming [`Request`]s against [`App`] state.
+//! Event-loop side of the control socket: starts [`ControlServer`], exposes its socket path to
+//! pane factories, and implements [`ControlHost`] so incoming [`Request`]s (both Twitty `ctl`
+//! and cmux v2/v1) dispatch cleanly against [`App`] state.
 
+use std::path::PathBuf;
 use std::sync::{mpsc, Arc};
 use std::time::Instant;
 
@@ -8,11 +10,12 @@ use serde_json::{json, Value};
 
 use super::{App, AppEvent};
 use crate::commands;
-use crate::control::protocol::{bound_read_text, MAX_READ_BYTES};
-use crate::control::{ControlServer, MethodCall, Request, Response, REQUEST_TIMEOUT};
-use crate::layout::PaneId;
-use crate::pty::{Pty, SpawnOptions};
-use crate::shell_integration::clean_text;
+use crate::control::cmux::{dispatch_request, ControlHost};
+use crate::control::{ControlServer, Request, Response, REQUEST_TIMEOUT};
+use crate::layout::{PaneId, SplitDir};
+use crate::pty::SpawnOptions;
+use crate::session::workspace::Workspace;
+use crate::ui::notifications::NotificationHistory;
 use crate::workflows::WorkflowSet;
 
 impl App {
@@ -49,13 +52,12 @@ impl App {
         }
     }
 
-    /// Attach `TWITTY_SOCKET` to `options` when the control server is running.
-    pub(super) fn attach_control_env(&self, options: &mut SpawnOptions) {
-        if let Some(path) = self.control.as_ref().and_then(ControlServer::path) {
-            options
-                .env
-                .push(("TWITTY_SOCKET".into(), path.to_string_lossy().into_owned()));
-        }
+    /// Path of the running control socket, if enabled and started.
+    pub(super) fn control_socket_path(&self) -> Option<String> {
+        self.control
+            .as_ref()
+            .and_then(ControlServer::path)
+            .map(|p| p.to_string_lossy().into_owned())
     }
 
     /// Handle one request delivered from a control client thread and send the reply.
@@ -65,217 +67,132 @@ impl App {
         req: Request,
         reply: mpsc::Sender<Response>,
     ) -> bool {
-        let id = req.id.clone();
-        let (response, should_exit) = match MethodCall::parse(&req) {
-            Ok(call) => match self.dispatch_control(call) {
-                Ok((result, exit)) => (Response::ok(id, result), exit),
-                Err(err) => (Response::err(id, err), false),
-            },
-            Err(err) => (Response::err(id, err), false),
-        };
+        let (response, should_exit) = dispatch_request(self, req);
         let _ = reply.send(response);
         should_exit
     }
+}
 
-    fn dispatch_control(&mut self, call: MethodCall) -> Result<(Value, bool), String> {
-        match call {
-            MethodCall::SystemPing => Ok((
-                json!({
-                    "version": env!("CARGO_PKG_VERSION"),
-                    "pid": std::process::id(),
-                }),
-                false,
-            )),
-            MethodCall::CommandList => {
-                let cwd = self.focused_id().and_then(|id| self.pane_cwd(id));
-                let set = WorkflowSet::load(&self.config.commands, cwd.as_deref());
-                Ok((Value::Array(set.control_list_json()), false))
-            }
-            MethodCall::CommandRun { name, pane } => {
-                if let Some(action) = commands::action(&name) {
-                    let target = match pane {
-                        Some(p) => {
-                            let id = PaneId(p);
-                            self.focus_pane_by_id(id)?;
-                            id
-                        }
-                        None => self
-                            .focused_id()
-                            .ok_or_else(|| "no focused pane".to_owned())?,
-                    };
-                    let should_exit = self.run_action(target, action);
-                    return Ok((json!({ "command": name, "pane": target.0 }), should_exit));
-                }
-                let target = self.resolve_pane(pane)?;
-                let cwd = self.pane_cwd(target);
-                let set = WorkflowSet::load(&self.config.commands, cwd.as_deref());
-                let workflow = set
-                    .resolve_control_run(&name)
-                    .map_err(|err| err.to_string())?;
-                if pane.is_some() {
-                    self.focus_pane_by_id(target)?;
-                }
-                self.run_workflow(target, &workflow)?;
-                Ok((json!({ "command": name, "pane": target.0 }), false))
-            }
-            MethodCall::TabList => {
-                let active = self.ws.active();
-                let list: Vec<Value> = self
-                    .ws
-                    .tabs()
-                    .iter()
-                    .enumerate()
-                    .map(|(index, tab)| {
-                        let panes: Vec<u64> = tab.root.leaves().into_iter().map(|p| p.0).collect();
-                        json!({
-                            "index": index,
-                            "title": clean_text(&self.ws.tab_title(index), 256),
-                            "active": index == active,
-                            "panes": panes,
-                        })
-                    })
-                    .collect();
-                Ok((Value::Array(list), false))
-            }
-            MethodCall::PaneList => {
-                let focused = self.focused_id();
-                let mut list = Vec::new();
-                for (tab_index, tab) in self.ws.tabs().iter().enumerate() {
-                    for id in tab.root.leaves() {
-                        let Some(pane) = self.ws.pane(id) else {
-                            continue;
-                        };
-                        let cwd = pane
-                            .meta
-                            .cwd
-                            .clone()
-                            .or_else(|| pane.pty.as_ref().and_then(Pty::cwd))
-                            .map(|p| clean_text(&p.to_string_lossy(), 4096))
-                            .filter(|s| !s.is_empty());
-                        let title = pane
-                            .title
-                            .as_deref()
-                            .map(|t| clean_text(t, 256))
-                            .filter(|t| !t.is_empty());
-                        let attention = pane.meta.attention.as_ref().map(|n| {
-                            json!({
-                                "title": n.title,
-                                "body": n.body,
-                            })
-                        });
-                        list.push(json!({
-                            "id": pane.id.0,
-                            "tab": tab_index,
-                            "focused": focused == Some(pane.id),
-                            "title": title,
-                            "cwd": cwd,
-                            "running": pane.meta.running,
-                            "last_exit": pane.meta.last_exit,
-                            "attention": attention,
-                            "size": {
-                                "cols": pane.size.0,
-                                "rows": pane.size.1,
-                            },
-                        }));
-                    }
-                }
-                Ok((Value::Array(list), false))
-            }
-            MethodCall::PaneFocus { pane } => {
-                let tab = self.focus_pane_by_id(PaneId(pane))?;
-                Ok((json!({ "pane": pane, "tab": tab }), false))
-            }
-            MethodCall::PaneSendText { pane, text } => {
-                let target = self.resolve_pane(pane)?;
-                self.send_input(target, text.as_bytes());
-                if self.focused_id() == Some(target) {
-                    self.cursor_blink.reset(Instant::now());
-                }
-                Ok((json!({ "pane": target.0, "bytes": text.len() }), false))
-            }
-            MethodCall::PaneRead { pane, lines } => {
-                let target = self.resolve_pane(pane)?;
-                let text = self
-                    .ws
-                    .pane(target)
-                    .map(|p| bound_read_text(&p.terminal.recent_lines(lines), MAX_READ_BYTES))
-                    .ok_or_else(|| format!("unknown pane: {}", target.0))?;
-                Ok((json!({ "pane": target.0, "text": text }), false))
-            }
-            MethodCall::TabNew { cwd, command } => {
-                if let Some(ref dir) = cwd {
-                    if !dir.is_dir() {
-                        return Err(format!(
-                            "cwd is not an existing directory: {}",
-                            dir.display()
-                        ));
-                    }
-                }
-                let options = SpawnOptions {
-                    cwd,
-                    command,
-                    env: Vec::new(),
-                };
-                let id = self
-                    .new_tab_with(options)
-                    .ok_or_else(|| "failed to open new tab".to_owned())?;
-                Ok((json!({ "pane": id.0, "tab": self.ws.active() }), false))
-            }
-            MethodCall::PaneSplit {
-                pane,
-                direction,
-                cwd,
-                command,
-            } => {
-                if let Some(ref dir) = cwd {
-                    if !dir.is_dir() {
-                        return Err(format!(
-                            "cwd is not an existing directory: {}",
-                            dir.display()
-                        ));
-                    }
-                }
-                match pane {
-                    Some(p) => {
-                        self.focus_pane_by_id(PaneId(p))?;
-                    }
-                    None => {
-                        if self.focused_id().is_none() {
-                            return Err("no focused pane".into());
-                        }
-                    }
-                }
-                let options = SpawnOptions {
-                    cwd,
-                    command,
-                    env: Vec::new(),
-                };
-                let id = self
-                    .split_focused_with(direction, options)
-                    .ok_or_else(|| "could not split pane".to_owned())?;
-                Ok((json!({ "pane": id.0, "tab": self.ws.active() }), false))
-            }
-            MethodCall::Notify { pane, title, body } => {
-                let target = self.resolve_pane(pane)?;
-                self.notify(target, title, body);
-                Ok((json!({ "pane": target.0 }), false))
-            }
+impl ControlHost for App {
+    fn ws(&self) -> &Workspace {
+        &self.ws
+    }
+
+    fn ws_mut(&mut self) -> &mut Workspace {
+        &mut self.ws
+    }
+
+    fn notification_history(&self) -> &NotificationHistory {
+        &self.notification_history
+    }
+
+    fn notification_history_mut(&mut self) -> &mut NotificationHistory {
+        &mut self.notification_history
+    }
+
+    fn pane_cwd(&self, id: PaneId) -> Option<PathBuf> {
+        App::pane_cwd(self, id)
+    }
+
+    fn sidebar_visible(&self) -> bool {
+        self.window.sidebar_visible()
+    }
+
+    fn set_sidebar_visible(&mut self, visible: bool) {
+        self.set_sidebar_shown(visible);
+    }
+
+    fn toggle_sidebar(&mut self) -> bool {
+        App::toggle_sidebar(self);
+        self.window.sidebar_visible()
+    }
+
+    fn new_tab_with(&mut self, options: SpawnOptions) -> Option<PaneId> {
+        App::new_tab_with(self, options)
+    }
+
+    fn split_focused_with(&mut self, dir: SplitDir, options: SpawnOptions) -> Option<PaneId> {
+        App::split_focused_with(self, dir, options)
+    }
+
+    fn focus_pane_by_id(&mut self, id: PaneId) -> Result<usize, String> {
+        App::focus_pane_by_id(self, id)
+    }
+
+    fn set_active_tab(&mut self, index: usize) {
+        App::set_active_tab(self, index);
+    }
+
+    fn close_pane(&mut self, id: PaneId) -> bool {
+        App::close_pane(self, id)
+    }
+
+    fn close_tab(&mut self, index: usize) -> bool {
+        App::close_tab(self, index)
+    }
+
+    fn send_input(&mut self, id: PaneId, bytes: &[u8]) {
+        App::send_input(self, id, bytes);
+        if self.focused_id() == Some(id) {
+            self.cursor_blink.reset(Instant::now());
         }
     }
 
-    fn resolve_pane(&self, pane: Option<u64>) -> Result<PaneId, String> {
-        match pane {
+    fn notify(&mut self, id: PaneId, title: Option<String>, body: String, send_desktop: bool) {
+        self.notify_with_desktop(id, title, body, send_desktop);
+    }
+
+    fn request_redraw(&mut self) {
+        self.window.request_redraw();
+    }
+
+    fn refresh_title(&mut self) {
+        self.refresh_window_title();
+    }
+
+    fn command_list(&self) -> Value {
+        let cwd = self.focused_id().and_then(|id| App::pane_cwd(self, id));
+        let set = WorkflowSet::load(&self.config.commands, cwd.as_deref());
+        Value::Array(set.control_list_json())
+    }
+
+    fn command_run(&mut self, name: &str, pane: Option<u64>) -> Result<(Value, bool), String> {
+        if let Some(action) = commands::action(name) {
+            let target = match pane {
+                Some(p) => {
+                    let id = PaneId(p);
+                    App::focus_pane_by_id(self, id)?;
+                    id
+                }
+                None => self
+                    .focused_id()
+                    .ok_or_else(|| "no focused pane".to_owned())?,
+            };
+            let should_exit = self.run_action(target, action);
+            return Ok((json!({ "command": name, "pane": target.0 }), should_exit));
+        }
+        let target = match pane {
             Some(p) => {
                 let id = PaneId(p);
                 if self.ws.pane(id).is_some() {
-                    Ok(id)
+                    id
                 } else {
-                    Err(format!("unknown pane: {p}"))
+                    return Err(format!("unknown pane: {p}"));
                 }
             }
             None => self
                 .focused_id()
-                .ok_or_else(|| "no focused pane".to_owned()),
+                .ok_or_else(|| "no focused pane".to_owned())?,
+        };
+        let cwd = App::pane_cwd(self, target);
+        let set = WorkflowSet::load(&self.config.commands, cwd.as_deref());
+        let workflow = set
+            .resolve_control_run(name)
+            .map_err(|err| err.to_string())?;
+        if pane.is_some() {
+            App::focus_pane_by_id(self, target)?;
         }
+        self.run_workflow(target, &workflow)?;
+        Ok((json!({ "command": name, "pane": target.0 }), false))
     }
 }
