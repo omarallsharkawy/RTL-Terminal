@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use super::Entry;
+use super::{AgentState, Entry};
 use crate::layout::{Rect, SidebarPosition};
 use crate::ui::chrome::{ChromeAction, UiLanguage};
 use crate::ui::hit::Hit;
@@ -15,11 +15,37 @@ const TITLE_HEIGHT: f32 = 20.0;
 const MESSAGE_HEIGHT: f32 = 18.0;
 const FOOTER_HEIGHT: f32 = 17.0;
 const NEW_TAB_HEIGHT: f32 = 30.0;
+pub(crate) const STATE_ICON_WIDTH: f32 = 16.0;
+pub(crate) const STATE_LABEL_PAD: f32 = 4.0;
 
 #[derive(Clone, Debug)]
 pub struct Card {
     pub entry: Entry,
     pub message: Vec<String>,
+    pub(crate) state_label_widths: [f32; 2],
+    pub(crate) title_ellipsis_width: f32,
+}
+
+impl Card {
+    pub fn new(entry: Entry, message: Vec<String>) -> Self {
+        Self {
+            entry,
+            message,
+            state_label_widths: [0.0; 2],
+            title_ellipsis_width: 0.0,
+        }
+    }
+}
+
+impl AgentState {
+    pub(crate) fn label(self, language: UiLanguage) -> &'static str {
+        match self {
+            Self::Working => language.text("Working", "شغّال"),
+            Self::NeedsInput => language.text("Needs input", "مستني إدخال"),
+            Self::Done => language.text("Done", "تم"),
+            Self::Error => language.text("Error", "خطأ"),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -27,6 +53,7 @@ pub struct CardLayout {
     pub title: Rect,
     pub unread: Rect,
     pub state: Rect,
+    pub state_has_label: bool,
     pub close: Rect,
     pub message: Rect,
     pub footer: Rect,
@@ -83,17 +110,18 @@ impl CardLayout {
         let unread = start(0.0, badge_w);
         let leading = if badge_w > 0.0 { badge_w + gap } else { 0.0 };
         let remaining = (inner.w - leading - close_w - gap).max(0.0);
-        let state_w = card.entry.display_state().map_or(0.0, |state| {
-            let label_w = match (language, state) {
-                (UiLanguage::English, crate::sidebar::AgentState::NeedsInput) => 82.0,
-                _ => 67.0,
-            } * scale;
-            if remaining >= label_w + 38.0 * scale {
-                label_w
-            } else {
-                (25.0 * scale).min(remaining * 0.36)
-            }
-        });
+        let caption_w = card.state_label_widths[usize::from(language == UiLanguage::Arabic)];
+        let pill_w = caption_w + (STATE_ICON_WIDTH + 2.0 * STATE_LABEL_PAD) * scale;
+        // Give the pill its full width as long as the title can still show its ellipsis.
+        let state_has_label =
+            caption_w > 0.0 && remaining >= pill_w + gap + card.title_ellipsis_width;
+        let state_w = if state_has_label {
+            pill_w
+        } else if card.entry.display_state().is_some() {
+            (25.0 * scale).min(remaining)
+        } else {
+            0.0
+        };
         let state = start(leading + remaining - state_w, state_w);
         let title = start(
             leading,
@@ -119,6 +147,7 @@ impl CardLayout {
             title,
             unread,
             state,
+            state_has_label,
             close,
             message,
             footer,
@@ -206,7 +235,7 @@ impl View {
     pub fn animates(&self) -> bool {
         self.items.iter().any(|item| {
             let state = item.layout(self).state;
-            state.w >= 16.0 * self.scale
+            state.w >= STATE_ICON_WIDTH * self.scale
                 && state.y >= self.area.y
                 && state.bottom() <= self.area.bottom()
                 && item.card.entry.display_state() == Some(super::AgentState::Working)
@@ -329,30 +358,14 @@ fn max_scroll(content_height: f32, area: Rect) -> f32 {
     (content_height - area.h).max(0.0)
 }
 
-/// Keep the longest prefix made of whole words. A single overlong word becomes an ellipsis.
-pub fn fit_title(text: &str, mut fits: impl FnMut(&str) -> bool) -> String {
-    if fits(text) {
-        return text.to_owned();
-    }
-    if !fits("…") {
-        return String::new();
-    }
-    let cuts: Vec<_> = text
-        .match_indices(char::is_whitespace)
-        .filter(|(i, _)| *i > 0 && !text[..*i].ends_with(char::is_whitespace))
-        .map(|(i, _)| i)
-        .collect();
-    let n = cuts.partition_point(|&cut| fits(&format!("{}…", &text[..cut])));
-    if n == 0 {
-        "…".to_owned()
-    } else {
-        format!("{}…", &text[..cuts[n - 1]])
-    }
+/// Keep a whole-word prefix when possible and fall back to graphemes in an overlong word.
+pub fn fit_title(text: &str, fits: impl FnMut(&str) -> bool) -> String {
+    crate::ui::text::fit_text(text, fits)
 }
 
 /// Wrap at spaces with the actual UI font's widths. The last line indicates remaining text.
 pub fn wrap_notice(text: &str, mut fits: impl FnMut(&str) -> bool) -> Vec<String> {
-    if text.is_empty() || !fits("…") {
+    if text.is_empty() {
         return Vec::new();
     }
     if fits(text) {
@@ -374,7 +387,12 @@ pub fn wrap_notice(text: &str, mut fits: impl FnMut(&str) -> bool) -> Vec<String
             .collect();
         let n = cuts.partition_point(|&cut| fits(&text[..cut]));
         if n == 0 {
-            return vec!["…".to_owned()];
+            let line = fit_title(text, fits);
+            return if line.is_empty() {
+                Vec::new()
+            } else {
+                vec![line]
+            };
         }
         let cut = cuts[n - 1];
         return vec![

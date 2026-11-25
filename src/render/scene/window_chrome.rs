@@ -269,7 +269,15 @@ impl Chrome<'_, '_> {
                 self.labels
                     .push(UiLabel::new(buffer, remaining, UiAlign::Start, s.text_dim));
             }
-            SearchPlaceholder::Hidden => {}
+            SearchPlaceholder::LocalShortened => {
+                self.word_label(
+                    remaining,
+                    language.text(SEARCH_EN, SEARCH_AR),
+                    UiSize::Caption,
+                    UiWeight::Regular,
+                    s.text_dim,
+                );
+            }
         }
     }
 
@@ -299,12 +307,11 @@ impl Chrome<'_, '_> {
                 (close.x - rect.x - pad).max(0.0),
                 rect.h,
             );
-            self.label(
+            self.word_label(
                 text,
                 &tab.title,
                 UiSize::Body,
                 UiWeight::Semibold,
-                UiAlign::Start,
                 if tab.active || hovered {
                     s.text
                 } else {
@@ -463,6 +470,31 @@ impl Chrome<'_, '_> {
             0.0,
             self.style.border,
         );
+    }
+
+    fn word_label(
+        &mut self,
+        rect: Rect,
+        text: &str,
+        size: UiSize,
+        weight: UiWeight,
+        color: crate::color::Rgba,
+    ) {
+        if rect.w <= 0.0 || rect.h <= 0.0 {
+            return;
+        }
+        let buffer = self.font.fit_words(
+            self.ctx.font_system,
+            size,
+            weight,
+            self.style.scale,
+            text,
+            (rect.w - 1.0).floor(),
+        );
+        if label_width(&buffer) > 0.0 {
+            self.labels
+                .push(UiLabel::new(buffer, rect, UiAlign::Start, color));
+        }
     }
 
     fn label(

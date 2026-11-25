@@ -241,7 +241,7 @@ pub const SEARCH_KEYCAP: &str = "Ctrl+Shift+P";
 pub enum SearchPlaceholder {
     Bilingual,
     Local,
-    Hidden,
+    LocalShortened,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -257,7 +257,7 @@ impl SearchContents {
         } else if room >= local {
             (SearchPlaceholder::Local, local)
         } else {
-            (SearchPlaceholder::Hidden, 0.0)
+            (SearchPlaceholder::LocalShortened, 0.0)
         };
         Self {
             placeholder,

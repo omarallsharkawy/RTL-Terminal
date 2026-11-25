@@ -767,9 +767,11 @@ fn caches_throttles_and_sidebar_scroll_stay_bounded_and_reveal_after_close() {
     // 4. ScrollState::reveal_active scrolls index 0 back into view even when active index stays 0
     //    (e.g. Tab 0 was active, user scrolled to bottom, then Tab 0 closed so Tab 1 became index 0).
     let entries: Vec<_> = (0..8)
-        .map(|i| Card {
-            entry: Entry::new(&format!("t{i}"), None, false, None, []),
-            message: Vec::new(),
+        .map(|i| {
+            Card::new(
+                Entry::new(&format!("t{i}"), None, false, None, []),
+                Vec::new(),
+            )
         })
         .collect();
     let mut scroll = ScrollState::default();

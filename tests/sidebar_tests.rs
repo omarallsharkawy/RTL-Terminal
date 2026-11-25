@@ -17,7 +17,8 @@ use twitty::render::scene::context::DrawContext;
 use twitty::render::scene::frame::{build_frame, FrameOptions};
 use twitty::render::scene::preedit::PreeditState;
 use twitty::render::scene::sidebar::{attention_quads, build, LabelCache};
-use twitty::render::text::ui::{label_width, UiFont};
+use twitty::render::scene::window_chrome::ChromeView;
+use twitty::render::text::ui::{label_width, UiFont, UiSize, UiWeight};
 use twitty::render::ui_style::UiStyle;
 use twitty::render::{CellMetrics, PaneFrame, RowCache, TabLabel};
 use twitty::sidebar::cards::{fit_title, wrap_notice, Card, CardLayout, Drag, ScrollState};
@@ -26,8 +27,11 @@ use twitty::sidebar::{
     display_path, entry_title, AgentState, AgentStatus, Entry, Notice, Placement,
 };
 use twitty::terminal::Terminal;
-use twitty::ui::chrome::{ChromeAction, UiLanguage};
+use twitty::ui::chrome::{
+    ChromeAction, TopBarLayout, UiLanguage, WindowLayout, SEARCH_AR, SEARCH_EN,
+};
 use twitty::ui::hit::{hit_test, Hit, HitGeometry};
+use unicode_segmentation::UnicodeSegmentation;
 
 struct Scratch(PathBuf);
 impl Scratch {
@@ -250,7 +254,7 @@ fn a_stationary_pointer_uses_the_current_pane_origin_for_links_and_mouse_reports
 
 fn card(entry: Entry) -> Card {
     let message = entry.display_notice().into_iter().collect();
-    Card { entry, message }
+    Card::new(entry, message)
 }
 
 fn center(r: Rect) -> (f64, f64) {
@@ -384,12 +388,23 @@ fn title_and_message_fitting_use_whole_words() {
         fit_title("مراجعة ودمج التغييرات دلوقتي", fit),
         "مراجعة ودمج…"
     );
-    assert_eq!(fit_title("uninterruptedverylongtitle", fit), "…");
+    assert_eq!(
+        fit_title("uninterruptedverylongtitle", fit),
+        "uninterrupte…"
+    );
     assert_eq!(
         wrap_notice("Do more work and pass the tests", fit),
         ["Do more work", "and pass the…"]
     );
     assert_eq!(wrap_notice("جاهز للدمج", fit), ["جاهز للدمج"]);
+}
+
+#[test]
+fn overlong_words_in_titles_and_notifications_keep_whole_graphemes() {
+    let fits = |s: &str| s.graphemes(true).count() <= 4;
+    assert_eq!(fit_title("سَلامٌعَلَيكُم", fits), "سَلا…");
+    assert_eq!(fit_title("iwide", |s| s == "i"), "i");
+    assert_eq!(wrap_notice("hello👩‍💻world", fits), ["hell", "o👩‍💻w…"],);
 }
 
 #[test]
@@ -723,6 +738,313 @@ fn pixel_fitting_preserves_arabic_direction_on_both_sides() {
             assert_eq!(path.buffer.metrics().font_size, 11.0);
             assert!(path.buffer.lines[0].text().starts_with('…'));
         }
+    }
+}
+
+#[test]
+fn footer_fits_whole_words_then_graphemes_and_keeps_the_path_tail() {
+    let mut fonts = twitty::render::text::fonts::new_font_system();
+    let font = UiFont::default();
+    let palette = Palette::default();
+    let mut ctx = DrawContext {
+        font_system: &mut fonts,
+        family: None,
+        palette: &palette,
+        metrics: metrics(),
+        is_srgb: false,
+    };
+    let area = Rect::new(0.0, 0.0, 150.0, 300.0);
+    let mut cache = LabelCache::default();
+    let path = Path::new("/tmp/a-very-long-directory-name/project");
+    let mut entry = Entry::new("Shell", Some(path), false, None, []);
+    for branch in [
+        "main extremely-long-next-word-in-the-branch-label",
+        "مَسَارٌمَسَارٌمَسَارٌمَسَارٌ",
+    ] {
+        entry.branch = Some(branch.to_owned());
+        let cards = cache.cards(&font, ctx.font_system, vec![entry.clone()], area, 1.0);
+        let view = ScrollState::default().view(
+            &cards,
+            0,
+            area,
+            1.0,
+            SidebarPosition::Right,
+            UiLanguage::English,
+        );
+        let scene = build(
+            &mut ctx,
+            &view,
+            &mut cache,
+            UiStyle::new(&palette, None, 1.0),
+            &font,
+        );
+        let branch_label = scene.labels[1].buffer.lines[0].text();
+        let prefix = branch_label.strip_suffix('…').unwrap();
+        assert!(
+            !prefix.is_empty() && branch.starts_with(prefix),
+            "{branch_label}"
+        );
+        assert!(branch
+            .grapheme_indices(true)
+            .any(|(offset, _)| offset == prefix.len()));
+        if branch.is_ascii() {
+            assert_eq!(branch_label, "main…");
+        }
+    }
+    entry.branch = None;
+    let cards = cache.cards(&font, ctx.font_system, vec![entry], area, 1.0);
+    let view = ScrollState::default().view(
+        &cards,
+        0,
+        area,
+        1.0,
+        SidebarPosition::Right,
+        UiLanguage::English,
+    );
+    let scene = build(
+        &mut ctx,
+        &view,
+        &mut cache,
+        UiStyle::new(&palette, None, 1.0),
+        &font,
+    );
+    assert_eq!(scene.labels[1].buffer.lines[0].text(), "…/project");
+}
+
+const LIVE_TAB_TITLE: &str = "omar@omarchy:~/Projects/twitty-bundle";
+
+#[test]
+fn active_and_inactive_workspace_titles_show_a_prefix_at_fractional_scale() {
+    let mut fonts = twitty::render::text::fonts::new_font_system();
+    let font = UiFont::default();
+    let scale = 1.5;
+    let metrics = CellMetrics { scale, ..metrics() };
+    let palette = Palette::default();
+    let style = UiStyle::new(&palette, None, scale);
+    let mut ctx = DrawContext {
+        font_system: &mut fonts,
+        family: None,
+        palette: &palette,
+        metrics,
+        is_srgb: false,
+    };
+    let working = Entry::new(LIVE_TAB_TITLE, None, true, None, []);
+    let idle = Entry::new(LIVE_TAB_TITLE, None, false, None, []);
+    let area = WindowLayout::new(
+        metrics,
+        (951.0, 1002.0),
+        2,
+        (SidebarPosition::Right, 220.0),
+        true,
+    )
+    .sidebar
+    .unwrap();
+    let mut cache = LabelCache::default();
+    let cards = cache.cards(&font, ctx.font_system, vec![working, idle], area, scale);
+    let view = ScrollState::default().view(
+        &cards,
+        0,
+        area,
+        scale,
+        SidebarPosition::Right,
+        UiLanguage::English,
+    );
+    let scene = build(&mut ctx, &view, &mut cache, style, &font);
+    for item in &view.items {
+        let bounds = item.layout(&view).title;
+        let label = scene
+            .labels
+            .iter()
+            .find(|label| {
+                label.bounds.left == bounds.x.ceil() as i32
+                    && label.bounds.right == bounds.right().floor() as i32
+                    && label.bounds.top == bounds.y.ceil() as i32
+            })
+            .unwrap();
+        let text = label.buffer.lines[0].text();
+        let prefix = text.strip_suffix('…').unwrap();
+        assert!(
+            !prefix.is_empty() && LIVE_TAB_TITLE.starts_with(prefix),
+            "{text}"
+        );
+        assert!(label_width(&label.buffer).ceil() + 1.0 <= bounds.w);
+        let next = LIVE_TAB_TITLE[prefix.len()..]
+            .graphemes(true)
+            .next()
+            .unwrap();
+        let longer = font.shape(
+            ctx.font_system,
+            UiSize::Body,
+            UiWeight::Semibold,
+            scale,
+            &format!("{prefix}{next}…"),
+        );
+        assert!(label_width(&longer).ceil() + 1.0 > bounds.w);
+    }
+}
+
+#[test]
+fn status_pill_measures_the_whole_label_then_falls_back_to_the_icon() {
+    let mut fonts = twitty::render::text::fonts::new_font_system();
+    let font = UiFont::default();
+    let scale = 1.5;
+    let palette = Palette::default();
+    let style = UiStyle::new(&palette, None, scale);
+    let mut ctx = DrawContext {
+        font_system: &mut fonts,
+        family: None,
+        palette: &palette,
+        metrics: CellMetrics { scale, ..metrics() },
+        is_srgb: false,
+    };
+    let mut cache = LabelCache::default();
+    for (language, name) in [
+        (UiLanguage::English, "Working"),
+        (UiLanguage::Arabic, "شغّال"),
+    ] {
+        let label = font.shape(
+            ctx.font_system,
+            UiSize::Small,
+            UiWeight::Semibold,
+            scale,
+            name,
+        );
+        let width = label_width(&label).ceil() + 1.0;
+        // Keep the full status until it would take the space needed for the title's ellipsis.
+        let ellipsis = font.shape(
+            ctx.font_system,
+            UiSize::Body,
+            UiWeight::Semibold,
+            scale,
+            "…",
+        );
+        let full_pill = width + (16.0 + 2.0 * 4.0) * scale;
+        let content = full_pill + 2.0 * 4.0 * scale + label_width(&ellipsis).ceil() + 1.0;
+        // The close target takes 18 logical pixels, capped at 20% of the inner width.
+        let threshold =
+            (content + 18.0 * scale).min(content / 0.8) + (2.0 * 8.0 + 2.0 * 6.0) * scale;
+        for (area_w, expected_label) in [
+            (330.0, true),
+            (threshold + 1.0, true),
+            (threshold - 1.0, false),
+        ] {
+            let area = Rect::new(951.0 - area_w, 54.0, area_w, 400.0);
+            let entry = Entry::new(LIVE_TAB_TITLE, None, true, None, []);
+            let cards = cache.cards(&font, ctx.font_system, vec![entry], area, scale);
+            let view = ScrollState::default().view(
+                &cards,
+                0,
+                area,
+                scale,
+                SidebarPosition::Right,
+                language,
+            );
+            let scene = build(&mut ctx, &view, &mut cache, style, &font);
+            let parts = view.items[0].layout(&view);
+            assert_eq!(
+                parts.state_has_label, expected_label,
+                "{language:?}, width {area_w}"
+            );
+            assert!(view.animates(), "the working dots remain visible");
+            let captions: Vec<_> = scene
+                .labels
+                .iter()
+                .filter(|label| label.buffer.metrics().font_size == UiSize::Small.px(scale))
+                .collect();
+            if expected_label {
+                let [caption] = captions.as_slice() else {
+                    panic!("expected exactly one state caption")
+                };
+                assert_eq!(caption.buffer.lines[0].text(), name);
+                assert!(
+                    label_width(&caption.buffer).ceil()
+                        <= (caption.bounds.right - caption.bounds.left) as f32
+                );
+                assert!(parts.state.right() < parts.title.x);
+            } else {
+                assert!(captions.is_empty());
+            }
+        }
+    }
+}
+
+#[test]
+fn narrow_toolbar_and_tab_pills_use_words_and_grapheme_fallbacks() {
+    let mut fonts = twitty::render::text::fonts::new_font_system();
+    let font = UiFont::default();
+    let palette = Palette::default();
+    let style = UiStyle::new(&palette, None, 1.0);
+    let metrics = metrics();
+    let surface = (640.0, 400.0);
+    let layout = WindowLayout::new(metrics, surface, 2, (SidebarPosition::Hidden, 220.0), true);
+    let unbroken = LIVE_TAB_TITLE;
+    let words = "Review and merge the extraordinarily long change";
+    let tabs = [
+        TabLabel {
+            title: unbroken.to_owned(),
+            active: true,
+        },
+        TabLabel {
+            title: words.to_owned(),
+            active: false,
+        },
+    ];
+    let mut opts = TopBarLayout::new(layout.top_bar, 1.0, None);
+    for (language, local) in [
+        (UiLanguage::English, SEARCH_EN),
+        (UiLanguage::Arabic, SEARCH_AR),
+    ] {
+        let first = local.graphemes(true).next().unwrap();
+        let short = format!("{first}…");
+        let width = |fonts: &mut FontSystem, text: &str| {
+            label_width(&font.shape(fonts, UiSize::Caption, UiWeight::Regular, 1.0, text)).ceil()
+        };
+        // Give the placeholder enough space for the first grapheme and ellipsis.
+        opts.search.w = width(&mut fonts, &short) + 38.0;
+        let view = ChromeView {
+            layout: &layout,
+            top: opts,
+            diff: None,
+            unread: 0,
+            sidebar_visible: false,
+            hover: None,
+            hover_tab: None,
+            language,
+            panes: &[],
+            tabs: &tabs,
+        };
+        let mut ctx = DrawContext {
+            font_system: &mut fonts,
+            family: None,
+            palette: &palette,
+            metrics,
+            is_srgb: false,
+        };
+        let options = FrameOptions {
+            window_focused: true,
+            cursor_style: "block",
+            cursor_blink_on: true,
+            surface,
+        };
+        let mut rows = RowCache::default();
+        let mut ime = PreeditState::default();
+        let mut frame = build_frame(&mut ctx, &options, &mut rows, &mut ime, &[], &[], &[]);
+        frame.add_chrome(&mut ctx, style, &font, &view);
+        let runs = frame.text_runs(&[], &rows, &ime);
+        let labels: Vec<_> = runs.iter().map(|run| run.buffer.lines[0].text()).collect();
+        assert_eq!(labels.len(), 3);
+        let search_prefix = labels[0].strip_suffix('…').unwrap();
+        assert!(
+            !search_prefix.is_empty() && local.starts_with(search_prefix),
+            "{labels:?}"
+        );
+        let title_prefix = labels[1].strip_suffix('…').unwrap();
+        assert!(
+            !title_prefix.is_empty() && unbroken.starts_with(title_prefix),
+            "{labels:?}"
+        );
+        let words_prefix = labels[2].strip_suffix('…').unwrap();
+        assert!(words[words_prefix.len()..].starts_with(' '), "{labels:?}");
     }
 }
 
