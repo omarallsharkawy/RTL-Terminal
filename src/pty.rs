@@ -15,6 +15,16 @@ pub const INHERITED_TERMINAL_VARS: &[&str] = &[
     "ALACRITTY_LOG",
     "ALACRITTY_SOCKET",
     "ALACRITTY_WINDOW_ID",
+    "CMUX_CLAUDE_HOOKS_DISABLED",
+    "CMUX_CLAUDE_PID",
+    "CMUX_PANEL_ID",
+    "CMUX_SOCKET",
+    "CMUX_SOCKET_MODE",
+    "CMUX_SOCKET_PASSWORD",
+    "CMUX_SOCKET_PATH",
+    "CMUX_SURFACE_ID",
+    "CMUX_TAB_ID",
+    "CMUX_WORKSPACE_ID",
     "COLUMNS",
     "GHOSTTY_BIN_DIR",
     "GHOSTTY_RESOURCES_DIR",
@@ -37,6 +47,7 @@ pub const INHERITED_TERMINAL_VARS: &[&str] = &[
     "TMUX_PANE",
     // Twitty's own shell integration (`session::shell_setup`), from a Twitty this one was
     // started in: set again for the shells that get it.
+    "TWITTY_BIN",
     "TWITTY_SHELL_INTEGRATION",
     "__TWITTY_BASH_LOGIN",
     "__TWITTY_BASH_RCFILE",
@@ -52,6 +63,12 @@ pub const INHERITED_TERMINAL_VARS: &[&str] = &[
     "WT_PROFILE_ID",
     "WT_SESSION",
 ];
+
+/// Whether an inherited environment variable name is stripped from child PTYs before applying
+/// Twitty's own pane environment.
+pub fn is_stripped_env_var(name: &str) -> bool {
+    name.starts_with("CMUX_") || INHERITED_TERMINAL_VARS.contains(&name)
+}
 
 /// Program output waiting for the UI thread, shared with the PTY reader thread.
 ///
@@ -224,6 +241,13 @@ impl Pty {
         cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
         for key in INHERITED_TERMINAL_VARS {
             cmd.env_remove(key);
+        }
+        for (key, _) in env::vars_os() {
+            if let Some(name) = key.to_str() {
+                if name.starts_with("CMUX_") {
+                    cmd.env_remove(name);
+                }
+            }
         }
         if env::var_os("LANG").is_none() && env::var_os("LC_ALL").is_none() {
             cmd.env("LANG", "en_US.UTF-8");

@@ -12,7 +12,7 @@ use crate::color::Rgba;
 use crate::layout::Rect;
 use crate::render::style::Quad;
 use crate::render::CellMetrics;
-use crate::sidebar::{display_path, View};
+use crate::sidebar::{display_path, AgentState, View};
 
 pub struct Label {
     pub buffer: Rc<Buffer>,
@@ -248,14 +248,23 @@ pub fn build(ctx: &mut DrawContext, view: &View, cache: &mut LabelCache) -> Scen
             ));
         let mut row = inner;
         row.y += m.line_height;
-        if let Some(notice) = &entry.notification {
+        if let Some(notice_text) = entry.display_notice() {
+            let notice_color = if entry.notification.is_some() {
+                accent
+            } else {
+                match entry.agent_status.as_ref().map(|s| s.state) {
+                    Some(AgentState::NeedsInput) => ctx.palette.ansi[3],
+                    Some(AgentState::Done) => ctx.palette.ansi[2],
+                    _ => accent,
+                }
+            };
             scene
                 .labels
-                .push(cache.get(ctx, notice.label(), row.w, Trim::End).place(
+                .push(cache.get(ctx, notice_text, row.w, Trim::End).place(
                     row,
                     clip,
                     view.right_aligned,
-                    accent,
+                    notice_color,
                 ));
             row.y += m.line_height;
         }
@@ -276,7 +285,14 @@ pub fn build(ctx: &mut DrawContext, view: &View, cache: &mut LabelCache) -> Scen
 
         // Reserve state space first so a long branch cannot hide running/exit indicators.
         let mut states = Vec::new();
-        if entry.running {
+        if let Some(agent) = &entry.agent_status {
+            let color = match agent.state {
+                AgentState::Working => accent,
+                AgentState::NeedsInput => ctx.palette.ansi[3],
+                AgentState::Done => ctx.palette.ansi[2],
+            };
+            states.push((agent.state.badge().to_string(), color));
+        } else if entry.running {
             states.push(("●".to_string(), accent));
         }
         if let Some(exit) = entry.last_exit {

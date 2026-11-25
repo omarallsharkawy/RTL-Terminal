@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# Adapted from cmux-gtk cmux/bin/claude (AGPL-3.0-or-later,
+# Copyright (c) 2026 Douglas Soares de Andrade). Changes: target Twitty's
+# control socket and `twitty claude-hook` subcommand with bounded timeout,
+# without modifying the user's Claude settings files.
+
+# Find the real claude binary on PATH, skipping our own directory.
+find_real_claude() {
+    local self_dir
+    self_dir="$(cd "$(dirname "$0")" && pwd -P)"
+    local IFS=:
+    local dirs=()
+    read -ra dirs <<< "${PATH:-}"
+    local d resolved
+    for d in "${dirs[@]}"; do
+        [[ -z "$d" ]] && continue
+        resolved="$(cd "$d" 2>/dev/null && pwd -P)" || continue
+        [[ "$resolved" == "$self_dir" ]] && continue
+        if [[ -f "$d/claude" && -x "$d/claude" ]]; then
+            printf '%s' "$d/claude"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Return 0 only when Twitty's control socket is reachable within ~0.75 s.
+twitty_socket_available() {
+    local socket="${TWITTY_SOCKET:-${CMUX_SOCKET_PATH:-}}"
+    [[ -n "$socket" && -S "$socket" ]] || return 1
+
+    local twitty_bin="${TWITTY_BIN:-}"
+    if [[ -z "$twitty_bin" || ! -x "$twitty_bin" ]]; then
+        twitty_bin="$(command -v twitty 2>/dev/null || true)"
+    fi
+    [[ -n "$twitty_bin" && -x "$twitty_bin" ]] || return 1
+
+    TWITTY_CLI_TIMEOUT_MS=750 \
+        "$twitty_bin" ctl system.ping >/dev/null 2>&1
+}
+
+IN_TWITTY=0
+if [[ -n "${TWITTY_PANE_ID:-}" || -n "${CMUX_SURFACE_ID:-}" ]]; then
+    IN_TWITTY=1
+fi
+
+# Pass through unchanged when outside Twitty, when hooks are disabled, or when
+# the control socket is not reachable.
+if [[ "$IN_TWITTY" == "0" \
+    || "${TWITTY_CLAUDE_HOOKS_DISABLED:-}" == "1" \
+    || "${CMUX_CLAUDE_HOOKS_DISABLED:-}" == "1" ]] \
+    || ! twitty_socket_available; then
+    if [[ "$IN_TWITTY" == "1" ]]; then
+        unset CLAUDECODE
+    fi
+    REAL_CLAUDE="$(find_real_claude)" || {
+        echo "Error: claude not found in PATH" >&2
+        exit 127
+    }
+    exec "$REAL_CLAUDE" "$@"
+fi
+
+REAL_CLAUDE="$(find_real_claude)" || {
+    echo "Error: claude not found in PATH" >&2
+    exit 127
+}
+
+# Pass through subcommands and meta flags that do not take --settings.
+case "${1:-}" in
+    mcp|config|api-key|rc|remote-control|doctor|update|install|--help|-h|--version|-v|-V)
+        exec "$REAL_CLAUDE" "$@"
+        ;;
+esac
+
+# Avoid false "nested session" errors when Twitty was launched from Claude Code.
+unset CLAUDECODE
+
+# Merge hook settings in memory via --settings; never touch user settings files.
+HOOKS_JSON='{"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"\"${TWITTY_BIN:-twitty}\" claude-hook session-start","timeout":10}]}],"Stop":[{"matcher":"","hooks":[{"type":"command","command":"\"${TWITTY_BIN:-twitty}\" claude-hook stop","timeout":10}]}],"SessionEnd":[{"matcher":"","hooks":[{"type":"command","command":"\"${TWITTY_BIN:-twitty}\" claude-hook session-end","timeout":1}]}],"Notification":[{"matcher":"","hooks":[{"type":"command","command":"\"${TWITTY_BIN:-twitty}\" claude-hook notification","timeout":10}]}],"UserPromptSubmit":[{"matcher":"","hooks":[{"type":"command","command":"\"${TWITTY_BIN:-twitty}\" claude-hook prompt-submit","timeout":10}]}],"PreToolUse":[{"matcher":"","hooks":[{"type":"command","command":"\"${TWITTY_BIN:-twitty}\" claude-hook pre-tool-use","timeout":5,"async":true}]}]}}'
+
+exec "$REAL_CLAUDE" --settings "$HOOKS_JSON" "$@"

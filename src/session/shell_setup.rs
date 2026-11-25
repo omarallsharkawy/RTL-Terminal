@@ -30,6 +30,7 @@ use crate::pty::SpawnOptions;
 const BASH: &str = include_str!("../../assets/shell/twitty.bash");
 const ZSH: &str = include_str!("../../assets/shell/twitty.zsh");
 const FISH: &str = include_str!("../../assets/shell/twitty.fish");
+const CLAUDE_WRAPPER: &str = include_str!("../../assets/bin/claude");
 
 /// The zsh startup files placed in Twitty's ZDOTDIR: each hands over to `twitty.zsh`, which
 /// reads the user's file of the same name.
@@ -222,6 +223,110 @@ fn script_dir() -> Option<PathBuf> {
         }
     }
     Some(dir)
+}
+
+/// Where Twitty's private wrapper binaries (such as `claude`) go:
+/// `$XDG_RUNTIME_DIR/twitty/bin`, else `~/.cache/twitty/bin`.
+pub fn default_bin_dir() -> Option<PathBuf> {
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .filter(|d| d.is_absolute() && d.is_dir());
+    let base = match runtime {
+        Some(dir) => dir,
+        None => {
+            let cache = std::env::var_os("XDG_CACHE_HOME")
+                .map(PathBuf::from)
+                .filter(|d| d.is_absolute());
+            cache.or_else(|| Some(PathBuf::from(std::env::var_os("HOME")?).join(".cache")))?
+        }
+    };
+    Some(base.join("twitty").join("bin"))
+}
+
+/// Write Twitty's embedded `claude` wrapper script into `dir` (mode 0700 dir, mode 0700
+/// executable file, atomic replace). Returns the path to `dir/claude`.
+pub fn install_claude_wrapper(dir: &Path) -> io::Result<PathBuf> {
+    create_private_dir(dir)?;
+    let path = dir.join("claude");
+    let up_to_date = fs::read(&path).is_ok_and(|old| old == CLAUDE_WRAPPER.as_bytes());
+    if !up_to_date {
+        let tmp = path.with_file_name(format!(".claude.{}.tmp", std::process::id()));
+        let written = fs::File::create(&tmp).and_then(|mut f| {
+            f.write_all(CLAUDE_WRAPPER.as_bytes())?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                f.set_permissions(fs::Permissions::from_mode(0o700))?;
+            }
+            f.sync_all()
+        });
+        if let Err(e) = written.and_then(|()| fs::rename(&tmp, &path)) {
+            let _ = fs::remove_file(&tmp);
+            return Err(e);
+        }
+    } else {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let meta = fs::symlink_metadata(&path)?;
+            if !meta.file_type().is_file() {
+                return Err(io::Error::other("wrapper path is not a regular file"));
+            }
+            if meta.permissions().mode() & 0o777 != 0o700 {
+                fs::set_permissions(&path, fs::Permissions::from_mode(0o700))?;
+            }
+        }
+    }
+    Ok(path)
+}
+
+/// Prepend `bin_dir` to a colon-separated `PATH`, skipping duplicate entries for `bin_dir`.
+pub fn prepend_path(bin_dir: &Path, existing: Option<&str>) -> String {
+    let dir_str = bin_dir.to_string_lossy();
+    let mut parts = vec![dir_str.as_ref()];
+    if let Some(existing) = existing {
+        for entry in existing.split(':').filter(|s| !s.is_empty()) {
+            if entry != dir_str.as_ref() {
+                parts.push(entry);
+            }
+        }
+    }
+    parts.join(":")
+}
+
+fn claude_bin_dir() -> Option<PathBuf> {
+    static BIN_DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
+    let dir = BIN_DIR.get_or_init(default_bin_dir).clone()?;
+    if let Err(e) = install_claude_wrapper(&dir) {
+        tracing::warn!("claude hook wrapper unavailable: {}: {e}", dir.display());
+        return None;
+    }
+    Some(dir)
+}
+
+/// Put Twitty's private `claude` wrapper first on `PATH` and expose `TWITTY_BIN` so Claude Code
+/// hooks call back into this Twitty binary.
+pub fn apply_claude_wrapper(options: &mut SpawnOptions) {
+    if cfg!(windows) {
+        return;
+    }
+    let Some(dir) = claude_bin_dir() else {
+        return;
+    };
+    let existing = options
+        .env
+        .iter()
+        .rev()
+        .find(|(k, _)| k == "PATH")
+        .map(|(_, v)| v.clone())
+        .or_else(|| std::env::var("PATH").ok());
+    let new_path = prepend_path(&dir, existing.as_deref());
+    options.env.push(("PATH".into(), new_path));
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_str) = exe.to_str() {
+            options.env.push(("TWITTY_BIN".into(), exe_str.to_owned()));
+        }
+    }
 }
 
 /// Load the integration into the shell `options` start, when they start the user's shell

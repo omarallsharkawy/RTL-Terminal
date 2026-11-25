@@ -11,6 +11,20 @@ use crate::session::shell_setup;
 use crate::session::workspace::PaneFactory;
 use crate::terminal::Terminal;
 
+/// Build the cmux-compatible environment variables exposed to a pane when `cmux_compat` and
+/// `control_socket` are both enabled.
+pub fn cmux_env_vars(
+    socket_path: &str,
+    workspace_id: u64,
+    surface_id: u64,
+) -> [(String, String); 3] {
+    [
+        ("CMUX_SOCKET_PATH".into(), socket_path.to_owned()),
+        ("CMUX_WORKSPACE_ID".into(), workspace_id.to_string()),
+        ("CMUX_SURFACE_ID".into(), surface_id.to_string()),
+    ]
+}
+
 pub(crate) struct ShellFactory<'a> {
     proxy: &'a EventLoopProxy<AppEvent>,
     /// Blink the cursor when the program has not chosen a style.
@@ -19,6 +33,14 @@ pub(crate) struct ShellFactory<'a> {
     pub options: SpawnOptions,
     /// Load Twitty's shell integration into bash, zsh and fish (`shell_setup`).
     shell_integration: bool,
+    /// Control socket path when the control server is running.
+    control_socket: Option<String>,
+    /// Expose `CMUX_SOCKET_PATH`, `CMUX_WORKSPACE_ID`, `CMUX_SURFACE_ID`.
+    cmux_compat: bool,
+    /// Prepend Twitty's private `claude` wrapper to `PATH` inside Twitty shells.
+    claude_hooks: bool,
+    /// Stable tab id for the pane being spawned (set by `Workspace` via `PaneFactory::set_tab_id`).
+    tab_id: u64,
 }
 
 impl<'a> ShellFactory<'a> {
@@ -28,6 +50,10 @@ impl<'a> ShellFactory<'a> {
             cursor_blink,
             options: SpawnOptions::default(),
             shell_integration: false,
+            control_socket: None,
+            cmux_compat: false,
+            claude_hooks: false,
+            tab_id: 1,
         }
     }
 
@@ -37,9 +63,26 @@ impl<'a> ShellFactory<'a> {
         self.shell_integration = on;
         self
     }
+
+    /// Configure control socket path and cmux / Claude hook integration for spawned panes.
+    pub fn with_control(
+        mut self,
+        socket_path: Option<String>,
+        cmux_compat: bool,
+        claude_hooks: bool,
+    ) -> Self {
+        self.control_socket = socket_path;
+        self.cmux_compat = cmux_compat;
+        self.claude_hooks = claude_hooks;
+        self
+    }
 }
 
 impl PaneFactory for ShellFactory<'_> {
+    fn set_tab_id(&mut self, tab_id: u64) {
+        self.tab_id = tab_id.max(1);
+    }
+
     fn spawn(
         &mut self,
         id: PaneId,
@@ -61,8 +104,20 @@ impl PaneFactory for ShellFactory<'_> {
         options
             .env
             .push(("TWITTY_PANE_ID".into(), id.0.to_string()));
+        if let Some(ref socket) = self.control_socket {
+            if !options.env.iter().any(|(k, _)| k == "TWITTY_SOCKET") {
+                options.env.push(("TWITTY_SOCKET".into(), socket.clone()));
+            }
+            if self.cmux_compat {
+                options.env.extend(cmux_env_vars(socket, self.tab_id, id.0));
+            }
+        }
+        let is_user_shell = options.command.is_empty();
         if self.shell_integration {
             shell_setup::apply(&mut options);
+        }
+        if self.claude_hooks && self.control_socket.is_some() && is_user_shell {
+            shell_setup::apply_claude_wrapper(&mut options);
         }
         let pty = match Pty::spawn_with(
             &options,

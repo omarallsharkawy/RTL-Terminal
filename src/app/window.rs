@@ -13,7 +13,9 @@ use crate::config::TwittyConfig;
 use crate::layout::{sidebar_layout, PaneId, Rect, SidebarPosition};
 use crate::render::{PaneFrame, Renderer, TabLabel};
 use crate::session::workspace::{GridGeometry, Workspace};
-use crate::sidebar::{entry_title, git::BranchCache, Entry, Notice, Placement, ScrollState};
+use crate::sidebar::{
+    entry_title, git::BranchCache, pick_tab_agent_status, Entry, Notice, Placement, ScrollState,
+};
 use crate::ui::hit::{hit_test, Hit, HitGeometry};
 use crate::ui::settings::{clamp_font_size, step_opacity};
 
@@ -460,6 +462,15 @@ fn sidebar_entries(ws: &Workspace, ports: &HashMap<PaneId, Vec<u16>>) -> Vec<Ent
                 .filter_map(|id| ws.pane(id)?.meta.attention.as_ref())
                 .collect();
             notifications.sort_by_key(|n| n.at);
+            let focused_status = focused.and_then(|p| p.meta.agent_status.as_ref());
+            let other_statuses: Vec<_> = tab
+                .root
+                .leaves()
+                .into_iter()
+                .filter(|&id| id != tab.focused)
+                .filter_map(|id| ws.pane(id)?.meta.agent_status.as_ref())
+                .collect();
+            let agent_status = pick_tab_agent_status(focused_status, other_statuses);
             Entry::new(
                 &sidebar_title(ws, index),
                 focused.and_then(|p| p.meta.cwd.as_deref()),
@@ -470,12 +481,21 @@ fn sidebar_entries(ws: &Workspace, ports: &HashMap<PaneId, Vec<u16>>) -> Vec<Ent
                     .map(|n| Notice::new(n.title.as_deref(), &n.body)),
             )
             .with_ports(tab_ports)
+            .with_agent_status(agent_status)
         })
         .collect()
 }
 
 pub(super) fn sidebar_title(ws: &Workspace, index: usize) -> String {
-    let pane = ws.tabs().get(index).and_then(|tab| ws.pane(tab.focused));
+    let tab = ws.tabs().get(index);
+    if let Some(custom) = tab
+        .and_then(|t| t.title.as_deref())
+        .map(|s| crate::shell_integration::clean_text(s, 256))
+        .filter(|s| !s.is_empty())
+    {
+        return custom;
+    }
+    let pane = tab.and_then(|tab| ws.pane(tab.focused));
     entry_title(
         pane.and_then(|p| p.title.as_deref()),
         pane.and_then(|p| p.pty.as_ref()?.program_name()),
@@ -592,6 +612,12 @@ impl App {
         self.config_dirty = true;
         self.apply_layout();
         self.refresh_pointer_hover();
+    }
+
+    pub(super) fn set_sidebar_shown(&mut self, visible: bool) {
+        if self.window.sidebar_visible() != visible {
+            self.toggle_sidebar();
+        }
     }
 
     pub(super) fn update_font_size(&mut self, new_size: f32) {

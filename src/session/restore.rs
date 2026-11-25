@@ -110,7 +110,8 @@ impl Session {
             .tabs
             .iter()
             .take(tab_count)
-            .map(|tab| {
+            .enumerate()
+            .map(|(tab_index, tab)| {
                 let mut focused = None;
                 let root = tab.prepare_node(
                     tab.nodes.len() - 1,
@@ -120,6 +121,8 @@ impl Session {
                     &mut focused,
                 );
                 Tab {
+                    id: (tab_index + 1) as u64,
+                    title: None,
                     focused: focused.unwrap_or_else(|| root.leaves()[0]),
                     root,
                 }
@@ -261,6 +264,7 @@ impl PreparedSession {
         let mut active = 0;
         let tab_count = self.tabs.len();
         for (index, tab) in self.tabs.into_iter().enumerate() {
+            factory.set_tab_id(tab.id);
             let restored = workspace.restore_tab(tab, tab_count, geo, |id, cols, rows| {
                 let settings = &self.panes[id.0 as usize - 1];
                 let pane = factory

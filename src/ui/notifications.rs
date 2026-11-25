@@ -21,6 +21,7 @@ const SHOWN_TAB_CHARS: usize = 24;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HistoryEntry {
+    pub id: u64,
     pub title: Option<String>,
     pub body: String,
     /// The pane that sent it; it may have been closed since.
@@ -57,6 +58,7 @@ impl Searchable for HistoryEntry {
 #[derive(Debug, Default)]
 pub struct NotificationHistory {
     entries: VecDeque<HistoryEntry>,
+    next_id: u64,
 }
 
 impl NotificationHistory {
@@ -81,7 +83,9 @@ impl NotificationHistory {
         if self.entries.len() >= MAX_HISTORY {
             self.entries.pop_front();
         }
+        self.next_id += 1;
         self.entries.push_back(HistoryEntry {
+            id: self.next_id,
             title,
             body,
             pane,
@@ -90,6 +94,11 @@ impl NotificationHistory {
             seen,
         });
         true
+    }
+
+    /// Remove all recorded notifications.
+    pub fn clear(&mut self) {
+        self.entries.clear();
     }
 
     /// Every entry, newest first.

@@ -55,7 +55,7 @@ mod imp {
         cleanup_stale_sockets, current_uid, default_runtime_dir, ensure_runtime_dir,
         socket_path_in, verify_dir, verify_socket,
     };
-    use crate::control::protocol::{parse_request_line, read_bounded_line, ReadLine};
+    use crate::control::protocol::{parse_wire_line, read_bounded_line, ReadLine};
 
     /// Running Unix-domain control socket server. Dropping it stops the accept loop and removes
     /// the socket file.
@@ -310,7 +310,7 @@ mod imp {
                     break;
                 }
                 Ok(ReadLine::Line(line)) => {
-                    let resp = match parse_request_line(&line) {
+                    let resp = match parse_wire_line(&line) {
                         Ok(req) => handler(req),
                         Err(err_resp) => err_resp,
                     };

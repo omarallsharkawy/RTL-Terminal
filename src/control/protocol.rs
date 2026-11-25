@@ -62,14 +62,17 @@ fn default_params() -> Value {
 }
 
 /// One JSON response line sent back to a control client.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// Twitty's native errors serialize `"error": "<message>"`; cmux v2 errors (created with
+/// [`Response::cmux_err`]) serialize `"error": {"code": "<code>", "message": "<message>"}`.
+/// Deserialization accepts both shapes so [`crate::control::client::Client`] handles either.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Response {
     pub id: Value,
     pub ok: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    pub error_code: Option<String>,
 }
 
 impl Response {
@@ -79,6 +82,7 @@ impl Response {
             ok: true,
             result: Some(result),
             error: None,
+            error_code: None,
         }
     }
 
@@ -88,7 +92,90 @@ impl Response {
             ok: false,
             result: None,
             error: Some(message.into()),
+            error_code: None,
         }
+    }
+
+    /// Structured cmux v2 error (`{"code": ..., "message": ...}`).
+    pub fn cmux_err(id: Value, code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            id,
+            ok: false,
+            result: None,
+            error: Some(message.into()),
+            error_code: Some(code.into()),
+        }
+    }
+}
+
+impl Serialize for Response {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+
+        let mut len = 2;
+        if self.result.is_some() {
+            len += 1;
+        }
+        if self.error.is_some() || self.error_code.is_some() {
+            len += 1;
+        }
+        let mut map = serializer.serialize_map(Some(len))?;
+        map.serialize_entry("id", &self.id)?;
+        map.serialize_entry("ok", &self.ok)?;
+        if let Some(ref result) = self.result {
+            map.serialize_entry("result", result)?;
+        }
+        if let Some(ref code) = self.error_code {
+            let msg = self.error.as_deref().unwrap_or("");
+            map.serialize_entry(
+                "error",
+                &serde_json::json!({ "code": code, "message": msg }),
+            )?;
+        } else if let Some(ref msg) = self.error {
+            map.serialize_entry("error", msg)?;
+        }
+        map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Response {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct RawResponse {
+            #[serde(default)]
+            id: Value,
+            ok: bool,
+            #[serde(default)]
+            result: Option<Value>,
+            #[serde(default)]
+            error: Option<Value>,
+        }
+
+        let raw = RawResponse::deserialize(deserializer)?;
+        let (error, error_code) = match raw.error {
+            None | Some(Value::Null) => (None, None),
+            Some(Value::String(s)) => (Some(s), None),
+            Some(Value::Object(map)) => {
+                let code = map
+                    .get("code")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned);
+                let msg = map
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+                    .or_else(|| code.clone());
+                (msg, code)
+            }
+            Some(other) => (Some(other.to_string()), None),
+        };
+        Ok(Self {
+            id: raw.id,
+            ok: raw.ok,
+            result: raw.result,
+            error,
+            error_code,
+        })
     }
 }
 
@@ -158,6 +245,20 @@ pub fn parse_request_line(line: &str) -> Result<Request, Response> {
         method: method.to_owned(),
         params,
     })
+}
+
+/// Parse one raw wire line from the control socket: JSON requests go through
+/// [`parse_request_line`], while non-JSON lines are handled as the minimal cmux v1 text protocol
+/// used by the Claude hook path (`ping`, `set_status`, `clear_status`, `list_status`, `notify`).
+pub fn parse_wire_line(line: &str) -> Result<Request, Response> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return Err(Response::err(Value::Null, "empty request"));
+    }
+    if trimmed.starts_with('{') || trimmed.starts_with('[') {
+        return parse_request_line(trimmed);
+    }
+    super::cmux::parse_v1_line(trimmed)
 }
 
 /// Validated, typed representation of every supported control method.

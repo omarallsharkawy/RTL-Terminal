@@ -62,13 +62,13 @@ Everything above `render/gpu` runs without a GPU and is covered by tests in `tes
 | `color.rs`, `config.rs` | Themes and palette resolution; `config.json` loading, clamping and atomic saving. | — |
 | `links.rs`, `blink.rs`, `ime.rs` | URL detection and opening, cursor blink timing, IME helpers. | — |
 | `shell_integration.rs` | Parses the OSC signals shells and agents send (OSC 7 cwd, OSC 9/99/777 notifications, OSC 133/633 command marks) into bounded, cleaned `ShellEvent`s. | `links` |
-| `session/shell_setup.rs`, `assets/shell/` | Injects Twitty's bash/zsh/fish integration scripts into shells it starts, so they send the marks without user setup. | — |
+| `session/shell_setup.rs`, `assets/shell/`, `assets/bin/` | Injects Twitty's bash/zsh/fish integration scripts and private `claude` hook wrapper (`0700` dir) into shells it starts, without modifying user startup or Claude settings files. | — |
 | `session/restore.rs` | Session restore: the versioned `session.json` (tab order, split trees and ratios, pane directories and titles, focus, sidebar) saved on a normal close and rebuilt with fresh shells on start. | `session` |
 | `blocks/` | Command blocks: turns marks into a per-pane `BlockList` (prompt, command, output, exit, duration) anchored to absolute lines so blocks follow the text as it scrolls. | `shell_integration` |
 | `sidebar/` | The vertical tab sidebar model: one entry per tab with cwd, git branch (read from `.git/HEAD`, bounded), running state, last exit and the latest notification. | `session` |
 | `notify.rs` | Desktop notifications through `notify-send` (argv, never a shell), throttled per pane. | — |
 | `commands.rs`, `ui/palette.rs` | The command table (name, English and Arabic titles, shortcut, action) and the palette state with Arabic-aware matching. | `input` |
-| `control/` | The control socket (`$XDG_RUNTIME_DIR/twitty/twitty-<pid>.sock`, 0600 in a 0700 dir) speaking newline-delimited JSON, and the `twitty ctl/send/notify/list/read` client. | — |
+| `control/` | The control socket (`$XDG_RUNTIME_DIR/twitty/twitty-<pid>.sock`, 0600 in a 0700 dir) speaking newline-delimited JSON (`twitty ctl` + cmux v2 JSON-RPC + minimal v1 text hook commands), `twitty claude-hook`, and the `twitty ctl/send/notify/list/read` client. | `session`, `sidebar`, `input`, `ui` |
 | `agent.rs` | "Ask an agent": picks a local agent CLI, builds its argv and a fenced prompt from the selection, block or screen. | — |
 | `ports.rs` | Listening TCP ports per pane for the sidebar: pure `/proc` parsing and a scanner thread. | — |
 

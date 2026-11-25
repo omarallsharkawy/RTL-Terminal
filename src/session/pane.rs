@@ -7,6 +7,8 @@ use crate::blocks::BlockList;
 use crate::input::mouse::{ClickCounter, StepAccumulator};
 use crate::layout::PaneId;
 use crate::pty::Pty;
+use crate::shell_integration::{clean_text, MAX_NOTIFY_CHARS};
+use crate::sidebar::{AgentState, AgentStatus};
 use crate::terminal::Terminal;
 use crate::ui::selection::SelectionState;
 
@@ -26,8 +28,22 @@ pub(crate) struct Pane {
     pub blocks: BlockList,
 }
 
+/// Maximum status key/value entries stored per pane.
+pub const MAX_STATUS_ENTRIES: usize = 16;
+
+/// One status key/value entry reported via `workspace.set_status` or hooks.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StatusEntry {
+    pub key: String,
+    pub value: String,
+    pub label: Option<String>,
+    pub icon: Option<String>,
+    pub color: Option<String>,
+}
+
 /// What the shell and the programs in a pane reported through shell signals
-/// (`shell_integration`). The sidebar, notifications, blocks and the control socket read it.
+/// (`shell_integration`) or control hooks. The sidebar, notifications, blocks and the control
+/// socket read it.
 #[derive(Debug, Default)]
 pub(crate) struct PaneMeta {
     /// Working directory from OSC 7.
@@ -41,6 +57,74 @@ pub(crate) struct PaneMeta {
     pub last_exit: Option<i32>,
     /// Last command line the shell reported (OSC 633 E).
     pub last_command: Option<String>,
+    /// Per-pane agent status (working / needs input / done) and optional last message.
+    pub agent_status: Option<AgentStatus>,
+    /// Bounded key/value status entries reported for this pane.
+    pub status_entries: Vec<StatusEntry>,
+}
+
+impl PaneMeta {
+    /// Insert or update a status key on this pane and refresh `agent_status`.
+    pub fn set_status(
+        &mut self,
+        key: &str,
+        value: &str,
+        label: Option<&str>,
+        icon: Option<&str>,
+        color: Option<&str>,
+    ) {
+        let key = clean_text(key, 64);
+        let value = clean_text(value, 64);
+        if key.is_empty() {
+            return;
+        }
+        let entry = StatusEntry {
+            key: key.clone(),
+            value,
+            label: label
+                .map(|s| clean_text(s, MAX_NOTIFY_CHARS))
+                .filter(|s| !s.is_empty()),
+            icon: icon.map(|s| clean_text(s, 64)).filter(|s| !s.is_empty()),
+            color: color.map(|s| clean_text(s, 64)).filter(|s| !s.is_empty()),
+        };
+        if let Some(existing) = self.status_entries.iter_mut().find(|e| e.key == key) {
+            *existing = entry;
+        } else {
+            if self.status_entries.len() >= MAX_STATUS_ENTRIES {
+                self.status_entries.remove(0);
+            }
+            self.status_entries.push(entry);
+        }
+        self.refresh_agent_status();
+    }
+
+    /// Clear one status key (or all keys when `key` is `None`) and refresh `agent_status`.
+    pub fn clear_status(&mut self, key: Option<&str>) {
+        match key {
+            Some(k) => self.status_entries.retain(|e| e.key != k),
+            None => self.status_entries.clear(),
+        }
+        self.refresh_agent_status();
+    }
+
+    fn refresh_agent_status(&mut self) {
+        let mut best: Option<AgentStatus> = None;
+        for entry in &self.status_entries {
+            let Some(state) = AgentState::from_status(&entry.key, &entry.value) else {
+                continue;
+            };
+            let text = entry.label.as_deref();
+            let candidate = AgentStatus::new(state, text);
+            match &best {
+                None => best = Some(candidate),
+                Some(cur) if candidate.state.priority() >= cur.state.priority() => {
+                    best = Some(candidate);
+                }
+                _ => {}
+            }
+        }
+        self.agent_status = best;
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

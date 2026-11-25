@@ -109,6 +109,9 @@ The config file is `~/.config/twitty/config.json` (`%APPDATA%\twitty\config.json
 | `background_opacity` | 0.2 (very see-through) to 1.0 (solid) |
 | `cursor_style` | `block`, `beam` or `underline`. Programs that set their own cursor shape (vim insert mode, for example) still win. |
 | `cursor_blink` | `true` (default) blinks the cursor, `false` keeps it solid. Programs that ask for a blinking or steady cursor (`CSI n SP q`) override this. The cursor stays solid while you type and while the window is unfocused. |
+| `control_socket` | `true` (default) listens on a private Unix socket (`0600` in a `0700` dir) for `twitty ctl` and agent tools. |
+| `cmux_compat` | `true` (default) exposes cmux-compatible environment variables (`CMUX_SOCKET_PATH`, `CMUX_WORKSPACE_ID`, `CMUX_SURFACE_ID`) when `control_socket` is enabled. |
+| `claude_hooks` | `true` (default) puts Twitty's `claude` wrapper first on `PATH` inside Twitty shells so Claude Code reports per-pane status and notifications over the socket without editing your Claude settings files. |
 
 Zoom and transparency changes are written back to this file when Twitty closes. Keys Twitty doesn't recognize are left untouched.
 
@@ -176,6 +179,35 @@ Example `.twitty/commands.json`:
 
 - `mode`: `"insert"` (default) pastes the command into the focused pane without a newline so you can review it and press Enter; `"run"` opens a split (or tab) and runs it with `$SHELL -c <command>` in the entry's `cwd` (must stay inside the project root) or the pane's working directory.
 - `twitty ctl command.list` lists built-in and custom commands (`source`, `trusted`); `twitty ctl command.run` can run trusted custom commands by name and always refuses untrusted project commands.
+
+### Control socket & cmux compatibility
+
+When `control_socket` is enabled (the default), Twitty listens on a same-user Unix socket (`$XDG_RUNTIME_DIR/twitty/twitty-<pid>.sock`, mode `0600` inside a `0700` directory). Alongside `twitty ctl`, the socket implements the cmux v2 JSON-RPC request/response shape (mapping a cmux **workspace** to a Twitty tab and a **pane**/**surface** to a Twitty pane):
+
+- **System:** `system.ping`, `system.identify`, `system.capabilities`
+- **Workspaces (tabs):** `workspace.list`, `workspace.current`, `workspace.create`, `workspace.new`, `workspace.select`, `workspace.close`, `workspace.rename`, `workspace.set_status`, `workspace.clear_status`, `workspace.list_status`
+- **Panes & surfaces:** `pane.list`, `pane.split`, `pane.new`, `pane.create`, `pane.focus`, `pane.close`, `surface.list`, `surface.current`, `surface.split`, `surface.focus`, `surface.close`, `surface.send_text`, `surface.send_input`, `surface.send_key`, `surface.read_text`
+- **Notifications & sidebar:** `notification.create`, `notification.create_for_surface`, `notification.create_for_target`, `notification.list`, `notification.clear`, `sidebar.show`, `sidebar.hide`, `sidebar.toggle`, `sidebar.status`
+- **Minimal v1 text commands (hook path):** `ping`, `set_status`, `clear_status`, `list_status`, `notify`, `notify_surface`, `notify_target`
+
+Browser, markdown, settings, and other unrecognized methods return a cmux `unknown_method` error. All existing `twitty ctl` methods (`tab.list`, `tab.new`, `pane.list`, `pane.focus`, `pane.split`, `pane.send-text`, `pane.read`, `notify`, `command.list`, `command.run`) continue to work unchanged.
+
+Environment variables set on spawned panes (inherited `TWITTY_*` and `CMUX_*` variables from parent terminals are stripped first):
+
+| Variable | Meaning |
+| --- | --- |
+| `TWITTY_SOCKET` / `TWITTY_PANE_ID` | Control socket path and current pane id |
+| `CMUX_SOCKET_PATH` | Control socket path (when `cmux_compat` and `control_socket` are enabled) |
+| `CMUX_WORKSPACE_ID` | Stable id of the pane's tab |
+| `CMUX_SURFACE_ID` | Current pane id |
+
+### Claude Code integration
+
+When `claude_hooks` and `control_socket` are enabled, Twitty writes a `claude` wrapper script into a private `0700` directory and puts it first on `PATH` inside Twitty shells.
+
+- Outside Twitty, when `claude_hooks` is `false`, when `TWITTY_CLAUDE_HOOKS_DISABLED=1` or `CMUX_CLAUDE_HOOKS_DISABLED=1` is set, or when the socket does not reply within ~0.75 s, the wrapper executes the real `claude` unchanged.
+- Inside a live Twitty shell, it passes `--settings` in memory so Claude Code's lifecycle hooks call `twitty claude-hook <event>` (reading bounded JSON on stdin). Your `~/.claude/settings.json` is never modified.
+- Twitty tracks per-pane agent status (`working`, `needs input`, `done`) in the sidebar; `needs input` and `done` events also go through Twitty's notification history and desktop notification path, with Arabic and mixed text cleaned and shaped normally.
 
 ### Shell
 
