@@ -94,9 +94,21 @@ fn git(dir: &Path, args: &[&str], limit: usize) -> Result<Output, LoadError> {
         let _ = child.wait();
         return Err(LoadError::Failed("git: no output pipe".into()));
     };
-    // The watchdog owns the child: it reaps it, or kills it on timeout or when the reader has
-    // enough. Killing closes the pipe, which ends the read below.
+    // The watchdog owns the child: it reaps it, or kills it on timeout, when the reader has
+    // enough, or if the watchdog thread itself fails to spawn. Killing closes the pipe, which
+    // ends the read below.
+    struct KillOnDrop(Option<std::process::Child>);
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            if let Some(mut c) = self.0.take() {
+                let _ = c.kill();
+                let _ = c.wait();
+            }
+        }
+    }
+
     let stop = Arc::new(AtomicBool::new(false));
+    let mut guard = KillOnDrop(Some(child));
     let watchdog = {
         let stop = stop.clone();
         thread::Builder::new()
@@ -104,14 +116,16 @@ fn git(dir: &Path, args: &[&str], limit: usize) -> Result<Output, LoadError> {
             .spawn(move || {
                 let start = Instant::now();
                 loop {
+                    let child = guard.0.as_mut()?;
                     match child.try_wait() {
-                        Ok(Some(status)) => return Some(status),
+                        Ok(Some(status)) => {
+                            let _ = guard.0.take();
+                            return Some(status);
+                        }
                         Ok(None) => {}
                         Err(_) => return None,
                     }
                     if stop.load(Ordering::Relaxed) || start.elapsed() > TIMEOUT {
-                        let _ = child.kill();
-                        let _ = child.wait();
                         return None;
                     }
                     thread::sleep(Duration::from_millis(15));

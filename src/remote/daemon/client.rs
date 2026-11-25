@@ -48,13 +48,19 @@ fn connect_or_start(runtime: &Runtime, name: &str, size: Size) -> Result<UnixStr
         match runtime.connect(name) {
             Ok(stream) => {
                 // The server owns the shell. Reap it if it exits while we're attached.
-                thread::spawn(move || {
-                    let _ = child.wait();
-                });
+                let _ = thread::Builder::new()
+                    .name("twitty-remote-reap".into())
+                    .spawn(move || {
+                        let _ = child.wait();
+                    });
                 return Ok(stream);
             }
             Err(err) if needs_server(&err) => {}
-            Err(err) => return Err(err.into()),
+            Err(err) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(err.into());
+            }
         }
         if let Some(status) = child.try_wait()? {
             let mut error = String::new();
@@ -74,6 +80,8 @@ fn connect_or_start(runtime: &Runtime, name: &str, size: Size) -> Result<UnixStr
             };
         }
         if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
             bail!("timed out waiting for the remote session server");
         }
         thread::sleep(Duration::from_millis(25));

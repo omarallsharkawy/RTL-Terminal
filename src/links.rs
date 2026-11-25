@@ -207,14 +207,24 @@ pub(crate) fn local_file_url(url: &str) -> Option<std::path::PathBuf> {
     Some(std::path::PathBuf::from(path))
 }
 
+fn has_launchable_ext(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .is_some_and(|e| LAUNCHABLE.contains(&e.as_str()))
+}
+
 /// True when opening `path` would run it rather than show it.
 fn is_launchable(path: &std::path::Path) -> bool {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(str::to_ascii_lowercase);
-    if ext.is_some_and(|e| LAUNCHABLE.contains(&e.as_str())) {
+    if has_launchable_ext(path) {
         return true;
+    }
+    // A symlink with a harmless extension (e.g. `notes.txt -> evil.desktop`) still launches its
+    // target when handed to the desktop opener.
+    if let Ok(real) = std::fs::canonicalize(path) {
+        if has_launchable_ext(&real) {
+            return true;
+        }
     }
     #[cfg(unix)]
     {
@@ -256,15 +266,22 @@ pub(crate) fn open_url(url: &str) -> bool {
     };
     let mut cmd = Command::new(program);
     cmd.arg(target)
+        .env_remove("TWITTY_SOCKET")
+        .env_remove("TWITTY_PANE_ID")
+        .env_remove("CMUX_SOCKET_PATH")
+        .env_remove("CMUX_WORKSPACE_ID")
+        .env_remove("CMUX_SURFACE_ID")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     match cmd.spawn() {
         Ok(mut child) => {
             // Reap it off the UI thread so it never becomes a zombie.
-            std::thread::spawn(move || {
-                let _ = child.wait();
-            });
+            let _ = std::thread::Builder::new()
+                .name("twitty-open-url".into())
+                .spawn(move || {
+                    let _ = child.wait();
+                });
             true
         }
         Err(_) => false,

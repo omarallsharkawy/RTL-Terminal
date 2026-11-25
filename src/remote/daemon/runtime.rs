@@ -39,7 +39,7 @@ impl Runtime {
         let metadata = dir.metadata()?;
         ensure!(
             metadata.uid() == rustix::process::geteuid().as_raw()
-                && metadata.mode() & 0o777 == 0o700,
+                && metadata.mode() & 0o7777 == 0o700,
             "{} must be owned by this user and have mode 0700",
             path.display()
         );
@@ -89,7 +89,7 @@ impl Runtime {
         let _lock = self.lock()?;
         let path = self.socket(name);
         let metadata = socket_metadata(&path)?;
-        if metadata.mode() & 0o777 != 0o600 {
+        if metadata.mode() & 0o7777 != 0o600 {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "session socket must have mode 0600",

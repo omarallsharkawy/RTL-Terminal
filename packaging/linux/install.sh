@@ -52,6 +52,11 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+if [ -z "$PREFIX" ]; then
+  echo "error: --prefix must not be empty" >&2
+  exit 2
+fi
+
 refresh_caches() {
   if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database -q "$PREFIX/share/applications" 2>/dev/null || true

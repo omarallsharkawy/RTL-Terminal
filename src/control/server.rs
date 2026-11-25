@@ -256,6 +256,8 @@ mod imp {
                         break;
                     }
                     tracing::warn!("control socket accept error: {err}");
+                    // Back off on persistent errors (e.g. EMFILE) to avoid a 100% CPU spin.
+                    thread::sleep(Duration::from_millis(50));
                     continue;
                 }
             };

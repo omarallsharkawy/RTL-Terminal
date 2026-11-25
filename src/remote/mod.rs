@@ -99,6 +99,7 @@ pub fn validate_destination(destination: &str) -> Result<(), String> {
     if host.is_empty()
         || destination.len() > 1024
         || destination.starts_with('-')
+        || destination.starts_with('@')
         || host.starts_with('-')
         || destination.chars().any(|c| {
             !c.is_alphanumeric() && !matches!(c, '.' | '_' | '-' | '@' | ':' | '[' | ']' | '%')

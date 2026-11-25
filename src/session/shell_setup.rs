@@ -21,9 +21,10 @@
 //! nothing when the user's own startup files already mark prompts with OSC 133. The shell gets
 //! `TWITTY_SHELL_INTEGRATION=1`. Nothing on Windows yet.
 
-use std::fs;
-use std::io::{self, Write};
+use std::fs::{self, OpenOptions};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 use crate::pty::SpawnOptions;
@@ -141,9 +142,98 @@ pub fn integrate(
     Some(Integration { command, env: vars })
 }
 
+/// Read a regular (non-symlink) file up to `expected.len() + 1` bytes and return whether its
+/// contents match `expected` and its permissions match `expected_mode` (on Unix).
+fn matches_private_file(path: &Path, expected: &[u8], expected_mode: u32) -> bool {
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return false;
+    };
+    if !meta.file_type().is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if meta.mode() & 0o7777 != expected_mode {
+            return false;
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = expected_mode;
+
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let Ok(file) = options.open(path) else {
+        return false;
+    };
+    if !file.metadata().is_ok_and(|m| m.file_type().is_file()) {
+        return false;
+    }
+    let mut existing = Vec::with_capacity(expected.len());
+    file.take(expected.len() as u64 + 1)
+        .read_to_end(&mut existing)
+        .is_ok()
+        && existing == expected
+}
+
+/// Atomically write `body` to `path` with mode `mode` (on Unix), using an exclusive temporary
+/// file in the same directory so concurrent spawns never collide and the file never exists with
+/// wider permissions.
+fn write_private_file(path: &Path, label: &str, body: &[u8], mode: u32) -> io::Result<()> {
+    static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+    let pid = std::process::id();
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(mode);
+    }
+    #[cfg(not(unix))]
+    let _ = mode;
+
+    let mut created = None;
+    for _ in 0..64 {
+        let seq = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
+        let tmp = path.with_file_name(format!(".{label}.{pid}.{seq}.tmp"));
+        match options.open(&tmp) {
+            Ok(file) => {
+                created = Some((tmp, file));
+                break;
+            }
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(err),
+        }
+    }
+    let Some((tmp, mut file)) = created else {
+        return Err(io::Error::other("could not allocate temporary script file"));
+    };
+
+    let result = (|| -> io::Result<()> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(fs::Permissions::from_mode(mode))?;
+        }
+        file.write_all(body)?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&tmp, path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    result
+}
+
 /// Write the scripts into `dir`, creating it (mode 0700) as needed. Each file is replaced
-/// atomically and only when its content differs, so shells starting meanwhile (in this or
-/// another Twitty) never read half a file.
+/// atomically and only when its content or permissions differ, so shells starting meanwhile
+/// (in this or another Twitty) never read half a file.
 pub fn install(dir: &Path) -> io::Result<()> {
     create_private_dir(dir)?;
     for (name, body) in files() {
@@ -151,22 +241,14 @@ pub fn install(dir: &Path) -> io::Result<()> {
         if let Some(parent) = path.parent() {
             create_private_dir(parent)?;
         }
-        if fs::read(&path).is_ok_and(|old| old == body.as_bytes()) {
+        if matches_private_file(&path, body.as_bytes(), 0o600) {
             continue;
         }
         let file_name = name
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("script");
-        let tmp = path.with_file_name(format!(".{file_name}.{}.tmp", std::process::id()));
-        let written = fs::File::create(&tmp).and_then(|mut f| {
-            f.write_all(body.as_bytes())?;
-            f.sync_all()
-        });
-        if let Err(e) = written.and_then(|()| fs::rename(&tmp, &path)) {
-            let _ = fs::remove_file(&tmp);
-            return Err(e);
-        }
+        write_private_file(&path, file_name, body.as_bytes(), 0o600)?;
     }
     Ok(())
 }
@@ -185,17 +267,28 @@ fn create_private_dir(dir: &Path) -> io::Result<()> {
     }
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        // Only the owner can change the mode, so this also refuses someone else's directory.
-        if meta.permissions().mode() & 0o077 != 0 {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let uid = crate::control::paths::current_uid()?;
+        if meta.uid() != uid {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!(
+                    "private directory {} is owned by uid {}, expected {uid}",
+                    dir.display(),
+                    meta.uid()
+                ),
+            ));
+        }
+        if meta.permissions().mode() & 0o6077 != 0 {
             fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
         }
     }
     Ok(())
 }
 
-/// Where the scripts go: `$XDG_RUNTIME_DIR/twitty/shell`, else `~/.cache/twitty/shell`.
-pub fn default_dir() -> Option<PathBuf> {
+/// Base private directory: `$XDG_RUNTIME_DIR/twitty`, else `$XDG_CACHE_HOME/twitty`, else
+/// `$HOME/.cache/twitty`. Relative environment paths are ignored.
+fn private_base_dir() -> Option<PathBuf> {
     let runtime = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .filter(|d| d.is_absolute() && d.is_dir());
@@ -205,10 +298,20 @@ pub fn default_dir() -> Option<PathBuf> {
             let cache = std::env::var_os("XDG_CACHE_HOME")
                 .map(PathBuf::from)
                 .filter(|d| d.is_absolute());
-            cache.or_else(|| Some(PathBuf::from(std::env::var_os("HOME")?).join(".cache")))?
+            cache.or_else(|| {
+                let home = std::env::var_os("HOME")
+                    .map(PathBuf::from)
+                    .filter(|d| d.is_absolute())?;
+                Some(home.join(".cache"))
+            })?
         }
     };
-    Some(base.join("twitty").join("shell"))
+    Some(base.join("twitty"))
+}
+
+/// Where the scripts go: `$XDG_RUNTIME_DIR/twitty/shell`, else `~/.cache/twitty/shell`.
+pub fn default_dir() -> Option<PathBuf> {
+    Some(private_base_dir()?.join("shell"))
 }
 
 /// A short digest of the scripts this build writes. Each build keeps its scripts in its own
@@ -247,19 +350,7 @@ fn script_dir() -> Option<PathBuf> {
 /// Where Twitty's private wrapper binaries (such as `claude`) go:
 /// `$XDG_RUNTIME_DIR/twitty/bin`, else `~/.cache/twitty/bin`.
 pub fn default_bin_dir() -> Option<PathBuf> {
-    let runtime = std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .filter(|d| d.is_absolute() && d.is_dir());
-    let base = match runtime {
-        Some(dir) => dir,
-        None => {
-            let cache = std::env::var_os("XDG_CACHE_HOME")
-                .map(PathBuf::from)
-                .filter(|d| d.is_absolute());
-            cache.or_else(|| Some(PathBuf::from(std::env::var_os("HOME")?).join(".cache")))?
-        }
-    };
-    Some(base.join("twitty").join("bin"))
+    Some(private_base_dir()?.join("bin"))
 }
 
 /// Write Twitty's embedded `claude` wrapper script into `dir` (mode 0700 dir, mode 0700
@@ -267,34 +358,13 @@ pub fn default_bin_dir() -> Option<PathBuf> {
 pub fn install_claude_wrapper(dir: &Path) -> io::Result<PathBuf> {
     create_private_dir(dir)?;
     let path = dir.join("claude");
-    let up_to_date = fs::read(&path).is_ok_and(|old| old == CLAUDE_WRAPPER.as_bytes());
-    if !up_to_date {
-        let tmp = path.with_file_name(format!(".claude.{}.tmp", std::process::id()));
-        let written = fs::File::create(&tmp).and_then(|mut f| {
-            f.write_all(CLAUDE_WRAPPER.as_bytes())?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                f.set_permissions(fs::Permissions::from_mode(0o700))?;
-            }
-            f.sync_all()
-        });
-        if let Err(e) = written.and_then(|()| fs::rename(&tmp, &path)) {
-            let _ = fs::remove_file(&tmp);
-            return Err(e);
+    if let Ok(meta) = fs::symlink_metadata(&path) {
+        if !meta.file_type().is_file() {
+            return Err(io::Error::other("wrapper path is not a regular file"));
         }
-    } else {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let meta = fs::symlink_metadata(&path)?;
-            if !meta.file_type().is_file() {
-                return Err(io::Error::other("wrapper path is not a regular file"));
-            }
-            if meta.permissions().mode() & 0o777 != 0o700 {
-                fs::set_permissions(&path, fs::Permissions::from_mode(0o700))?;
-            }
-        }
+    }
+    if !matches_private_file(&path, CLAUDE_WRAPPER.as_bytes(), 0o700) {
+        write_private_file(&path, "claude", CLAUDE_WRAPPER.as_bytes(), 0o700)?;
     }
     Ok(path)
 }

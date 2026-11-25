@@ -189,19 +189,13 @@ pub enum ReadLine {
 }
 
 /// Read a single UTF-8 line up to `max_bytes` (not counting a trailing `\r\n` or `\n`).
-/// Never buffers more than `max_bytes + 1` bytes from `reader`.
+/// Never buffers more than `max_bytes + 2` bytes from `reader`.
 pub fn read_bounded_line<R: BufRead>(reader: &mut R, max_bytes: usize) -> io::Result<ReadLine> {
     let mut buf = Vec::new();
-    let mut limited = reader.take(max_bytes.saturating_add(1) as u64);
+    let mut limited = reader.take(max_bytes.saturating_add(2) as u64);
     let n = limited.read_until(b'\n', &mut buf)?;
     if n == 0 {
         return Ok(ReadLine::Eof);
-    }
-    if buf.len() > max_bytes {
-        // Only fits if the extra byte is the terminating newline itself.
-        if buf.last() != Some(&b'\n') {
-            return Ok(ReadLine::TooLong);
-        }
     }
     if buf.last() == Some(&b'\n') {
         buf.pop();
@@ -323,6 +317,12 @@ impl MethodCall {
                 let name = required_str(params, "name")?.to_owned();
                 if name.is_empty() {
                     return Err("\"name\" must not be empty".into());
+                }
+                if name == "edit.paste" {
+                    return Err(
+                        "refusing to run \"edit.paste\" over the control socket (clipboard read is blocked)"
+                            .into(),
+                    );
                 }
                 let pane = optional_u64(params, "pane")?;
                 Ok(Self::CommandRun { name, pane })

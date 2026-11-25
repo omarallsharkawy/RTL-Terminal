@@ -31,7 +31,9 @@ fi
 # startup files above may have prepended their own directories.
 if [[ -n "${TWITTY_CLAUDE_DIR-}" ]]; then
     __twitty_path=":${PATH-}:"
-    __twitty_path=${__twitty_path//":$TWITTY_CLAUDE_DIR:"/:}
+    while [[ "$__twitty_path" == *":$TWITTY_CLAUDE_DIR:"* ]]; do
+        __twitty_path=${__twitty_path//":$TWITTY_CLAUDE_DIR:"/:}
+    done
     __twitty_path=${__twitty_path#:}
     __twitty_path=${__twitty_path%:}
     PATH="$TWITTY_CLAUDE_DIR${__twitty_path:+:$__twitty_path}"

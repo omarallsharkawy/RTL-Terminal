@@ -132,10 +132,12 @@ impl PaneFactory for ShellFactory<'_> {
         if self.claude_hooks && self.control_socket.is_some() && is_user_shell {
             shell_setup::apply_claude_wrapper(&mut options);
         }
+        let pty_cols = cols.clamp(1, u16::MAX as usize) as u16;
+        let pty_rows = rows.clamp(1, u16::MAX as usize) as u16;
         let pty = match Pty::spawn_with(
             &options,
-            cols as u16,
-            rows as u16,
+            pty_cols,
+            pty_rows,
             move || {
                 let _ = proxy.send_event(AppEvent::PtyOutput(id));
             },
@@ -172,7 +174,9 @@ pub(crate) fn start_remote_pty(proxy: &EventLoopProxy<AppEvent>, pane: &mut Pane
     };
     remote.connecting();
     let (cols, rows) = pane.size;
-    match remote_pty(proxy, pane.id, &remote.target, cols as u16, rows as u16) {
+    let pty_cols = cols.clamp(1, u16::MAX as usize) as u16;
+    let pty_rows = rows.clamp(1, u16::MAX as usize) as u16;
+    match remote_pty(proxy, pane.id, &remote.target, pty_cols, pty_rows) {
         Ok(pty) => pane.pty = Some(pty),
         Err(err) => {
             remote.disconnected(false);

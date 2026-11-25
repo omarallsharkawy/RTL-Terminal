@@ -46,13 +46,17 @@ pub struct TrustStore {
 
 impl TrustStore {
     /// Compute the trust store path from `XDG_STATE_HOME` and `HOME`.
+    /// Relative paths are ignored so a repository or untrusted environment cannot redirect trust.
     pub fn path_from(xdg_state_home: Option<&OsStr>, home: Option<&OsStr>) -> Option<PathBuf> {
-        let base = if let Some(xdg) = xdg_state_home.filter(|v| !v.is_empty()) {
-            PathBuf::from(xdg)
+        let absolute = |v: Option<&OsStr>| {
+            v.filter(|v| !v.is_empty())
+                .map(PathBuf::from)
+                .filter(|p| p.is_absolute())
+        };
+        let base = if let Some(xdg) = absolute(xdg_state_home) {
+            xdg
         } else {
-            PathBuf::from(home.filter(|v| !v.is_empty())?)
-                .join(".local")
-                .join("state")
+            absolute(home)?.join(".local").join("state")
         };
         Some(base.join("twitty").join("trust.json"))
     }
@@ -81,6 +85,26 @@ impl TrustStore {
     /// Load from `path`. Missing, symlinked, non-regular, oversized, wrong-version, or corrupt
     /// files fail closed and return an empty store (nothing trusted).
     pub fn load_from(path: &Path) -> Self {
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            match fs::symlink_metadata(parent) {
+                Ok(parent_meta) if parent_meta.file_type().is_dir() => {}
+                Ok(_) => {
+                    warn(format!(
+                        "twitty: refusing trust store in non-directory or symlinked parent {}; treating all project commands as untrusted",
+                        parent.display()
+                    ));
+                    return Self::default();
+                }
+                Err(err) if err.kind() == io::ErrorKind::NotFound => return Self::default(),
+                Err(err) => {
+                    warn(format!(
+                        "twitty: ignoring trust store {} ({err}); treating all project commands as untrusted",
+                        path.display()
+                    ));
+                    return Self::default();
+                }
+            }
+        }
         let meta = match fs::symlink_metadata(path) {
             Ok(m) => m,
             Err(err) if err.kind() == io::ErrorKind::NotFound => return Self::default(),
@@ -133,6 +157,20 @@ impl TrustStore {
                 path.display()
             ));
             return Self::default();
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let Ok(uid) = crate::control::paths::current_uid() else {
+                return Self::default();
+            };
+            if fd_meta.uid() != uid || fd_meta.mode() & 0o6002 != 0 {
+                warn(format!(
+                    "twitty: refusing trust store {} with unsafe ownership or permissions; treating all project commands as untrusted",
+                    path.display()
+                ));
+                return Self::default();
+            }
         }
 
         let mut bytes = Vec::with_capacity(fd_meta.len().min(MAX_TRUST_FILE_BYTES as u64) as usize);

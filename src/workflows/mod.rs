@@ -343,9 +343,9 @@ pub fn resolve_run_cwd(
                 ));
             };
             if !target.is_dir() {
+                let shown = clean_text(&target.to_string_lossy(), 256);
                 return Err(format!(
-                    "workflow cwd is not an existing directory: {}",
-                    target.display()
+                    "workflow cwd is not an existing directory: {shown}"
                 ));
             }
             Ok(Some(target))
@@ -357,29 +357,28 @@ pub fn resolve_run_cwd(
 /// outside `project_root`.
 pub fn resolve_project_cwd(project_root: &Path, relative: &str) -> Result<PathBuf, String> {
     let rel = Path::new(relative);
+    let shown_rel = clean_text(relative, 256);
     if rel.is_absolute() {
         return Err(format!(
-            "refusing workflow cwd {relative:?}: must be relative to project root"
+            "refusing workflow cwd {shown_rel:?}: must be relative to project root"
         ));
     }
     let canon_root = fs::canonicalize(project_root).map_err(|err| {
-        format!(
-            "could not resolve project root {}: {err}",
-            project_root.display()
-        )
+        let shown_root = clean_text(&project_root.to_string_lossy(), 256);
+        format!("could not resolve project root {shown_root}: {err}")
     })?;
     let joined = canon_root.join(rel);
     let canon_target = fs::canonicalize(&joined).map_err(|err| {
-        format!("workflow cwd {relative:?} does not exist inside project root: {err}")
+        format!("workflow cwd {shown_rel:?} does not exist inside project root: {err}")
     })?;
     if !canon_target.starts_with(&canon_root) {
+        let shown_root = clean_text(&canon_root.to_string_lossy(), 256);
         return Err(format!(
-            "refusing workflow cwd {relative:?}: escapes project root {}",
-            canon_root.display()
+            "refusing workflow cwd {shown_rel:?}: escapes project root {shown_root}"
         ));
     }
     if !canon_target.is_dir() {
-        return Err(format!("workflow cwd {relative:?} is not a directory"));
+        return Err(format!("workflow cwd {shown_rel:?} is not a directory"));
     }
     Ok(canon_target)
 }

@@ -141,24 +141,33 @@ pub(super) fn serve(runtime: &Runtime, name: &str, size: Size) -> Result<()> {
         exit: None,
     }));
     let reader_state = session.clone();
-    let reader = thread::spawn(move || {
-        let mut buffer = [0; CHUNK];
-        while let Ok(n @ 1..) = reader.read(&mut buffer) {
-            reader_state.lock().unwrap().publish(&buffer[..n]);
-        }
-    });
-    let (input, input_rx) = mpsc::sync_channel::<Vec<u8>>(32);
-    thread::spawn(move || {
-        for bytes in input_rx {
-            if writer
-                .write_all(&bytes)
-                .and_then(|_| writer.flush())
-                .is_err()
-            {
-                break;
+    let reader = thread::Builder::new()
+        .name("twitty-remote-reader".into())
+        .spawn(move || {
+            let mut buffer = [0; CHUNK];
+            while let Ok(n @ 1..) = reader.read(&mut buffer) {
+                reader_state
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .publish(&buffer[..n]);
             }
-        }
-    });
+        })
+        .context("starting remote PTY reader thread")?;
+    let (input, input_rx) = mpsc::sync_channel::<Vec<u8>>(32);
+    thread::Builder::new()
+        .name("twitty-remote-writer".into())
+        .spawn(move || {
+            for bytes in input_rx {
+                if writer
+                    .write_all(&bytes)
+                    .and_then(|_| writer.flush())
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .context("starting remote PTY writer thread")?;
 
     let (kill, kill_rx) = mpsc::sync_channel(1);
     let clients = Arc::new(());
@@ -188,9 +197,11 @@ pub(super) fn serve(runtime: &Runtime, name: &str, size: Size) -> Result<()> {
                         let session = session.clone();
                         let input = input.clone();
                         let kill = kill.clone();
-                        thread::spawn(move || {
-                            let _ = handle_client(stream, next_id, session, input, kill, slot);
-                        });
+                        let _ = thread::Builder::new()
+                            .name("twitty-remote-client".into())
+                            .spawn(move || {
+                                let _ = handle_client(stream, next_id, session, input, kill, slot);
+                            });
                     }
                     Ok(_) => break,
                     Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
@@ -203,7 +214,7 @@ pub(super) fn serve(runtime: &Runtime, name: &str, size: Size) -> Result<()> {
 
     drop(socket);
     {
-        let mut session = session.lock().unwrap();
+        let mut session = session.lock().unwrap_or_else(|e| e.into_inner());
         session.exit = Some(exit_code);
         session.attachments.clear();
     }
@@ -251,7 +262,7 @@ fn attach_client(
     let reader = stream.try_clone()?;
     let (output, queue) = mpsc::sync_channel(32);
     let replay = {
-        let mut session = session.lock().unwrap();
+        let mut session = session.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(exit) = session.exit {
             return stream.write_all(&[ATTACH, EXIT, exit]);
         }
@@ -268,17 +279,25 @@ fn attach_client(
     };
     let state = session.clone();
     let input_slot = slot.clone();
-    thread::spawn(move || {
-        let _slot = input_slot;
-        let mut reader = reader;
-        let _ = receive_input(&mut reader, id, &state, &input);
-        let mut state = state.lock().unwrap();
+    if let Err(err) = thread::Builder::new()
+        .name("twitty-remote-input".into())
+        .spawn(move || {
+            let _slot = input_slot;
+            let mut reader = reader;
+            let _ = receive_input(&mut reader, id, &state, &input);
+            let mut state = state.lock().unwrap_or_else(|e| e.into_inner());
+            state.attachments.remove(&id);
+            state.resize();
+            drop(state);
+            // On EOF, stop any output worker blocked writing to the old attachment.
+            let _ = reader.shutdown(Shutdown::Both);
+        })
+    {
+        let mut state = session.lock().unwrap_or_else(|e| e.into_inner());
         state.attachments.remove(&id);
         state.resize();
-        drop(state);
-        // On EOF, stop any output worker blocked writing to the old attachment.
-        let _ = reader.shutdown(Shutdown::Both);
-    });
+        return Err(err);
+    }
     let result = send_output(&mut stream, replay, queue, &session);
     let _ = stream.shutdown(Shutdown::Both);
     result
@@ -301,7 +320,7 @@ fn receive_input(
             }
             RESIZE => {
                 let size = Size::read(stream)?;
-                let mut session = session.lock().unwrap();
+                let mut session = session.lock().unwrap_or_else(|e| e.into_inner());
                 let Some(client) = session.attachments.get_mut(&id) else {
                     break;
                 };
@@ -325,7 +344,7 @@ fn send_output(
     for bytes in queue {
         protocol::write_data(stream, OUTPUT, &bytes)?;
     }
-    let exit = session.lock().unwrap().exit;
+    let exit = session.lock().unwrap_or_else(|e| e.into_inner()).exit;
     if let Some(code) = exit {
         stream.write_all(&[EXIT, code])?;
     }

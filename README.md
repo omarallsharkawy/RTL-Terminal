@@ -98,6 +98,7 @@ cargo build --release
 
 | Action | Keys |
 | --- | --- |
+| Command palette | Ctrl+Shift+P |
 | Copy selection | Release the mouse, or Ctrl+Shift+C |
 | Paste | Ctrl+Shift+V, or middle-click |
 | Search scrollback | Ctrl+Shift+F, then type. Enter = older match, Shift+Enter = newer, Esc closes |
@@ -108,16 +109,23 @@ cargo build --release
 | Background transparency | Ctrl+Shift+wheel |
 | Open a link (OSC 8 or plain URL) | Ctrl+Click |
 | New tab / close pane (last pane closes the tab) | Ctrl+Shift+T / Ctrl+Shift+W |
+| Switch to tab 1–9 | Ctrl+Shift+1 … Ctrl+Shift+9 |
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab, or Ctrl+PageDown / Ctrl+PageUp; or click the tab |
 | Split right / split down | Ctrl+Shift+E / Ctrl+Shift+O |
 | Focus the pane to the left / right / above / below | Alt+Arrow keys, or click the pane |
 | Resize a split | Drag the divider |
+| Toggle workspace sidebar | Ctrl+Shift+B |
+| Jump to next unseen notification | Ctrl+Shift+U |
+| Open notification list | Ctrl+Shift+I |
+| Previous / next command block | Ctrl+Shift+Up / Ctrl+Shift+Down |
+| Copy command block output | Ctrl+Shift+Y |
+| Ask a coding agent about the selected block or screen | Ctrl+Shift+A |
 | Review changes (the focused repository's uncommitted diff, beside the panes) | Ctrl+Shift+R |
 
 With a single pane, Alt+Arrow goes to the program (fish, readline word jumps); with a single tab, so do Ctrl+Tab and Ctrl+PageUp/PageDown.
 
 The top bar opens the sidebar, command palette and notification history. It shows the focused
-local Git worktree’s changed line counts and opens review when `review.toggle` is available. Pane
+local Git worktree’s changed line counts and opens the code review panel on click. Pane
 headers show the program or agent and offer split and close buttons. Tabs move to the sidebar
 when it is visible.
 
@@ -143,9 +151,17 @@ The config file is `~/.config/twitty/config.json` (`%APPDATA%\twitty\config.json
 | `background_opacity` | 0.2 (very see-through) to 1.0 (solid) |
 | `cursor_style` | `block`, `beam` or `underline`. Programs that set their own cursor shape (vim insert mode, for example) still win. |
 | `cursor_blink` | `true` (default) blinks the cursor, `false` keeps it solid. Programs that ask for a blinking or steady cursor (`CSI n SP q`) override this. The cursor stays solid while you type and while the window is unfocused. |
+| `sidebar` | Where the workspace sidebar sits: `"right"` (default), `"left"`, or `"hidden"`. |
+| `sidebar_width` | Sidebar width in logical pixels (default `220`, clamped to `140`–`480`). |
+| `desktop_notifications` | `true` (default) sends desktop notifications via `notify-send` when an unfocused pane requests attention. |
+| `shell_integration` | `true` (default) loads Twitty's automatic bash/zsh/fish integration for OSC 133 command blocks and OSC 7 working directories. |
+| `restore_session` | `true` (default) restores tabs, splits, directories, titles, and SSH sessions saved on normal window close. |
+| `agent_command` | Command run by "Ask an agent" (`Ctrl+Shift+A`), e.g. `"claude"` or `"codex"`. Unset auto-detects the first installed agent (`claude`, `codex`, `gemini`, `opencode`, `grok`). |
+| `commands` | Array of custom workflow commands listed in the command palette (always trusted). See [Custom commands (workflows)](#custom-commands-workflows). |
 | `control_socket` | `true` (default) listens on a private Unix socket (`0600` in a `0700` dir) for `twitty ctl` and agent tools. |
 | `cmux_compat` | `true` (default) exposes cmux-compatible environment variables (`CMUX_SOCKET_PATH`, `CMUX_WORKSPACE_ID`, `CMUX_SURFACE_ID`) when `control_socket` is enabled. |
 | `claude_hooks` | `true` (default) puts Twitty's `claude` wrapper first on `PATH` inside Twitty shells so Claude Code reports per-pane status and notifications over the socket without editing your Claude settings files. |
+| `theme`, `colors` | Built-in theme name and per-color overrides. See [Themes](#themes). |
 
 Zoom and transparency changes are written back to this file when Twitty closes. Keys Twitty doesn't recognize are left untouched.
 
@@ -238,7 +254,7 @@ When `control_socket` is enabled (the default), Twitty listens on a same-user Un
 - **Notifications & sidebar:** `notification.create`, `notification.create_for_surface`, `notification.create_for_target`, `notification.list`, `notification.clear`, `sidebar.show`, `sidebar.hide`, `sidebar.toggle`, `sidebar.status`
 - **Minimal v1 text commands (hook path):** `ping`, `set_status`, `clear_status`, `list_status`, `notify`, `notify_surface`, `notify_target`
 
-Browser, markdown, settings, and other unrecognized methods return a cmux `unknown_method` error. All existing `twitty ctl` methods (`tab.list`, `tab.new`, `pane.list`, `pane.focus`, `pane.split`, `pane.send-text`, `pane.read`, `notify`, `command.list`, `command.run`) continue to work unchanged.
+Browser, markdown, settings, and other unrecognized methods return a cmux `unknown_method` error. All existing `twitty ctl` methods (`system.ping`, `tab.list`, `tab.new`, `tab.new-ssh`, `pane.list`, `pane.focus`, `pane.split`, `pane.send-text`, `pane.read`, `notify`, `command.list`, `command.run`) continue to work unchanged (clipboard paste via `command.run` is blocked to match OSC 52 clipboard-read protection).
 
 Environment variables set on spawned panes (inherited `TWITTY_*` and `CMUX_*` variables from parent terminals are stripped first):
 
@@ -268,7 +284,7 @@ When `claude_hooks` and `control_socket` are enabled, Twitty writes a `claude` w
 
 ### Shell
 
-On Linux and macOS Twitty starts `$SHELL` as a login shell. On Windows it picks PowerShell 7 (`pwsh.exe`), then Windows PowerShell, then `%COMSPEC%`. Set `TWITTY_SHELL` to override, arguments included:
+On Linux and macOS Twitty starts `$SHELL` (falling back to `/bin/bash`; remote SSH helper sessions start `$SHELL -l`). On Windows it picks PowerShell 7 (`pwsh.exe`), then Windows PowerShell, then `%COMSPEC%`. Set `TWITTY_SHELL` to override, arguments included:
 
 ```bash
 TWITTY_SHELL="bash --norc" twitty

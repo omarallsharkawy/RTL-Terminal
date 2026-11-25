@@ -229,7 +229,9 @@ impl Pane {
         self.terminal.resize(cols, rows);
         self.blocks.refresh(&self.terminal);
         if let Some(ref pty) = self.pty {
-            let _ = pty.resize(cols as u16, rows as u16);
+            let pty_cols = cols.clamp(1, u16::MAX as usize) as u16;
+            let pty_rows = rows.clamp(1, u16::MAX as usize) as u16;
+            let _ = pty.resize(pty_cols, pty_rows);
         }
     }
 }

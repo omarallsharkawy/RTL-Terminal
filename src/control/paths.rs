@@ -19,10 +19,14 @@ pub fn parse_socket_pid(name: &str) -> Option<u32> {
 }
 
 /// Choose the runtime directory from an optional `XDG_RUNTIME_DIR` value and the user's UID:
-/// `$XDG_RUNTIME_DIR/twitty` when set and non-empty, else `/tmp/twitty-<uid>`.
+/// `$XDG_RUNTIME_DIR/twitty` when set, non-empty, and absolute, else `/tmp/twitty-<uid>`.
 pub fn runtime_dir_from(xdg_runtime_dir: Option<OsString>, uid: u32) -> PathBuf {
-    match xdg_runtime_dir.filter(|v| !v.is_empty()) {
-        Some(xdg) => PathBuf::from(xdg).join("twitty"),
+    match xdg_runtime_dir
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+    {
+        Some(xdg) => xdg.join("twitty"),
         None => PathBuf::from(format!("/tmp/twitty-{uid}")),
     }
 }

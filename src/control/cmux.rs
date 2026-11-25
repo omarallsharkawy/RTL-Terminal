@@ -24,7 +24,9 @@ use crate::input::terminal_key_raw;
 use crate::layout::{PaneId, Rect, SplitDir};
 use crate::pty::SpawnOptions;
 use crate::session::pane::{Notification, Pane};
-use crate::session::workspace::{GridGeometry, PaneFactory, Workspace};
+use crate::session::workspace::{
+    GridGeometry, PaneFactory, Workspace, MIN_SPLIT_COLS, MIN_SPLIT_ROWS,
+};
 use crate::shell_integration::{clean_text, MAX_NOTIFY_CHARS};
 use crate::sidebar::{entry_title, pick_tab_agent_status, AgentStatus, Entry, Notice};
 use crate::terminal::Terminal;
@@ -34,6 +36,7 @@ const MAX_METHOD_LEN: usize = 200;
 const MAX_CWD_BYTES: usize = 4096;
 const MAX_TITLE_CHARS: usize = 256;
 const MAX_V1_TOKENS: usize = 64;
+const MAX_KEY_MODS: usize = 16;
 
 /// Every control method supported by Twitty (both Twitty `ctl` and cmux v2).
 pub const SUPPORTED_METHODS: &[&str] = &[
@@ -764,6 +767,9 @@ fn exec_twitty_call(
                     }
                 }
             }
+            if !host.ws().can_split_focused(direction) {
+                return Err(split_failure_reason(host.ws(), direction).1);
+            }
             let options = SpawnOptions {
                 cwd,
                 command,
@@ -771,7 +777,7 @@ fn exec_twitty_call(
             };
             let id = host
                 .split_focused_with(direction, options)
-                .ok_or_else(|| "could not split pane".to_owned())?;
+                .ok_or_else(|| split_failure_reason(host.ws(), direction).1)?;
             Ok((json!({ "pane": id.0, "tab": host.ws().active() }), false))
         }
         MethodCall::Notify { pane, title, body } => {
@@ -782,6 +788,33 @@ fn exec_twitty_call(
         MethodCall::TabNewSsh { destination, name } => {
             Ok((host.new_ssh_tab(&destination, name.as_deref())?, false))
         }
+    }
+}
+
+fn split_failure_reason(ws: &Workspace, dir: SplitDir) -> (&'static str, String) {
+    let Some((cols, rows)) = ws.focused_id().and_then(|id| ws.pane(id)).map(|p| p.size) else {
+        return ("not_found", "no focused pane / لا توجد لوحة محددة".into());
+    };
+    let min_cols = MIN_SPLIT_COLS * 2;
+    let min_rows = MIN_SPLIT_ROWS * 2;
+    match dir {
+        SplitDir::Horizontal if cols < min_cols => (
+            "pane_too_small",
+            format!(
+                "cannot split pane horizontally: pane is too small ({cols}x{rows}; need at least {min_cols} columns) / لا يمكن تقسيم اللوحة أفقياً: اللوحة صغيرة جداً ({cols}x{rows}، يلزم {min_cols} عموداً على الأقل)"
+            ),
+        ),
+        SplitDir::Vertical if rows < min_rows => (
+            "pane_too_small",
+            format!(
+                "cannot split pane vertically: pane is too small ({cols}x{rows}; need at least {min_rows} rows) / لا يمكن تقسيم اللوحة رأسياً: اللوحة صغيرة جداً ({cols}x{rows}، يلزم {min_rows} صفاً على الأقل)"
+            ),
+        ),
+        _ => (
+            "internal",
+            "could not split pane: failed to start shell / تعذر تقسيم اللوحة: فشل تشغيل الصدفة"
+                .into(),
+        ),
     }
 }
 
@@ -1310,13 +1343,18 @@ fn handle_cmux_split(
         return Response::cmux_err(id, "not_found", "No workspace selected");
     }
 
+    if !host.ws().can_split_focused(dir) {
+        let (code, msg) = split_failure_reason(host.ws(), dir);
+        return Response::cmux_err(id, code, msg);
+    }
     let options = SpawnOptions {
         cwd,
         command,
         env: Vec::new(),
     };
     let Some(new_id) = host.split_focused_with(dir, options) else {
-        return Response::cmux_err(id, "internal", "could not split pane");
+        let (code, msg) = split_failure_reason(host.ws(), dir);
+        return Response::cmux_err(id, code, msg);
     };
     let tab_idx = host.ws().active();
     let tab_id = host.ws().tabs()[tab_idx].id;
@@ -1458,6 +1496,13 @@ fn handle_surface_send_key(
                     "'mods' must be an array of strings",
                 );
             };
+            if arr.len() > MAX_KEY_MODS {
+                return Response::cmux_err(
+                    id,
+                    "invalid_params",
+                    format!("'mods' exceeds maximum of {MAX_KEY_MODS} entries"),
+                );
+            }
             for item in arr {
                 let Some(s) = item.as_str() else {
                     return Response::cmux_err(

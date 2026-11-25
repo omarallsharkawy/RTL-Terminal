@@ -1,12 +1,15 @@
 use std::env;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
 use anyhow::{Context, Result};
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
+
+/// Maximum queued input chunks per pane before writes fail fast instead of growing without bound.
+const WRITE_QUEUE_CAPACITY: usize = 256;
 
 /// Variables a parent terminal (or tmux) sets for its own shells. Inherited by a Twitty
 /// started from inside one of them, they make programs talk that terminal's protocols
@@ -139,8 +142,9 @@ pub struct Pty {
     /// Output read from the shell, taken by the UI with `take_output`.
     output: OutputQueue,
     master: Box<dyn MasterPty + Send>,
-    /// Writes go through a dedicated thread so a large paste never blocks the UI.
-    writer: Sender<Vec<u8>>,
+    /// Writes go through a dedicated bounded channel so a large paste never blocks the UI and
+    /// a wedged child cannot grow memory without bound.
+    writer: SyncSender<Vec<u8>>,
     /// Ends the shell when the pane is closed (the reader thread keeps the PTY open otherwise).
     killer: Box<dyn ChildKiller + Send + Sync>,
     program_name: Option<String>,
@@ -233,6 +237,8 @@ impl Pty {
         F: FnMut(&[u8], bool) + Send + 'static,
         E: FnMut(Option<u32>) + Send + 'static,
     {
+        let cols = cols.max(1);
+        let rows = rows.max(1);
         let cwd = options.cwd.as_deref();
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -306,36 +312,62 @@ impl Pty {
             .master
             .take_writer()
             .context("Failed to take PTY writer")?;
-        let (writer, write_rx) = channel::<Vec<u8>>();
-        thread::spawn(move || {
-            for data in write_rx {
-                if pty_writer
-                    .write_all(&data)
-                    .and_then(|_| pty_writer.flush())
-                    .is_err()
-                {
-                    break;
+        let (writer, write_rx) = sync_channel::<Vec<u8>>(WRITE_QUEUE_CAPACITY);
+        if let Err(err) = thread::Builder::new()
+            .name("twitty-pty-writer".into())
+            .spawn(move || {
+                for data in write_rx {
+                    if pty_writer
+                        .write_all(&data)
+                        .and_then(|_| pty_writer.flush())
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            })
+        {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(err).context("Failed to spawn PTY writer thread");
+        }
+
+        struct ChildGuard(Option<Box<dyn portable_pty::Child + Send + Sync>>);
+        impl Drop for ChildGuard {
+            fn drop(&mut self) {
+                if let Some(mut c) = self.0.take() {
+                    let _ = c.kill();
+                    let _ = c.wait();
                 }
             }
-        });
+        }
 
         let output = OutputQueue::default();
         let queue = output.clone();
-        thread::spawn(move || {
-            let mut buf = [0u8; 64 * 1024];
-            loop {
-                match reader.read(&mut buf) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        let bytes = &buf[..n];
-                        let wake = queue.push(bytes);
-                        on_output(bytes, wake);
+        let mut child_guard = ChildGuard(Some(child));
+        thread::Builder::new()
+            .name("twitty-pty-reader".into())
+            .spawn(move || {
+                let mut buf = [0u8; 64 * 1024];
+                loop {
+                    match reader.read(&mut buf) {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            let bytes = &buf[..n];
+                            let wake = queue.push(bytes);
+                            on_output(bytes, wake);
+                        }
+                        Err(_) => break,
                     }
-                    Err(_) => break,
                 }
-            }
-            on_exit(child.wait().ok().map(|status| status.exit_code()));
-        });
+                let exit_code = child_guard
+                    .0
+                    .take()
+                    .and_then(|mut c| c.wait().ok())
+                    .map(|status| status.exit_code());
+                on_exit(exit_code);
+            })
+            .context("Failed to spawn PTY reader thread")?;
 
         Ok(Self {
             output,
@@ -375,16 +407,18 @@ impl Pty {
     }
 
     pub fn write(&self, data: &[u8]) -> Result<()> {
-        self.writer
-            .send(data.to_vec())
-            .map_err(|_| anyhow::anyhow!("PTY writer closed"))
+        match self.writer.try_send(data.to_vec()) {
+            Ok(()) => Ok(()),
+            Err(TrySendError::Full(_)) => Err(anyhow::anyhow!("PTY write queue full")),
+            Err(TrySendError::Disconnected(_)) => Err(anyhow::anyhow!("PTY writer closed")),
+        }
     }
 
     pub fn resize(&self, cols: u16, rows: u16) -> Result<()> {
         self.master
             .resize(PtySize {
-                rows,
-                cols,
+                rows: rows.max(1),
+                cols: cols.max(1),
                 pixel_width: 0,
                 pixel_height: 0,
             })

@@ -624,7 +624,7 @@ impl Terminal {
     /// Grid point of an absolute line and column, if the line is still kept.
     fn abs_point(&self, (line, column): (AbsLine, usize)) -> Option<Point> {
         let view = self.line_view()?;
-        let grid_line = line - self.lines.top();
+        let grid_line = line.checked_sub(self.lines.top())?;
         if line < view.oldest || grid_line >= self.rows as AbsLine {
             return None;
         }
@@ -643,7 +643,7 @@ impl Terminal {
         let (end_line, end_col) = end;
         // The cell before `end`.
         let to = if end_col == 0 {
-            let to = self.abs_point((end_line - 1, 0))?;
+            let to = self.abs_point((end_line.checked_sub(1)?, 0))?;
             Point::new(to.line, Column(self.cols - 1))
         } else {
             self.abs_point((end_line, end_col - 1))?
@@ -659,10 +659,14 @@ impl Terminal {
         if self.line_view().is_none() {
             return;
         }
-        let grid_line = line - self.lines.top();
-        let offset = (-grid_line).clamp(0, self.term.grid().history_size() as AbsLine);
-        let delta = offset - self.display_offset() as AbsLine;
-        self.term.scroll_display(Scroll::Delta(delta as i32));
+        let grid_line = line.saturating_sub(self.lines.top());
+        let offset = grid_line
+            .saturating_neg()
+            .clamp(0, self.term.grid().history_size() as AbsLine);
+        let delta = offset
+            .saturating_sub(self.display_offset() as AbsLine)
+            .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32;
+        self.term.scroll_display(Scroll::Delta(delta));
     }
 
     /// Grid position of the cursor, to tell whether output moved it.
@@ -1054,6 +1058,9 @@ impl Terminal {
             rows: 0,
             next: None,
         };
+        if max_rows == 0 {
+            return done;
+        }
         let bottom = match from {
             None => self.term.bottommost_line().0,
             Some(pos) => match self.text_point(pos, 0, 0) {
@@ -1063,7 +1070,8 @@ impl Terminal {
         };
         let grid = self.term.grid();
         let top = self.term.topmost_line().0;
-        let lowest = top.max(bottom - max_rows.min(i32::MAX as usize) as i32 + 1);
+        let span = i32::try_from(max_rows.saturating_sub(1)).unwrap_or(i32::MAX);
+        let lowest = top.max(bottom.saturating_sub(span));
         let last = Column(self.cols - 1);
         let wraps = |line: i32| grid[Line(line)][last].flags.contains(CellFlags::WRAPLINE);
         let (abs_top, epoch, remap_seq) =
@@ -1127,13 +1135,19 @@ impl Terminal {
                 chars.pop();
             }
             let go_on = chars.is_empty() || f(pos_of(start), &chars);
-            end = start - 1;
+            let Some(prev) = start.checked_sub(1) else {
+                return TextScan {
+                    rows: (i64::from(bottom) - i64::from(start) + 1).max(0) as usize,
+                    next: None,
+                };
+            };
+            end = prev;
             if !go_on {
                 break;
             }
         }
         TextScan {
-            rows: (bottom - end) as usize,
+            rows: (i64::from(bottom) - i64::from(end)).max(0) as usize,
             next: (end >= lowest).then(|| pos_of(end)),
         }
     }
@@ -1400,8 +1414,10 @@ fn build_line(
         })
         .collect();
     for &(from, to, level) in overlay.search {
-        for cell in &mut out[from..=to] {
-            cell.search_match = cell.search_match.max(level);
+        if from <= to && to < out.len() {
+            for cell in &mut out[from..=to] {
+                cell.search_match = cell.search_match.max(level);
+            }
         }
     }
     LineData {

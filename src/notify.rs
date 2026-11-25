@@ -155,8 +155,23 @@ fn show(title: String, body: String) {
             let _slot = slot;
             match command(&title, &body).spawn() {
                 Ok(mut child) => {
-                    if let Err(error) = child.wait() {
-                        tracing::debug!(%error, "notify-send wait failed");
+                    const NOTIFY_TIMEOUT: Duration = Duration::from_secs(10);
+                    let start = Instant::now();
+                    loop {
+                        match child.try_wait() {
+                            Ok(Some(_)) => break,
+                            Ok(None) if start.elapsed() >= NOTIFY_TIMEOUT => {
+                                let _ = child.kill();
+                                let _ = child.wait();
+                                tracing::debug!("notify-send timed out and was stopped");
+                                break;
+                            }
+                            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+                            Err(error) => {
+                                tracing::debug!(%error, "notify-send wait failed");
+                                break;
+                            }
+                        }
                     }
                 }
                 Err(error) => tracing::debug!(%error, "desktop notification unavailable"),

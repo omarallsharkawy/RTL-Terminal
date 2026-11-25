@@ -1,8 +1,13 @@
 use crate::color::{parse_hex, Palette, Rgba};
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+
+/// Maximum `config.json` size read from disk (2 MiB).
+pub const MAX_CONFIG_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
@@ -119,10 +124,15 @@ static WARNINGS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 /// Report a configuration problem: printed to stderr and kept for `take_warnings`, so the
 /// app can also show it in the terminal (a Windows GUI app has no visible stderr).
+/// Control and bidi-override characters are stripped so paths/errors cannot inject escapes.
 pub(crate) fn warn(message: String) {
-    tracing::warn!("{message}");
+    let clean = crate::shell_integration::clean_text(&message, 512);
+    if clean.is_empty() {
+        return;
+    }
+    tracing::warn!("{clean}");
     if let Ok(mut warnings) = WARNINGS.lock() {
-        warnings.push(message);
+        warnings.push(clean);
     }
 }
 
@@ -199,15 +209,20 @@ impl TwittyConfig {
     }
 
     /// `%APPDATA%\twitty\config.json` on Windows, `$XDG_CONFIG_HOME/twitty/config.json`
-    /// (default `~/.config`) elsewhere.
+    /// (default `~/.config`) elsewhere. Relative environment paths are ignored.
     fn config_path() -> Option<PathBuf> {
-        let non_empty = |key: &str| std::env::var_os(key).filter(|v| !v.is_empty());
+        let absolute_dir = |key: &str| {
+            std::env::var_os(key)
+                .filter(|v| !v.is_empty())
+                .map(PathBuf::from)
+                .filter(|p| p.is_absolute())
+        };
         let mut path = if cfg!(windows) {
-            PathBuf::from(non_empty("APPDATA")?)
-        } else if let Some(xdg) = non_empty("XDG_CONFIG_HOME") {
-            PathBuf::from(xdg)
+            absolute_dir("APPDATA")?
+        } else if let Some(xdg) = absolute_dir("XDG_CONFIG_HOME") {
+            xdg
         } else {
-            PathBuf::from(non_empty("HOME")?).join(".config")
+            absolute_dir("HOME")?.join(".config")
         };
         path.push("twitty");
         path.push("config.json");
@@ -218,11 +233,85 @@ impl TwittyConfig {
         Self::config_path().map_or_else(Self::default, |path| Self::load_from(&path))
     }
 
-    /// Read `path`; a missing file gives the defaults. A file that fails to parse also gives
-    /// the defaults, with a warning, and is left untouched by later saves.
+    /// Read `path`; a missing file gives the defaults. A file that fails to parse, is not a
+    /// regular file, or exceeds [`MAX_CONFIG_BYTES`] also gives the defaults, with a warning,
+    /// and is left untouched by later saves.
     pub fn load_from(path: &Path) -> Self {
-        let Ok(content) = fs::read_to_string(path) else {
-            return Self::default();
+        let mut options = OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            // Avoid blocking startup if a FIFO is placed at the config path; symlinks are
+            // still followed so dotfiles links work.
+            options.custom_flags(libc::O_NONBLOCK);
+        }
+        let file = match options.open(path) {
+            Ok(f) => f,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Self::default(),
+            Err(err) => {
+                warn(format!(
+                    "twitty: could not open {} ({err}); it will not be overwritten",
+                    path.display()
+                ));
+                return Self {
+                    keep_file: true,
+                    ..Self::default()
+                };
+            }
+        };
+        let Ok(meta) = file.metadata() else {
+            return Self {
+                keep_file: true,
+                ..Self::default()
+            };
+        };
+        if !meta.file_type().is_file() {
+            warn(format!(
+                "twitty: ignoring {} (not a regular file); it will not be overwritten",
+                path.display()
+            ));
+            return Self {
+                keep_file: true,
+                ..Self::default()
+            };
+        }
+        let mut bytes = Vec::new();
+        if let Err(err) = file
+            .take(MAX_CONFIG_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)
+        {
+            warn(format!(
+                "twitty: could not read {} ({err}); it will not be overwritten",
+                path.display()
+            ));
+            return Self {
+                keep_file: true,
+                ..Self::default()
+            };
+        }
+        if bytes.len() > MAX_CONFIG_BYTES {
+            warn(format!(
+                "twitty: ignoring {} (exceeds {MAX_CONFIG_BYTES} bytes); it will not be overwritten",
+                path.display()
+            ));
+            return Self {
+                keep_file: true,
+                ..Self::default()
+            };
+        }
+        let content = match String::from_utf8(bytes) {
+            Ok(s) => s,
+            Err(err) => {
+                warn(format!(
+                    "twitty: ignoring {} (not valid UTF-8: {err}); it will not be overwritten",
+                    path.display()
+                ));
+                return Self {
+                    keep_file: true,
+                    ..Self::default()
+                };
+            }
         };
         let mut config = match serde_json::from_str::<Self>(&content) {
             Ok(config) => config,
@@ -276,21 +365,54 @@ impl TwittyConfig {
         }
     }
 
-    /// Write the config to `path` through a temporary file, so a crash or a full disk never
-    /// leaves a truncated config behind. Does nothing when the existing file failed to parse.
-    /// A symlinked config (dotfiles) is written through the link, which stays a link.
+    /// Write the config to `path` through a unique temporary file, so a crash, concurrent
+    /// window close, or full disk never leaves a truncated config behind. Does nothing when
+    /// the existing file failed to parse. A symlinked config (dotfiles) is written through
+    /// the link, which stays a link.
     pub fn save_to(&self, path: &Path) -> std::io::Result<()> {
         if self.keep_file {
             return Ok(());
         }
         let resolved = fs::canonicalize(path).ok();
         let path = resolved.as_deref().unwrap_or(path);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
+        let parent = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        fs::create_dir_all(parent)?;
         let json = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
-        let tmp = path.with_extension("json.tmp");
-        fs::write(&tmp, json)?;
-        fs::rename(&tmp, path)
+        let (tmp, mut file) = create_temp_config(parent)?;
+        let result = (|| -> io::Result<()> {
+            file.write_all(json.as_bytes())?;
+            file.sync_all()?;
+            drop(file);
+            fs::rename(&tmp, path)
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&tmp);
+        }
+        result
     }
+}
+
+fn create_temp_config(dir: &Path) -> io::Result<(PathBuf, fs::File)> {
+    static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+    let pid = std::process::id();
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    for _ in 0..64 {
+        let seq = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
+        let tmp = dir.join(format!(".config-{pid}-{seq}.json.tmp"));
+        match options.open(&tmp) {
+            Ok(file) => return Ok((tmp, file)),
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(err),
+        }
+    }
+    Err(io::Error::other("could not create temporary config file"))
 }

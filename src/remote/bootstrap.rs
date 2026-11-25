@@ -124,7 +124,7 @@ pub fn bootstrap(
     // Validate the staged file before replacing the known path, then check the cache again.
     let dir = home_path(".cache/twitty/bin");
     let upload = sh(&format!(
-        "set -eu\numask 077\nmkdir -p {dir}\n\
+        "set -eu\numask 077\nmkdir -p {dir}\nchmod 700 {dir}\n\
          tmp=$(mktemp {dir}/.twitty-remote.XXXXXXXX)\n\
          trap 'rm -f -- \"$tmp\"' EXIT\n\
          cat > \"$tmp\"\n\
