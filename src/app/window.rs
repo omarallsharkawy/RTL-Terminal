@@ -9,6 +9,7 @@ use winit::event_loop::ActiveEventLoop;
 use winit::window::{CursorIcon, UserAttentionType, WindowAttributes};
 
 use super::{git_diff, App};
+use crate::blocks::cards::BlockHover;
 use crate::config::TwittyConfig;
 use crate::layout::{PaneId, Rect, SidebarPosition};
 use crate::render::scene::window_chrome::{ChromeView, PaneHeaderView};
@@ -18,7 +19,9 @@ use crate::sidebar::cards::{Drag, ScrollState, View as SidebarView, DOT_INTERVAL
 use crate::sidebar::{
     git::BranchCache, localized_entry_title, pick_tab_agent_status, Entry, Notice, Placement,
 };
-use crate::ui::chrome::{ChromeAction, PaneHeaderLayout, TopBarLayout, UiLanguage, WindowLayout};
+use crate::ui::chrome::{
+    ChromeAction, PaneFlash, PaneHeaderLayout, TopBarLayout, UiLanguage, WindowLayout,
+};
 use crate::ui::git_diff::DiffStat;
 use crate::ui::hit::{hit_test, Hit, HitGeometry};
 use crate::ui::notifications::NotificationHistory;
@@ -67,6 +70,8 @@ pub(super) struct Window {
     sidebar_drag: Option<Drag>,
     sidebar_tick: Option<Instant>,
     sidebar_dot: usize,
+    block_hover: Option<BlockHover>,
+    pane_flash: PaneFlash,
     diff: Option<(git_diff::Target, DiffStat)>,
     sidebar_scroll: ScrollState,
     branches: BranchCache,
@@ -95,6 +100,8 @@ impl Window {
             sidebar_drag: None,
             sidebar_tick: None,
             sidebar_dot: 0,
+            block_hover: None,
+            pane_flash: PaneFlash::default(),
             diff: None,
             sidebar_scroll: ScrollState::default(),
             branches: BranchCache::default(),
@@ -153,6 +160,7 @@ impl Window {
         renderer.set_opacity(config.background_opacity);
         renderer.set_cursor_style(config.cursor_style.clone());
         renderer.set_palette(config.palette());
+        renderer.set_block_cards(config.block_cards);
         self.sidebar = Placement::new(config.sidebar.parse().unwrap_or_default());
         self.sidebar_width = config.sidebar_width;
         self.top_bar = config.top_bar;
@@ -268,6 +276,30 @@ impl Window {
             self.tab_hover = tab;
             self.request_redraw();
         }
+    }
+
+    pub(super) fn set_block_hover(&mut self, hover: Option<BlockHover>) {
+        if self.block_hover != hover {
+            self.block_hover = hover;
+            if let Some(ref mut r) = self.renderer {
+                r.set_block_hover(hover);
+            }
+            self.request_redraw();
+        }
+    }
+
+    pub(super) fn flash_pane(&mut self, id: PaneId) {
+        self.pane_flash.trigger(id, Instant::now());
+        self.request_redraw();
+    }
+
+    pub(super) fn tick_pane_flash(&mut self, now: Instant) -> Option<Instant> {
+        let was_active = self.pane_flash.is_active();
+        let next = self.pane_flash.tick(now);
+        if was_active {
+            self.request_redraw();
+        }
+        next
     }
 
     /// The sidebar is on screen.
@@ -468,6 +500,13 @@ impl Window {
     /// Pane `id` was closed: drop what the renderer cached for it.
     pub(super) fn forget_pane(&mut self, id: PaneId) {
         self.notifications.forget(id);
+        self.pane_flash.forget(id);
+        if self.block_hover.is_some_and(|h| h.pane == id) {
+            self.block_hover = None;
+            if let Some(r) = self.renderer.as_mut() {
+                r.set_block_hover(None);
+            }
+        }
         if let Some(r) = self.renderer.as_mut() {
             r.forget_pane(id);
         }
@@ -514,7 +553,11 @@ impl Window {
             gap: r.divider_gap(),
             slop: (r.metrics().scale * 3.0).max(2.0),
         };
-        hit_test(&geometry, ws.active_tab().map(|t| &t.root), x, y)
+        let zoomed_root = ws.zoomed_pane().map(crate::layout::Node::Leaf);
+        let root = zoomed_root
+            .as_ref()
+            .or_else(|| ws.active_tab().map(|t| &t.root));
+        hit_test(&geometry, root, x, y)
     }
 
     /// The cell of pane `id` (drawn in `rect`) under `(x, y)`, and which side of it.
@@ -625,6 +668,8 @@ impl Window {
             self.sidebar_tick = None;
             self.sidebar_dot = 0;
         }
+        let now = Instant::now();
+        let zoomed_id = ws.zoomed_pane();
         let pane_headers = ws
             .active_layout(self)
             .into_iter()
@@ -633,7 +678,9 @@ impl Window {
                 let layout = self.pane_layout(rect);
                 let focused = ws.focused_id() == Some(id);
                 let attention = pane.meta.needs_attention();
-                if layout.header.h == 0.0 && !attention {
+                let zoomed = zoomed_id == Some(id);
+                let flash = self.pane_flash.intensity(id, now);
+                if layout.header.h == 0.0 && !attention && flash <= 0.0 {
                     return None;
                 }
                 let (title, agent) = pane_header_title(pane);
@@ -644,6 +691,8 @@ impl Window {
                     agent,
                     focused,
                     attention,
+                    zoomed,
+                    flash,
                 })
             })
             .collect::<Vec<_>>();

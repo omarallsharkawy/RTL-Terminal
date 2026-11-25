@@ -159,9 +159,11 @@ pub fn append_instances(shapes: &[Shape], out: &mut Vec<ShapeInstance>) -> std::
     start..out.len() as u32
 }
 
-/// Back to front above the plain quads. All glyphon text is drawn after both layers.
+/// Back to front: `underlay` draws behind plain quads (command block cards), `chrome` and
+/// `overlay` draw above plain quads. All glyphon text is drawn after every shape layer.
 #[derive(Default)]
 pub struct ShapeLayers {
+    pub underlay: Vec<Shape>,
     pub chrome: Vec<Shape>,
     pub overlay: Vec<Shape>,
 }

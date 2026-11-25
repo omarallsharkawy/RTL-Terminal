@@ -34,6 +34,8 @@ struct SavedTab {
     // Flat JSON lets us prune deep trees without recursing while deserializing them.
     nodes: Vec<SavedNode>,
     focused: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
@@ -77,6 +79,7 @@ impl Session {
                     let mut saved = SavedTab {
                         nodes: Vec::new(),
                         focused: 0,
+                        title: tab.title.clone(),
                     };
                     saved.capture_node(workspace, &tab.root, tab.focused);
                     saved
@@ -127,7 +130,11 @@ impl Session {
                 );
                 Tab {
                     id: (tab_index + 1) as u64,
-                    title: None,
+                    title: tab
+                        .title
+                        .as_deref()
+                        .map(|s| clean_text(s, MAX_TITLE_CHARS))
+                        .filter(|s| !s.is_empty()),
                     focused: focused.unwrap_or_else(|| root.leaves()[0]),
                     root,
                 }
@@ -640,7 +647,11 @@ mod tests {
             version: VERSION,
             active_tab: 0,
             sidebar_visible: true,
-            tabs: vec![SavedTab { nodes, focused }],
+            tabs: vec![SavedTab {
+                nodes,
+                focused,
+                title: None,
+            }],
         }
     }
 
@@ -843,6 +854,7 @@ mod tests {
             session.tabs.push(SavedTab {
                 nodes: vec![leaf(None), leaf(None), split(0, 1)],
                 focused: 0,
+                title: None,
             });
         }
         session.active_tab = MAX_TABS + 1;

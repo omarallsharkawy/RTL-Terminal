@@ -110,9 +110,14 @@ cargo build --release
 | Open a link (OSC 8 or plain URL) | Ctrl+Click |
 | New tab / close pane (last pane closes the tab) | Ctrl+Shift+T / Ctrl+Shift+W |
 | Switch to tab 1–9 | Ctrl+Shift+1 … Ctrl+Shift+9 |
+| Rename tab (empty clears custom title) | Ctrl+Shift+N |
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab, or Ctrl+PageDown / Ctrl+PageUp; or click the tab |
 | Split right / split down | Ctrl+Shift+E / Ctrl+Shift+O |
+| Toggle pane zoom (maximize focused pane within its tab) | Ctrl+Shift+Z |
+| Close other panes in the tab (confirms if any runs a program) | Ctrl+Shift+K |
+| Flash focused pane outline | Ctrl+Shift+H |
 | Focus the pane to the left / right / above / below | Alt+Arrow keys, or click the pane |
+| Jump to newest unread notification (any tab) / oldest unread | Ctrl+Shift+J / Ctrl+Shift+U |
 | Resize a split | Drag the divider |
 | Toggle workspace sidebar | Ctrl+Shift+B |
 | Jump to next unseen notification | Ctrl+Shift+U |
@@ -148,6 +153,7 @@ The config file is `~/.config/twitty/config.json` (`%APPDATA%\twitty\config.json
 | `ui_font_family` | Proportional chrome font. Defaults to the system sans, with bundled Noto Naskh Arabic for fallback. |
 | `ui_accent` | Chrome accent in `#rgb` or `#rrggbb`. Defaults to the theme cursor color. |
 | `top_bar`, `pane_headers` | Both default to `true`. Set either to `false` to hide it. |
+| `block_cards` | `true` (default) renders OSC 133 command blocks on the main screen as rounded cards with a status strip and hover/selected toolbar (copy command, copy output, ask agent, rerun without newline). Set to `false` for thin gutter markers. |
 | `background_opacity` | 0.2 (very see-through) to 1.0 (solid) |
 | `cursor_style` | `block`, `beam` or `underline`. Programs that set their own cursor shape (vim insert mode, for example) still win. |
 | `cursor_blink` | `true` (default) blinks the cursor, `false` keeps it solid. Programs that ask for a blinking or steady cursor (`CSI n SP q`) override this. The cursor stays solid while you type and while the window is unfocused. |

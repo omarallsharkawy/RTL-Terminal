@@ -34,6 +34,10 @@ pub enum InputAction {
     NewTab,
     /// Close the focused pane (its tab, or the window, when it is the last one).
     ClosePane,
+    CloseOtherPanes,
+    TogglePaneZoom,
+    FlashPane,
+    RenameTab,
     /// Switch to the next tab.
     NextTab,
     /// Switch to the previous tab.
@@ -50,6 +54,7 @@ pub enum InputAction {
     ToggleSidebar,
     /// Focus the next pane with an unseen notification.
     NextAttention,
+    JumpUnread,
     /// Open the command palette.
     CommandPalette,
     /// List the notification history in the palette.
@@ -323,6 +328,11 @@ fn ctrl_shift_shortcut(key_code: KeyCode) -> Option<InputAction> {
         KeyCode::KeyG => InputAction::SearchAll,
         KeyCode::KeyT => InputAction::NewTab,
         KeyCode::KeyW => InputAction::ClosePane,
+        KeyCode::KeyK => InputAction::CloseOtherPanes,
+        KeyCode::KeyZ => InputAction::TogglePaneZoom,
+        KeyCode::KeyH => InputAction::FlashPane,
+        KeyCode::KeyN => InputAction::RenameTab,
+        KeyCode::KeyJ => InputAction::JumpUnread,
         KeyCode::KeyE => InputAction::SplitRight,
         KeyCode::KeyO => InputAction::SplitDown,
         KeyCode::KeyP => InputAction::CommandPalette,

@@ -767,7 +767,7 @@ fn exec_twitty_call(
                     }
                 }
             }
-            if !host.ws().can_split_focused(direction) {
+            if pane_too_small(host.ws(), direction) {
                 return Err(split_failure_reason(host.ws(), direction).1);
             }
             let options = SpawnOptions {
@@ -789,6 +789,12 @@ fn exec_twitty_call(
             Ok((host.new_ssh_tab(&destination, name.as_deref())?, false))
         }
     }
+}
+
+/// Whether the focused pane is below the split minimum, judged from its current grid size.
+/// The workspace re-checks against the real layout when it splits.
+fn pane_too_small(ws: &Workspace, dir: SplitDir) -> bool {
+    split_failure_reason(ws, dir).0 == "pane_too_small"
 }
 
 fn split_failure_reason(ws: &Workspace, dir: SplitDir) -> (&'static str, String) {
@@ -1343,7 +1349,7 @@ fn handle_cmux_split(
         return Response::cmux_err(id, "not_found", "No workspace selected");
     }
 
-    if !host.ws().can_split_focused(dir) {
+    if pane_too_small(host.ws(), dir) {
         let (code, msg) = split_failure_reason(host.ws(), dir);
         return Response::cmux_err(id, code, msg);
     }

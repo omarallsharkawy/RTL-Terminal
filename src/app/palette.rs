@@ -27,9 +27,11 @@ use crate::input::{key_shortcut, InputAction};
 use crate::layout::{PaneId, SplitDir};
 use crate::pty::{Pty, SpawnOptions};
 use crate::render::scene::palette::{PaletteHit, PaletteItem, PaletteView};
+use crate::session::workspace::CloseOthers;
 use crate::ui::notifications::{jump_target, palette_item};
 use crate::ui::palette::{
     matches, visible_window_in, PaletteCmd, PaletteEntry, PaletteId, PaletteMode, PaletteState,
+    RenameCmd, RENAME_TAB_PLACEHOLDER,
 };
 use crate::ui::search_all::{
     jump_target as search_target, PaneInfo, Query, SearchAll, SearchHit, PLACEHOLDER, SLICE,
@@ -46,6 +48,8 @@ pub(super) struct OpenPalette {
     /// Built-in and custom commands, in palette order.
     entries: Vec<PaletteEntry>,
     pending_trust: Option<PendingTrust>,
+    close_others: Option<CloseOthers>,
+    rename_tab: Option<u64>,
     /// Results of searching every pane (search mode).
     search: SearchAll,
 }
@@ -95,8 +99,22 @@ impl App {
             workflows,
             entries,
             pending_trust: None,
+            close_others: None,
+            rename_tab: self
+                .ws
+                .active_tab()
+                .map(|tab| tab.id)
+                .filter(|_| mode == PaletteMode::RenameTab),
             search: SearchAll::default(),
         });
+        self.sync_palette();
+    }
+
+    pub(super) fn open_close_others_confirmation(&mut self, plan: CloseOthers) {
+        self.open_palette(PaletteMode::CloseOtherPanes);
+        if let Some(open) = self.palette.as_mut() {
+            open.close_others = Some(plan);
+        }
         self.sync_palette();
     }
 
@@ -175,6 +193,32 @@ impl App {
                     Some("Filter notifications… / دوّر في الإشعارات…".to_string()),
                 )
             }
+            PaletteMode::RenameTab => (
+                vec![PaletteItem {
+                    title_en: "Save tab name (blank clears it)".into(),
+                    title_ar: "احفظ اسم التاب (الاسم الفاضي بيمسحه)".into(),
+                    shortcut: None,
+                    dimmed: false,
+                }],
+                Some(RENAME_TAB_PLACEHOLDER.into()),
+            ),
+            PaletteMode::CloseOtherPanes => (
+                vec![
+                    PaletteItem {
+                        title_en: "Close other panes".into(),
+                        title_ar: "اقفل باقي اللوحات".into(),
+                        shortcut: None,
+                        dimmed: false,
+                    },
+                    PaletteItem {
+                        title_en: "Cancel".into(),
+                        title_ar: "إلغاء".into(),
+                        shortcut: None,
+                        dimmed: false,
+                    },
+                ],
+                Some("Close panes with running programs? / تقفل لوحات فيها برامج شغّالة؟".into()),
+            ),
             PaletteMode::Search => (
                 open.search.rows(&state.query),
                 Some(PLACEHOLDER.to_string()),
@@ -221,6 +265,10 @@ impl App {
                 self.toggle_palette_mode(PaletteMode::Search);
                 return false;
             }
+            Some(InputAction::RenameTab) => {
+                self.toggle_palette_mode(PaletteMode::RenameTab);
+                return false;
+            }
             _ => {}
         }
         let modifiers = self.modifiers;
@@ -264,6 +312,29 @@ impl App {
                     }
                     PaletteCmd::Close => self.close_palette(),
                     PaletteCmd::None | PaletteCmd::Run(_) => self.sync_palette(),
+                }
+            }
+            PaletteMode::RenameTab => match open.state.rename_key(key, text, modifiers) {
+                RenameCmd::Edit => self.sync_palette(),
+                RenameCmd::Cancel => self.close_palette(),
+                RenameCmd::Save(title) => self.save_tab_title(title),
+            },
+            PaletteMode::CloseOtherPanes => {
+                // Confirmation is a fixed choice. Only navigation, Enter and Escape affect it.
+                if matches!(
+                    key,
+                    Key::Named(
+                        NamedKey::ArrowUp
+                            | NamedKey::ArrowDown
+                            | NamedKey::Enter
+                            | NamedKey::Escape
+                    )
+                ) {
+                    match open.state.key_list(2, key, None, modifiers) {
+                        PaletteCmd::Choose(0) => self.confirm_close_others(),
+                        PaletteCmd::Choose(_) | PaletteCmd::Close => self.close_palette(),
+                        _ => self.sync_palette(),
+                    }
                 }
             }
             PaletteMode::Search => {}
@@ -318,6 +389,20 @@ impl App {
                 }
                 false
             }
+            PaletteMode::RenameTab => {
+                let title = open.state.tab_title();
+                self.save_tab_title(title);
+                false
+            }
+            PaletteMode::CloseOtherPanes => {
+                let shown = visible_window_in(2, open.state.selected, self.palette_capacity());
+                if shown.start + row == 0 {
+                    self.confirm_close_others();
+                } else {
+                    self.close_palette();
+                }
+                false
+            }
             PaletteMode::Search => {
                 let hits = open.search.hits();
                 let shown = visible_window_in(hits.len(), state.selected, self.palette_capacity());
@@ -325,6 +410,26 @@ impl App {
                 self.jump_to_hit(hit);
                 false
             }
+        }
+    }
+
+    fn save_tab_title(&mut self, title: Option<String>) {
+        let tab = self.palette.as_ref().and_then(|open| open.rename_tab);
+        self.close_palette();
+        if let Some(index) = tab.and_then(|id| self.ws.tab_index_by_id(id)) {
+            self.ws.rename_tab(index, title);
+            self.refresh_window_title();
+        }
+    }
+
+    fn confirm_close_others(&mut self) {
+        let plan = self
+            .palette
+            .as_mut()
+            .and_then(|open| open.close_others.take());
+        self.close_palette();
+        if let Some(plan) = plan {
+            self.close_other_panes(plan, true);
         }
     }
 
@@ -398,9 +503,7 @@ impl App {
         match target {
             Some(id) => {
                 self.close_palette();
-                if self.focus_pane_by_id(id).is_ok() {
-                    self.window.request_redraw();
-                }
+                self.jump_to_notification(id);
             }
             // A closed pane: nothing to jump to, the list stays open.
             None => self.sync_palette(),
@@ -410,7 +513,7 @@ impl App {
     /// Text committed by an input method while the palette is open (Arabic typing).
     pub(super) fn palette_text(&mut self, text: &str) {
         if let Some(open) = self.palette.as_mut() {
-            if open.pending_trust.is_some() {
+            if open.pending_trust.is_some() || open.state.mode == PaletteMode::CloseOtherPanes {
                 return;
             }
             open.state.push_text(text);
@@ -607,9 +710,9 @@ impl App {
                     command: run_shell_argv(&workflow.spec.command),
                     env: Vec::new(),
                 };
-                let spawned = if self.ws.can_split_focused(SplitDir::Horizontal) {
+                let spawned = if self.can_split_focused(SplitDir::Horizontal) {
                     self.split_focused_with(SplitDir::Horizontal, options)
-                } else if self.ws.can_split_focused(SplitDir::Vertical) {
+                } else if self.can_split_focused(SplitDir::Vertical) {
                     self.split_focused_with(SplitDir::Vertical, options)
                 } else {
                     self.new_tab_with(options)

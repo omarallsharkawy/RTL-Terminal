@@ -20,6 +20,8 @@ pub const MAX_RESULTS: usize = 10;
 /// Longest query kept, in characters.
 const MAX_QUERY_CHARS: usize = 200;
 
+pub const RENAME_TAB_PLACEHOLDER: &str = "Rename tab… / غيّر اسم التاب…";
+
 /// What the palette lists.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum PaletteMode {
@@ -29,6 +31,8 @@ pub enum PaletteMode {
     Notifications,
     /// Lines of every pane matching the query (`search.all`).
     Search,
+    RenameTab,
+    CloseOtherPanes,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -114,7 +118,32 @@ pub enum PaletteCmd {
     Choose(usize),
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum RenameCmd {
+    Edit,
+    Cancel,
+    Save(Option<String>),
+}
+
 impl PaletteState {
+    pub fn rename_key(
+        &mut self,
+        key: &Key,
+        text: Option<&str>,
+        modifiers: ModifiersState,
+    ) -> RenameCmd {
+        match self.key_list(1, key, text, modifiers) {
+            PaletteCmd::Choose(_) => RenameCmd::Save(self.tab_title()),
+            PaletteCmd::Close => RenameCmd::Cancel,
+            _ => RenameCmd::Edit,
+        }
+    }
+
+    pub fn tab_title(&self) -> Option<String> {
+        let title = crate::shell_integration::clean_text(&self.query, MAX_QUERY_CHARS);
+        (!title.is_empty()).then_some(title)
+    }
+
     /// Add typed or committed (IME) text to the query.
     pub fn push_text(&mut self, text: &str) {
         for c in text.chars().filter(|c| !c.is_control()) {

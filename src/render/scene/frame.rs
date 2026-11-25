@@ -15,6 +15,7 @@ use super::cursor::{
 use super::palette::{palette_overlay, PaletteView};
 use super::preedit::{bounds_outside, ImeArea, PreeditState};
 use super::window_chrome::{self, ChromeView};
+use crate::blocks::cards::BlockHover;
 use crate::layout::{PaneId, Rect};
 use crate::render::metrics::CellMetrics;
 use crate::render::row::cache::RowCache;
@@ -70,8 +71,12 @@ pub struct Frame {
     review_texts: Vec<super::review::ReviewText>,
     /// Per pane: the status line text and its top y.
     statuses: Vec<Option<(Buffer, f32)>>,
-    /// Per pane: the badges of its command blocks.
+    /// Per pane: the badges of its command blocks (legacy mode).
     badges: Vec<Vec<Badge>>,
+    /// Floating block card toolbar / badge rectangles whose covered row text must be clipped.
+    block_clips: Vec<(PaneId, Rect)>,
+    /// Dim duration/exit labels inside block card toolbars.
+    block_labels: Vec<UiLabel>,
     /// The preedit box (left, y, width), when one is visible.
     preedit_box: Option<(f32, f32, f32)>,
     /// Clip of the pane the preedit is drawn in.
@@ -149,6 +154,7 @@ fn rect_bounds(r: Rect) -> TextBounds {
 
 /// Lay out the tab bar (with two or more tabs), every pane and the dividers between them.
 /// Rows that changed are reshaped into `cache`; the preedit is shaped into `ime`.
+/// Uses the legacy block markers when panes carry `blocks` (`block_cards = false`).
 pub fn build_frame(
     ctx: &mut DrawContext,
     opts: &FrameOptions,
@@ -157,6 +163,40 @@ pub fn build_frame(
     tabs: &[TabLabel],
     panes: &[PaneFrame],
     dividers: &[Rect],
+) -> Frame {
+    build_frame_inner(ctx, opts, cache, ime, tabs, panes, dividers, true)
+}
+
+/// Like [`build_frame`], rendering command blocks as rounded SDF cards with floating top-right
+/// toolbars (`block_cards = true`).
+#[allow(clippy::too_many_arguments)]
+pub fn build_frame_with_cards(
+    ctx: &mut DrawContext,
+    opts: &FrameOptions,
+    cache: &mut RowCache,
+    ime: &mut PreeditState,
+    tabs: &[TabLabel],
+    panes: &[PaneFrame],
+    dividers: &[Rect],
+    style: UiStyle,
+    font: &UiFont,
+    block_hover: Option<BlockHover>,
+) -> Frame {
+    let mut frame = build_frame_inner(ctx, opts, cache, ime, tabs, panes, dividers, false);
+    frame.add_block_cards(ctx, style, font, panes, block_hover);
+    frame
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_frame_inner(
+    ctx: &mut DrawContext,
+    opts: &FrameOptions,
+    cache: &mut RowCache,
+    ime: &mut PreeditState,
+    tabs: &[TabLabel],
+    panes: &[PaneFrame],
+    dividers: &[Rect],
+    legacy_blocks: bool,
 ) -> Frame {
     let m = ctx.metrics;
     let (width, _) = opts.surface;
@@ -180,7 +220,9 @@ pub fn build_frame(
         let mut rows = Vec::with_capacity(pane.lines.len());
         let shape = effective_cursor_shape(opts.cursor_style, pane.cursor.shape);
         let cursor_focused = opts.window_focused && pane.focused;
-        blocks::tint_quads(ctx, pane, &mut quads);
+        if legacy_blocks {
+            blocks::tint_quads(ctx, pane, &mut quads);
+        }
 
         for (r, line) in pane.lines.iter().enumerate() {
             let y = origin_y + r as f32 * m.line_height;
@@ -237,9 +279,13 @@ pub fn build_frame(
             }
         }
         cache.put(pane.id, rows);
-        blocks::mark_quads(ctx, pane, &mut quads);
-        let status_row = pane.status.as_ref().and(pane.lines.len().checked_sub(1));
-        badges.push(blocks::badges(ctx, pane, status_row, &mut quads));
+        if legacy_blocks {
+            blocks::mark_quads(ctx, pane, &mut quads);
+            let status_row = pane.status.as_ref().and(pane.lines.len().checked_sub(1));
+            badges.push(blocks::badges(ctx, pane, status_row, &mut quads));
+        } else {
+            badges.push(Vec::new());
+        }
     }
 
     let (preedit_box, ime_area) = ime.layout(ctx, ime_caret, &mut quads, &mut focused_cursor);
@@ -278,6 +324,8 @@ pub fn build_frame(
         review_texts: Vec::new(),
         statuses,
         badges,
+        block_clips: Vec::new(),
+        block_labels: Vec::new(),
         preedit_box,
         ime_bounds,
         metrics: m,
@@ -289,6 +337,31 @@ pub fn build_frame(
 }
 
 impl Frame {
+    /// Draw command block cards into `shapes.underlay` and floating toolbars into `shapes.chrome`.
+    pub fn add_block_cards(
+        &mut self,
+        ctx: &mut DrawContext,
+        style: UiStyle,
+        font: &UiFont,
+        panes: &[PaneFrame],
+        block_hover: Option<BlockHover>,
+    ) {
+        for pane in panes {
+            let status_row = pane.status.as_ref().and(pane.lines.len().checked_sub(1));
+            let scene = blocks::draw_cards(
+                ctx,
+                style,
+                font,
+                pane,
+                status_row,
+                block_hover,
+                &mut self.shapes,
+            );
+            self.block_clips.extend(scene.clips);
+            self.block_labels.extend(scene.labels);
+        }
+    }
+
     /// Draw the toolbar and pane headers. The `PaneFrame` rectangles already describe grids.
     pub fn add_chrome(
         &mut self,
@@ -299,7 +372,7 @@ impl Frame {
     ) {
         self.chrome_labels = window_chrome::draw(ctx, style, font, view, &mut self.shapes.chrome);
         self.pane_clips.extend(view.panes.iter().filter_map(|pane| {
-            let edge = if pane.attention {
+            let edge = if pane.attention || pane.flash > 0.0 {
                 2.0
             } else if pane.focused && pane.layout.header.h > 0.0 {
                 1.0
@@ -407,6 +480,11 @@ impl Frame {
         };
         for ((pane, status), badges) in panes.iter().zip(&self.statuses).zip(&self.badges) {
             let bounds = pane_bounds(pane);
+            let card_holes: Vec<Rect> = self
+                .block_clips
+                .iter()
+                .filter_map(|&(id, rect)| (id == pane.id).then_some(rect))
+                .collect();
             let rows = pane.lines.len();
             for r in 0..rows {
                 if status.is_some() && r + 1 == rows {
@@ -427,8 +505,33 @@ impl Frame {
                     (_, Some(b)) => (bounds_outside(bounds, b.left, b.right), 1),
                     _ => ([bounds, bounds], 1),
                 };
+                let row_bounds: Vec<TextBounds> = if card_holes.is_empty() {
+                    parts[..n].to_vec()
+                } else {
+                    let row_top = y.floor() as i32;
+                    let row_bottom = (y + m.line_height).ceil() as i32;
+                    let mut clipped: Vec<TextBounds> = parts[..n]
+                        .iter()
+                        .map(|&b| TextBounds {
+                            top: b.top.max(row_top),
+                            bottom: b.bottom.min(row_bottom),
+                            ..b
+                        })
+                        .filter(|b| b.left < b.right && b.top < b.bottom)
+                        .collect();
+                    for &hole in &card_holes {
+                        if hole.bottom() <= y || hole.y >= y + m.line_height {
+                            continue;
+                        }
+                        clipped = clipped
+                            .into_iter()
+                            .flat_map(|b| bounds_around(b, hole))
+                            .collect();
+                    }
+                    clipped
+                };
                 for seg in &cached_row.segments {
-                    for &bounds in &parts[..n] {
+                    for &bounds in &row_bounds {
                         runs.push(TextRun {
                             buffer: &seg.buffer,
                             left: pane.rect.x + m.padding_left + seg.seg_x,
@@ -501,6 +604,7 @@ impl Frame {
             }
         }
         runs.extend(self.review_labels.iter().map(ui_run));
+        runs.extend(self.block_labels.iter().map(ui_run));
         runs.extend(self.chrome_labels.iter().map(ui_run));
         if let Some(hole) = self.overlay_rect {
             runs = clip_runs(runs, hole);

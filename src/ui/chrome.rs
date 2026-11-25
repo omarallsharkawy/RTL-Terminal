@@ -1,11 +1,65 @@
 //! Shared physical-pixel geometry for painting and hit testing the window chrome.
 
+use std::time::{Duration, Instant};
+
 use crate::layout::{sidebar_layout, PaneId, Rect, SidebarPosition};
 use crate::render::CellMetrics;
 use crate::ui::git_diff::DiffStat;
 
 pub const TOP_BAR_HEIGHT: f32 = 36.0;
 pub const PANE_HEADER_HEIGHT: f32 = 28.0;
+/// How long `pane.flash` highlights a pane's outline.
+pub const PANE_FLASH_DURATION: Duration = Duration::from_millis(450);
+const PANE_FLASH_STEP: Duration = Duration::from_millis(16);
+
+/// Brief outline flash on a pane (`pane.flash`, and after jumping to an unread notification).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PaneFlash {
+    active: Option<(PaneId, Instant)>,
+}
+
+impl PaneFlash {
+    pub fn trigger(&mut self, pane: PaneId, now: Instant) {
+        self.active = Some((pane, now));
+    }
+
+    pub fn forget(&mut self, pane: PaneId) {
+        if self.active.is_some_and(|(id, _)| id == pane) {
+            self.active = None;
+        }
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.active.is_some()
+    }
+
+    /// Strength in `0.0..=1.0` for `pane` at `now` (0.0 when inactive or expired).
+    pub fn intensity(&self, pane: PaneId, now: Instant) -> f32 {
+        let Some((id, started)) = self.active else {
+            return 0.0;
+        };
+        if id != pane {
+            return 0.0;
+        }
+        let elapsed = now.saturating_duration_since(started);
+        if elapsed >= PANE_FLASH_DURATION {
+            return 0.0;
+        }
+        let remaining = 1.0 - elapsed.as_secs_f32() / PANE_FLASH_DURATION.as_secs_f32();
+        remaining * remaining
+    }
+
+    /// Expire finished flashes and return the next redraw deadline while active.
+    pub fn tick(&mut self, now: Instant) -> Option<Instant> {
+        let (_, started) = self.active?;
+        let end = started + PANE_FLASH_DURATION;
+        if now >= end {
+            self.active = None;
+            return None;
+        }
+        Some((now + PANE_FLASH_STEP).min(end))
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChromeAction {

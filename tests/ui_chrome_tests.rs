@@ -106,6 +106,10 @@ fn every_icon_stays_in_its_box() {
         Icon::Terminal,
         Icon::Agent,
         Icon::Diff,
+        Icon::Copy,
+        Icon::CopyCommand,
+        Icon::Rerun,
+        Icon::Zoom,
     ] {
         for scale in [1.0, 1.25, 1.5, 2.0] {
             for size in [12.0, 16.0, 20.0] {

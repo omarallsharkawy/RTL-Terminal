@@ -10,6 +10,7 @@ use crate::layout::{FocusDir, PaneId, Rect, SplitDir};
 use crate::pty::SpawnOptions;
 use crate::remote::Target;
 use crate::session::spawn::ShellFactory;
+use crate::session::workspace::CloseOthers;
 use winit::event_loop::EventLoopProxy;
 
 fn shell_factory<'a>(
@@ -100,6 +101,12 @@ impl App {
         Some(id)
     }
 
+    pub(super) fn can_split_focused(&self, dir: SplitDir) -> bool {
+        self.window
+            .grid()
+            .is_some_and(|grid| self.ws.can_split_focused(grid, dir))
+    }
+
     pub(super) fn split_focused(&mut self, dir: SplitDir) {
         self.split_focused_with(dir, SpawnOptions::default());
     }
@@ -152,7 +159,11 @@ impl App {
     }
 
     pub(super) fn focus_pane(&mut self, id: PaneId) {
+        let was_zoomed = self.ws.zoomed_pane().is_some();
         if let Some(old) = self.ws.focus_pane(id) {
+            if was_zoomed {
+                self.apply_layout();
+            }
             self.focus_changed(Some(old), id);
         }
     }
@@ -160,11 +171,15 @@ impl App {
     /// Focus pane `id` across tabs in one atomic step (no intermediate focus events on the
     /// target tab's previously focused pane). Returns the tab index holding `id`.
     pub(super) fn focus_pane_by_id(&mut self, id: PaneId) -> Result<usize, String> {
+        let was_zoomed = self.ws.zoomed_pane().is_some();
         let Some((tab_index, old, tab_changed)) = self.ws.focus_any_pane(id) else {
             return Err(format!("unknown pane: {}", id.0));
         };
         if tab_changed {
             self.reset_pointer_gesture();
+        }
+        if was_zoomed && self.ws.zoomed_pane().is_none() {
+            self.apply_layout();
         }
         self.focus_changed(old, id);
         if old == Some(id) {
@@ -176,10 +191,14 @@ impl App {
 
     pub(super) fn set_active_tab(&mut self, index: usize) {
         let old = self.focused_id();
+        let was_zoomed = self.ws.zoomed_pane().is_some();
         if !self.ws.set_active_tab(index) {
             return;
         }
         self.reset_pointer_gesture();
+        if was_zoomed {
+            self.apply_layout();
+        }
         if let Some(new) = self.focused_id() {
             self.focus_changed(old, new);
         }
@@ -193,16 +212,56 @@ impl App {
 
     /// Focus the pane with the oldest unseen notification, switching tabs when needed.
     pub(super) fn focus_next_attention(&mut self) {
-        let Some((_, id)) = self.ws.oldest_attention() else {
-            return;
-        };
-        let _ = self.focus_pane_by_id(id);
-        if self.window_focused {
-            if let Some(pane) = self.ws.pane_mut(id) {
-                pane.meta.attention = None;
+        if let Some((_, id)) = self.ws.oldest_attention() {
+            self.jump_to_notification(id);
+        }
+    }
+
+    pub(super) fn focus_newest_attention(&mut self) {
+        if let Some(id) = self.ws.newest_attention() {
+            self.jump_to_notification(id);
+        }
+    }
+
+    pub(super) fn jump_to_notification(&mut self, id: PaneId) {
+        if self.focus_pane_by_id(id).is_ok() {
+            if self.window_focused {
+                if let Some(pane) = self.ws.pane_mut(id) {
+                    pane.meta.attention = None;
+                    pane.meta.mark_agent_input_seen();
+                }
+                self.notification_history.mark_seen(id);
+            }
+            self.window.flash_pane(id);
+        }
+    }
+
+    pub(super) fn toggle_pane_zoom(&mut self) {
+        if self.ws.toggle_pane_zoom() {
+            self.reset_pointer_gesture();
+            self.apply_layout();
+        }
+    }
+
+    pub(super) fn request_close_others(&mut self) {
+        if let Some(plan) = self.ws.other_panes() {
+            if plan.confirm {
+                self.open_close_others_confirmation(plan);
+            } else {
+                self.close_other_panes(plan, false);
             }
         }
-        self.window.request_redraw();
+    }
+
+    pub(super) fn close_other_panes(&mut self, plan: CloseOthers, confirmed: bool) {
+        let Some(removed) = self.ws.close_others(plan, confirmed) else {
+            return;
+        };
+        for id in removed {
+            self.window.forget_pane(id);
+            self.pointer.forget(id);
+        }
+        self.apply_layout();
     }
 
     pub(super) fn focus_direction(&mut self, dir: FocusDir) {

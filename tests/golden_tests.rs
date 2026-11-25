@@ -351,6 +351,7 @@ fn sdf_shapes_render_rounded_border_shadow_and_capsule() {
         Err(err) => panic!("shape pixels require an offscreen adapter: {err:#}"),
     };
     let layers = ShapeLayers {
+        underlay: Vec::new(),
         chrome: vec![Shape::rounded(
             Rect::new(0.0, 0.0, 64.0, 48.0),
             0.0,

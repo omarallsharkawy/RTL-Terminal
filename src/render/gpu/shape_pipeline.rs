@@ -10,7 +10,7 @@ pub(crate) struct ShapeRenderer {
     bind_group: wgpu::BindGroup,
     buffer: Option<(wgpu::Buffer, usize)>,
     instances: Vec<ShapeInstance>,
-    layers: [Range<u32>; 2],
+    layers: [Range<u32>; 3],
 }
 
 impl ShapeRenderer {
@@ -70,7 +70,7 @@ impl ShapeRenderer {
             bind_group,
             buffer: None,
             instances: Vec::new(),
-            layers: [0..0, 0..0],
+            layers: [0..0, 0..0, 0..0],
         }
     }
 
@@ -82,6 +82,7 @@ impl ShapeRenderer {
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, shapes: &ShapeLayers) {
         self.instances.clear();
         self.layers = [
+            append_instances(&shapes.underlay, &mut self.instances),
             append_instances(&shapes.chrome, &mut self.instances),
             append_instances(&shapes.overlay, &mut self.instances),
         ];
@@ -108,11 +109,19 @@ impl ShapeRenderer {
         }
     }
 
+    pub fn render_underlay<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
+        self.render_layers(pass, &self.layers[..1]);
+    }
+
     pub fn render<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
+        self.render_layers(pass, &self.layers[1..]);
+    }
+
+    fn render_layers<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, layers: &[Range<u32>]) {
         let Some((buffer, _)) = &self.buffer else {
             return;
         };
-        for layer in self.layers.iter().filter(|layer| !layer.is_empty()) {
+        for layer in layers.iter().filter(|layer| !layer.is_empty()) {
             let stride = size_of::<ShapeInstance>() as u64;
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.bind_group, &[]);

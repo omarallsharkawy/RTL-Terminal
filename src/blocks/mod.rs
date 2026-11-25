@@ -13,6 +13,7 @@
 //! blocks from that line down are dropped.
 
 pub mod anchor;
+pub mod cards;
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -67,6 +68,11 @@ impl Block {
         }
     }
 
+    /// Stable identifier of this block within its pane.
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
     /// The command started (C) and has not ended (D).
     pub fn is_running(&self) -> bool {
         self.end.is_none()
@@ -108,6 +114,21 @@ impl Block {
         }
         if let Some(d) = self.duration().filter(|d| d.as_secs() >= 1) {
             parts.push(format_duration(d));
+        }
+        (!parts.is_empty()).then(|| parts.join(" · "))
+    }
+
+    /// Dim duration and exit code label for the block card toolbar, e.g. `"2.3s · exit 1"`.
+    pub fn toolbar_meta(&self) -> Option<String> {
+        if self.is_running() {
+            return None;
+        }
+        let mut parts = Vec::new();
+        if let Some(d) = self.duration().filter(|d| d.as_millis() >= 100) {
+            parts.push(format_duration(d));
+        }
+        if let Some(code) = self.exit.filter(|&c| c != 0) {
+            parts.push(format!("exit {code}"));
         }
         (!parts.is_empty()).then(|| parts.join(" · "))
     }
@@ -156,6 +177,8 @@ pub enum BlockStatus {
 /// viewport: a block that starts above it has a negative `first_row`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct BlockDecor {
+    /// Stable per-pane block id (`0` for the waiting prompt).
+    pub id: u64,
     /// Row of the prompt line, which gets the separator above it and the badge.
     pub first_row: i64,
     /// Last row of the block (inclusive).
@@ -163,6 +186,10 @@ pub struct BlockDecor {
     pub status: BlockStatus,
     pub selected: bool,
     pub badge: Option<String>,
+    /// Dim duration/exit label for the card toolbar (e.g. `"2.3s · exit 1"`).
+    pub meta: Option<String>,
+    /// Whether this block has a known command string (enables copy-command and rerun).
+    pub has_command: bool,
 }
 
 /// A block's text, e.g. for asking an agent about it.
@@ -474,6 +501,16 @@ impl BlockList {
         self.selected().or_else(|| self.blocks.back())
     }
 
+    /// Look up a block by its stable per-pane `id`.
+    pub fn block_by_id(&self, id: u64) -> Option<&Block> {
+        self.blocks.iter().find(|b| b.id == id)
+    }
+
+    /// The command, output and exit status of the block with `id`.
+    pub fn block_text_by_id(&self, id: u64, term: &Terminal) -> Option<BlockText> {
+        self.text(self.block_by_id(id)?, term)
+    }
+
     /// The text of `selected_or_last`.
     pub fn selected_or_last_text(&self, term: &Terminal) -> Option<BlockText> {
         self.text(self.selected_or_last()?, term)
@@ -516,27 +553,59 @@ impl BlockList {
                 continue;
             }
             out.push(BlockDecor {
+                id: block.id,
                 first_row: first,
                 last_row: last,
                 status: block.status(),
                 selected: self.selected == Some(block.id),
                 badge: block.badge(),
+                meta: block.toolbar_meta(),
+                has_command: block
+                    .command
+                    .as_deref()
+                    .is_some_and(|c| !rerun_text(c).is_empty()),
             });
         }
         if let Some(pending) = &self.pending {
             let first = row(pending.prompt.line);
             if (0..rows).contains(&first) {
                 out.push(BlockDecor {
+                    id: 0,
                     first_row: first,
                     last_row: first,
                     status: BlockStatus::Prompt,
                     selected: false,
                     badge: None,
+                    meta: None,
+                    has_command: false,
                 });
             }
         }
         out
     }
+}
+
+/// Prepare a command line to be inserted into the shell prompt for rerun: never contains a
+/// newline, carriage return, NUL, or control/bidi-override characters, and stays bounded.
+pub fn rerun_text(command: &str) -> String {
+    let single_line: String = command
+        .chars()
+        .map(|c| match c {
+            '\r' | '\n' | '\u{2028}' | '\u{2029}' => ' ',
+            _ => c,
+        })
+        .collect();
+    crate::shell_integration::clean_text(&single_line, crate::shell_integration::MAX_COMMAND_CHARS)
+}
+
+/// Encode a command for rerun insertion into the focused prompt without executing it (no newline;
+/// respects bracketed paste and strips paste-end escape sequences).
+pub fn encode_rerun(command: &str, bracketed: bool) -> Vec<u8> {
+    let text = rerun_text(command);
+    if text.is_empty() {
+        return Vec::new();
+    }
+    crate::input::encode_paste(&text, bracketed)
 }
 
 /// `text` without the blank lines (and spaces) it ends with.

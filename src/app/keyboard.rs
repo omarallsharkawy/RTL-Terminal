@@ -61,6 +61,19 @@ impl App {
         {
             return false;
         }
+        // Holding a pane command should not toggle zoom repeatedly or jump past unread panes.
+        if event.repeat
+            && matches!(
+                action,
+                Some(
+                    InputAction::TogglePaneZoom
+                        | InputAction::CloseOtherPanes
+                        | InputAction::JumpUnread
+                )
+            )
+        {
+            return false;
+        }
         match route_key(action, search_open) {
             KeyRoute::SearchBar => {
                 self.handle_search_key(id, event);
@@ -128,6 +141,11 @@ impl App {
             InputAction::Search => self.open_search(id),
             InputAction::NewTab => self.new_tab(),
             InputAction::ClosePane => return self.close_pane(id),
+            InputAction::CloseOtherPanes => self.request_close_others(),
+            InputAction::TogglePaneZoom => self.toggle_pane_zoom(),
+            InputAction::FlashPane => self.window.flash_pane(id),
+            InputAction::RenameTab => self.open_palette(PaletteMode::RenameTab),
+            InputAction::JumpUnread => self.focus_newest_attention(),
             InputAction::NextTab => self.cycle_tab(1),
             InputAction::PrevTab => self.cycle_tab(-1),
             InputAction::SplitRight => self.split_focused(SplitDir::Horizontal),

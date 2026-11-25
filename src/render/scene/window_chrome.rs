@@ -21,6 +21,9 @@ pub struct PaneHeaderView {
     pub agent: bool,
     pub focused: bool,
     pub attention: bool,
+    pub zoomed: bool,
+    /// Outline flash intensity in `0.0..=1.0` (`pane.flash` / after notification jump).
+    pub flash: f32,
 }
 
 pub struct ChromeView<'a> {
@@ -359,11 +362,78 @@ impl Chrome<'_, '_> {
             };
             pictogram.draw(icon, self.ctx.color(s.text_dim), self.shapes);
             let pad = s.px(6.0);
-            let (left, right) = if rtl {
+            let (mut left, mut right) = if rtl {
                 (title.x + pad, icon.x - pad)
             } else {
                 (icon.right() + pad, title.right() - pad)
             };
+            if pane.zoomed && right - left > s.px(26.0) {
+                let pill_h = s.px(18.0).min((title.h - s.px(4.0)).max(0.0));
+                let pill_y = title.y + (title.h - pill_h) * 0.5;
+                let pill_pad = s.px(5.0);
+                let icon_side = s.px(12.0).min(pill_h);
+                let full_text = "Zoom · مكبّرة";
+                let short_text = "Zoom";
+                let full_buf = self.font.shape(
+                    self.ctx.font_system,
+                    UiSize::Small,
+                    UiWeight::Semibold,
+                    s.scale,
+                    full_text,
+                );
+                let short_buf = self.font.shape(
+                    self.ctx.font_system,
+                    UiSize::Small,
+                    UiWeight::Semibold,
+                    s.scale,
+                    short_text,
+                );
+                let avail = (right - left - pad).max(0.0);
+                let full_w = pill_pad * 2.0 + icon_side + s.px(4.0) + label_width(&full_buf).ceil();
+                let short_w =
+                    pill_pad * 2.0 + icon_side + s.px(4.0) + label_width(&short_buf).ceil();
+                let icon_only_w = pill_pad * 2.0 + icon_side;
+                let (pill_w, text_buf) = if full_w <= avail * 0.55 && full_w <= avail {
+                    (full_w, Some(full_buf))
+                } else if short_w <= avail * 0.55 && short_w <= avail {
+                    (short_w, Some(short_buf))
+                } else {
+                    (icon_only_w.min(avail), None)
+                };
+                if pill_w >= icon_only_w * 0.8 && pill_h > 0.0 {
+                    let pill_x = if rtl { left } else { right - pill_w };
+                    let pill = Rect::new(pill_x, pill_y, pill_w, pill_h);
+                    self.shapes.push(Shape::RoundedRect {
+                        rect: pill,
+                        radii: [s.px(RADIUS_6); 4],
+                        fill: self.ctx.color(s.accent_tint(s.bg2)),
+                        border: Some(Border {
+                            width: s.px(1.0),
+                            color: self.ctx.color(s.accent),
+                        }),
+                        shadow: None,
+                    });
+                    let z_icon = Rect::new(
+                        pill.x + pill_pad,
+                        pill.y + (pill.h - icon_side) * 0.5,
+                        icon_side,
+                        icon_side,
+                    );
+                    Icon::Zoom.draw(z_icon, self.ctx.color(s.text), self.shapes);
+                    if let Some(buf) = text_buf {
+                        let lx = z_icon.right() + s.px(4.0);
+                        let label_rect =
+                            Rect::new(lx, pill.y, (pill.right() - pill_pad - lx).max(0.0), pill.h);
+                        self.labels
+                            .push(UiLabel::new(buf, label_rect, UiAlign::Left, s.text));
+                    }
+                    if rtl {
+                        left = pill.right() + pad;
+                    } else {
+                        right = pill.x - pad;
+                    }
+                }
+            }
             let label = Rect::new(left, title.y, (right - left).max(0.0), title.h);
             self.label(
                 label,
@@ -395,18 +465,35 @@ impl Chrome<'_, '_> {
                 );
             }
         }
-        if (rect.h > 0.0 && pane.focused) || pane.attention {
+        let flash = pane.flash.clamp(0.0, 1.0);
+        if (rect.h > 0.0 && pane.focused) || pane.attention || flash > 0.0 {
             let outer = Rect::new(rect.x, rect.y, rect.w, pane.layout.grid.bottom() - rect.y);
-            self.shapes.push(Shape::RoundedRect {
-                rect: outer,
-                radii: [0.0; 4],
-                fill: [0.0; 4],
-                border: Some(Border {
-                    width: s.px(if pane.attention { 2.0 } else { 1.0 }),
-                    color: self.ctx.color(s.accent),
-                }),
-                shadow: None,
-            });
+            if (rect.h > 0.0 && pane.focused) || pane.attention {
+                self.shapes.push(Shape::RoundedRect {
+                    rect: outer,
+                    radii: [0.0; 4],
+                    fill: [0.0; 4],
+                    border: Some(Border {
+                        width: s.px(if pane.attention { 2.0 } else { 1.0 }),
+                        color: self.ctx.color(s.accent),
+                    }),
+                    shadow: None,
+                });
+            }
+            if flash > 0.0 {
+                let mut glow = s.accent.mix(s.text, 0.35 * flash);
+                glow.a = (0.35 + 0.65 * flash).min(1.0);
+                self.shapes.push(Shape::RoundedRect {
+                    rect: outer,
+                    radii: [0.0; 4],
+                    fill: [0.0; 4],
+                    border: Some(Border {
+                        width: s.px(2.0 + 2.0 * flash),
+                        color: self.ctx.color(glow),
+                    }),
+                    shadow: None,
+                });
+            }
         }
     }
 
