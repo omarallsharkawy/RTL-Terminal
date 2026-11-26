@@ -242,6 +242,7 @@ impl App {
                     .ai
                     .apply_save_secret(&keyring, &account, &secret, lang);
             }
+            self.restart_agent_engine_when_idle();
         }
         if let Some(account) = outcome.delete_secret {
             let keyring = twitty_store::SystemSecretStore::new();
@@ -249,6 +250,10 @@ impl App {
             if let Some(state) = self.settings.as_mut() {
                 state.ai.apply_delete_secret(&keyring, &account, lang);
             }
+            self.restart_agent_engine_when_idle();
+        }
+        if outcome.ai_config_changed {
+            self.restart_agent_engine_when_idle();
         }
         if outcome.clear_agent_history {
             self.agent_panel.state.clear_history();

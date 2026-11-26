@@ -7,14 +7,18 @@
 //! `twitty-store`.
 
 use std::path::PathBuf;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::Instant;
 
 use alacritty_terminal::term::TermMode;
 use twitty_ai::context::{AssembleInput, SelectedBlock, DEFAULT_BUDGET_TOKENS};
-use twitty_ai::engine::model::{AgentCommand, AgentEvent, ContextBundle, SessionId, StepId};
+use twitty_ai::engine::model::{
+    AgentCommand, AgentEvent, AgentHandle, ContextBundle, SessionId, StepId,
+};
+use twitty_ai::engine::EngineConfig;
 use twitty_core::redact::redact;
+use twitty_store::SecretStore;
 use winit::event::{KeyEvent, MouseButton};
 use winit::keyboard::PhysicalKey;
 use winit::window::CursorIcon;
@@ -28,9 +32,19 @@ use crate::input::{key_shortcut_with, InputAction};
 use crate::layout::{PaneId, SplitDir};
 use crate::pty::{Pty, SpawnOptions};
 use crate::ui::agent_panel::{
-    spawn_placeholder_engine, width_from_divider_drag, AgentEngineSpawner, AgentPanelAction,
-    AgentPanelHit, AgentPanelLayout, AgentPanelState, AgentPanelView, SpawnEngineFn,
+    width_from_divider_drag, AgentEngineSpawner, AgentPanelAction, AgentPanelHit, AgentPanelLayout,
+    AgentPanelState, AgentPanelView,
 };
+
+/// The real engine (`twitty_ai::engine`), with API keys read from the system keyring.
+struct BuiltInEngine;
+
+impl AgentEngineSpawner for BuiltInEngine {
+    fn spawn(&self, config: EngineConfig) -> Result<AgentHandle, String> {
+        let secrets = Arc::new(twitty_store::SystemSecretStore::new());
+        Ok(twitty_ai::engine::spawn(config, secrets))
+    }
+}
 
 /// Maximum bytes of command output tail sent back to the agent engine (redacted before sending).
 const MAX_COMMAND_OUTPUT_TAIL_BYTES: usize = 8 * 1024;
@@ -57,7 +71,7 @@ pub(super) struct AgentPanelHost {
 
 impl Default for AgentPanelHost {
     fn default() -> Self {
-        Self::with_spawner(Box::new(spawn_placeholder_engine as SpawnEngineFn))
+        Self::with_spawner(Box::new(BuiltInEngine))
     }
 }
 
@@ -142,7 +156,14 @@ impl App {
         if let Some(tx) = &self.agent_panel.cmd_tx {
             return Some(tx.clone());
         }
-        match self.agent_panel.spawner.spawn() {
+        let detected = crate::ui::settings_ai::detect_cli_agents_on_path();
+        let keyring = twitty_store::SystemSecretStore::new();
+        let config = crate::ui::settings_ai::engine_config(
+            &self.config,
+            &detected,
+            |account| matches!(keyring.get(account), Ok(Some(v)) if !v.is_empty()),
+        );
+        match self.agent_panel.spawner.spawn(config) {
             Ok(handle) => {
                 let proxy = self.proxy.clone();
                 let rx = handle.events;
@@ -162,6 +183,14 @@ impl App {
                 tracing::warn!("twitty agent engine failed to start: {err}");
                 None
             }
+        }
+    }
+
+    /// Settings → AI changed (provider, keys, caps, allow-lists): the next request starts a
+    /// fresh engine with the new configuration. A run in progress keeps its engine.
+    pub(super) fn restart_agent_engine_when_idle(&mut self) {
+        if !self.agent_panel.state.is_running() {
+            self.agent_panel.cmd_tx = None;
         }
     }
 

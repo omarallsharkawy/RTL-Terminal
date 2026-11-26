@@ -15,6 +15,7 @@ use twitty_ai::engine::model::{
     FinishReason, ProviderInfo, ProviderKind, ReadTool, SessionId, Step, StepId, StepKind,
     StepStatus, Usage,
 };
+use twitty_ai::engine::EngineConfig;
 use unicode_bidi::{bidi_class, BidiClass};
 use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey};
 
@@ -359,19 +360,31 @@ pub fn format_deny_reason(reason: &DenyReason, language: UiLanguage) -> String {
     }
 }
 
+/// Cards that wait for the user's Approve/Deny (AGENT.md §1.3).
+pub fn is_approval_kind(kind: &StepKind) -> bool {
+    matches!(
+        kind,
+        StepKind::Command { .. }
+            | StepKind::Patch { .. }
+            | StepKind::ReadApproval { .. }
+            | StepKind::FactSuggestion { .. }
+            | StepKind::LimitReached { .. }
+    )
+}
+
 // ---- Engine spawner abstraction & scripted fake engine ----
 
-/// Factory producing an [`AgentHandle`] (wraps `twitty_ai::engine::spawn` once lane s10 lands).
+/// Factory producing an [`AgentHandle`]; the app uses `twitty_ai::engine::spawn`, tests a script.
 pub trait AgentEngineSpawner: Send + Sync {
-    fn spawn(&self) -> Result<AgentHandle, String>;
+    fn spawn(&self, config: EngineConfig) -> Result<AgentHandle, String>;
 }
 
 /// Function-pointer spawner implementation for lightweight wiring.
-pub type SpawnEngineFn = fn() -> Result<AgentHandle, String>;
+pub type SpawnEngineFn = fn(EngineConfig) -> Result<AgentHandle, String>;
 
 impl AgentEngineSpawner for SpawnEngineFn {
-    fn spawn(&self) -> Result<AgentHandle, String> {
-        (self)()
+    fn spawn(&self, config: EngineConfig) -> Result<AgentHandle, String> {
+        (self)(config)
     }
 }
 
@@ -420,7 +433,7 @@ impl ScriptedEngine {
 }
 
 impl AgentEngineSpawner for ScriptedEngine {
-    fn spawn(&self) -> Result<AgentHandle, String> {
+    fn spawn(&self, _config: EngineConfig) -> Result<AgentHandle, String> {
         // Because `ScriptedEngine` may be spawned once per app lifetime, we forward through a
         // channel owned by a background thread only if created via `spawn_handle`; here we provide
         // a clean fallback if called via trait object directly.
@@ -439,8 +452,8 @@ impl AgentEngineSpawner for ScriptedEngine {
     }
 }
 
-/// Default placeholder spawner used by the app until lane s10's `twitty_ai::engine::spawn` lands.
-pub fn spawn_placeholder_engine() -> Result<AgentHandle, String> {
+/// Offline stand-in engine that answers every request with a fixed message (tests, demos).
+pub fn spawn_placeholder_engine(_config: EngineConfig) -> Result<AgentHandle, String> {
     let (cmd_tx, cmd_rx) = mpsc::channel::<AgentCommand>();
     let (evt_tx, evt_rx) = mpsc::channel::<AgentEvent>();
     thread::Builder::new()
@@ -575,14 +588,7 @@ impl StepEntry {
 
     /// True if this card is currently waiting for user approval.
     pub fn is_waiting(&self) -> bool {
-        self.step.status == StepStatus::WaitingApproval
-            && matches!(
-                self.step.kind,
-                StepKind::Command { .. }
-                    | StepKind::Patch { .. }
-                    | StepKind::FactSuggestion { .. }
-                    | StepKind::LimitReached { .. }
-            )
+        self.step.status == StepStatus::WaitingApproval && is_approval_kind(&self.step.kind)
     }
 
     /// Buttons currently offered by this card, in keyboard Tab order.
@@ -630,7 +636,9 @@ impl StepEntry {
                     Vec::new()
                 }
             }
-            StepKind::FactSuggestion { .. } | StepKind::LimitReached { .. } => {
+            StepKind::ReadApproval { .. }
+            | StepKind::FactSuggestion { .. }
+            | StepKind::LimitReached { .. } => {
                 if self.step.status == StepStatus::WaitingApproval {
                     vec![CardButton::Primary, CardButton::Deny]
                 } else {
@@ -651,7 +659,9 @@ impl StepEntry {
             StepKind::Command { .. } | StepKind::Patch { .. } => {
                 vec![CardButton::Primary, CardButton::Edit, CardButton::Deny]
             }
-            StepKind::FactSuggestion { .. } | StepKind::LimitReached { .. } => {
+            StepKind::ReadApproval { .. }
+            | StepKind::FactSuggestion { .. }
+            | StepKind::LimitReached { .. } => {
                 vec![CardButton::Primary, CardButton::Deny]
             }
             _ => Vec::new(),
@@ -999,14 +1009,8 @@ impl AgentPanelState {
             }
             AgentEvent::StepAdded { session, step } => {
                 let id = step.id;
-                let waiting = step.status == StepStatus::WaitingApproval
-                    && matches!(
-                        step.kind,
-                        StepKind::Command { .. }
-                            | StepKind::Patch { .. }
-                            | StepKind::FactSuggestion { .. }
-                            | StepKind::LimitReached { .. }
-                    );
+                let waiting =
+                    step.status == StepStatus::WaitingApproval && is_approval_kind(&step.kind);
                 let entry = self
                     .sessions
                     .entry(session)
@@ -1030,14 +1034,8 @@ impl AgentPanelState {
             }
             AgentEvent::StepUpdated { session, step } => {
                 let id = step.id;
-                let waiting = step.status == StepStatus::WaitingApproval
-                    && matches!(
-                        step.kind,
-                        StepKind::Command { .. }
-                            | StepKind::Patch { .. }
-                            | StepKind::FactSuggestion { .. }
-                            | StepKind::LimitReached { .. }
-                    );
+                let waiting =
+                    step.status == StepStatus::WaitingApproval && is_approval_kind(&step.kind);
                 let sess = self
                     .sessions
                     .entry(session)
@@ -2573,6 +2571,7 @@ fn measure_card_height(
                 };
                 title_h + px(18.0) + extra
             }
+            StepKind::ReadApproval { .. } => title_h + px(18.0),
             StepKind::Command {
                 command,
                 reason,

@@ -26,17 +26,17 @@ pub const API_PROVIDERS: [ApiProviderSpec; 3] = [
     ApiProviderSpec {
         id: "anthropic",
         label: "Anthropic (Claude)",
-        keyring_account: "ai.api_key.anthropic",
+        keyring_account: "anthropic-api-key",
     },
     ApiProviderSpec {
         id: "openai",
         label: "OpenAI",
-        keyring_account: "ai.api_key.openai",
+        keyring_account: "openai-api-key",
     },
     ApiProviderSpec {
         id: "gemini",
         label: "Google Gemini",
-        keyring_account: "ai.api_key.gemini",
+        keyring_account: "gemini-api-key",
     },
 ];
 
@@ -374,4 +374,71 @@ pub struct AiApiRowLayout {
     pub clear_key_button: Option<Rect>,
     pub key_input: Option<Rect>,
     pub key_save_button: Option<Rect>,
+}
+
+/// Map the AI settings to the agent engine's configuration (AGENT.md §1.6).
+///
+/// `detected_clis` is the result of [`detect_cli_agents_on_path`]; `has_key` tells whether the
+/// keyring holds a key for an API provider account. Auto (no default provider) prefers an
+/// installed coding-agent CLI, then the first API provider with a key, then local Ollama.
+pub fn engine_config(
+    config: &TwittyConfig,
+    detected_clis: &[String],
+    has_key: impl Fn(&str) -> bool,
+) -> twitty_ai::engine::EngineConfig {
+    use twitty_ai::engine::model::ProviderKind;
+    let cli_program = config
+        .ai_agent
+        .clone()
+        .or_else(|| config.agent_command.clone())
+        .filter(|p| !p.trim().is_empty())
+        .or_else(|| detected_clis.first().cloned());
+    let ollama = || ProviderKind::Ollama {
+        base_url: config.ai_ollama_url.clone(),
+    };
+    let api = |id: &str| match id {
+        "anthropic" => Some(ProviderKind::Anthropic),
+        "openai" => Some(ProviderKind::OpenAi),
+        "gemini" => Some(ProviderKind::Gemini),
+        _ => None,
+    };
+    let provider = match config.ai_default_provider.as_deref().unwrap_or("") {
+        "cli" => ProviderKind::Cli {
+            program: cli_program.unwrap_or_else(|| "claude".into()),
+        },
+        "ollama" => ollama(),
+        id if api(id).is_some() => api(id).unwrap_or_else(ollama),
+        _ => match cli_program {
+            Some(program) => ProviderKind::Cli { program },
+            None => API_PROVIDERS
+                .iter()
+                .find(|spec| has_key(spec.keyring_account))
+                .and_then(|spec| api(spec.id))
+                .unwrap_or_else(ollama),
+        },
+    };
+    let allow_lists = config
+        .ai_project_allow_list
+        .iter()
+        .map(|(root, prefixes)| {
+            let root = std::path::PathBuf::from(root);
+            let root = std::fs::canonicalize(&root).unwrap_or(root);
+            let argv = prefixes
+                .iter()
+                .map(|p| p.split_whitespace().map(str::to_owned).collect::<Vec<_>>())
+                .filter(|argv| !argv.is_empty())
+                .collect();
+            (root, argv)
+        })
+        .collect();
+    twitty_ai::engine::EngineConfig {
+        provider,
+        timeout: std::time::Duration::from_secs(config.ai_timeout_secs),
+        // One request can never spend more than the whole monthly cap.
+        cost_cap_micros_usd: config
+            .ai_monthly_cost_cap_usd
+            .map(|usd| (usd * 1_000_000.0).round() as u64),
+        allow_lists,
+        ..twitty_ai::engine::EngineConfig::default()
+    }
 }

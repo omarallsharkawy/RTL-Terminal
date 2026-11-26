@@ -555,6 +555,31 @@ impl AgentDrawer<'_, '_> {
                     }
                 }
             }
+            StepKind::ReadApproval { tool, target } => {
+                let heading = format!(
+                    "{} · {}",
+                    self.lang()
+                        .text("Read needs approval", "قراءة تحتاج موافقة"),
+                    read_tool_name(*tool)
+                );
+                self.push_label(
+                    title_rect,
+                    &heading,
+                    UiSize::Small,
+                    UiWeight::Semibold,
+                    self.start_align(),
+                    s.warn,
+                    Some(clip),
+                );
+                // Path keeps terminal LTR/bidi shaping.
+                let path_y = title_rect.bottom() + s.px(2.0);
+                self.push_mono_line(
+                    Rect::new(inner.x, path_y, inner.w, mono_lh),
+                    target,
+                    s.text,
+                    clip,
+                );
+            }
             StepKind::Command {
                 command,
                 cwd,
@@ -1143,6 +1168,7 @@ impl AgentDrawer<'_, '_> {
                 StepKind::Patch { .. } => self.lang().text("Apply", "تطبيق"),
                 StepKind::FactSuggestion { .. } => self.lang().text("Remember", "حفظ"),
                 StepKind::LimitReached { .. } => self.lang().text("Continue", "متابعة"),
+                StepKind::ReadApproval { .. } => self.lang().text("Allow read", "اسمح بالقراءة"),
                 _ => self.lang().text("Approve", "موافقة"),
             },
             CardButton::Edit => self.lang().text("Edit", "تعديل"),
