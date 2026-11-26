@@ -53,7 +53,11 @@ impl App {
         let over_sidebar = self.window.sidebar_contains(&self.ws, x, y);
         let captured = self.pointer.capture.is_some();
         self.update_chrome_hover(&hit, captured);
-        if let Some(icon) = self.review_cursor(x, y).filter(|_| !captured) {
+        if let Some(icon) = self.composer_cursor(x, y).filter(|_| !captured) {
+            self.window.set_block_hover(None);
+            self.window.set_cursor_icon(icon);
+            return;
+        } else if let Some(icon) = self.review_cursor(x, y).filter(|_| !captured) {
             self.window.set_cursor_icon(icon);
         } else if let Some(icon) = cursor_icon_for(&hit, captured, self.window.cursor_icon()) {
             self.window.set_cursor_icon(icon);
@@ -144,6 +148,9 @@ impl App {
             return pressed && self.on_palette_mouse_press(button);
         }
         if pressed && self.review_mouse_press(button) {
+            return false;
+        }
+        if pressed && self.composer_mouse_press(button) {
             return false;
         }
         let Some(code) = button_code(button) else {
@@ -257,6 +264,12 @@ impl App {
         let line_height = self.window.line_height().unwrap_or(20.0);
         let lines = wheel_lines(delta, line_height);
         if !lines.is_finite() || lines == 0.0 {
+            return;
+        }
+        if self
+            .composer_cursor(self.pointer.pos.0, self.pointer.pos.1)
+            .is_some()
+        {
             return;
         }
         if self.review_wheel(lines) {

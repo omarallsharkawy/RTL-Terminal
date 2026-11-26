@@ -54,6 +54,9 @@ pub struct TwittyConfig {
     /// working / needs-input / done status and notifications over the control socket. Defaults
     /// to true.
     pub claude_hooks: bool,
+    /// Command composer mode: "off", "on-demand" (default) or "always".
+    #[serde(deserialize_with = "deserialize_composer")]
+    pub composer: String,
     /// Load Twitty's shell integration (OSC 133 prompt marks, OSC 7 cwd) into bash, zsh and fish.
     pub shell_integration: bool,
     /// Restore the tabs and splits from the last window closed normally. Defaults to true.
@@ -97,6 +100,7 @@ impl Default for TwittyConfig {
             control_socket: true,
             cmux_compat: true,
             claude_hooks: true,
+            composer: crate::composer::ComposerMode::OnDemand.as_str().into(),
             shell_integration: true,
             restore_session: true,
             agent_command: None,
@@ -156,6 +160,15 @@ fn deserialize_sidebar<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String,
     Ok(crate::layout::SidebarPosition::Right.as_str().to_owned())
 }
 
+fn deserialize_composer<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let value = serde_json::Value::deserialize(d)?;
+    if let serde_json::Value::String(value) = value {
+        return Ok(value);
+    }
+    warn("twitty: invalid composer value, using on-demand".into());
+    Ok(crate::composer::ComposerMode::OnDemand.as_str().to_owned())
+}
+
 /// Parses a color value from the config, warning on stderr and returning `None` if invalid.
 fn parse_config_color(value: &str, key: &str) -> Option<Rgba> {
     let color = parse_hex(value);
@@ -168,6 +181,11 @@ fn parse_config_color(value: &str, key: &str) -> Option<Rgba> {
 }
 
 impl TwittyConfig {
+    /// Parsed command composer policy (`off`, `on-demand`, `always`).
+    pub fn composer_mode(&self) -> crate::composer::ComposerMode {
+        self.composer.parse().unwrap_or_default()
+    }
+
     pub(crate) fn ui_accent_color(&self) -> Option<Rgba> {
         self.ui_accent
             .as_deref()
@@ -357,6 +375,17 @@ impl TwittyConfig {
                 self.sidebar
             ));
             self.sidebar = defaults.sidebar;
+        }
+        if self
+            .composer
+            .parse::<crate::composer::ComposerMode>()
+            .is_err()
+        {
+            warn(format!(
+                "twitty: invalid composer {:?}, using on-demand",
+                self.composer
+            ));
+            self.composer = defaults.composer;
         }
     }
 

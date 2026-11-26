@@ -14,6 +14,7 @@
 
 mod agent;
 mod branches;
+mod composer;
 mod control;
 mod event;
 mod git_diff;
@@ -93,6 +94,8 @@ pub struct App {
     /// The code review panel.
     review: crate::review::ReviewPanel,
     git_diff: git_diff::GitDiffWatch,
+    /// The docked command composer.
+    composer: composer::ComposerHost,
 }
 
 impl App {
@@ -128,6 +131,7 @@ impl App {
             branches: branches::BranchWatch::default(),
             review: Default::default(),
             git_diff: git_diff::GitDiffWatch::default(),
+            composer: composer::ComposerHost::default(),
         }
     }
 
@@ -220,22 +224,27 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::Branches(branches) => self.on_branches(branches),
             AppEvent::Review(generation, result) => self.on_review_loaded(generation, result),
             AppEvent::GitDiff(generation, stat) => self.on_git_diff(generation, stat),
+            AppEvent::ComposerHistory(entries) => self.on_composer_history(entries),
+            AppEvent::ComposerDir(dir, entries) => self.on_composer_dir(dir, entries),
         }
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
-        let (blinking, shown) = self
-            .focused_id()
-            .and_then(|id| {
-                self.term(id, |t| {
-                    (
-                        t.cursor_blinking(),
-                        t.mode().contains(TermMode::SHOW_CURSOR),
-                    )
+        let (blinking, shown) = if self.composer_has_keys() {
+            (self.config.cursor_blink, true)
+        } else {
+            self.focused_id()
+                .and_then(|id| {
+                    self.term(id, |t| {
+                        (
+                            t.cursor_blinking(),
+                            t.mode().contains(TermMode::SHOW_CURSOR),
+                        )
+                    })
                 })
-            })
-            .unwrap_or((false, false));
+                .unwrap_or((false, false))
+        };
         self.cursor_blink.set_enabled(now, blinking && shown);
         self.cursor_blink.tick(now);
 

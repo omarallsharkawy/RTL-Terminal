@@ -238,6 +238,20 @@ impl Window {
         }
     }
 
+    /// Hand the command composer's view to the renderer (`None` hides it).
+    pub(super) fn set_composer(
+        &mut self,
+        view: Option<crate::render::scene::composer::ComposerView>,
+    ) {
+        if let Some(ref mut r) = self.renderer {
+            r.set_composer(view);
+        }
+    }
+
+    pub(super) fn ui_language(&self) -> UiLanguage {
+        self.language
+    }
+
     pub(super) fn pane_layout(&self, rect: Rect) -> PaneHeaderLayout {
         PaneHeaderLayout::new(
             rect,
@@ -897,6 +911,8 @@ impl App {
         self.sync_branch_watch();
         let review = self.review_view();
         self.window.set_review(review);
+        let composer = self.composer_view();
+        self.window.set_composer(composer);
         let (panes, dividers) = self.frame();
         let visible = self.cursor_blink.visible();
         self.window.render(

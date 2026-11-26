@@ -3,6 +3,7 @@
 pub mod blocks;
 pub mod boxdraw;
 pub mod chrome;
+pub mod composer;
 pub mod context;
 pub mod cursor;
 pub mod frame;

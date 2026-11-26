@@ -33,6 +33,10 @@ pub enum AppEvent {
         Result<crate::review::Snapshot, crate::review::LoadError>,
     ),
     GitDiff(u64, Option<crate::ui::git_diff::DiffStat>),
+    /// Shell history loaded off the UI thread for the command composer.
+    ComposerHistory(Vec<String>),
+    /// Directory entries loaded off the UI thread for composer path completion.
+    ComposerDir(PathBuf, Vec<crate::composer::complete::DirEntryInfo>),
 }
 
 /// Longest title kept from a program, in characters.
@@ -119,6 +123,8 @@ impl App {
         };
         pane.blocks.on_event(&event, &pane.terminal, Instant::now());
         let command_ended = matches!(event.signal, Signal::Mark(MarkKind::CommandEnd { .. }));
+        let mut mark_kind = None;
+        let mut cmd_line = None;
         let meta = &mut pane.meta;
         match event.signal {
             Signal::Cwd(path) => meta.cwd = Some(path),
@@ -126,16 +132,29 @@ impl App {
                 self.notify(id, title, body);
                 return;
             }
-            Signal::CommandLine(line) => meta.last_command = Some(line),
-            Signal::Mark(kind) => match kind {
-                MarkKind::OutputStart => meta.running = true,
-                MarkKind::CommandEnd { exit } => {
-                    meta.running = false;
-                    meta.last_exit = exit;
-                    self.git_diff.refresh(id);
+            Signal::CommandLine(line) => {
+                cmd_line = Some(line.clone());
+                meta.last_command = Some(line);
+            }
+            Signal::Mark(kind) => {
+                meta.prompt_state.on_mark(kind);
+                mark_kind = Some(kind);
+                match kind {
+                    MarkKind::OutputStart => meta.running = true,
+                    MarkKind::CommandEnd { exit } => {
+                        meta.running = false;
+                        meta.last_exit = exit;
+                        self.git_diff.refresh(id);
+                    }
+                    MarkKind::PromptStart | MarkKind::CommandStart => {}
                 }
-                MarkKind::PromptStart | MarkKind::CommandStart => {}
-            },
+            }
+        }
+        if let Some(line) = cmd_line {
+            self.on_composer_command_line(&line);
+        }
+        if let Some(kind) = mark_kind {
+            self.on_composer_shell_mark(id, kind);
         }
         if command_ended {
             self.review_command_ended(id);
