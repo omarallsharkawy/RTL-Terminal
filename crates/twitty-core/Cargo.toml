@@ -1,0 +1,20 @@
+[package]
+name = "twitty-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+alacritty_terminal.workspace = true
+anyhow.workspace = true
+cosmic_text.workspace = true
+memchr.workspace = true
+portable-pty.workspace = true
+tracing.workspace = true
+unicode-bidi.workspace = true
+unicode-normalization.workspace = true
+unicode-segmentation.workspace = true
+unicode-width.workspace = true

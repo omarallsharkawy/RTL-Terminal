@@ -81,7 +81,11 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [ -z "$VERSION" ]; then
-  VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$REPO_ROOT/Cargo.toml" | head -n 1)"
+  VERSION="$(awk -F '"' '
+    /^\[workspace\.package\][[:space:]]*$/ { in_pkg = 1; next }
+    /^\[/ { in_pkg = 0 }
+    in_pkg && /^version[[:space:]]*=/ { print $2; exit }
+  ' "$REPO_ROOT/Cargo.toml")"
   if [ -z "$VERSION" ]; then
     echo "error: could not determine version from $REPO_ROOT/Cargo.toml" >&2
     exit 1

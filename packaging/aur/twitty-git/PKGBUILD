@@ -67,7 +67,7 @@ check() {
   cd "${srcdir}/${pkgname}"
   export RUSTUP_TOOLCHAIN=stable
   export CARGO_TARGET_DIR=target
-  cargo test --release --locked --offline
+  cargo test --workspace --release --locked --offline
 }
 
 package() {

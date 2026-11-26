@@ -22,7 +22,7 @@ use crate::blocks::cards::BlockHover;
 use crate::layout::{PaneId, Rect};
 use crate::render::metrics::CellMetrics;
 use crate::render::row::cache::RowCache;
-use crate::render::row::{hash_row, RowCursor};
+use crate::render::row::RowCursor;
 use crate::render::shapes::ShapeLayers;
 use crate::render::style::Quad;
 use crate::render::text::labels::UiLabels;
@@ -31,6 +31,9 @@ use crate::render::ui_style::UiStyle;
 use crate::render::{PaneFrame, TabLabel};
 use crate::ui::chrome::UiLanguage;
 use crate::ui::motion::ChromeMotion;
+
+use twitty_core::row::hash_row;
+pub use twitty_render::scene::TextRun;
 
 /// Renderer state a frame depends on besides what it is drawn with.
 pub struct FrameOptions<'a> {
@@ -42,15 +45,6 @@ pub struct FrameOptions<'a> {
     pub cursor_blink_on: bool,
     /// Surface size in physical pixels.
     pub surface: (f32, f32),
-}
-
-/// A shaped buffer and where to draw it.
-pub struct TextRun<'a> {
-    pub buffer: &'a Buffer,
-    pub left: f32,
-    pub top: f32,
-    pub bounds: TextBounds,
-    pub color: glyphon::Color,
 }
 
 /// Everything a frame draws. Row text stays in the `RowCache` and the preedit text in its

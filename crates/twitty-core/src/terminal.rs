@@ -1,0 +1,1432 @@
+use crate::blocks::anchor::{AbsLine, LineRemap, LineTracker};
+use crate::links::find_url_at;
+use crate::shell_integration::{
+    clean_text, parse_osc, MarkKind, ShellEvent, Signal, MAX_COMMAND_CHARS, MAX_PENDING_EVENTS,
+    MAX_SIGNAL_LEN,
+};
+use alacritty_terminal::event::{Event, EventListener};
+use alacritty_terminal::grid::{Dimensions, Row, Scroll};
+use alacritty_terminal::index::{Boundary, Column, Direction, Line, Point, Side};
+use alacritty_terminal::selection::{Selection, SelectionRange, SelectionType};
+use alacritty_terminal::term::cell::{Cell, Flags as CellFlags, LineLength};
+use alacritty_terminal::term::color::Colors;
+use alacritty_terminal::term::search::{Match, RegexIter, RegexSearch};
+use alacritty_terminal::term::test::TermSize;
+use alacritty_terminal::term::{point_to_viewport, viewport_to_point};
+use alacritty_terminal::term::{Config, Term, TermMode};
+use alacritty_terminal::vte::ansi::{
+    Color as AnsiColor, CursorShape, CursorStyle, NamedColor, Processor, StdSyncHandler,
+};
+use std::cell::RefCell;
+use std::collections::{HashMap, VecDeque};
+use std::ops::Range;
+use std::sync::Arc;
+use unicode_bidi::{bidi_class, BidiClass};
+
+struct ForwardListener {
+    on_event: Arc<dyn Fn(Event) + Send + Sync>,
+}
+
+impl EventListener for ForwardListener {
+    fn send_event(&self, event: Event) {
+        (self.on_event)(event);
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CellData {
+    pub c: char,
+    /// Combining marks attached to `c` (Arabic harakat, accents, ZWJ sequences).
+    pub zerowidth: Vec<char>,
+    pub fg: AnsiColor,
+    pub bg: AnsiColor,
+    pub flags: CellFlags,
+    /// Inside the mouse selection.
+    pub selected: bool,
+    /// 0 = no search match, 1 = match, 2 = the focused match.
+    pub search_match: u8,
+    /// Under the Ctrl-hovered link.
+    pub link_hover: bool,
+}
+
+impl CellData {
+    pub fn blank() -> Self {
+        Self {
+            c: ' ',
+            zerowidth: Vec::new(),
+            fg: AnsiColor::Named(NamedColor::Foreground),
+            bg: AnsiColor::Named(NamedColor::Background),
+            flags: CellFlags::empty(),
+            selected: false,
+            search_match: 0,
+            link_hover: false,
+        }
+    }
+
+    /// Spacer cells sit after (or before) a double-width glyph and carry no text of their own.
+    pub fn is_spacer(&self) -> bool {
+        self.flags
+            .intersects(CellFlags::WIDE_CHAR_SPACER | CellFlags::LEADING_WIDE_CHAR_SPACER)
+    }
+
+    /// A plain space with nothing attached, usable as a segment separator.
+    pub fn is_blank(&self) -> bool {
+        self.c == ' ' && self.zerowidth.is_empty() && !self.is_spacer()
+    }
+
+    /// The characters this cell contributes to a shaped run: none for spacers, and never a
+    /// bidi embedding, override or isolate (see `is_bidi_control`).
+    fn shaped_chars(&self) -> impl Iterator<Item = char> + '_ {
+        let cell = (!self.is_spacer()).then_some(self.c);
+        cell.into_iter()
+            .chain(self.zerowidth.iter().copied().filter(|_| !self.is_spacer()))
+            .filter(|&c| !is_bidi_control(c))
+            .flat_map(base_letters)
+    }
+
+    /// Separates words for bidi: any space, including the no-break space programs put after a
+    /// prompt (Claude Code writes `❯` + U+00A0).
+    pub fn is_word_break(&self) -> bool {
+        !self.is_spacer() && self.zerowidth.is_empty() && self.c.is_whitespace()
+    }
+
+    /// Text this cell contributes to a shaped run (empty for spacers).
+    pub fn push_text(&self, out: &mut String) {
+        out.extend(self.shaped_chars());
+    }
+}
+
+/// Arabic presentation forms (`U+FB50–FDFF`, `U+FE70–FEFF`) as the plain letters they stand
+/// for; any other character as itself.
+///
+/// vim and nvim shape Arabic themselves by default ('arabicshape'): they send each letter
+/// already in its joined form, in logical order. Twitty shapes and reorders Arabic itself, so
+/// pre-shaped letters came out unjoined and reversed. Turned back into plain letters they are
+/// joined and laid out like any other Arabic text (lam-alef ligatures become lam + alef).
+fn base_letters(c: char) -> impl Iterator<Item = char> {
+    use unicode_normalization::char::decompose_compatible;
+    let mut out = smallvec_like::Chars::default();
+    if matches!(c, '\u{FB50}'..='\u{FDFF}' | '\u{FE70}'..='\u{FEFF}') {
+        decompose_compatible(c, |d| out.push(d));
+    }
+    if out.is_empty() {
+        out.push(c);
+    }
+    out.into_iter()
+}
+
+/// A few chars without allocating (a presentation form decomposes to at most a handful).
+mod smallvec_like {
+    #[derive(Default)]
+    pub struct Chars {
+        buf: [char; 8],
+        len: usize,
+    }
+
+    impl Chars {
+        pub fn push(&mut self, c: char) {
+            if self.len < self.buf.len() {
+                self.buf[self.len] = c;
+                self.len += 1;
+            }
+        }
+
+        pub fn is_empty(&self) -> bool {
+            self.len == 0
+        }
+    }
+
+    impl IntoIterator for Chars {
+        type Item = char;
+        type IntoIter = std::iter::Take<std::array::IntoIter<char, 8>>;
+
+        fn into_iter(self) -> Self::IntoIter {
+            self.buf.into_iter().take(self.len)
+        }
+    }
+}
+
+/// Bidi embeddings, overrides and isolates (LRE, RLE, PDF, LRO, RLO, LRI, RLI, FSI, PDI).
+///
+/// Twitty lays out right-to-left text itself and wraps it in its own isolates; these controls
+/// from a program's output would reorder a line arbitrarily (`cat` of a file could make text
+/// read differently from what it says, as in "Trojan Source") or unbalance Twitty's isolates.
+/// They are invisible, so they are simply not shaped. Direction marks (LRM, RLM, ALM) only
+/// settle neutrals and stay.
+#[doc(hidden)]
+pub fn is_bidi_control(c: char) -> bool {
+    matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
+/// Narrowest grid: a double-width character needs two columns.
+pub(crate) const MIN_COLS: usize = 2;
+
+/// Combining marks of one cell that are drawn. Real text needs a few (Arabic harakat, accents,
+/// emoji sequences); a program can attach millions to one cell, which would make every frame
+/// hash and shape them all.
+pub const MAX_DRAWN_MARKS: usize = 16;
+
+/// The combining marks of a grid cell that are drawn and hashed.
+fn drawn_marks(cell: &Cell) -> &[char] {
+    let marks = cell.zerowidth().unwrap_or(&[]);
+    &marks[..marks.len().min(MAX_DRAWN_MARKS)]
+}
+
+/// A link under a viewport cell: its target and the cells it covers on that row.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Link {
+    pub uri: String,
+    pub row: usize,
+    pub cols: Range<usize>,
+}
+
+#[derive(Clone, Debug)]
+pub struct LineData {
+    /// Shared with the terminal's previous snapshot while the row is unchanged.
+    pub cells: Arc<[CellData]>,
+    pub has_rtl: bool,
+    /// Key of everything in `cells` (text, colors, flags, selection, search and link
+    /// highlights): rows with equal keys draw the same.
+    pub hash: u64,
+}
+
+/// Where the main screen is in absolute lines (see `blocks::anchor`), for drawing and
+/// navigating command blocks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LineView {
+    /// Absolute line of the top viewport row.
+    pub viewport_top: AbsLine,
+    pub rows: usize,
+    pub cols: usize,
+    /// Oldest line still in the scrollback.
+    pub oldest: AbsLine,
+    /// The cursor: absolute line and column.
+    pub cursor: (AbsLine, usize),
+    /// Changes when earlier absolute lines lost their meaning (cleared scrollback, a flood).
+    pub epoch: u64,
+    /// Sequence number of the newest reflow remap (`Terminal::line_remaps_since`).
+    pub remap_seq: u64,
+}
+
+/// Where a line read by [`Terminal::for_each_text_line`] is, to find it again later.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextLinePos {
+    /// A main-screen line by absolute number (see `blocks::anchor`), valid while the tracker's
+    /// `epoch` and `remap_seq` are unchanged.
+    Main {
+        line: AbsLine,
+        epoch: u64,
+        remap_seq: u64,
+    },
+    /// A row of the alternate screen (0 = top), which has no scrollback.
+    Alt(i32),
+}
+
+/// One character of a text line: a cell's own character (`mark` false) or one of the combining
+/// marks drawn on it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TextChar {
+    /// As stored in the cell (Arabic presentation forms are not decomposed).
+    pub c: char,
+    pub mark: bool,
+    /// Row within the logical line (0 = its first row) and column of the cell.
+    pub row: u16,
+    pub col: u16,
+    /// The cell is a double-width character.
+    pub wide: bool,
+}
+
+/// How far a [`Terminal::for_each_text_line`] call got.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TextScan {
+    /// Rows read.
+    pub rows: usize,
+    /// The row to go on from when it stopped early; `None` once the rows ran out.
+    pub next: Option<TextLinePos>,
+}
+
+/// Most rows joined into one logical line by [`Terminal::for_each_text_line`].
+pub const MAX_JOINED_ROWS: usize = 16;
+
+#[derive(Clone, Debug)]
+pub struct CursorState {
+    pub col: usize,
+    pub row: usize,
+    pub is_visible: bool,
+    pub shape: CursorShape,
+}
+
+/// Longest OSC string (title, hyperlink, clipboard copy…) passed to the parser. vte buffers an
+/// OSC until its terminator with no limit, so an unterminated one (`\e]52;c;` followed by
+/// endless data) would grow the terminal's memory until it is killed.
+pub const MAX_OSC_LEN: usize = 8 << 20;
+
+/// Tracks OSC strings in the byte stream and cuts the ones longer than `MAX_OSC_LEN`.
+#[derive(Default)]
+struct OscGuard {
+    state: OscState,
+    /// Start of the current OSC's payload, up to `MAX_SIGNAL_LEN` bytes, for shell signals.
+    payload: Vec<u8>,
+    /// The payload went past `MAX_SIGNAL_LEN`: it is not a signal.
+    payload_cut: bool,
+}
+
+#[derive(Default, Clone, Copy, PartialEq)]
+enum OscState {
+    #[default]
+    Other,
+    Escape,
+    Osc(usize),
+    /// Past the limit: bytes are dropped until the terminator.
+    Overflow,
+}
+
+/// What to do with one byte.
+#[derive(PartialEq)]
+enum OscStep {
+    Keep,
+    /// Keep this byte; it ends an OSC whose payload is in `OscGuard::payload`.
+    End,
+    Drop,
+    /// The OSC just went over the limit: replace this byte with one that spoils the payload, so
+    /// a cut clipboard copy (invalid base64) or link is ignored instead of applied half.
+    Spoil,
+}
+
+impl OscGuard {
+    fn step(&mut self, byte: u8) -> OscStep {
+        use OscState::*;
+        let (next, step) = match (self.state, byte) {
+            // BEL and ESC (ST is ESC \) end an OSC; CAN and SUB cancel it.
+            (Osc(_), 0x07) => (Other, OscStep::End),
+            (Osc(_), 0x1B) => (Escape, OscStep::End),
+            (Osc(_) | Overflow, 0x18 | 0x1A) => (Other, OscStep::Keep),
+            (Overflow, 0x07) => (Other, OscStep::Keep),
+            (_, 0x1B) => (Escape, OscStep::Keep),
+            (Escape, b']') => {
+                self.payload.clear();
+                self.payload_cut = false;
+                (Osc(0), OscStep::Keep)
+            }
+            (Escape, _) => (Other, OscStep::Keep),
+            (Osc(n), _) if n >= MAX_OSC_LEN => (Overflow, OscStep::Spoil),
+            (Osc(n), _) => {
+                if self.payload.len() < MAX_SIGNAL_LEN {
+                    self.payload.push(byte);
+                } else {
+                    self.payload_cut = true;
+                }
+                (Osc(n + 1), OscStep::Keep)
+            }
+            (Overflow, _) => (Overflow, OscStep::Drop),
+            (Other, _) => (Other, OscStep::Keep),
+        };
+        self.state = next;
+        step
+    }
+}
+
+pub struct Terminal {
+    term: Term<ForwardListener>,
+    parser: Processor<StdSyncHandler>,
+    osc_guard: OscGuard,
+    cols: usize,
+    rows: usize,
+    search: Option<SearchState>,
+    link_hover: Option<(usize, Range<usize>)>,
+    /// The last snapshot's rows by key, so rows that did not change are not rebuilt.
+    snapshot_rows: RefCell<HashMap<u64, LineData>>,
+    /// Shell signals (OSC 7, 9, 99, 133, 633, 777) not yet taken by the app.
+    shell_events: VecDeque<ShellEvent>,
+    /// Absolute line numbers for command blocks (see `blocks::anchor`).
+    lines: LineTracker,
+    /// Where the last OSC 133 B mark was, until its C mark: the command line is read from there
+    /// when the shell sent no OSC 633 E.
+    command_start: Option<(AbsLine, usize)>,
+    scrollback: usize,
+}
+
+struct SearchState {
+    query: String,
+    regex: RefCell<RegexSearch>,
+    focus: Option<Match>,
+    /// 1-based index of the focused match (oldest first) and the total count.
+    position: (usize, usize),
+}
+
+/// Stop counting beyond this many matches.
+const MAX_COUNTED_MATCHES: usize = 100_000;
+
+/// Case-insensitive literal pattern for `query`.
+fn literal_pattern(query: &str) -> String {
+    let mut pattern = String::from("(?i)");
+    for c in query.chars() {
+        if "\\.+*?()|[]{}^$#&-~".contains(c) {
+            pattern.push('\\');
+        }
+        pattern.push(c);
+    }
+    pattern
+}
+
+/// A palette color the program redefined with OSC 4 (pywal, vim themes), as a direct RGB
+/// color. Only the 256 indexed colors are taken over; the default foreground and background
+/// stay with the theme so the window and the cells keep matching.
+fn program_color(color: AnsiColor, colors: &Colors) -> AnsiColor {
+    let index = match color {
+        AnsiColor::Indexed(i) => i as usize,
+        AnsiColor::Named(n) if (n as usize) < 16 => n as usize,
+        _ => return color,
+    };
+    colors[index].map_or(color, AnsiColor::Spec)
+}
+
+/// Terminal config whose default cursor blinks as `cursor_blink` says. DECSCUSR (`CSI n SP q`)
+/// overrides it, and `CSI 0 SP q` falls back to it.
+fn term_config(cursor_blink: bool, scrollback: usize) -> Config {
+    Config {
+        default_cursor_style: CursorStyle {
+            shape: CursorShape::Block,
+            blinking: cursor_blink,
+        },
+        kitty_keyboard: true,
+        scrolling_history: scrollback,
+        ..Config::default()
+    }
+}
+
+/// Lines of scrollback a terminal keeps.
+pub const SCROLLBACK_LINES: usize = 10_000;
+
+/// Most rows a typed command line is read from (OSC 133 B to C) when no OSC 633 E came.
+const MAX_TYPED_COMMAND_LINES: AbsLine = 64;
+
+impl Terminal {
+    /// Terminal that only forwards replies destined for the PTY (used by tests).
+    pub fn new<F>(cols: usize, rows: usize, on_pty_write: F) -> Self
+    where
+        F: Fn(String) + Send + Sync + 'static,
+    {
+        Self::with_events(cols, rows, move |event| {
+            if let Event::PtyWrite(text) = event {
+                on_pty_write(text);
+            }
+        })
+    }
+
+    /// Terminal that forwards every event (title, bell, OSC queries, clipboard, PTY replies).
+    pub fn with_events<F>(cols: usize, rows: usize, on_event: F) -> Self
+    where
+        F: Fn(Event) + Send + Sync + 'static,
+    {
+        Self::build(cols, rows, SCROLLBACK_LINES, on_event)
+    }
+
+    /// Terminal with `scrollback` lines of history that ignores its events (tests of what happens
+    /// when the scrollback is full).
+    pub fn with_scrollback(cols: usize, rows: usize, scrollback: usize) -> Self {
+        Self::build(cols, rows, scrollback, |_| {})
+    }
+
+    fn build<F>(cols: usize, rows: usize, scrollback: usize, on_event: F) -> Self
+    where
+        F: Fn(Event) + Send + Sync + 'static,
+    {
+        let (cols, rows) = (cols.max(MIN_COLS), rows.max(1));
+        let size = TermSize::new(cols, rows);
+        let listener = ForwardListener {
+            on_event: Arc::new(on_event),
+        };
+        let term = Term::new(term_config(true, scrollback), &size, listener);
+        let parser = Processor::<StdSyncHandler>::new();
+        Self {
+            term,
+            parser,
+            osc_guard: OscGuard::default(),
+            cols,
+            rows,
+            search: None,
+            link_hover: None,
+            snapshot_rows: RefCell::default(),
+            shell_events: VecDeque::new(),
+            lines: LineTracker::new(scrollback),
+            command_start: None,
+            scrollback,
+        }
+    }
+
+    pub fn process_bytes(&mut self, bytes: &[u8]) {
+        let mut from = 0;
+        let mut i = 0;
+        while i < bytes.len() {
+            // Outside an OSC only its opener matters: skip to the next `ESC ]`, or to a
+            // trailing ESC whose `]` may come in the next read.
+            if self.osc_guard.state == OscState::Other {
+                static OSC_START: std::sync::LazyLock<memchr::memmem::Finder<'static>> =
+                    std::sync::LazyLock::new(|| memchr::memmem::Finder::new(b"\x1b]"));
+                match OSC_START.find(&bytes[i..]) {
+                    Some(at) => i += at,
+                    None if bytes.last() == Some(&0x1B) => i = bytes.len() - 1,
+                    None => break,
+                }
+            }
+            let step = self.osc_guard.step(bytes[i]);
+            if step == OscStep::End {
+                let signal = (!self.osc_guard.payload_cut)
+                    .then(|| parse_osc(&self.osc_guard.payload))
+                    .flatten();
+                if let Some(signal) = signal {
+                    // Parse what came before the terminator first, so the event records
+                    // where the cursor was when the shell sent it.
+                    self.parser.advance(&mut self.term, &bytes[from..=i]);
+                    from = i + 1;
+                    self.push_shell_event(signal);
+                }
+            } else if step != OscStep::Keep {
+                self.parser.advance(&mut self.term, &bytes[from..i]);
+                if step == OscStep::Spoil {
+                    self.parser.advance(&mut self.term, b"!");
+                }
+                from = i + 1;
+            }
+            i += 1;
+        }
+        self.parser.advance(&mut self.term, &bytes[from..]);
+        if self.lines.enabled() {
+            self.sync_lines();
+        }
+    }
+
+    fn is_alt_screen(&self) -> bool {
+        self.term.mode().contains(TermMode::ALT_SCREEN)
+    }
+
+    fn sync_lines(&mut self) {
+        let alt = self.is_alt_screen();
+        self.lines.sync(self.term.grid(), alt);
+    }
+
+    /// The RGB a program gave palette entry `index` (0..256) with OSC 4, if it changed it.
+    pub fn program_palette_color(
+        &self,
+        index: usize,
+    ) -> Option<alacritty_terminal::vte::ansi::Rgb> {
+        if index >= 256 {
+            return None;
+        }
+        self.term.colors()[index]
+    }
+
+    /// Default blinking for when the program has not chosen a cursor style.
+    pub fn set_default_cursor_blink(&mut self, cursor_blink: bool) {
+        self.term
+            .set_options(term_config(cursor_blink, self.scrollback));
+    }
+
+    /// Whether the cursor should blink: the program's DECSCUSR choice, else the default.
+    pub fn cursor_blinking(&self) -> bool {
+        self.term.cursor_style().blinking
+    }
+
+    /// Shell signals received since the last call, oldest first.
+    pub fn take_shell_events(&mut self) -> Vec<ShellEvent> {
+        self.shell_events.drain(..).collect()
+    }
+
+    fn push_shell_event(&mut self, signal: Signal) {
+        let point = self.term.grid().cursor.point;
+        let alt = self.is_alt_screen();
+        let mut abs_line = None;
+        if let Signal::Mark(kind) = signal {
+            self.lines.enable(self.term.grid(), alt);
+            self.lines.sync(self.term.grid(), alt);
+            abs_line = (!alt).then(|| self.lines.top() + AbsLine::from(point.line.0));
+            match kind {
+                MarkKind::CommandStart => {
+                    self.command_start = abs_line.map(|line| (line, point.column.0));
+                }
+                MarkKind::OutputStart => {
+                    // No OSC 633 E: the command line is what was typed after the prompt.
+                    // Bounded: a program can send B, a flood, then C.
+                    let typed = self
+                        .command_start
+                        .take()
+                        .zip(abs_line)
+                        .filter(|((b, _), c)| c - b <= MAX_TYPED_COMMAND_LINES)
+                        .and_then(|(b, c)| self.text_between(b, (c, point.column.0)));
+                    let typed = typed.map(|t| clean_text(&t.replace('\n', " "), MAX_COMMAND_CHARS));
+                    if let Some(text) = typed.filter(|t| !t.is_empty()) {
+                        self.push_event(ShellEvent {
+                            signal: Signal::CommandLine(text),
+                            line: point.line.0,
+                            column: point.column.0,
+                            history: self.term.grid().history_size(),
+                            abs_line: None,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        } else if let Signal::CommandLine(_) = signal {
+            self.command_start = None;
+        }
+        self.push_event(ShellEvent {
+            signal,
+            line: point.line.0,
+            column: point.column.0,
+            history: self.term.grid().history_size(),
+            abs_line,
+        });
+    }
+
+    fn push_event(&mut self, event: ShellEvent) {
+        if self.shell_events.len() >= MAX_PENDING_EVENTS {
+            self.shell_events.pop_front();
+        }
+        self.shell_events.push_back(event);
+    }
+
+    /// Absolute-line bookkeeping of the main screen, for command blocks. `None` until the shell
+    /// sent its first OSC 133 mark, and while the alternate screen is shown.
+    pub fn line_view(&self) -> Option<LineView> {
+        if !self.lines.enabled() || self.is_alt_screen() {
+            return None;
+        }
+        let grid = self.term.grid();
+        let top = self.lines.top();
+        let cursor = grid.cursor.point;
+        Some(LineView {
+            viewport_top: top - grid.display_offset() as AbsLine,
+            rows: self.rows,
+            cols: self.cols,
+            oldest: top - grid.history_size() as AbsLine,
+            cursor: (top + AbsLine::from(cursor.line.0), cursor.column.0),
+            epoch: self.lines.epoch(),
+            remap_seq: self.lines.remap_seq(),
+        })
+    }
+
+    /// Oldest absolute line of the main screen's scrollback, also while the alternate screen is
+    /// shown. `None` until the first OSC 133 mark.
+    pub fn oldest_line(&self) -> Option<AbsLine> {
+        self.lines.enabled().then(|| self.lines.oldest())
+    }
+
+    /// Reflow remaps after sequence number `seen` (see `LineView::remap_seq`), or `None` when
+    /// some of them are no longer kept.
+    pub fn line_remaps_since(&self, seen: u64) -> Option<&[LineRemap]> {
+        self.lines.remaps_since(seen)
+    }
+
+    /// Grid point of an absolute line and column, if the line is still kept.
+    fn abs_point(&self, (line, column): (AbsLine, usize)) -> Option<Point> {
+        let view = self.line_view()?;
+        let grid_line = line.checked_sub(self.lines.top())?;
+        if line < view.oldest || grid_line >= self.rows as AbsLine {
+            return None;
+        }
+        let grid_line = i32::try_from(grid_line).ok()?;
+        Some(Point::new(
+            Line(grid_line),
+            Column(column.min(self.cols - 1)),
+        ))
+    }
+
+    /// Text from `start` up to (not including) `end`, both absolute (line, column): logical
+    /// order, soft-wrapped rows joined, hard line ends as `\n`, trailing blanks of each line
+    /// dropped. `None` when a line left the scrollback or the alternate screen is shown.
+    pub fn text_between(&self, start: (AbsLine, usize), end: (AbsLine, usize)) -> Option<String> {
+        let from = self.abs_point(start)?;
+        let (end_line, end_col) = end;
+        // The cell before `end`.
+        let to = if end_col == 0 {
+            let to = self.abs_point((end_line.checked_sub(1)?, 0))?;
+            Point::new(to.line, Column(self.cols - 1))
+        } else {
+            self.abs_point((end_line, end_col - 1))?
+        };
+        if to < from {
+            return Some(String::new());
+        }
+        Some(self.term.bounds_to_string(from, to))
+    }
+
+    /// Scroll so absolute line `line` is the top row (as far as the scrollback allows).
+    pub fn scroll_to_line(&mut self, line: AbsLine) {
+        if self.line_view().is_none() {
+            return;
+        }
+        let grid_line = line.saturating_sub(self.lines.top());
+        let offset = grid_line
+            .saturating_neg()
+            .clamp(0, self.term.grid().history_size() as AbsLine);
+        let delta = offset
+            .saturating_sub(self.display_offset() as AbsLine)
+            .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32;
+        self.term.scroll_display(Scroll::Delta(delta));
+    }
+
+    /// Grid position of the cursor, to tell whether output moved it.
+    pub fn cursor_position(&self) -> (i32, usize) {
+        let point = self.term.grid().cursor.point;
+        (point.line.0, point.column.0)
+    }
+
+    /// Resize the grid; it never gets smaller than `MIN_COLS` x 1 (alacritty panics on an empty
+    /// grid, and on a wide character in a one-column one).
+    pub fn resize(&mut self, cols: usize, rows: usize) {
+        let (cols, rows) = (cols.max(MIN_COLS), rows.max(1));
+        self.cols = cols;
+        self.rows = rows;
+        let alt = self.is_alt_screen();
+        let prep = self.lines.before_resize(self.term.grid(), alt, cols, rows);
+        self.term.resize(TermSize::new(cols, rows));
+        self.lines.after_resize(self.term.grid(), alt, prep);
+    }
+
+    pub fn size(&self) -> (usize, usize) {
+        (self.cols, self.rows)
+    }
+
+    pub fn mode(&self) -> TermMode {
+        *self.term.mode()
+    }
+
+    pub fn scroll_display(&mut self, delta: i32) {
+        self.term.scroll_display(Scroll::Delta(delta));
+    }
+
+    pub fn scroll_to_bottom(&mut self) {
+        self.term.scroll_display(Scroll::Bottom);
+    }
+
+    pub fn display_offset(&self) -> usize {
+        self.term.grid().display_offset()
+    }
+
+    fn grid_point(&self, col: usize, row: usize) -> Point {
+        let col = col.min(self.cols.saturating_sub(1));
+        let row = row.min(self.rows.saturating_sub(1));
+        viewport_to_point(self.display_offset(), Point::new(row, Column(col)))
+    }
+
+    /// Start a selection at a viewport cell: 1 click = characters, 2 = word, 3 = line.
+    pub fn start_selection(&mut self, col: usize, row: usize, side: Side, clicks: u8) {
+        let ty = match clicks {
+            1 => SelectionType::Simple,
+            2 => SelectionType::Semantic,
+            _ => SelectionType::Lines,
+        };
+        let point = self.grid_point(col, row);
+        self.term.selection = Some(Selection::new(ty, point, side));
+    }
+
+    pub fn update_selection(&mut self, col: usize, row: usize, side: Side) {
+        let point = self.grid_point(col, row);
+        if let Some(selection) = self.term.selection.as_mut() {
+            selection.update(point, side);
+        }
+    }
+
+    pub fn clear_selection(&mut self) {
+        self.term.selection = None;
+    }
+
+    pub fn has_selection(&self) -> bool {
+        self.term.selection.as_ref().is_some_and(|s| !s.is_empty())
+    }
+
+    /// Selected text, or `None` when nothing (or only an empty range) is selected.
+    pub fn selection_text(&self) -> Option<String> {
+        if !self.has_selection() {
+            return None;
+        }
+        self.term
+            .selection_to_string()
+            .filter(|text| !text.is_empty())
+    }
+
+    /// Up to the last `max_lines` lines from scrollback and screen in logical grid order,
+    /// omitting trailing blank lines below the last non-empty row.
+    pub fn recent_lines(&self, max_lines: usize) -> String {
+        if max_lines == 0 {
+            return String::new();
+        }
+        let grid = self.term.grid();
+        let top = self.term.topmost_line().0;
+        let bottom = self.term.bottommost_line().0;
+        let row_is_blank = |line: i32| {
+            let row = &grid[Line(line)];
+            (0..self.cols).all(|c| {
+                let cell = &row[Column(c)];
+                cell.c == ' ' && drawn_marks(cell).is_empty()
+            })
+        };
+        let mut end = bottom;
+        while end >= top && row_is_blank(end) {
+            end -= 1;
+        }
+        if end < top {
+            return String::new();
+        }
+        let available = (end - top + 1) as usize;
+        let take = available.min(max_lines);
+        let start = top + (available - take) as i32;
+        let mut out = String::new();
+        for (i, line) in (start..=end).enumerate() {
+            if i > 0 {
+                out.push('\n');
+            }
+            let row = &grid[Line(line)];
+            let mut text = String::new();
+            for c in 0..self.cols {
+                let cell = &row[Column(c)];
+                if cell
+                    .flags
+                    .intersects(CellFlags::WIDE_CHAR_SPACER | CellFlags::LEADING_WIDE_CHAR_SPACER)
+                {
+                    continue;
+                }
+                if !cell.c.is_control()
+                    && !is_bidi_control(cell.c)
+                    && !matches!(cell.c, '\u{2028}' | '\u{2029}')
+                {
+                    text.push(cell.c);
+                }
+                for &z in drawn_marks(cell) {
+                    if !z.is_control()
+                        && !is_bidi_control(z)
+                        && !matches!(z, '\u{2028}' | '\u{2029}')
+                    {
+                        text.push(z);
+                    }
+                }
+            }
+            out.push_str(text.trim_end_matches(' '));
+        }
+        out
+    }
+
+    /// The viewport's rows and the cursor. Rows whose content and highlights did not change
+    /// since the previous snapshot are shared with it instead of being rebuilt.
+    pub fn snapshot(&self) -> (Vec<LineData>, CursorState) {
+        let content = self.term.renderable_content();
+        let display_offset = content.display_offset;
+        let selection = content.selection;
+        let colors = content.colors;
+        let cursor = content.cursor;
+
+        let search = self.search_spans(display_offset);
+        let grid = self.term.grid();
+        let palette_key = palette_key(colors);
+        let mut previous = self.snapshot_rows.borrow_mut();
+        let mut current = HashMap::with_capacity(self.rows);
+        let mut lines = Vec::with_capacity(self.rows);
+        for row in 0..self.rows {
+            let grid_line = Line(row as i32 - display_offset as i32);
+            let cells = &grid[grid_line];
+            let overlay = RowOverlay {
+                selected: selection.and_then(|s| selected_span(&s, grid_line)),
+                search: search.get(row).map_or(&[], Vec::as_slice),
+                hover: self
+                    .link_hover
+                    .as_ref()
+                    .filter(|(r, _)| *r == row)
+                    .map(|(_, cols)| cols.clone()),
+            };
+            let key = row_key(cells, self.cols, palette_key, &overlay);
+            let line = match previous.remove(&key).or_else(|| current.get(&key).cloned()) {
+                Some(line) => line,
+                None => build_line(cells, self.cols, colors, &overlay, key),
+            };
+            current.insert(key, line.clone());
+            lines.push(line);
+        }
+        *previous = current;
+
+        let cursor_point = point_to_viewport(display_offset, cursor.point);
+        let cursor = match cursor_point {
+            Some(p) if p.line < self.rows => CursorState {
+                row: p.line,
+                col: p.column.0.min(self.cols.saturating_sub(1)),
+                is_visible: cursor.shape != CursorShape::Hidden,
+                shape: cursor.shape,
+            },
+            // Cursor scrolled out of the viewport.
+            _ => CursorState {
+                row: 0,
+                col: 0,
+                is_visible: false,
+                shape: CursorShape::Hidden,
+            },
+        };
+
+        (lines, cursor)
+    }
+
+    /// Underline these cells (a Ctrl-hovered link), or nothing. Returns true if it changed.
+    pub fn set_link_hover(&mut self, hover: Option<(usize, Range<usize>)>) -> bool {
+        let changed = self.link_hover != hover;
+        self.link_hover = hover;
+        changed
+    }
+
+    /// The link at a viewport cell: an OSC 8 hyperlink, else a plain URL in the row's text.
+    pub fn link_at(&self, col: usize, row: usize) -> Option<Link> {
+        if col >= self.cols || row >= self.rows {
+            return None;
+        }
+        let line = viewport_to_point(self.display_offset(), Point::new(row, Column(0))).line;
+        let grid = self.term.grid();
+        let at = |c: usize| &grid[line][Column(c)];
+
+        if let Some(h) = at(col).hyperlink() {
+            let same = |c: usize| at(c).hyperlink().is_some_and(|o| o == h);
+            let (mut a, mut b) = (col, col + 1);
+            while a > 0 && same(a - 1) {
+                a -= 1;
+            }
+            while b < self.cols && same(b) {
+                b += 1;
+            }
+            return Some(Link {
+                uri: h.uri().to_string(),
+                row,
+                cols: a..b,
+            });
+        }
+
+        // Row text with a char -> column map (spacers carry no text).
+        let mut text = String::new();
+        let mut char_cols = Vec::new();
+        let mut hit = None;
+        for c in 0..self.cols {
+            let cell = at(c);
+            if cell
+                .flags
+                .intersects(CellFlags::WIDE_CHAR_SPACER | CellFlags::LEADING_WIDE_CHAR_SPACER)
+            {
+                continue;
+            }
+            let before = char_cols.len();
+            text.push(cell.c);
+            char_cols.push(c);
+            for z in drawn_marks(cell) {
+                text.push(*z);
+                char_cols.push(c);
+            }
+            let width = if cell.flags.contains(CellFlags::WIDE_CHAR) {
+                2
+            } else {
+                1
+            };
+            if (c..c + width).contains(&col) {
+                hit = Some(before);
+            }
+        }
+        let (start, end, uri) = find_url_at(&text, hit?)?;
+        let last = char_cols[end - 1];
+        let wide = at(last).flags.contains(CellFlags::WIDE_CHAR);
+        Some(Link {
+            uri,
+            row,
+            cols: char_cols[start]..(last + if wide { 2 } else { 1 }).min(self.cols),
+        })
+    }
+
+    /// Find the next match of `query` (literal, case-insensitive) and scroll it into view.
+    ///
+    /// `Direction::Left` goes towards older output, `Direction::Right` towards newer. A changed
+    /// query keeps the current match when it still matches there (incremental typing); a first
+    /// search starts at the bottom of the viewport. Returns false when nothing matches.
+    pub fn search(&mut self, query: &str, direction: Direction) -> bool {
+        if query.is_empty() {
+            self.clear_search();
+            return false;
+        }
+        let same_query = self.search.as_ref().is_some_and(|s| s.query == query);
+        if !same_query {
+            let Ok(regex) = RegexSearch::new(&literal_pattern(query)) else {
+                self.clear_search();
+                return false;
+            };
+            let focus = self.search.take().and_then(|s| s.focus);
+            self.search = Some(SearchState {
+                query: query.to_owned(),
+                regex: RefCell::new(regex),
+                focus,
+                position: (0, 0),
+            });
+        }
+        let Some(state) = self.search.as_mut() else {
+            return false;
+        };
+        let (origin, direction) = match (&state.focus, same_query) {
+            (Some(m), true) => match direction {
+                Direction::Left => (m.start().sub(&self.term, Boundary::Grid, 1), direction),
+                Direction::Right => (m.end().add(&self.term, Boundary::Grid, 1), direction),
+            },
+            // The query changed: stay on the current match if it still matches there.
+            (Some(m), false) => (*m.start(), Direction::Left),
+            (None, _) => {
+                let bottom = viewport_to_point(
+                    self.term.grid().display_offset(),
+                    Point::new(
+                        self.rows.saturating_sub(1),
+                        Column(self.cols.saturating_sub(1)),
+                    ),
+                );
+                (bottom, Direction::Left)
+            }
+        };
+        let found = self.term.search_next(
+            &mut state.regex.borrow_mut(),
+            origin,
+            direction,
+            Side::Left,
+            None,
+        );
+        state.focus = found.clone();
+        let Some(found) = found else {
+            state.position = (0, 0);
+            return false;
+        };
+        self.term.scroll_to_point(*found.start());
+        self.count_matches();
+        true
+    }
+
+    /// Fill `position` for the focused match by walking every match from the oldest line.
+    fn count_matches(&mut self) {
+        let Some(state) = self.search.as_mut() else {
+            return;
+        };
+        let Some(focus) = state.focus.clone() else {
+            return;
+        };
+        let start = Point::new(self.term.topmost_line(), Column(0));
+        let end = Point::new(self.term.bottommost_line(), self.term.last_column());
+        let mut regex = state.regex.borrow_mut();
+        let (mut index, mut total) = (0, 0);
+        for m in RegexIter::new(start, end, Direction::Right, &self.term, &mut regex)
+            .take(MAX_COUNTED_MATCHES)
+        {
+            total += 1;
+            if m.start() == focus.start() {
+                index = total;
+            }
+        }
+        drop(regex);
+        state.position = (index, total);
+    }
+
+    /// (index, total) of the focused match, `None` without a query.
+    pub fn search_position(&self) -> Option<(usize, usize)> {
+        self.search.as_ref().map(|s| s.position)
+    }
+
+    pub fn has_search_match(&self) -> bool {
+        self.search.as_ref().is_some_and(|s| s.focus.is_some())
+    }
+
+    /// Drop the query and all highlights.
+    pub fn clear_search(&mut self) {
+        self.search = None;
+    }
+
+    /// Call `f` with each logical line (soft-wrapped rows joined, at most [`MAX_JOINED_ROWS`])
+    /// of the shown screen and its scrollback, newest first: from the row at `from` (the
+    /// bottom row when `None`) upwards, at most `max_rows` rows, until `f` returns false. Blank
+    /// lines are skipped, trailing blanks dropped, control and bidi control characters left
+    /// out. Turns on absolute line numbers for the main screen, so the positions handed out
+    /// (and [`TextScan::next`], to go on later) stay valid while output scrolls.
+    pub fn for_each_text_line(
+        &mut self,
+        from: Option<TextLinePos>,
+        max_rows: usize,
+        mut f: impl FnMut(TextLinePos, &[TextChar]) -> bool,
+    ) -> TextScan {
+        let alt = self.is_alt_screen();
+        if !alt {
+            self.lines.enable(self.term.grid(), false);
+            self.sync_lines();
+        }
+        let done = TextScan {
+            rows: 0,
+            next: None,
+        };
+        if max_rows == 0 {
+            return done;
+        }
+        let bottom = match from {
+            None => self.term.bottommost_line().0,
+            Some(pos) => match self.text_point(pos, 0, 0) {
+                Some(point) => point.line.0,
+                None => return done,
+            },
+        };
+        let grid = self.term.grid();
+        let top = self.term.topmost_line().0;
+        let span = i32::try_from(max_rows.saturating_sub(1)).unwrap_or(i32::MAX);
+        let lowest = top.max(bottom.saturating_sub(span));
+        let last = Column(self.cols - 1);
+        let wraps = |line: i32| grid[Line(line)][last].flags.contains(CellFlags::WRAPLINE);
+        let (abs_top, epoch, remap_seq) =
+            (self.lines.top(), self.lines.epoch(), self.lines.remap_seq());
+        let pos_of = |line: i32| {
+            if alt {
+                TextLinePos::Alt(line)
+            } else {
+                TextLinePos::Main {
+                    line: abs_top + AbsLine::from(line),
+                    epoch,
+                    remap_seq,
+                }
+            }
+        };
+        let shown = |c: char| {
+            !c.is_control() && !is_bidi_control(c) && !matches!(c, '\u{2028}' | '\u{2029}')
+        };
+        let spacer = CellFlags::WIDE_CHAR_SPACER | CellFlags::LEADING_WIDE_CHAR_SPACER;
+        let mut chars: Vec<TextChar> = Vec::with_capacity(self.cols * 2);
+        let mut end = bottom;
+        while end >= lowest {
+            let mut start = end;
+            while start > lowest
+                && wraps(start - 1)
+                && ((end - start) as usize) < MAX_JOINED_ROWS - 1
+            {
+                start -= 1;
+            }
+            chars.clear();
+            for line in start..=end {
+                let row = &grid[Line(line)];
+                // Only the last physical row can lose padding; inside a wrapped line those
+                // columns preserve the logical spacing.
+                let cols = if line == end {
+                    row.line_length().0
+                } else {
+                    self.cols
+                };
+                for c in 0..cols {
+                    let cell = &row[Column(c)];
+                    if cell.flags.intersects(spacer) {
+                        continue;
+                    }
+                    let (row, col) = ((line - start) as u16, c as u16);
+                    let wide = cell.flags.contains(CellFlags::WIDE_CHAR);
+                    // A cell that holds no visible text still takes its column.
+                    let base = if shown(cell.c) { cell.c } else { ' ' };
+                    chars.push(TextChar {
+                        c: base,
+                        mark: false,
+                        row,
+                        col,
+                        wide,
+                    });
+                    for &z in drawn_marks(cell).iter().filter(|&&z| shown(z)) {
+                        chars.push(TextChar {
+                            c: z,
+                            mark: true,
+                            row,
+                            col,
+                            wide,
+                        });
+                    }
+                }
+            }
+            while chars.last().is_some_and(|t| !t.mark && t.c == ' ') {
+                chars.pop();
+            }
+            let go_on = chars.is_empty() || f(pos_of(start), &chars);
+            let Some(prev) = start.checked_sub(1) else {
+                return TextScan {
+                    rows: (i64::from(bottom) - i64::from(start) + 1).max(0) as usize,
+                    next: None,
+                };
+            };
+            end = prev;
+            if !go_on {
+                break;
+            }
+        }
+        TextScan {
+            rows: (i64::from(bottom) - i64::from(end)).max(0) as usize,
+            next: (end >= lowest).then(|| pos_of(end)),
+        }
+    }
+
+    /// Grid point of `row` rows below the line at `pos` and `column`, while it is still where
+    /// it was when `pos` was handed out.
+    fn text_point(&self, pos: TextLinePos, row: usize, column: usize) -> Option<Point> {
+        let line = match pos {
+            TextLinePos::Main {
+                line,
+                epoch,
+                remap_seq,
+            } => {
+                let view = self.line_view()?;
+                if view.epoch != epoch || view.remap_seq != remap_seq || line < view.oldest {
+                    return None;
+                }
+                i32::try_from(line - self.lines.top()).ok()?
+            }
+            TextLinePos::Alt(line) if self.is_alt_screen() => line,
+            TextLinePos::Alt(_) => return None,
+        };
+        let line = line.checked_add(i32::try_from(row).ok()?)?;
+        if line < self.term.topmost_line().0 || line > self.term.bottommost_line().0 {
+            return None;
+        }
+        (column < self.cols).then(|| Point::new(Line(line), Column(column)))
+    }
+
+    /// Make the match of `needle` (literal and case-insensitive, like [`Terminal::search`])
+    /// that starts at `row`/`column` of the line at `pos` the focused search match, and scroll
+    /// it into view. When that line is gone or no longer holds `needle` there, the newest
+    /// match of `needle` is focused instead. Returns false when nothing matches at all.
+    pub fn focus_search_at(
+        &mut self,
+        needle: &str,
+        pos: TextLinePos,
+        row: usize,
+        column: usize,
+    ) -> bool {
+        let Ok(mut regex) = RegexSearch::new(&literal_pattern(needle)) else {
+            self.clear_search();
+            return false;
+        };
+        let found = self.text_point(pos, row, column).and_then(|start| {
+            let last = (start.line + MAX_JOINED_ROWS as i32).min(self.term.bottommost_line());
+            let end = Point::new(last, self.term.last_column());
+            RegexIter::new(start, end, Direction::Right, &self.term, &mut regex)
+                .next()
+                .filter(|m| *m.start() == start)
+        });
+        let Some(found) = found else {
+            self.clear_search();
+            self.term.scroll_display(Scroll::Bottom);
+            return self.search(needle, Direction::Left);
+        };
+        self.term.scroll_to_point(*found.start());
+        self.search = Some(SearchState {
+            query: needle.to_owned(),
+            regex: RefCell::new(regex),
+            focus: Some(found),
+            position: (0, 0),
+        });
+        self.count_matches();
+        true
+    }
+
+    /// Per viewport row, the inclusive column spans of visible matches and their level
+    /// (1 = match, 2 = focused). Empty without a search.
+    fn search_spans(&self, display_offset: usize) -> Vec<Vec<(usize, usize, u8)>> {
+        let Some(state) = self.search.as_ref() else {
+            return Vec::new();
+        };
+        let mut spans = vec![Vec::new(); self.rows];
+        let top = Line(-(display_offset as i32));
+        let start = Point::new(top, Column(0));
+        let end = Point::new(top + (self.rows as i32 - 1), self.term.last_column());
+        let mut regex = state.regex.borrow_mut();
+        let last_col = self.cols.saturating_sub(1);
+        for m in RegexIter::new(start, end, Direction::Right, &self.term, &mut regex) {
+            let level = if state.focus.as_ref().is_some_and(|f| f.start() == m.start()) {
+                2
+            } else {
+                1
+            };
+            for line in m.start().line.0..=m.end().line.0 {
+                let Some(row) =
+                    point_to_viewport(display_offset, Point::new(Line(line), Column(0)))
+                else {
+                    continue;
+                };
+                let row = row.line;
+                if row >= self.rows {
+                    continue;
+                }
+                let from = if Line(line) == m.start().line {
+                    m.start().column.0
+                } else {
+                    0
+                };
+                let to = if Line(line) == m.end().line {
+                    m.end().column.0
+                } else {
+                    last_col
+                };
+                spans[row].push((from.min(last_col), to.min(last_col), level));
+            }
+        }
+        spans
+    }
+}
+
+/// Highlights drawn over a row's cells.
+struct RowOverlay<'a> {
+    /// Selected columns (inclusive).
+    selected: Option<(usize, usize)>,
+    /// Search matches (inclusive columns, level).
+    search: &'a [(usize, usize, u8)],
+    /// Columns under the Ctrl-hovered link.
+    hover: Option<Range<usize>>,
+}
+
+/// The selected columns of grid line `line` (inclusive): the cells `SelectionRange::contains`
+/// accepts on that line.
+fn selected_span(range: &SelectionRange, line: Line) -> Option<(usize, usize)> {
+    if line < range.start.line || line > range.end.line {
+        return None;
+    }
+    let from = if range.is_block || line == range.start.line {
+        range.start.column.0
+    } else {
+        0
+    };
+    let to = if range.is_block || line == range.end.line {
+        range.end.column.0
+    } else {
+        usize::MAX
+    };
+    (from <= to).then_some((from, to))
+}
+
+/// Fast 64-bit hash (a folded multiply per word, as in foldhash) for row keys.
+///
+/// Rows with equal keys are drawn from the cache, so a collision shows one row's content in
+/// place of another's. The seed is random per process: with a fixed one, output could be crafted
+/// offline so that a line on screen looks like a different line seen earlier.
+struct KeyHasher(u64);
+
+impl KeyHasher {
+    const MUL: u64 = 0x9E37_79B9_7F4A_7C15;
+
+    fn seed() -> u64 {
+        use std::hash::BuildHasher;
+        static SEED: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+        *SEED.get_or_init(|| {
+            std::collections::hash_map::RandomState::new().hash_one(0x7477_6974_7479_u64)
+        })
+    }
+
+    fn new() -> Self {
+        Self(Self::seed())
+    }
+
+    #[inline]
+    fn write(&mut self, word: u64) {
+        let product = u128::from(self.0 ^ word) * u128::from(Self::MUL);
+        self.0 = (product as u64) ^ ((product >> 64) as u64);
+    }
+
+    fn finish(mut self) -> u64 {
+        self.write(Self::seed());
+        self.0
+    }
+}
+
+/// A color in 28 bits: a tag and the name, RGB or index.
+fn color_bits(color: AnsiColor) -> u64 {
+    match color {
+        AnsiColor::Named(n) => (1 << 24) | n as u64,
+        AnsiColor::Spec(rgb) => {
+            (2 << 24) | (rgb.r as u64) << 16 | (rgb.g as u64) << 8 | rgb.b as u64
+        }
+        AnsiColor::Indexed(i) => (3 << 24) | i as u64,
+    }
+}
+
+/// Key of the palette entries programs redefined (OSC 4), which change cell colors.
+fn palette_key(colors: &Colors) -> u64 {
+    let mut hasher = KeyHasher::new();
+    for i in 0..256 {
+        hasher.write(colors[i].map_or(0, |rgb| color_bits(AnsiColor::Spec(rgb))));
+    }
+    hasher.finish()
+}
+
+/// Key of everything a row's `LineData` is built from, read straight from the grid.
+fn row_key(cells: &Row<Cell>, cols: usize, palette: u64, overlay: &RowOverlay) -> u64 {
+    let mut hasher = KeyHasher::new();
+    hasher.write(palette);
+    hasher.write(cols as u64);
+    for cell in &cells[..Column(cols)] {
+        hasher.write(cell.c as u64 | (cell.flags.bits() as u64) << 32);
+        hasher.write(color_bits(cell.fg) << 28 | color_bits(cell.bg));
+        let marks = drawn_marks(cell);
+        if !marks.is_empty() {
+            hasher.write(u64::MAX - marks.len() as u64);
+            for &mark in marks {
+                hasher.write(mark as u64);
+            }
+        }
+    }
+    match overlay.selected {
+        Some((from, to)) => {
+            hasher.write(1);
+            hasher.write(from as u64);
+            hasher.write(to as u64);
+        }
+        None => hasher.write(0),
+    }
+    hasher.write(overlay.search.len() as u64);
+    for &(from, to, level) in overlay.search {
+        hasher.write(from as u64 | (to as u64) << 24 | (level as u64) << 48);
+    }
+    match &overlay.hover {
+        Some(cols) => {
+            hasher.write(1);
+            hasher.write(cols.start as u64 | (cols.end as u64) << 32);
+        }
+        None => hasher.write(0),
+    }
+    hasher.finish()
+}
+
+/// Materialize a grid row into `LineData`.
+fn build_line(
+    cells: &Row<Cell>,
+    cols: usize,
+    colors: &Colors,
+    overlay: &RowOverlay,
+    hash: u64,
+) -> LineData {
+    let mut has_rtl = false;
+    let mut out: Vec<CellData> = cells[..Column(cols)]
+        .iter()
+        .enumerate()
+        .map(|(col, cell)| {
+            let c = cell.c;
+            let class = bidi_class(c);
+            if class == BidiClass::R || class == BidiClass::AL {
+                has_rtl = true;
+            }
+            CellData {
+                c,
+                zerowidth: drawn_marks(cell).to_vec(),
+                fg: program_color(cell.fg, colors),
+                bg: program_color(cell.bg, colors),
+                flags: cell.flags,
+                selected: overlay
+                    .selected
+                    .is_some_and(|(from, to)| from <= col && col <= to),
+                search_match: 0,
+                link_hover: overlay.hover.as_ref().is_some_and(|h| h.contains(&col)),
+            }
+        })
+        .collect();
+    for &(from, to, level) in overlay.search {
+        if from <= to && to < out.len() {
+            for cell in &mut out[from..=to] {
+                cell.search_match = cell.search_match.max(level);
+            }
+        }
+    }
+    LineData {
+        cells: out.into(),
+        has_rtl,
+        hash,
+    }
+}

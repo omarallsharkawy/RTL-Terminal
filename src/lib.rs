@@ -1,33 +1,29 @@
 #![forbid(unsafe_code)]
-pub mod agent;
 pub mod ai;
 pub mod app;
 pub mod blink;
 pub mod blocks;
-pub mod color;
 pub mod commands;
 pub mod composer;
 pub mod config;
 pub mod control;
 pub mod ime;
 pub mod input;
-pub mod layout;
 pub mod layouts;
-pub mod links;
 pub mod notify;
 mod perf;
 pub mod ports;
 pub mod projects;
-pub mod pty;
 pub mod remote;
 pub mod render;
 pub mod review;
 pub mod session;
-pub mod shell_integration;
 pub mod sidebar;
-pub mod terminal;
 pub mod ui;
 pub mod workflows;
+
+pub use twitty_ai::agent;
+pub use twitty_core::{color, layout, links, pty, shell_integration, terminal};
 
 /// Older path of `session::pane`.
 pub use session::pane;

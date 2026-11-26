@@ -1,0 +1,20 @@
+[package]
+name = "twitty-render"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+alacritty_terminal.workspace = true
+anyhow.workspace = true
+bytemuck.workspace = true
+cosmic_text.workspace = true
+glyphon.workspace = true
+pollster.workspace = true
+twitty-core.workspace = true
+unicode-segmentation.workspace = true
+wgpu.workspace = true
+winit.workspace = true

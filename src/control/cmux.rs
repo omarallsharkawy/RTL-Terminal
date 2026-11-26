@@ -7,7 +7,6 @@
 //! cmux-compatible v2 JSON-RPC and minimal v1 text control dispatch, mapped onto Twitty's tabs,
 //! panes, notifications, and sidebar status.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
@@ -19,7 +18,8 @@ use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey};
 
 use crate::control::protocol::{
     bound_read_text, parse_wire_line, MethodCall, Request, Response, DEFAULT_READ_LINES,
-    MAX_COMMAND_ARGS, MAX_COMMAND_BYTES, MAX_READ_BYTES, MAX_READ_LINES, MAX_SEND_TEXT_BYTES,
+    MAX_COMMAND_ARGS, MAX_COMMAND_BYTES, MAX_METHOD_LEN, MAX_READ_BYTES, MAX_READ_LINES,
+    MAX_SEND_TEXT_BYTES,
 };
 use crate::input::terminal_key_raw;
 use crate::layout::{PaneId, Rect, SplitDir};
@@ -31,10 +31,10 @@ use crate::sidebar::{entry_title, pick_tab_agent_status, AgentStatus, Entry, Not
 use crate::terminal::Terminal;
 use crate::ui::notifications::NotificationHistory;
 
-const MAX_METHOD_LEN: usize = 200;
+pub use twitty_control::protocol::parse_v1_line;
+
 const MAX_CWD_BYTES: usize = 4096;
 const MAX_TITLE_CHARS: usize = 256;
-const MAX_V1_TOKENS: usize = 64;
 const MAX_KEY_MODS: usize = 16;
 
 /// Every control method supported by Twitty (both Twitty `ctl` and cmux v2).
@@ -91,169 +91,6 @@ pub const SUPPORTED_METHODS: &[&str] = &[
     "sidebar.toggle",
     "sidebar.status",
 ];
-
-// ---------------------------------------------------------------------------
-// Minimal v1 text protocol (for the Claude hook path)
-// ---------------------------------------------------------------------------
-
-/// Parse a non-JSON line using the minimal cmux v1 text protocol needed by the Claude hook path:
-/// `ping`, `set_status`, `clear_status`, `list_status`, `notify`, `notify_surface`, `notify_target`.
-pub fn parse_v1_line(line: &str) -> Result<Request, Response> {
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
-        return Err(Response::err(Value::Null, "empty request"));
-    }
-    let (command, rest) = match trimmed.split_once(char::is_whitespace) {
-        Some((cmd, r)) => (cmd, r.trim()),
-        None => (trimmed, ""),
-    };
-    let (args, flags) = parse_v1_args(rest);
-    let workspace = flags.get("tab").or_else(|| flags.get("workspace"));
-    let surface = flags.get("panel").or_else(|| flags.get("surface"));
-
-    let (method, mut params) = match command {
-        "ping" => ("system.ping", json!({})),
-        "set_status" => {
-            let key = args.first().map(String::as_str).unwrap_or("");
-            let value = args.get(1).map(String::as_str).unwrap_or("");
-            let mut p = json!({ "key": key, "value": value });
-            if args.len() > 2 {
-                let label = args[2..].join(" ");
-                if !label.is_empty() {
-                    p["label"] = json!(label);
-                }
-            }
-            if let Some(icon) = flags.get("icon") {
-                p["icon"] = json!(icon);
-            }
-            if let Some(color) = flags.get("color") {
-                p["color"] = json!(color);
-            }
-            ("workspace.set_status", p)
-        }
-        "clear_status" => {
-            let mut p = json!({});
-            if let Some(key) = args.first() {
-                p["key"] = json!(key);
-            }
-            ("workspace.clear_status", p)
-        }
-        "list_status" => ("workspace.list_status", json!({})),
-        "notify" => {
-            let title = args.first().map(String::as_str).unwrap_or("");
-            let body = args.get(1).map(String::as_str).unwrap_or("");
-            (
-                "notification.create",
-                json!({ "title": title, "body": body }),
-            )
-        }
-        "notify_surface" => {
-            let sid = args.first().map(String::as_str).unwrap_or("");
-            let title = args.get(1).map(String::as_str).unwrap_or("");
-            let body = args.get(2).map(String::as_str).unwrap_or("");
-            (
-                "notification.create",
-                json!({ "surface": sid, "title": title, "body": body }),
-            )
-        }
-        "notify_target" => {
-            let ws_arg = args.first().map(String::as_str).unwrap_or("");
-            let sid = args.get(1).map(String::as_str).unwrap_or("");
-            let title = args.get(2).map(String::as_str).unwrap_or("");
-            let body = args.get(3).map(String::as_str).unwrap_or("");
-            (
-                "notification.create",
-                json!({
-                    "workspace": ws_arg,
-                    "surface": sid,
-                    "title": title,
-                    "body": body,
-                }),
-            )
-        }
-        other => {
-            return Err(Response::cmux_err(
-                Value::Null,
-                "unknown_method",
-                format!("Unknown command: {}", clean_text(other, MAX_METHOD_LEN)),
-            ));
-        }
-    };
-
-    if let Some(ws) = workspace {
-        if params.get("workspace").is_none() {
-            params["workspace"] = json!(ws);
-        }
-    }
-    if let Some(s) = surface {
-        if params.get("surface").is_none() {
-            params["surface"] = json!(s);
-        }
-    }
-
-    Ok(Request {
-        id: Value::String("v1".into()),
-        method: method.into(),
-        params,
-    })
-}
-
-/// Parse `"arg1 \"quoted arg\" --flag=value"` into `(positional_args, flags)`, bounded to
-/// [`MAX_V1_TOKENS`].
-fn parse_v1_args(input: &str) -> (Vec<String>, HashMap<String, String>) {
-    let mut args = Vec::new();
-    let mut flags = HashMap::new();
-    let mut chars = input.chars().peekable();
-
-    while chars.peek().is_some() && args.len() + flags.len() < MAX_V1_TOKENS {
-        while chars.peek().is_some_and(|c| c.is_whitespace()) {
-            chars.next();
-        }
-        if chars.peek().is_none() {
-            break;
-        }
-
-        let mut token = String::new();
-        if chars.peek() == Some(&'"') {
-            chars.next();
-            while let Some(ch) = chars.next() {
-                if ch == '"' {
-                    break;
-                }
-                if ch == '\\' {
-                    if let Some(&next) = chars.peek() {
-                        if matches!(next, '"' | '\\') {
-                            token.push(next);
-                            chars.next();
-                            continue;
-                        }
-                    }
-                }
-                token.push(ch);
-            }
-        } else {
-            while let Some(&ch) = chars.peek() {
-                if ch.is_whitespace() {
-                    break;
-                }
-                token.push(ch);
-                chars.next();
-            }
-        }
-
-        if let Some(flag) = token.strip_prefix("--") {
-            if let Some((key, value)) = flag.split_once('=') {
-                flags.insert(key.to_owned(), value.to_owned());
-            } else {
-                flags.insert(flag.to_owned(), String::new());
-            }
-        } else {
-            args.push(token);
-        }
-    }
-
-    (args, flags)
-}
 
 // ---------------------------------------------------------------------------
 // Key encoding for `surface.send_key`

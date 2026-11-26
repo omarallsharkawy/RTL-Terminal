@@ -2,18 +2,15 @@
 
 pub mod ai;
 pub mod blocks;
-pub mod boxdraw;
 pub mod chrome;
 pub mod composer;
-pub mod context;
-pub mod cursor;
 pub mod frame;
 mod motion;
 pub mod palette;
-pub mod preedit;
 pub mod review;
-pub mod row_quads;
 pub mod settings;
 pub mod sidebar;
 pub mod welcome;
 pub mod window_chrome;
+
+pub use twitty_render::scene::{boxdraw, context, cursor, preedit, row_quads};

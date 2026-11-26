@@ -4,7 +4,6 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
 
 /// Maximum `config.json` size read from disk (2 MiB).
 pub const MAX_CONFIG_BYTES: usize = 2 * 1024 * 1024;
@@ -157,29 +156,8 @@ pub struct ThemeColors {
     pub ansi: Option<Vec<String>>,
 }
 
-static WARNINGS: Mutex<Vec<String>> = Mutex::new(Vec::new());
-
-/// Report a configuration problem: printed to stderr and kept for `take_warnings`, so the
-/// app can also show it in the terminal (a Windows GUI app has no visible stderr).
-/// Control and bidi-override characters are stripped so paths/errors cannot inject escapes.
-pub(crate) fn warn(message: String) {
-    let clean = crate::shell_integration::clean_text(&message, 512);
-    if clean.is_empty() {
-        return;
-    }
-    tracing::warn!("{clean}");
-    if let Ok(mut warnings) = WARNINGS.lock() {
-        warnings.push(clean);
-    }
-}
-
-/// Problems reported since the last call, oldest first.
-pub fn take_warnings() -> Vec<String> {
-    WARNINGS
-        .lock()
-        .map(|mut w| std::mem::take(&mut *w))
-        .unwrap_or_default()
-}
+pub use twitty_core::warnings::take_warnings;
+pub(crate) use twitty_core::warnings::warn;
 
 fn deserialize_sidebar<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     let value = serde_json::Value::deserialize(d)?;

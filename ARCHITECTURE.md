@@ -44,7 +44,25 @@ the cursor, backgrounds, selection, mouse hits and IME follow the text the user 
 
 Everything above `render/gpu` runs without a GPU and is covered by tests in `tests/`.
 
+## Cargo workspace
+
+All packages inherit their version and Rust edition from the root manifest. The root
+`twitty` package builds both binaries and re-exports the existing library paths.
+
+| Package | Owns | Workspace dependencies |
+| --- | --- | --- |
+| `twitty-core` | Terminal and PTY, shell events, command blocks, layout primitives, palette colors, bidi, and CPU-only row shaping | — |
+| `twitty-render` | Cell metrics and row caching, block card geometry, scene primitives, UI styling, and wgpu/glyphon pipelines | `twitty-core` |
+| `twitty-control` | Control sockets, wire formats, CLI, and Claude hook client | `twitty-core` |
+| `twitty-ai` | Agent selection, prompts, subprocess execution, consent, and AI response formats | `twitty-core`, `twitty-control` (UID lookup on Unix) |
+| `twitty` | Windows, sessions, app views and frame composition, cmux dispatch, remote bootstrap and daemon, and the library facade | All four members |
+
+The app composes its frame from live UI state. Its renderer and pane-specific cmux dispatch
+stay with those models. Assets and integration tests live at the repository root.
+
 ## Modules
+
+The module names below follow the root library's module tree.
 
 | Module | Responsibility | Depends on |
 | --- | --- | --- |
@@ -55,7 +73,7 @@ Everything above `render/gpu` runs without a GPU and is covered by tests in `tes
 | `layout.rs` | Split-tree geometry: pane rectangles, dividers, tab bar. Pure arithmetic. | — |
 | `terminal.rs` | Wrapper around `alacritty_terminal::Term`: feeding bytes, snapshots for drawing, selection, search, links, program-set palette colors. | `alacritty_terminal` |
 | `pty.rs` | Shell discovery, environment, PTY spawning, a writer thread so large pastes never block the UI. | `portable-pty` |
-| `render/text/` | Fonts, bidi helpers, and `RowShaper`, which turns a row of cells into shaped segments. | `cosmic-text` |
+| `twitty-core::text` | Fonts, bidi helpers, and `RowShaper`, which turns a row of cells into shaped segments. | `cosmic-text` |
 | `render/row/` | A shaped row: per-cell visual extents, mouse hit testing, caret placement, and the per-pane `RowCache`. | `render/text` |
 | `render/scene/` | CPU frame composition. Block card backgrounds go in `shapes.underlay` (behind cell quads), terminal quads draw next, then chrome shapes (headers, zoom badge, flash outline, block toolbars) and overlays before glyphon draws. Palette and block-toolbar bounds cut holes in the text runs behind them. | `render/row`, `render/style`, `render/shapes`, `blocks` |
 | `render/shapes.rs`, `render/icons.rs`, `render/ui_style.rs`, `render/text/ui.rs` | Shared UI foundation. Physical-pixel shapes (underlay, chrome, overlay) and icons, scalable theme tokens and single-line proportional UI labels with Arabic fallback and grapheme-safe truncation. | `color`, `layout`, `cosmic-text` |
@@ -83,12 +101,12 @@ Everything above `render/gpu` runs without a GPU and is covered by tests in `tes
 | `remote/`, `app/ssh.rs` | Validates SSH identities, verifies and installs the versioned helper over OpenSSH, and reconnects an ordinary pane PTY on transport failure. | `session`, `pty` |
 | `remote/daemon/`, `bin/twitty-remote.rs` | GUI-free Linux helper. Owns persistent login-shell PTYs and a 256 KiB output tail per session. Attachments use framed terminal bytes, resize and exit messages on a private Unix socket. | `portable-pty`, `rustix` |
 
-Dependencies point downwards only: nothing in `render/`, `terminal.rs`, `input/` or `ui/` knows
-about winit windows or the app.
+The terminal model and row shaper take terminal data and geometry. The window renderer
+connects them to the winit window through the GPU context.
 
 ## Shaping a row
 
-`RowShaper::build_row` (in `render/text/shaper.rs`):
+`RowShaper::build_row` (in `crates/twitty-core/src/text/shaper.rs`):
 
 1. **Segments.** A row is cut at box-drawing/block cells (drawn as geometry, never as text) and
    at runs of 8+ spaces, so TUI columns never bleed into each other. Short space runs stay inside
@@ -162,6 +180,6 @@ shown, sent to `notify-send`, returned over the control socket or put into an ag
 ## Where to start
 
 - A rendering bug in Arabic text: write a failing test modelled on `tests/bidi_layout_tests.rs`,
-  then look at `render/text/shaper.rs` (marks, segments) or `render/row/` (extents, hits).
+  then look at `twitty-core::text::shaper` (marks, segments) or `twitty-core::row` (extents, hits).
 - A key that sends the wrong bytes: `tests/kitty_keyboard_tests.rs` and `input/keys.rs`.
 - Tabs or panes misbehaving: `tests/layout_tests.rs`, `session/workspace.rs`, `layout.rs`.

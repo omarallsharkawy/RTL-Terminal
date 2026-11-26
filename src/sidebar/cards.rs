@@ -461,7 +461,7 @@ fn max_scroll(content_height: f32, area: Rect) -> f32 {
 
 /// Keep a whole-word prefix when possible and fall back to graphemes in an overlong word.
 pub fn fit_title(text: &str, mut fits: impl FnMut(&str) -> bool) -> String {
-    let fitted = crate::ui::text::fit_text(text, &mut fits);
+    let fitted = twitty_render::text::fit_text(text, &mut fits);
     if fitted != "…" {
         return fitted;
     }

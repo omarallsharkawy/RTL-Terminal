@@ -5,7 +5,7 @@
 #[path = "../remote/daemon/mod.rs"]
 pub mod daemon;
 #[cfg(target_os = "linux")]
-#[path = "../remote/wire.rs"]
+#[path = "../../crates/twitty-core/src/remote/wire.rs"]
 mod wire;
 #[cfg(target_os = "linux")]
 use wire::{validate_name, ATTACH_MARKER, BOOTSTRAP_FAILED, SSH_DISCONNECTED};

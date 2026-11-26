@@ -168,7 +168,7 @@ semver_gt() {
 read_cargo_version() {
   local cargo_toml="$1"
   awk '
-    /^\[package\][[:space:]]*$/ { in_pkg = 1; next }
+    /^\[workspace\.package\][[:space:]]*$/ { in_pkg = 1; next }
     /^\[/ { in_pkg = 0 }
     in_pkg && /^version[[:space:]]*=/ {
       val = $0
@@ -187,7 +187,7 @@ bump_cargo_toml() {
   tmp="$(mktemp "${cargo_toml}.tmp.XXXXXX")"
   if ! awk -v ver="$new_ver" '
     BEGIN { in_pkg = 0; done = 0 }
-    /^\[package\][[:space:]]*$/ { in_pkg = 1; print; next }
+    /^\[workspace\.package\][[:space:]]*$/ { in_pkg = 1; print; next }
     /^\[/ { in_pkg = 0; print; next }
     in_pkg && !done && /^version[[:space:]]*=/ {
       print "version = \"" ver "\""
@@ -198,32 +198,50 @@ bump_cargo_toml() {
     END { if (!done) exit 3 }
   ' "$cargo_toml" > "$tmp"; then
     rm -f "$tmp"
-    echo "error: failed to update [package] version in $cargo_toml" >&2
+    echo "error: failed to update [workspace.package] version in $cargo_toml" >&2
     return 1
   fi
   mv "$tmp" "$cargo_toml"
 }
 
 update_cargo_lock_file() {
-  local cargo_lock="$1"
-  local new_ver="$2"
-  local tmp
+  local repo_root="$1"
+  local cargo_lock="$2"
+  local new_ver="$3"
+  local packages tmp
+  # The workspace includes the root package and the manifests matched by crates/*.
+  packages="$(awk -F '"' '
+    FNR == 1 { in_pkg = 0 }
+    /^\[package\][[:space:]]*$/ { in_pkg = 1; next }
+    /^\[/ { in_pkg = 0 }
+    in_pkg && /^name[[:space:]]*=/ { print $2 }
+  ' "$repo_root/Cargo.toml" "$repo_root"/crates/*/Cargo.toml)" || return 1
+
   tmp="$(mktemp "${cargo_lock}.tmp.XXXXXX")"
-  if ! awk -v ver="$new_ver" '
-    BEGIN { in_twitty = 0; updated = 0 }
-    /^\[\[package\]\]/ { in_twitty = 0; print; next }
-    /^name = "twitty"$/ { in_twitty = 1; print; next }
-    in_twitty && !updated && /^version = "/ {
-      print "version = \"" ver "\""
-      updated = 1
-      in_twitty = 0
+  if ! awk -F '"' -v packages="$packages" -v ver="$new_ver" '
+    BEGIN {
+      count = split(packages, names, "\n")
+      for (i = 1; i <= count; i++) members[names[i]] = 1
+    }
+    /^\[\[package\]\]$/ { name = "" }
+    /^name = "/ { name = $2 }
+    name in members && /^version = "/ {
+      read_next = getline following
+      if (read_next < 0) exit 3
+      if (read_next && following ~ /^source = /) {
+        print
+      } else {
+        print "version = \"" ver "\""
+        updated[name] = 1
+      }
+      if (read_next) print following
       next
     }
     { print }
-    END { if (!updated) exit 3 }
+    END { for (name in members) if (!(name in updated)) exit 3 }
   ' "$cargo_lock" > "$tmp"; then
     rm -f "$tmp"
-    echo "error: failed to update twitty version in $cargo_lock" >&2
+    echo "error: failed to update workspace versions in $cargo_lock" >&2
     return 1
   fi
   mv "$tmp" "$cargo_lock"
@@ -235,13 +253,13 @@ refresh_cargo_lock_offline() {
   if [[ ! -f "$repo_root/Cargo.lock" ]]; then
     return 0
   fi
-  # Prefer Cargo itself (offline) when a full workspace/crate layout is present.
+  # Prefer Cargo itself (offline) when a full workspace is present.
   if command -v cargo >/dev/null 2>&1 && [[ -d "$repo_root/src" ]]; then
     if cargo metadata --offline --format-version 1 --manifest-path "$repo_root/Cargo.toml" >/dev/null 2>&1; then
       return 0
     fi
   fi
-  update_cargo_lock_file "$repo_root/Cargo.lock" "$new_ver"
+  update_cargo_lock_file "$repo_root" "$repo_root/Cargo.lock" "$new_ver"
 }
 
 move_changelog() {
@@ -440,9 +458,9 @@ run_gates() {
   echo "==> Running release gates..."
   (
     cd "$repo_root"
-    cargo fmt -- --check
-    cargo clippy --all-targets -- -D warnings
-    cargo test
+    cargo fmt --all -- --check
+    cargo clippy --workspace --all-targets -- -D warnings
+    cargo test --workspace
     if command -v desktop-file-validate >/dev/null 2>&1; then
       desktop-file-validate packaging/linux/twitty.desktop
     fi
@@ -532,7 +550,7 @@ main() {
   local current_ver
   current_ver="$(read_cargo_version "$repo_root/Cargo.toml")"
   if [[ -z "$current_ver" ]]; then
-    echo "error: could not read [package] version from $repo_root/Cargo.toml" >&2
+    echo "error: could not read [workspace.package] version from $repo_root/Cargo.toml" >&2
     exit 1
   fi
 
@@ -579,7 +597,7 @@ main() {
 
     bump_cargo_toml "$stage/Cargo.toml" "$version"
     if [[ -f "$stage/Cargo.lock" ]]; then
-      update_cargo_lock_file "$stage/Cargo.lock" "$version"
+      update_cargo_lock_file "$repo_root" "$stage/Cargo.lock" "$version"
     fi
     move_changelog "$stage/CHANGELOG.md" "$version" "$rel_date"
     add_metainfo_release "$stage/$metainfo_rel" "$version" "$rel_date"

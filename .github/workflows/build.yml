@@ -37,16 +37,16 @@ jobs:
         uses: swatinem/rust-cache@v2
 
       - name: Check Rust formatting
-        run: cargo fmt -- --check
+        run: cargo fmt --all -- --check
 
       - name: Lint Rust with clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Run Rust tests
         shell: bash
         run: |
           set -o pipefail
-          cargo test --no-fail-fast 2>&1 | tee test-output.txt
+          cargo test --workspace --no-fail-fast 2>&1 | tee test-output.txt
 
       # Job logs need a sign-in; annotations are public, so surface the failures there.
       - name: Report failing tests
@@ -85,7 +85,7 @@ jobs:
       - name: Package Windows release zip
         shell: pwsh
         run: |
-          $version = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
+          $version = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages | Where-Object name -eq twitty | Select-Object -ExpandProperty version
           $stage = "dist/twitty-$version-windows-x86_64"
           if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
           New-Item -ItemType Directory -Force "$stage/licenses" | Out-Null
@@ -132,7 +132,7 @@ jobs:
 
       - name: Package the release tarball
         run: |
-          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "twitty") | .version')
           stage="dist/twitty-$version-linux-x86_64"
           rm -rf "$stage"
           mkdir -p "$stage/bin" \
@@ -242,8 +242,8 @@ jobs:
       - name: Cache Rust build output
         uses: swatinem/rust-cache@v2
 
-      - name: Check the crate builds on the declared rust-version
-        run: cargo check --all-targets
+      - name: Check the workspace builds on the declared rust-version
+        run: cargo check --workspace --all-targets
 
   coverage:
     name: Test coverage
@@ -264,7 +264,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          cargo llvm-cov --release --summary-only --no-fail-fast 2>&1 | tee test-output.txt
+          cargo llvm-cov --workspace --release --summary-only --no-fail-fast 2>&1 | tee test-output.txt
 
       # Job logs need a sign-in; annotations are public, so surface the failures there.
       - name: Report failing tests
@@ -377,7 +377,7 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           cargo_version="$(awk '
-            /^\[package\][[:space:]]*$/ { in_pkg = 1; next }
+            /^\[workspace\.package\][[:space:]]*$/ { in_pkg = 1; next }
             /^\[/ { in_pkg = 0 }
             in_pkg && /^version[[:space:]]*=/ {
               val = $0
