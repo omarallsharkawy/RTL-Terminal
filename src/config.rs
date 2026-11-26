@@ -87,6 +87,13 @@ pub struct TwittyConfig {
         deserialize_with = "crate::workflows::deserialize_config_commands"
     )]
     pub commands: Vec<crate::workflows::WorkflowSpec>,
+    /// Custom keyboard shortcut overrides mapping command ids to one or more key chords (or null/"" to unbind).
+    #[serde(
+        default,
+        skip_serializing_if = "crate::input::keybindings::KeybindingsConfig::is_empty",
+        deserialize_with = "crate::input::keybindings::deserialize_keybindings"
+    )]
+    pub keybindings: crate::input::keybindings::KeybindingsConfig,
     /// Keys this version does not know about are kept so saving never drops them.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
@@ -127,6 +134,7 @@ impl Default for TwittyConfig {
             ai_timeout_secs: 60,
             project_roots: crate::projects::scan::default_project_roots(),
             commands: Vec::new(),
+            keybindings: crate::input::keybindings::KeybindingsConfig::default(),
             extra: serde_json::Map::new(),
             keep_file: false,
         }
@@ -454,6 +462,12 @@ impl TwittyConfig {
         } else {
             self.ai_timeout_secs.clamp(5, 300)
         };
+        if !self.keybindings.is_empty() {
+            let resolved = crate::input::keybindings::KeyBindings::resolve(&self.keybindings);
+            for w in resolved.warnings {
+                warn(w);
+            }
+        }
     }
 
     pub(crate) fn save(&self) {

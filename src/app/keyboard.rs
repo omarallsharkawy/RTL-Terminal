@@ -8,7 +8,7 @@ use winit::keyboard::{Key, ModifiersState, NamedKey};
 use super::App;
 use crate::blocks::{BlockList, BlockNav};
 use crate::input::route::{route_key, shortcut_is_idle, KeyRoute};
-use crate::input::{handle_key, key_shortcut, terminal_key, InputAction};
+use crate::input::{handle_key_with, key_shortcut_with, terminal_key, InputAction};
 use crate::layout::{PaneId, SplitDir};
 use crate::ui::palette::PaletteMode;
 use crate::ui::search::{search_bar_text, search_key, SearchCmd};
@@ -49,9 +49,9 @@ impl App {
             return false;
         };
         let mode = self.mode_of(id);
-        let mut action = handle_key(event, self.modifiers, mode);
+        let mut action = handle_key_with(event, self.modifiers, mode, &self.keybindings);
         let single_pane = self.ws.single_pane();
-        let shortcut = key_shortcut(event, self.modifiers);
+        let shortcut = key_shortcut_with(event, self.modifiers, &self.keybindings);
         let blocks = self
             .ws
             .pane(id)

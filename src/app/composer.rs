@@ -25,7 +25,7 @@ use crate::composer::{
     encode_submit, should_show_composer, ComposerAction, ComposerMode, ComposerState,
 };
 use crate::input::route::shortcut_is_idle;
-use crate::input::{key_shortcut, InputAction};
+use crate::input::{key_shortcut_with, InputAction};
 use crate::layout::PaneId;
 use crate::pty::Pty;
 use crate::render::scene::composer::{
@@ -453,7 +453,7 @@ impl App {
         if !self.composer_has_keys() {
             return None;
         }
-        match key_shortcut(event, self.modifiers) {
+        match key_shortcut_with(event, self.modifiers, &self.keybindings) {
             Some(InputAction::ToggleComposer) => {
                 if event.state.is_pressed() {
                     self.close_composer();

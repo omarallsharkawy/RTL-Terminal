@@ -111,40 +111,42 @@ cargo build --release
 
 ### Shortcuts
 
-| Action | Keys |
+| Action | Keys (default) |
 | --- | --- |
-| Command palette | Ctrl+Shift+P |
-| Command composer (toggle / open) | Ctrl+Shift+Space |
-| Settings (Appearance, Behaviour, Keys, About) | Ctrl+, |
-| Copy selection | Release the mouse, or Ctrl+Shift+C |
-| Paste | Ctrl+Shift+V, or middle-click |
-| Search scrollback | Ctrl+Shift+F, then type. Enter = older match, Shift+Enter = newer, Esc closes |
-| Search all terminals (every tab and pane, screen and scrollback) | Ctrl+Shift+G, then type 2+ characters (Arabic without tashkeel or with any alef form matches). Enter jumps to the line and highlights it; Esc closes |
+| Command palette (`palette.open`) | Ctrl+Shift+P |
+| Compose command (`composer.open`) | Ctrl+Shift+Space |
+| Settings (`settings.open`) | Ctrl+, |
+| Copy selection (`edit.copy`) | Release the mouse, or Ctrl+Shift+C |
+| Paste (`edit.paste`) | Ctrl+Shift+V, or middle-click |
+| Search scrollback (`search.open`) | Ctrl+Shift+F, then type. Enter = older match, Shift+Enter = newer, Esc closes |
+| Search all terminals (`search.all`) | Ctrl+Shift+G, then type 2+ characters (Arabic without tashkeel or with any alef form matches). Enter jumps to the line and highlights it; Esc closes |
 | Select word / line | Double-click / triple-click |
 | Select inside vim, Claude Code, etc. | Hold Shift while dragging |
-| Zoom in / out / reset | Ctrl+= / Ctrl+- / Ctrl+0, or Ctrl+wheel |
+| Zoom in / out / reset (`zoom.in`, `zoom.out`, `zoom.reset`) | Ctrl+= / Ctrl+- / Ctrl+0, or Ctrl+wheel |
 | Background transparency | Ctrl+Shift+wheel |
 | Open a link (OSC 8 or plain URL) | Ctrl+Click |
-| New tab / close pane (last pane closes the tab) | Ctrl+Shift+T / Ctrl+Shift+W |
-| Reopen last closed tab (restores directory and title) | Ctrl+Shift+Alt+T |
+| New tab / close pane (`tab.new`, `pane.close`) | Ctrl+Shift+T / Ctrl+Shift+W |
+| Reopen last closed tab (`tab.reopen`) | Ctrl+Shift+Alt+T |
 | Switch to tab 1–9 | Ctrl+Shift+1 … Ctrl+Shift+9 |
-| Rename tab (empty clears custom title) | Ctrl+Shift+N |
-| Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab, or Ctrl+PageDown / Ctrl+PageUp; or click the tab |
-| Move tab left / right | Ctrl+Shift+PageUp / Ctrl+Shift+PageDown |
-| Open project switcher (Enter: tab or switch, Alt+Enter: split) | Ctrl+Shift+L |
-| Split right / split down | Ctrl+Shift+E / Ctrl+Shift+O |
-| Toggle pane zoom (maximize focused pane within its tab) | Ctrl+Shift+Z |
-| Close other panes in the tab (confirms if any runs a program) | Ctrl+Shift+K |
-| Flash focused pane outline | Ctrl+Shift+H |
-| Focus the pane to the left / right / above / below | Alt+Arrow keys, or click the pane |
+| Rename tab (`tab.rename`) | Ctrl+Shift+N |
+| Next / previous tab (`tab.next`, `tab.prev`) | Ctrl+Tab / Ctrl+Shift+Tab, or Ctrl+PageDown / Ctrl+PageUp; or click the tab |
+| Move tab left / right (`tab.move-left`, `tab.move-right`) | Ctrl+Shift+PageUp / Ctrl+Shift+PageDown |
+| Open project switcher (`project.open`) | Ctrl+Shift+L (Enter: tab or switch, Alt+Enter: split) |
+| Split right / split down (`split.right`, `split.down`) | Ctrl+Shift+E / Ctrl+Shift+O |
+| Toggle pane zoom (`pane.zoom`) | Ctrl+Shift+Z |
+| Close other panes in the tab (`pane.close-others`) | Ctrl+Shift+K |
+| Flash focused pane outline (`pane.flash`) | Ctrl+Shift+H |
+| Focus the pane to the left / right / above / below (`focus.*`) | Alt+Arrow keys, or click the pane |
+| Jump to newest / next unread notification (`notifications.jump-unread`, `attention.next`) | Ctrl+Shift+J / Ctrl+Shift+U |
 | Resize a split | Drag the divider |
-| Toggle workspace sidebar | Ctrl+Shift+B |
-| Jump to newest / next unread notification | Ctrl+Shift+J / Ctrl+Shift+U |
-| Open notification list | Ctrl+Shift+I |
-| Previous / next command block | Ctrl+Shift+Up / Ctrl+Shift+Down |
-| Copy command block output | Ctrl+Shift+Y |
-| Ask a coding agent about the selected block or screen | Ctrl+Shift+A |
-| Review changes (the focused repository's uncommitted diff, beside the panes) | Ctrl+Shift+R |
+| Toggle workspace sidebar (`sidebar.toggle`) | Ctrl+Shift+B |
+| Open notification list (`notifications.list`) | Ctrl+Shift+I |
+| Previous / next command block (`block.prev`, `block.next`) | Ctrl+Shift+Up / Ctrl+Shift+Down |
+| Copy command block output (`block.copy-output`) | Ctrl+Shift+Y |
+| Ask a coding agent about the selected block or screen (`agent.ask`) | Ctrl+Shift+A |
+| Review changes (`review.toggle`) | Ctrl+Shift+R |
+
+All command shortcuts can be remapped or unbound in `config.json` under `"keybindings"`, or edited live in **Settings → Keys** (`Ctrl+,`). The command palette and Settings always display the effective (possibly remapped) chord.
 
 With a single pane, Alt+Arrow goes to the program (fish, readline word jumps); with a single tab, so do Ctrl+Tab and Ctrl+PageUp/PageDown.
 
@@ -189,6 +191,7 @@ The config file is `~/.config/twitty/config.json` (`%APPDATA%\twitty\config.json
 | `ai_timeout_secs` | Timeout in seconds for non-interactive built-in AI requests (default `60`, clamped `5`–`300`). |
 | `project_roots` | Array of directories scanned one or two levels deep for git repositories in the project switcher (`Ctrl+Shift+L`). Defaults to `["~/Projects", "~/src", "~/code"]` (only existing directories are scanned). |
 | `commands` | Array of custom workflow commands listed in the command palette (always trusted). See [Custom commands (workflows)](#custom-commands-workflows). |
+| `keybindings` | Object mapping command ids (e.g. `"tab.new"`, `"composer.open"`, `"settings.open"`) to a single chord string, an array of chords, or `null` / `""` to unbind. See [Keybindings](#keybindings). |
 | `control_socket` | `true` (default) listens on a private Unix socket (`0600` in a `0700` dir) for `twitty ctl` and agent tools. |
 | `cmux_compat` | `true` (default) exposes cmux-compatible environment variables (`CMUX_SOCKET_PATH`, `CMUX_WORKSPACE_ID`, `CMUX_SURFACE_ID`) when `control_socket` is enabled. |
 | `claude_hooks` | `true` (default) puts Twitty's `claude` wrapper first on `PATH` inside Twitty shells so Claude Code reports per-pane status and notifications over the socket without editing your Claude settings files. |
@@ -216,6 +219,25 @@ An unknown name prints a warning and falls back to `twitty-dark`.
   }
 }
 ```
+
+#### Keybindings
+
+Override or unbind any built-in command under `"keybindings"` in `config.json`, or edit shortcuts live in **Settings → Keys** (`Ctrl+,`):
+
+```json
+{
+  "keybindings": {
+    "tab.new": "Alt+T",
+    "composer.open": ["Alt+Enter", "F6"],
+    "pane.flash": null
+  }
+}
+```
+
+- Single chords combine modifiers (`Ctrl`, `Shift`, `Alt`, `Super`/`Meta`) with letters, digits, punctuation (`,`, `.`, `=`, `-`, `;`, …), or named keys (`Enter`, `Tab`, `Space`, `Escape`, `Up`/`Down`/`Left`/`Right`, `PageUp`/`PageDown`, `Home`/`End`, `Insert`/`Delete`, `F1`–`F12`).
+- Bindings work on Arabic and other non-Latin keyboard layouts using the physical key fallback, and Windows AltGr symbols continue to pass through untouched.
+- Plain-typing chords (no modifier other than `Shift` on a printable key, outside function/navigation keys) are refused with a warning so terminal input is never swallowed.
+- If two commands share a chord, the last entry in `"keybindings"` wins over earlier entries and defaults, a warning is logged, and **Settings → Keys** highlights the conflict inline. Set a command to `null` or `""` to unbind it.
 
 ### Session restore
 

@@ -213,7 +213,15 @@ impl WorkflowSet {
 
     /// Built-in commands followed by custom commands, ready for the generic command palette.
     pub fn palette_entries(&self) -> Vec<PaletteEntry> {
-        let mut entries = PaletteEntry::builtins();
+        self.palette_entries_with(crate::input::keybindings::KeyBindings::defaults())
+    }
+
+    /// Built-in commands (showing effective shortcuts from `bindings`) followed by custom commands.
+    pub fn palette_entries_with(
+        &self,
+        bindings: &crate::input::keybindings::KeyBindings,
+    ) -> Vec<PaletteEntry> {
+        let mut entries = PaletteEntry::builtins_with(bindings);
         for (idx, wf) in self.workflows.iter().enumerate() {
             let shortcut = match &wf.source {
                 WorkflowSource::User => None,
@@ -246,6 +254,14 @@ impl WorkflowSet {
     /// JSON list returned by the `command.list` control socket method: built-ins plus custom
     /// commands, each with `name`, `source` (`"builtin"`, `"user"`, or `"project"`), and `trusted`.
     pub fn control_list_json(&self) -> Vec<Value> {
+        self.control_list_json_with(crate::input::keybindings::KeyBindings::defaults())
+    }
+
+    /// Like [`Self::control_list_json`], reporting effective shortcuts from `bindings`.
+    pub fn control_list_json_with(
+        &self,
+        bindings: &crate::input::keybindings::KeyBindings,
+    ) -> Vec<Value> {
         let mut out: Vec<Value> = commands::all()
             .into_iter()
             .map(|c| {
@@ -253,7 +269,7 @@ impl WorkflowSet {
                     "name": c.name,
                     "title_en": c.title_en,
                     "title_ar": c.title_ar,
-                    "shortcut": c.shortcut,
+                    "shortcut": bindings.display_shortcut(c.name),
                     "source": "builtin",
                     "trusted": true,
                 })

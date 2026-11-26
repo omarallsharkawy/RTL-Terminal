@@ -23,7 +23,7 @@ use winit::keyboard::{Key, ModifiersState, NamedKey};
 
 use super::App;
 use crate::commands;
-use crate::input::{key_shortcut, InputAction};
+use crate::input::{key_shortcut_with, InputAction};
 use crate::layout::{PaneId, SplitDir};
 use crate::pty::{Pty, SpawnOptions};
 use crate::render::icons::Icon;
@@ -89,7 +89,7 @@ impl App {
         let (workflows, entries) = if mode == PaletteMode::Commands {
             let cwd = self.focused_id().and_then(|id| self.pane_cwd(id));
             let workflows = WorkflowSet::load(&self.config.commands, cwd.as_deref());
-            let entries = workflows.palette_entries();
+            let entries = workflows.palette_entries_with(&self.keybindings);
             (workflows, entries)
         } else {
             (WorkflowSet::default(), Vec::new())
@@ -365,7 +365,7 @@ impl App {
             return false;
         }
         // The palette shortcuts switch between its modes, or close it from its own.
-        match key_shortcut(event, self.modifiers) {
+        match key_shortcut_with(event, self.modifiers, &self.keybindings) {
             Some(InputAction::CommandPalette) => {
                 self.toggle_palette_mode(PaletteMode::Commands);
                 return false;

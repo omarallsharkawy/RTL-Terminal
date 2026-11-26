@@ -14,7 +14,7 @@ use super::agent::AgentStartError;
 use super::event::AppEvent;
 use super::App;
 use crate::input::route::shortcut_is_idle;
-use crate::input::{key_shortcut, InputAction};
+use crate::input::{key_shortcut_with, InputAction};
 use crate::layout::PaneId;
 use crate::pty::Pty;
 use crate::review::comment::{
@@ -130,7 +130,7 @@ impl App {
         if !self.review_has_keys() {
             return None;
         }
-        match key_shortcut(event, self.modifiers) {
+        match key_shortcut_with(event, self.modifiers, &self.keybindings) {
             // Pasting while typing a comment goes into the comment.
             Some(InputAction::Paste) if self.review.is_editing() => {
                 if event.state.is_pressed() {

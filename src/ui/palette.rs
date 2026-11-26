@@ -13,6 +13,7 @@
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
 use crate::commands::Command;
+use crate::input::keybindings::KeyBindings;
 
 /// Most results shown at once.
 pub const MAX_RESULTS: usize = 10;
@@ -73,21 +74,36 @@ pub struct PaletteEntry {
 
 impl PaletteEntry {
     pub fn from_command(command: &Command) -> Self {
+        Self::from_command_with(command, KeyBindings::defaults())
+    }
+
+    pub fn from_command_with(command: &Command, bindings: &KeyBindings) -> Self {
         Self {
             id: PaletteId::Builtin(command.name),
             name: command.name.to_owned(),
             title_en: command.title_en.to_owned(),
             title_ar: command.title_ar.to_owned(),
-            shortcut: command.shortcut.map(str::to_owned),
+            shortcut: bindings.display_shortcut(command.name),
         }
     }
 
     pub fn from_commands(commands: &[Command]) -> Vec<Self> {
-        commands.iter().map(Self::from_command).collect()
+        Self::from_commands_with(commands, KeyBindings::defaults())
+    }
+
+    pub fn from_commands_with(commands: &[Command], bindings: &KeyBindings) -> Vec<Self> {
+        commands
+            .iter()
+            .map(|c| Self::from_command_with(c, bindings))
+            .collect()
     }
 
     pub fn builtins() -> Vec<Self> {
-        Self::from_commands(&crate::commands::all())
+        Self::builtins_with(KeyBindings::defaults())
+    }
+
+    pub fn builtins_with(bindings: &KeyBindings) -> Vec<Self> {
+        Self::from_commands_with(&crate::commands::all(), bindings)
     }
 }
 

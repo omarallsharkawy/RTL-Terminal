@@ -4,11 +4,16 @@
 //! Drawing lives in `render::scene::settings`; live application and persistence hooks live in
 //! `app::settings`.
 
-use winit::keyboard::{Key, ModifiersState, NamedKey};
+use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey};
 
 use crate::color::theme_names;
 use crate::commands::{self, Command};
 use crate::config::TwittyConfig;
+use crate::input::keybindings::{
+    default_chords_for, is_bindable_key_code, is_modifier_key_code, set_captured_chord, Chord,
+    KeybindingValue,
+};
+use crate::input::shortcut_key_code;
 use crate::layout::{clamp_sidebar_width, Rect, SidebarPosition};
 use crate::ui::chrome::UiLanguage;
 use crate::ui::palette::{fold, matches};
@@ -595,6 +600,29 @@ pub struct ExpandedPicker {
     pub scroll: usize,
 }
 
+/// Inline feedback shown during shortcut capture when a pressed key cannot be bound.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyCaptureNotice {
+    /// Unmodified or Shift-only printable/control key that would swallow ordinary typing.
+    PlainTyping,
+    /// Key code is not supported as a shortcut.
+    UnsupportedKey,
+}
+
+impl KeyCaptureNotice {
+    pub fn message(self, language: UiLanguage) -> &'static str {
+        match self {
+            Self::PlainTyping => language.text(
+                "Cannot bind plain typing key — add Ctrl, Alt, or Super",
+                "لا يمكن ربط مفتاح كتابة عادي — أضف Ctrl أو Alt أو Super",
+            ),
+            Self::UnsupportedKey => {
+                language.text("Unsupported shortcut key", "مفتاح اختصار غير مدعوم")
+            }
+        }
+    }
+}
+
 /// Result of handling one input event on the settings panel.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SettingsOutcome {
@@ -602,6 +630,8 @@ pub struct SettingsOutcome {
     pub redraw: bool,
     /// Config settings that were modified and should be applied live + saved.
     pub changed: Vec<SettingId>,
+    /// Keybindings in `config.keybindings` were modified and should be applied live + saved.
+    pub keybindings_changed: bool,
     /// Live theme preview update: `Some(theme_name_opt)` tells the app to preview that theme
     /// (or revert to the committed theme) without modifying `config.theme`.
     pub preview_theme: Option<Option<String>>,
@@ -648,6 +678,10 @@ pub struct SettingsPanelState {
     pub keys_query: String,
     /// Scroll offset (in rows) in the `Keys` section.
     pub keys_scroll: usize,
+    /// Stable command id currently capturing a new key chord in `Keys`, if any.
+    pub capturing_key: Option<&'static str>,
+    /// Inline feedback shown if the last captured key was rejected (e.g. plain typing).
+    pub key_capture_notice: Option<KeyCaptureNotice>,
     /// Whether the user just copied the config path in `About`.
     pub copied_config_path: bool,
     /// Installed monospace font families from the system font database.
@@ -688,6 +722,8 @@ impl SettingsPanelState {
             dragging_slider: None,
             keys_query: String::new(),
             keys_scroll: 0,
+            capturing_key: None,
+            key_capture_notice: None,
             copied_config_path: false,
             monospace_fonts,
             ui_fonts,
@@ -807,8 +843,16 @@ impl SettingsPanelState {
             .collect()
     }
 
+    /// True when the `Keys` section is waiting for the user to press a new shortcut chord.
+    pub fn is_capturing_key(&self) -> bool {
+        self.capturing_key.is_some()
+    }
+
     /// True when keyboard text / IME commits should be routed into an active text or search box.
     pub fn accepts_text_input(&self) -> bool {
+        if self.capturing_key.is_some() {
+            return false;
+        }
         if let Some(exp) = &self.expanded {
             return matches!(
                 exp.setting.descriptor().kind,
@@ -832,6 +876,9 @@ impl SettingsPanelState {
     ) -> SettingsOutcome {
         let mut outcome = SettingsOutcome::default();
         self.cancel_picker_into(config, &mut outcome);
+        if self.capturing_key.take().is_some() || self.key_capture_notice.take().is_some() {
+            outcome.redraw = true;
+        }
         if self.section != section {
             self.section = section;
             self.selected = 0;
@@ -954,6 +1001,9 @@ impl SettingsPanelState {
     /// Handle text committed by an IME (Arabic or Latin) while settings is open.
     pub fn on_text(&mut self, text: &str, config: &mut TwittyConfig) -> SettingsOutcome {
         let mut outcome = SettingsOutcome::default();
+        if self.capturing_key.is_some() {
+            return outcome;
+        }
         if let Some(exp) = &mut self.expanded {
             if matches!(
                 exp.setting.descriptor().kind,
@@ -988,7 +1038,7 @@ impl SettingsPanelState {
         outcome
     }
 
-    /// Handle one key press. Returns actions for the app to apply.
+    /// Handle one key press (without a physical key code). Returns actions for the app to apply.
     pub fn on_key(
         &mut self,
         key: &Key,
@@ -998,7 +1048,28 @@ impl SettingsPanelState {
         surface: (f32, f32),
         scale: f32,
     ) -> SettingsOutcome {
+        self.on_key_with_physical(None, key, text, modifiers, config, surface, scale)
+    }
+
+    /// Handle one key press with its optional physical `KeyCode` (needed for non-Latin layouts
+    /// such as Arabic when capturing new keybinding chords).
+    #[allow(clippy::too_many_arguments)]
+    pub fn on_key_with_physical(
+        &mut self,
+        physical: Option<KeyCode>,
+        key: &Key,
+        text: Option<&str>,
+        modifiers: ModifiersState,
+        config: &mut TwittyConfig,
+        surface: (f32, f32),
+        scale: f32,
+    ) -> SettingsOutcome {
         let mut outcome = SettingsOutcome::default();
+
+        // 0. Active shortcut capture in the `Keys` section owns every key press.
+        if let Some(cmd_name) = self.capturing_key {
+            return self.handle_key_capture(cmd_name, physical, key, modifiers, config);
+        }
 
         // 1. Expanded inline picker owns arrows, Enter, Space, Backspace, text, Tab, and Esc.
         if let Some(exp) = self.expanded.clone() {
@@ -1130,13 +1201,23 @@ impl SettingsPanelState {
             }
         }
 
-        // 5. Keys section content: searchable shortcut list.
+        // 5. Keys section content: searchable, editable shortcut list.
         if self.section == SettingsSection::Keys {
             let count = self.filtered_commands().len();
             let visible = SettingsLayout::build(surface, scale, self, config)
                 .keys_visible_rows
                 .max(1);
             match key {
+                Key::Named(NamedKey::Enter) => {
+                    if let Some(cmd_name) =
+                        self.filtered_commands().get(self.selected).map(|c| c.name)
+                    {
+                        self.capturing_key = Some(cmd_name);
+                        self.key_capture_notice = None;
+                        outcome.redraw = true;
+                    }
+                    return outcome;
+                }
                 Key::Named(NamedKey::ArrowDown) => {
                     if count > 0 {
                         self.selected = (self.selected.min(count - 1) + 1) % count;
@@ -1250,6 +1331,80 @@ impl SettingsPanelState {
             }
             _ => outcome,
         }
+    }
+
+    fn handle_key_capture(
+        &mut self,
+        cmd_name: &'static str,
+        physical: Option<KeyCode>,
+        key: &Key,
+        modifiers: ModifiersState,
+        config: &mut TwittyConfig,
+    ) -> SettingsOutcome {
+        let mut outcome = SettingsOutcome::default();
+        // Plain Esc cancels capture without closing settings.
+        if matches!(key, Key::Named(NamedKey::Escape)) && modifiers.is_empty() {
+            self.capturing_key = None;
+            self.key_capture_notice = None;
+            outcome.redraw = true;
+            return outcome;
+        }
+        // Plain Backspace clears / unbinds the command.
+        if matches!(key, Key::Named(NamedKey::Backspace)) && modifiers.is_empty() {
+            self.capturing_key = None;
+            self.key_capture_notice = None;
+            let changed = if default_chords_for(cmd_name).is_empty() {
+                config.keybindings.remove(cmd_name)
+            } else {
+                let already_unbound =
+                    config.keybindings.get(cmd_name) == Some(&KeybindingValue::Unbind);
+                if already_unbound {
+                    false
+                } else {
+                    config.keybindings.set(cmd_name, KeybindingValue::Unbind);
+                    true
+                }
+            };
+            outcome.keybindings_changed = changed;
+            outcome.redraw = true;
+            return outcome;
+        }
+        // Lone modifier key presses keep waiting for the actual key.
+        if matches!(
+            key,
+            Key::Named(
+                NamedKey::Shift
+                    | NamedKey::Control
+                    | NamedKey::Alt
+                    | NamedKey::AltGraph
+                    | NamedKey::Super
+                    | NamedKey::Meta
+                    | NamedKey::CapsLock
+                    | NamedKey::NumLock
+                    | NamedKey::ScrollLock
+            )
+        ) || physical.is_some_and(is_modifier_key_code)
+        {
+            return outcome;
+        }
+        let Some(code) = shortcut_key_code(physical, key).filter(|&c| is_bindable_key_code(c))
+        else {
+            self.key_capture_notice = Some(KeyCaptureNotice::UnsupportedKey);
+            outcome.redraw = true;
+            return outcome;
+        };
+        let chord = Chord::from_modifiers(modifiers, code);
+        if chord.swallows_plain_typing() {
+            self.key_capture_notice = Some(KeyCaptureNotice::PlainTyping);
+            outcome.redraw = true;
+            return outcome;
+        }
+        set_captured_chord(&mut config.keybindings, cmd_name, chord);
+        self.capturing_key = None;
+        self.key_capture_notice = None;
+        outcome.keybindings_changed = true;
+        outcome.redraw = true;
+        outcome
     }
 
     fn focus_next(&mut self) {
@@ -1611,11 +1766,50 @@ impl SettingsPanelState {
             }
             SettingsHit::KeysSearch => {
                 self.focus = FocusZone::Content;
+                self.capturing_key = None;
+                self.key_capture_notice = None;
+                outcome.redraw = true;
+            }
+            SettingsHit::KeysResetAll => {
+                self.focus = FocusZone::Content;
+                self.capturing_key = None;
+                self.key_capture_notice = None;
+                if config.keybindings.clear() {
+                    outcome.keybindings_changed = true;
+                }
                 outcome.redraw = true;
             }
             SettingsHit::KeyRow(index) => {
                 self.focus = FocusZone::Content;
                 self.selected = index;
+                self.capturing_key = None;
+                self.key_capture_notice = None;
+                outcome.redraw = true;
+            }
+            SettingsHit::KeyChange(index) => {
+                self.focus = FocusZone::Content;
+                self.selected = index;
+                if let Some(cmd_name) = self.filtered_commands().get(index).map(|c| c.name) {
+                    if self.capturing_key == Some(cmd_name) {
+                        self.capturing_key = None;
+                        self.key_capture_notice = None;
+                    } else {
+                        self.capturing_key = Some(cmd_name);
+                        self.key_capture_notice = None;
+                    }
+                }
+                outcome.redraw = true;
+            }
+            SettingsHit::KeyReset(index) => {
+                self.focus = FocusZone::Content;
+                self.selected = index;
+                self.capturing_key = None;
+                self.key_capture_notice = None;
+                if let Some(cmd_name) = self.filtered_commands().get(index).map(|c| c.name) {
+                    if config.keybindings.remove(cmd_name) {
+                        outcome.keybindings_changed = true;
+                    }
+                }
                 outcome.redraw = true;
             }
             SettingsHit::CopyConfigPath => {
@@ -1627,8 +1821,12 @@ impl SettingsPanelState {
                 }
             }
             SettingsHit::Inside => {
-                // Clicking empty space inside the panel collapses an open picker (reverting preview).
+                // Clicking empty space inside the panel collapses an open picker (reverting preview)
+                // or cancels an active key capture.
                 self.cancel_picker_into(config, &mut outcome);
+                if self.capturing_key.take().is_some() || self.key_capture_notice.take().is_some() {
+                    outcome.redraw = true;
+                }
             }
         }
         outcome
@@ -1942,7 +2140,10 @@ pub enum SettingsHit {
     PickerSearch(SettingId),
     PickerItem(SettingId, usize),
     KeysSearch,
+    KeysResetAll,
     KeyRow(usize),
+    KeyChange(usize),
+    KeyReset(usize),
     CopyConfigPath,
 }
 
@@ -2010,6 +2211,15 @@ pub struct ControlRowLayout {
     pub picker: Option<ExpandedPickerLayout>,
 }
 
+/// Physical-pixel geometry for one visible row in the `Keys` section.
+#[derive(Clone, Copy, Debug)]
+pub struct KeyRowLayout {
+    pub cmd_idx: usize,
+    pub rect: Rect,
+    pub change_button: Rect,
+    pub reset_button: Option<Rect>,
+}
+
 /// Physical-pixel geometry shared by `render::scene::settings` and pointer hit testing.
 #[derive(Clone, Debug)]
 pub struct SettingsLayout {
@@ -2024,8 +2234,12 @@ pub struct SettingsLayout {
     pub sections: [(SettingsSection, Rect); 4],
     pub rows: Vec<ControlRowLayout>,
     pub keys_search: Option<Rect>,
+    pub keys_reset_all: Option<Rect>,
+    pub keys_banner: Option<Rect>,
     /// Visible shortcut rows: `(filtered_command_index, row_rect)`.
     pub keys_rows: Vec<(usize, Rect)>,
+    /// Detailed per-row geometry for the `Keys` section (including Change and Reset buttons).
+    pub keys_row_layouts: Vec<KeyRowLayout>,
     pub keys_visible_rows: usize,
     pub about_header: Option<Rect>,
     pub about_info_rows: Vec<Rect>,
@@ -2151,7 +2365,10 @@ impl SettingsLayout {
             sections,
             rows: Vec::new(),
             keys_search: None,
+            keys_reset_all: None,
+            keys_banner: None,
             keys_rows: Vec::new(),
+            keys_row_layouts: Vec::new(),
             keys_visible_rows: 0,
             about_header: None,
             about_info_rows: Vec::new(),
@@ -2166,7 +2383,7 @@ impl SettingsLayout {
                 layout.build_control_rows(scale, state, config);
             }
             SettingsSection::Keys => {
-                layout.build_keys_layout(scale, state);
+                layout.build_keys_layout(scale, state, config);
             }
             SettingsSection::About => {
                 layout.build_about_layout(scale);
@@ -2332,24 +2549,75 @@ impl SettingsLayout {
         }
     }
 
-    fn build_keys_layout(&mut self, scale: f32, state: &SettingsPanelState) {
+    fn build_keys_layout(&mut self, scale: f32, state: &SettingsPanelState, config: &TwittyConfig) {
         let px = |logical: f32| logical * scale;
         let vp = self.viewport;
         let search_h = px(34.0).min(vp.h);
-        let search = Rect::new(vp.x, vp.y, vp.w, search_h);
+        let gap = px(8.0);
+        let reset_all_w = px(106.0).min(vp.w * 0.30);
+        let search_w = (vp.w - reset_all_w - gap).max(0.0);
+        let (search, reset_all) = if self.mirrored {
+            let ra = Rect::new(vp.x, vp.y, reset_all_w, search_h);
+            let sr = Rect::new(ra.right() + gap, vp.y, search_w, search_h);
+            (sr, ra)
+        } else {
+            let sr = Rect::new(vp.x, vp.y, search_w, search_h);
+            let ra = Rect::new(vp.right() - reset_all_w, vp.y, reset_all_w, search_h);
+            (sr, ra)
+        };
         self.keys_search = Some(search);
-        let list_y = search.bottom() + px(10.0);
+        self.keys_reset_all = Some(reset_all);
+
+        let list_y = if state.capturing_key.is_some() || state.key_capture_notice.is_some() {
+            let banner_h = px(28.0).min((vp.bottom() - search.bottom()).max(0.0));
+            let banner = Rect::new(vp.x, search.bottom() + px(6.0), vp.w, banner_h);
+            self.keys_banner = Some(banner);
+            banner.bottom() + px(6.0)
+        } else {
+            search.bottom() + px(10.0)
+        };
         let list_h = (vp.bottom() - list_y).max(0.0);
-        let row_h = px(30.0).round().max(1.0);
+        let row_h = px(40.0).round().max(1.0);
         let visible = (list_h / row_h).floor() as usize;
         self.keys_visible_rows = visible;
 
         let filtered = state.filtered_commands();
         let max_scroll = filtered.len().saturating_sub(visible);
         let scroll = state.keys_scroll.min(max_scroll);
+        let pad = px(8.0);
+        let btn_h = px(24.0).min((row_h - px(8.0)).max(1.0));
+        let btn_gap = px(6.0);
         for (slot, cmd_idx) in (scroll..filtered.len()).take(visible).enumerate() {
             let rect = Rect::new(vp.x, list_y + slot as f32 * row_h, vp.w, row_h);
+            let cmd = filtered[cmd_idx];
+            let is_custom = config.keybindings.contains(cmd.name);
+            let btn_y = rect.y + (rect.h - btn_h) / 2.0;
+            let change_w = px(64.0).min(rect.w * 0.16);
+            let reset_w = px(102.0).min(rect.w * 0.22);
+            let (change_button, reset_button) = if self.mirrored {
+                if is_custom {
+                    let reset = Rect::new(rect.x + pad, btn_y, reset_w, btn_h);
+                    let change = Rect::new(reset.right() + btn_gap, btn_y, change_w, btn_h);
+                    (change, Some(reset))
+                } else {
+                    let change = Rect::new(rect.x + pad, btn_y, change_w, btn_h);
+                    (change, None)
+                }
+            } else if is_custom {
+                let reset = Rect::new(rect.right() - pad - reset_w, btn_y, reset_w, btn_h);
+                let change = Rect::new(reset.x - btn_gap - change_w, btn_y, change_w, btn_h);
+                (change, Some(reset))
+            } else {
+                let change = Rect::new(rect.right() - pad - change_w, btn_y, change_w, btn_h);
+                (change, None)
+            };
             self.keys_rows.push((cmd_idx, rect));
+            self.keys_row_layouts.push(KeyRowLayout {
+                cmd_idx,
+                rect,
+                change_button,
+                reset_button,
+            });
         }
         if max_scroll > 0 && list_h > 0.0 {
             let ratio = visible as f32 / filtered.len() as f32;
@@ -2411,14 +2679,25 @@ impl SettingsLayout {
                 return SettingsHit::Section(section);
             }
         }
+        if let Some(reset_all) = self.keys_reset_all {
+            if reset_all.contains(x, y) {
+                return SettingsHit::KeysResetAll;
+            }
+        }
         if let Some(search) = self.keys_search {
             if search.contains(x, y) {
                 return SettingsHit::KeysSearch;
             }
         }
-        for &(idx, rect) in &self.keys_rows {
-            if rect.contains(x, y) {
-                return SettingsHit::KeyRow(idx);
+        for row in &self.keys_row_layouts {
+            if row.change_button.contains(x, y) {
+                return SettingsHit::KeyChange(row.cmd_idx);
+            }
+            if row.reset_button.is_some_and(|r| r.contains(x, y)) {
+                return SettingsHit::KeyReset(row.cmd_idx);
+            }
+            if row.rect.contains(x, y) {
+                return SettingsHit::KeyRow(row.cmd_idx);
             }
         }
         if let Some(copy_btn) = self.copy_button {

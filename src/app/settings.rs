@@ -3,12 +3,14 @@
 //! persisting changes atomically via `TwittyConfig::save`.
 
 use winit::event::{KeyEvent, MouseButton, MouseScrollDelta};
+use winit::keyboard::PhysicalKey;
 use winit::window::CursorIcon;
 
 use super::App;
 use crate::config::TwittyConfig;
+use crate::input::keybindings::KeyBindings;
 use crate::input::mouse::wheel_lines;
-use crate::input::{key_shortcut, InputAction};
+use crate::input::{key_shortcut_with, InputAction};
 use crate::layout::PaneId;
 use crate::render::scene::settings::SettingsView;
 use crate::ui::settings_panel::{SettingId, SettingsLayout, SettingsOutcome, SettingsPanelState};
@@ -72,31 +74,42 @@ impl App {
         if !event.state.is_pressed() {
             return false;
         }
-        match key_shortcut(event, self.modifiers) {
-            Some(InputAction::Settings) => {
-                self.close_settings();
-                return false;
-            }
-            Some(InputAction::Paste)
-                if self
-                    .settings
-                    .as_ref()
-                    .is_some_and(SettingsPanelState::accepts_text_input) =>
-            {
-                if let Some(text) = self.clipboard.text() {
-                    self.settings_text(&text);
+        let capturing = self
+            .settings
+            .as_ref()
+            .is_some_and(SettingsPanelState::is_capturing_key);
+        if !capturing {
+            match key_shortcut_with(event, self.modifiers, &self.keybindings) {
+                Some(InputAction::Settings) => {
+                    self.close_settings();
+                    return false;
                 }
-                return false;
+                Some(InputAction::Paste)
+                    if self
+                        .settings
+                        .as_ref()
+                        .is_some_and(SettingsPanelState::accepts_text_input) =>
+                {
+                    if let Some(text) = self.clipboard.text() {
+                        self.settings_text(&text);
+                    }
+                    return false;
+                }
+                _ => {}
             }
-            _ => {}
         }
         let (surface, scale) = self.settings_geometry();
         let modifiers = self.modifiers;
+        let physical = match event.physical_key {
+            PhysicalKey::Code(c) => Some(c),
+            _ => None,
+        };
         let outcome = {
             let Some(state) = self.settings.as_mut() else {
                 return false;
             };
-            state.on_key(
+            state.on_key_with_physical(
+                physical,
                 &event.logical_key,
                 event.text.as_deref(),
                 modifiers,
@@ -209,7 +222,10 @@ impl App {
             preview_cfg.theme = preview.clone();
             self.window.set_palette(preview_cfg.palette());
         }
-        if !outcome.changed.is_empty() {
+        if outcome.keybindings_changed {
+            self.keybindings = KeyBindings::from_config(&self.config.keybindings);
+        }
+        if !outcome.changed.is_empty() || outcome.keybindings_changed {
             let mut needs_layout = false;
             for setting in &outcome.changed {
                 match setting {
@@ -289,7 +305,11 @@ impl App {
             self.window.set_settings_panel(None);
             self.refresh_pointer_hover();
             self.window.request_redraw();
-        } else if outcome.redraw || !outcome.changed.is_empty() || outcome.preview_theme.is_some() {
+        } else if outcome.redraw
+            || !outcome.changed.is_empty()
+            || outcome.keybindings_changed
+            || outcome.preview_theme.is_some()
+        {
             self.sync_settings();
         }
     }
