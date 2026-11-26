@@ -171,7 +171,7 @@ impl Directory {
                         name: Some(name),
                     };
                     file.write_all(snapshot.text.as_bytes())?;
-                    file.set_permissions(snapshot.permissions.clone())?;
+                    set_permissions(&file, &snapshot.permissions)?;
                     file.sync_all()?;
                     return Ok(staged);
                 }
@@ -181,6 +181,23 @@ impl Directory {
         }
         Err(io::ErrorKind::AlreadyExists.into())
     }
+}
+
+#[cfg(unix)]
+fn set_permissions(file: &File, permissions: &fs::Permissions) -> io::Result<()> {
+    file.set_permissions(permissions.clone())
+}
+
+/// Windows permissions are file attributes; copying a folder's (or another file's) attributes
+/// can carry flags such as "directory" that make the call fail. Only the read-only flag counts.
+#[cfg(not(unix))]
+fn set_permissions(file: &File, permissions: &fs::Permissions) -> io::Result<()> {
+    let mut current = file.metadata()?.permissions();
+    if current.readonly() == permissions.readonly() {
+        return Ok(());
+    }
+    current.set_readonly(permissions.readonly());
+    file.set_permissions(current)
 }
 
 pub(super) struct Staged<'a> {
