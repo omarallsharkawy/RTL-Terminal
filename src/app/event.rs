@@ -104,7 +104,7 @@ impl App {
             self.window.request_redraw();
         }
         // The output may have replaced the link under a Ctrl-hovering pointer.
-        if self.modifiers.control_key() && !self.palette_open() {
+        if self.modifiers.control_key() && !self.palette_open() && !self.settings_open() {
             self.update_link_hover(id);
         }
         for event in events {

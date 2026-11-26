@@ -44,9 +44,10 @@ use scene::context::DrawContext;
 use scene::frame::{build_frame, build_frame_with_cards, FrameOptions};
 use scene::palette::{PaletteLayout, PaletteView};
 use scene::preedit::PreeditState;
+use scene::settings::SettingsView;
 use scene::sidebar::LabelCache;
 use scene::window_chrome::ChromeView;
-use text::fonts::{installed_family, new_font_system};
+use text::fonts::{all_families, installed_family, monospace_families, new_font_system};
 use text::ui::UiFont;
 use ui_style::UiStyle;
 
@@ -79,8 +80,10 @@ pub(crate) struct Renderer {
     config: wgpu::SurfaceConfiguration,
     gpu: Gpu,
     font_system: FontSystem,
-    /// Configured terminal font family (leaked once per change; `None` = monospace).
+    /// Configured terminal font family (interned once per distinct family; `None` = monospace).
     font_family: Option<&'static str>,
+    /// Interned family names so switching fonts repeatedly never leaks duplicates.
+    interned_families: Vec<&'static str>,
     palette: Palette,
     ui_accent: Option<Rgba>,
     ui_font: UiFont,
@@ -101,6 +104,8 @@ pub(crate) struct Renderer {
     ime: PreeditState,
     /// The command palette, while it is open.
     palette_view: Option<PaletteView>,
+    /// The settings panel, while it is open.
+    settings_view: Option<SettingsView>,
     /// The code review panel, while it is open.
     review_view: Option<crate::review::panel::View>,
     review_labels: scene::review::ReviewCache,
@@ -122,6 +127,7 @@ impl Renderer {
             gpu,
             font_system: new_font_system(),
             font_family: None,
+            interned_families: Vec::new(),
             palette: Palette::default(),
             ui_accent: None,
             ui_font: UiFont::default(),
@@ -142,6 +148,7 @@ impl Renderer {
             sidebar_labels: LabelCache::default(),
             ime: Default::default(),
             palette_view: None,
+            settings_view: None,
             review_view: None,
             review_labels: Default::default(),
             block_cards: true,
@@ -197,6 +204,21 @@ impl Renderer {
         self.ui_accent = accent;
     }
 
+    pub(crate) fn set_ui_font_family(&mut self, family: Option<&str>) {
+        self.ui_font = UiFont::new(&mut self.font_system, family);
+    }
+
+    pub(crate) fn set_ui_accent(&mut self, accent: Option<Rgba>) {
+        self.ui_accent = accent;
+    }
+
+    pub(crate) fn font_families(&self) -> (Vec<String>, Vec<String>) {
+        (
+            monospace_families(&self.font_system),
+            all_families(&self.font_system),
+        )
+    }
+
     pub(crate) fn palette_rows(&self, max: usize) -> usize {
         PaletteLayout::new(self.metrics.scale, self.surface_size(), max).rows()
     }
@@ -217,7 +239,19 @@ impl Renderer {
         let name = name.map(str::trim).filter(|n| !n.is_empty());
         self.font_family = match name {
             Some(n) => match installed_family(&self.font_system, n) {
-                Some(installed) => Some(Box::leak(installed.into_boxed_str())),
+                Some(installed) => {
+                    if let Some(&existing) = self
+                        .interned_families
+                        .iter()
+                        .find(|&&f| f == installed.as_str())
+                    {
+                        Some(existing)
+                    } else {
+                        let leaked: &'static str = Box::leak(installed.into_boxed_str());
+                        self.interned_families.push(leaked);
+                        Some(leaked)
+                    }
+                }
                 None => {
                     crate::config::warn(format!(
                         "twitty: font_family {n:?} is not installed, using monospace"
@@ -266,6 +300,11 @@ impl Renderer {
     /// Show the command palette (`Some`) or hide it.
     pub(crate) fn set_command_palette(&mut self, view: Option<PaletteView>) {
         self.palette_view = view;
+    }
+
+    /// Show the settings overlay (`Some`) or hide it.
+    pub(crate) fn set_settings_panel(&mut self, view: Option<SettingsView>) {
+        self.settings_view = view;
     }
 
     /// Show the code review panel (`Some`) or hide it.
@@ -411,6 +450,8 @@ impl Renderer {
         frame.add_chrome(&mut ctx, style, &self.ui_font, chrome);
         if let Some(view) = &self.palette_view {
             frame.add_palette(&mut ctx, style, &self.ui_font, view);
+        } else if let Some(view) = &self.settings_view {
+            frame.add_settings(&mut ctx, style, &self.ui_font, view);
         }
         if let Some((x, y, w, h)) = frame.ime_area {
             self.window.set_ime_cursor_area(

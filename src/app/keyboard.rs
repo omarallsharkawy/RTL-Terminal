@@ -24,6 +24,9 @@ fn is_plain_escape(event: &KeyEvent, modifiers: ModifiersState) -> bool {
 impl App {
     /// A key press or release. Returns true when the window should close.
     pub(super) fn on_key(&mut self, event: &KeyEvent) -> bool {
+        if self.settings_open() {
+            return self.handle_settings_key(event);
+        }
         if self.palette_open() {
             return self.handle_palette_key(event);
         }
@@ -93,6 +96,10 @@ impl App {
             }
             Ime::Commit(text) => {
                 self.update_preedit(None);
+                if self.settings_open() {
+                    self.settings_text(&text);
+                    return;
+                }
                 if self.palette_open() {
                     self.palette_text(&text);
                     return;
@@ -165,6 +172,7 @@ impl App {
             InputAction::SearchAll => self.open_palette(PaletteMode::Search),
             InputAction::AskAgent => self.ask_agent(id),
             InputAction::ToggleReview => self.toggle_review(),
+            InputAction::Settings => self.open_settings(),
             InputAction::PrevBlock => self.navigate_blocks(id, BlockList::select_prev),
             InputAction::NextBlock => self.navigate_blocks(id, BlockList::select_next),
             InputAction::CopyBlockOutput => self.copy_block_output(id),

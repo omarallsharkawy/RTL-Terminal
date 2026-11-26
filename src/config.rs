@@ -213,7 +213,7 @@ impl TwittyConfig {
 
     /// `%APPDATA%\twitty\config.json` on Windows, `$XDG_CONFIG_HOME/twitty/config.json`
     /// (default `~/.config`) elsewhere. Relative environment paths are ignored.
-    fn config_path() -> Option<PathBuf> {
+    pub fn config_path() -> Option<PathBuf> {
         let absolute_dir = |key: &str| {
             std::env::var_os(key)
                 .filter(|v| !v.is_empty())

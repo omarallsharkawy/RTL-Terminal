@@ -23,7 +23,7 @@ use crate::ui::hit::Hit;
 impl App {
     pub(super) fn on_modifiers(&mut self, modifiers: ModifiersState) {
         self.modifiers = modifiers;
-        if self.palette_open() {
+        if self.palette_open() || self.settings_open() {
             return;
         }
         let (x, y) = self.pointer.pos;
@@ -35,6 +35,10 @@ impl App {
     pub(super) fn on_cursor_moved(&mut self, x: f64, y: f64) {
         self.pointer.pos = (x, y);
         self.window.update_sidebar_drag();
+        if self.settings_open() {
+            self.on_settings_cursor_moved(x, y);
+            return;
+        }
         if self.palette_open() {
             let hit = self.window.palette_hit(x, y);
             let icon = if matches!(hit, crate::render::scene::palette::PaletteHit::Item(_)) {
@@ -126,6 +130,9 @@ impl App {
     }
 
     pub(super) fn on_cursor_left(&mut self) {
+        if self.settings_open() {
+            self.on_settings_cursor_left();
+        }
         self.window.set_chrome_hover(None, None);
         self.window.cancel_sidebar_drag();
         self.window.set_block_hover(None);
@@ -140,6 +147,10 @@ impl App {
 
     /// Returns true when the press closed the last pane and the window should exit.
     pub(super) fn on_mouse_input(&mut self, button: MouseButton, pressed: bool) -> bool {
+        if self.settings_open() {
+            self.on_settings_mouse(button, pressed);
+            return false;
+        }
         if self.palette_open() {
             return pressed && self.on_palette_mouse_press(button);
         }
@@ -251,6 +262,10 @@ impl App {
     }
 
     pub(super) fn on_wheel(&mut self, delta: MouseScrollDelta) {
+        if self.settings_open() {
+            self.on_settings_wheel(delta);
+            return;
+        }
         if self.palette_open() {
             return;
         }
@@ -400,7 +415,11 @@ impl App {
     }
 
     pub(super) fn refresh_pointer_hover(&mut self) {
-        if self.palette_open() || self.pointer.capture.is_some() || self.pointer.drag.is_some() {
+        if self.palette_open()
+            || self.settings_open()
+            || self.pointer.capture.is_some()
+            || self.pointer.drag.is_some()
+        {
             return;
         }
         let (x, y) = self.pointer.pos;

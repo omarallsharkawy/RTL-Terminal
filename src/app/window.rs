@@ -467,6 +467,81 @@ impl Window {
         }
     }
 
+    pub(super) fn set_settings_panel(
+        &mut self,
+        view: Option<crate::render::scene::settings::SettingsView>,
+    ) {
+        if let Some(ref mut r) = self.renderer {
+            r.set_settings_panel(view);
+        }
+    }
+
+    pub(super) fn font_families(&self) -> (Vec<String>, Vec<String>) {
+        self.renderer
+            .as_ref()
+            .map_or_else(|| (Vec::new(), Vec::new()), Renderer::font_families)
+    }
+
+    pub(super) fn ui_language(&self) -> UiLanguage {
+        self.language
+    }
+
+    pub(super) fn surface_size(&self) -> Option<(f32, f32)> {
+        self.renderer.as_ref().map(Renderer::surface_size)
+    }
+
+    pub(super) fn set_palette(&mut self, palette: crate::color::Palette) {
+        if let Some(ref mut r) = self.renderer {
+            r.set_palette(palette);
+        }
+    }
+
+    pub(super) fn set_font_family(&mut self, family: Option<&str>) {
+        if let Some(ref mut r) = self.renderer {
+            r.set_font_family(family);
+        }
+    }
+
+    pub(super) fn set_ui_font_family(&mut self, family: Option<&str>) {
+        if let Some(ref mut r) = self.renderer {
+            r.set_ui_font_family(family);
+        }
+    }
+
+    pub(super) fn set_ui_accent(&mut self, accent: Option<crate::color::Rgba>) {
+        if let Some(ref mut r) = self.renderer {
+            r.set_ui_accent(accent);
+        }
+    }
+
+    pub(super) fn set_cursor_style(&mut self, style: String) {
+        if let Some(ref mut r) = self.renderer {
+            r.set_cursor_style(style);
+        }
+    }
+
+    pub(super) fn set_sidebar_position(&mut self, position: SidebarPosition) {
+        self.sidebar = Placement::new(position);
+    }
+
+    pub(super) fn set_sidebar_width(&mut self, width: f32) {
+        self.sidebar_width = crate::layout::clamp_sidebar_width(width);
+    }
+
+    pub(super) fn set_top_bar(&mut self, enabled: bool) {
+        self.top_bar = enabled;
+    }
+
+    pub(super) fn set_pane_headers(&mut self, enabled: bool) {
+        self.pane_headers = enabled;
+    }
+
+    pub(super) fn set_block_cards(&mut self, enabled: bool) {
+        if let Some(ref mut r) = self.renderer {
+            r.set_block_cards(enabled);
+        }
+    }
+
     pub(super) fn palette_rows(&self, max: usize) -> usize {
         self.renderer.as_ref().map_or(max, |r| r.palette_rows(max))
     }
@@ -874,7 +949,7 @@ impl App {
     /// Draw the active tab.
     pub(super) fn redraw(&mut self) {
         self.window.needs_redraw = false;
-        if self.modifiers.control_key() && !self.palette_open() {
+        if self.modifiers.control_key() && !self.palette_open() && !self.settings_open() {
             self.refresh_pointer_hover();
         }
         // A notification counts as seen once its pane is on screen, focused, in a focused window.
