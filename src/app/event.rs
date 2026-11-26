@@ -50,6 +50,8 @@ pub enum AppEvent {
     Projects(u64, Vec<crate::projects::ProjectItem>),
     /// Result of a non-interactive built-in AI CLI request.
     AiComplete(u64, crate::ai::AiResult),
+    /// Event emitted by the agent engine thread (`twitty_ai::engine::model`).
+    Agent(twitty_ai::engine::model::AgentEvent),
 }
 
 /// Longest title kept from a program, in characters.
@@ -146,17 +148,18 @@ impl App {
         if let Some(cwd) = recorded_cwd {
             self.record_project_cwd(&cwd);
         }
-        if let Some(block) = finished_block {
+        if let Some(block) = &finished_block {
             crate::history::record_finished_block(
                 &self.store,
                 self.config.record_history,
-                &block,
+                block,
                 finished_cwd.as_deref(),
                 is_local,
                 self.shell_name.as_deref(),
             );
         }
         if command_ended {
+            self.agent_panel_command_ended(id, finished_block.as_ref());
             self.review_command_ended(id);
         }
         self.window.request_redraw();

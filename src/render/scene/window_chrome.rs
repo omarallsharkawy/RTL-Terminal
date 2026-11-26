@@ -23,6 +23,8 @@ pub struct PaneHeaderView {
     pub agent: bool,
     pub focused: bool,
     pub attention: bool,
+    /// True when an agent card or hook on this pane is waiting for user approval ("Needs input").
+    pub needs_input: bool,
     pub zoomed: bool,
     /// Outline flash intensity in `0.0..=1.0` (`pane.flash` / after notification jump).
     pub flash: f32,
@@ -414,6 +416,74 @@ impl Chrome<'_, '_> {
             } else {
                 (icon.right() + pad, title.right() - pad)
             };
+            if pane.needs_input && right - left > s.px(24.0) {
+                let pill_h = s.px(SPACE_16).min((title.h - s.px(SPACE_4)).max(0.0));
+                let pill_y = title.y + (title.h - pill_h) * 0.5;
+                let pill_pad = s.px(SPACE_4);
+                let icon_side = s.px(SPACE_12).min(pill_h);
+                let text = language.text("Needs input", "بانتظار ردك");
+                let text_buf = self.font.shape(
+                    self.ctx.font_system,
+                    UiSize::Small,
+                    UiWeight::Semibold,
+                    s.scale,
+                    text,
+                );
+                let avail = (right - left - pad).max(0.0);
+                let full_w = pill_pad * 2.0 + icon_side + s.px(4.0) + label_width(&text_buf).ceil();
+                let icon_only_w = pill_pad * 2.0 + icon_side;
+                let (pill_w, show_buf) = if full_w <= avail * 0.60 && full_w <= avail {
+                    (full_w, Some(text_buf))
+                } else {
+                    (icon_only_w.min(avail), None)
+                };
+                if pill_w >= icon_only_w * 0.8 && pill_h > 0.0 {
+                    let pill_x = if rtl { left } else { right - pill_w };
+                    let pill = Rect::new(pill_x, pill_y, pill_w, pill_h);
+                    self.shapes.push(Shape::RoundedRect {
+                        rect: pill,
+                        radii: [s.px(RADIUS_6); 4],
+                        fill: self.ctx.color(s.bg2.mix(s.warn, 0.22)),
+                        border: Some(Border {
+                            width: s.hairline(),
+                            color: self.ctx.color(s.warn),
+                        }),
+                        shadow: None,
+                    });
+                    let w_icon = Rect::new(
+                        pill.x + pill_pad,
+                        pill.y + (pill.h - icon_side) * 0.5,
+                        icon_side,
+                        icon_side,
+                    );
+                    let direction = if rtl {
+                        UiLanguage::Arabic
+                    } else {
+                        UiLanguage::English
+                    };
+                    Icon::Warning.draw(
+                        direction.mirror(w_icon, pill),
+                        self.ctx.color(s.warn),
+                        self.shapes,
+                    );
+                    if let Some(buf) = show_buf {
+                        let lx = w_icon.right() + s.px(SPACE_4);
+                        let label_rect =
+                            Rect::new(lx, pill.y, (pill.right() - pill_pad - lx).max(0.0), pill.h);
+                        self.labels.push(UiLabel::new(
+                            buf,
+                            direction.mirror(label_rect, pill),
+                            if rtl { UiAlign::Right } else { UiAlign::Left },
+                            s.warn.mix(s.text, 0.30),
+                        ));
+                    }
+                    if rtl {
+                        left = pill.right() + pad;
+                    } else {
+                        right = pill.x - pad;
+                    }
+                }
+            }
             if pane.zoomed && right - left > s.px(24.0) {
                 let pill_h = s.px(SPACE_16).min((title.h - s.px(SPACE_4)).max(0.0));
                 let pill_y = title.y + (title.h - pill_h) * 0.5;

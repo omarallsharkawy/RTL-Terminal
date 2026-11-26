@@ -471,6 +471,7 @@ fn cmux_pane_commands_shortcuts_flash_and_zoom_indicator() {
             agent: false,
             focused: true,
             attention: false,
+            needs_input: false,
             zoomed,
             flash: flash_val,
         }];

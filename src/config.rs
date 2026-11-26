@@ -79,6 +79,21 @@ pub struct TwittyConfig {
     pub ai_agent: Option<String>,
     /// Timeout in seconds for non-interactive built-in AI requests (default 60, clamped 5..=300).
     pub ai_timeout_secs: u64,
+    /// Default agent provider (`"cli"`, `"anthropic"`, `"openai"`, `"gemini"`, `"ollama"`, or unset for auto).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_default_provider: Option<String>,
+    /// Local Ollama server URL (default `http://127.0.0.1:11434`).
+    #[serde(default = "default_ollama_url")]
+    pub ai_ollama_url: String,
+    /// Optional monthly USD cost cap for agent runs (`None` = off by default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_monthly_cost_cap_usd: Option<f64>,
+    /// Optional per-project exact argv-prefix allow-lists (off/empty by default).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub ai_project_allow_list: std::collections::BTreeMap<String, Vec<String>>,
+    /// Per-project approved rules files (`AGENTS.md`, `CLAUDE.md`, `TWITTY.md`).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub ai_approved_rules_files: std::collections::BTreeMap<String, Vec<String>>,
     /// Directories scanned (1-2 levels deep) for git repositories in the project switcher.
     #[serde(default = "crate::projects::scan::default_project_roots")]
     pub project_roots: Vec<String>,
@@ -135,6 +150,11 @@ impl Default for TwittyConfig {
             ai: true,
             ai_agent: None,
             ai_timeout_secs: 60,
+            ai_default_provider: None,
+            ai_ollama_url: default_ollama_url(),
+            ai_monthly_cost_cap_usd: None,
+            ai_project_allow_list: std::collections::BTreeMap::new(),
+            ai_approved_rules_files: std::collections::BTreeMap::new(),
             project_roots: crate::projects::scan::default_project_roots(),
             commands: Vec::new(),
             keybindings: crate::input::keybindings::KeybindingsConfig::default(),
@@ -158,6 +178,10 @@ pub struct ThemeColors {
     pub selection: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ansi: Option<Vec<String>>,
+}
+
+fn default_ollama_url() -> String {
+    crate::ui::settings_ai::DEFAULT_OLLAMA_URL.to_owned()
 }
 
 pub use twitty_core::warnings::take_warnings;
@@ -444,6 +468,14 @@ impl TwittyConfig {
         } else {
             self.ai_timeout_secs.clamp(5, 300)
         };
+        if self.ai_ollama_url.trim().is_empty() {
+            self.ai_ollama_url = default_ollama_url();
+        }
+        if let Some(cap) = self.ai_monthly_cost_cap_usd {
+            if !cap.is_finite() || cap <= 0.0 {
+                self.ai_monthly_cost_cap_usd = None;
+            }
+        }
         if !self.keybindings.is_empty() {
             let resolved = crate::input::keybindings::KeyBindings::resolve(&self.keybindings);
             for w in resolved.warnings {

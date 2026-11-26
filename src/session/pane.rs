@@ -112,7 +112,7 @@ impl PaneMeta {
         self.refresh_agent_status();
     }
 
-    fn waiting_for_input(&self) -> bool {
+    pub fn waiting_for_input(&self) -> bool {
         self.agent_status
             .as_ref()
             .is_some_and(|status| status.state == AgentState::NeedsInput)

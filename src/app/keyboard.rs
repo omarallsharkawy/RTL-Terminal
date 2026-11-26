@@ -45,6 +45,9 @@ impl App {
         if let Some(close) = self.handle_review_key(event) {
             return close;
         }
+        if let Some(close) = self.handle_agent_panel_key(event) {
+            return close;
+        }
         let Some(id) = self.focused_id() else {
             return false;
         };
@@ -129,13 +132,15 @@ impl App {
         match ime {
             Ime::Enabled => {}
             Ime::Disabled => {
-                if !self.composer_ime_preedit(None) {
+                if !self.composer_ime_preedit(None) && !self.agent_panel_ime_preedit(None) {
                     self.update_preedit(None);
                 }
             }
             Ime::Preedit(text, cursor) => {
                 let norm = crate::ime::normalize_preedit(text, cursor);
-                if !self.composer_ime_preedit(norm.clone()) {
+                if !self.composer_ime_preedit(norm.clone())
+                    && !self.agent_panel_ime_preedit(norm.clone())
+                {
                     self.update_preedit(norm);
                 }
             }
@@ -149,7 +154,7 @@ impl App {
                     self.settings_text(&text);
                     return;
                 }
-                if !self.composer_ime_preedit(None) {
+                if !self.composer_ime_preedit(None) && !self.agent_panel_ime_preedit(None) {
                     self.update_preedit(None);
                 }
                 if self.palette_open() {
@@ -160,6 +165,9 @@ impl App {
                     return;
                 }
                 if self.review_text(&text) {
+                    return;
+                }
+                if self.agent_panel_ime_commit(&text) {
                     return;
                 }
                 let Some(id) = self.focused_id() else { return };
@@ -217,6 +225,7 @@ impl App {
     pub(super) fn send_input(&mut self, id: PaneId, bytes: &[u8]) {
         self.clear_selection(id);
         self.clear_block_selection(id);
+        self.agent_panel_on_pane_input(id, bytes);
         self.write_to(id, bytes);
         self.scroll_to_bottom(id);
     }
@@ -274,6 +283,7 @@ impl App {
                 self.analyze_focused_failed_block(id, crate::ai::BlockAiMode::SuggestFix);
             }
             InputAction::ToggleReview => self.toggle_review(),
+            InputAction::ToggleAgentPanel => self.toggle_agent_panel(),
             InputAction::ToggleComposer => self.toggle_composer(),
             InputAction::Settings => self.open_settings(),
             InputAction::Welcome => self.open_welcome(),

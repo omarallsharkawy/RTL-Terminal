@@ -14,6 +14,7 @@
 //! - `selection`: mouse selection and the clipboard.
 
 mod agent;
+mod agent_panel;
 mod ai;
 mod branches;
 mod composer;
@@ -107,6 +108,8 @@ pub struct App {
     branches: branches::BranchWatch,
     /// The code review panel.
     review: crate::review::ReviewPanel,
+    /// The docked Agent side panel (round 10).
+    agent_panel: agent_panel::AgentPanelHost,
     git_diff: git_diff::GitDiffWatch,
     /// The docked command composer.
     composer: composer::ComposerHost,
@@ -164,6 +167,7 @@ impl App {
             ports: ports::PortWatch::default(),
             branches: branches::BranchWatch::default(),
             review: Default::default(),
+            agent_panel: agent_panel::AgentPanelHost::default(),
             git_diff: git_diff::GitDiffWatch::default(),
             composer: composer::ComposerHost::default(),
             ai: ai::AiHost::load(),
@@ -270,6 +274,7 @@ impl ApplicationHandler<AppEvent> for App {
             }
             AppEvent::Projects(generation, items) => self.on_projects_loaded(generation, items),
             AppEvent::AiComplete(request_id, result) => self.on_ai_complete(request_id, result),
+            AppEvent::Agent(event) => self.on_agent_event(event),
         }
     }
 
@@ -279,7 +284,7 @@ impl ApplicationHandler<AppEvent> for App {
         let output_due = self.output.schedule.end_turn(now);
         let (blinking, shown) = if self.window.is_occluded() {
             (false, false)
-        } else if self.composer_has_keys() {
+        } else if self.composer_has_keys() || self.agent_panel_has_keys() {
             (self.config.cursor_blink && !self.config.reduce_motion, true)
         } else {
             self.focused_id()

@@ -32,10 +32,17 @@ impl App {
         let config_path = TwittyConfig::config_path().map(|p| p.display().to_string());
         let env_language = crate::ui::chrome::UiLanguage::from_environment();
         let language = self.window.ui_language();
-        self.settings = Some(
-            SettingsPanelState::new(mono, all, config_path, language)
-                .with_env_language(env_language),
-        );
+        let mut panel = SettingsPanelState::new(mono, all, config_path, language)
+            .with_env_language(env_language);
+        panel.ai.detected_cli_agents = crate::ui::settings_ai::detect_cli_agents_on_path();
+        panel.ai.active_project_root = self
+            .focused_id()
+            .and_then(|id| self.pane_cwd(id))
+            .map(|p| p.display().to_string());
+        panel.ai.sync_from_config(&self.config);
+        let keyring = twitty_store::SystemSecretStore::new();
+        panel.ai.refresh_key_flags(&keyring);
+        self.settings = Some(panel);
         self.sync_settings();
     }
 
@@ -226,10 +233,30 @@ impl App {
             preview_cfg.theme = preview.clone();
             self.window.set_palette(preview_cfg.palette());
         }
+        if let Some((account, secret)) = outcome.save_secret {
+            let keyring = twitty_store::SystemSecretStore::new();
+            let lang = self.window.ui_language();
+            if let Some(state) = self.settings.as_mut() {
+                state
+                    .ai
+                    .apply_save_secret(&keyring, &account, &secret, lang);
+            }
+        }
+        if let Some(account) = outcome.delete_secret {
+            let keyring = twitty_store::SystemSecretStore::new();
+            let lang = self.window.ui_language();
+            if let Some(state) = self.settings.as_mut() {
+                state.ai.apply_delete_secret(&keyring, &account, lang);
+            }
+        }
+        if outcome.clear_agent_history {
+            self.agent_panel.state.clear_history();
+            self.sync_agent_needs_input();
+        }
         if outcome.keybindings_changed {
             self.keybindings = KeyBindings::from_config(&self.config.keybindings);
         }
-        if !outcome.changed.is_empty() || outcome.keybindings_changed {
+        if !outcome.changed.is_empty() || outcome.keybindings_changed || outcome.ai_config_changed {
             let mut needs_layout = false;
             for setting in &outcome.changed {
                 match setting {
@@ -322,6 +349,8 @@ impl App {
         } else if outcome.redraw
             || !outcome.changed.is_empty()
             || outcome.keybindings_changed
+            || outcome.ai_config_changed
+            || outcome.clear_agent_history
             || outcome.preview_theme.is_some()
         {
             self.sync_settings();
