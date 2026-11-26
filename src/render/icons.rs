@@ -27,6 +27,7 @@ pub enum Icon {
     CopyCommand,
     Rerun,
     Zoom,
+    Explain,
 }
 
 impl Icon {
@@ -201,6 +202,22 @@ impl Icon {
                 icon.stroke(out, [12.1, 3.9], [9.2, 6.8]);
                 line(out, &[[3.5, 9.2], [3.5, 12.5], [6.8, 12.5]]);
                 icon.stroke(out, [3.9, 12.1], [6.8, 9.2]);
+            }
+            Self::Explain => {
+                icon.outline(out, [2.2, 2.2, 11.6, 11.6], 5.8);
+                line(
+                    out,
+                    &[
+                        [6.2, 6.0],
+                        [6.8, 5.0],
+                        [8.2, 4.8],
+                        [9.5, 5.5],
+                        [9.5, 6.8],
+                        [8.0, 7.9],
+                        [8.0, 9.0],
+                    ],
+                );
+                icon.stroke(out, [8.0, 11.1], [8.0, 11.1]);
             }
         }
     }

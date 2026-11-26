@@ -11,10 +11,82 @@ use crate::ui::chrome::UiLanguage;
 /// Action button in a block card's floating top-right toolbar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BlockButton {
+    ExplainError,
     CopyCommand,
     CopyOutput,
     AskAgent,
     Rerun,
+}
+
+/// Fixed-capacity `Copy` list of toolbar buttons (4 standard buttons, plus `ExplainError` on
+/// failed blocks with a non-zero exit).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ToolbarButtons {
+    items: [(BlockButton, Rect, bool); 5],
+    len: usize,
+}
+
+impl ToolbarButtons {
+    pub fn as_slice(&self) -> &[(BlockButton, Rect, bool)] {
+        &self.items[..self.len]
+    }
+
+    pub fn as_mut_slice(&mut self) -> &mut [(BlockButton, Rect, bool)] {
+        &mut self.items[..self.len]
+    }
+
+    pub fn iter(&self) -> std::slice::Iter<'_, (BlockButton, Rect, bool)> {
+        self.as_slice().iter()
+    }
+
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
+
+impl std::ops::Deref for ToolbarButtons {
+    type Target = [(BlockButton, Rect, bool)];
+
+    fn deref(&self) -> &Self::Target {
+        self.as_slice()
+    }
+}
+
+impl std::ops::DerefMut for ToolbarButtons {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.as_mut_slice()
+    }
+}
+
+impl IntoIterator for ToolbarButtons {
+    type Item = (BlockButton, Rect, bool);
+    type IntoIter = std::iter::Take<std::array::IntoIter<(BlockButton, Rect, bool), 5>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.items.into_iter().take(self.len)
+    }
+}
+
+impl<'a> IntoIterator for &'a ToolbarButtons {
+    type Item = &'a (BlockButton, Rect, bool);
+    type IntoIter = std::slice::Iter<'a, (BlockButton, Rect, bool)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.as_slice().iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a mut ToolbarButtons {
+    type Item = &'a mut (BlockButton, Rect, bool);
+    type IntoIter = std::slice::IterMut<'a, (BlockButton, Rect, bool)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.as_mut_slice().iter_mut()
+    }
 }
 
 /// Which block card (and optionally which toolbar button) the pointer hovers in one pane.
@@ -27,7 +99,7 @@ pub struct BlockHover {
 
 /// Geometry of a block card's floating top-right toolbar, in physical pixels.
 ///
-/// The four icon buttons are anchored to the toolbar's right edge so their hit rectangles depend
+/// The icon buttons are anchored to the toolbar's right edge so their hit rectangles depend
 /// only on `pane_rect` and `metrics.scale` (never on font metrics). When a dim duration/exit label
 /// fits to their left, the pill expands leftward to include `meta`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -37,7 +109,7 @@ pub struct CardToolbarLayout {
     /// Dim duration / exit code label area to the left of the buttons, when present and room fits.
     pub meta: Option<Rect>,
     /// Action buttons left to right: `(button, rect, enabled)`.
-    pub buttons: [(BlockButton, Rect, bool); 4],
+    pub buttons: ToolbarButtons,
 }
 
 impl CardToolbarLayout {
@@ -182,6 +254,7 @@ pub fn layout_cards(
                     rows_top,
                     metrics,
                     decor.has_command,
+                    matches!(decor.status, BlockStatus::Failed(_)),
                     decor.meta.as_deref().map(&mut meta_width),
                 )
             })
@@ -211,6 +284,7 @@ fn layout_toolbar(
     first_row_y: f32,
     metrics: CellMetrics,
     has_command: bool,
+    failed: bool,
     meta_w: Option<f32>,
 ) -> Option<CardToolbarLayout> {
     let scale = metrics.scale;
@@ -225,7 +299,8 @@ fn layout_toolbar(
 
     let min_left = card.x + strip_w + pad;
     let right = card.right() - pad;
-    let buttons_w = 4.0 * btn_w + 2.0 * inner_pad;
+    let btn_count = if failed { 5 } else { 4 };
+    let buttons_w = btn_count as f32 * btn_w + 2.0 * inner_pad;
     if right - buttons_w < min_left {
         return None;
     }
@@ -241,43 +316,83 @@ fn layout_toolbar(
     let x_agent = x_rerun - btn_w;
     let x_out = x_agent - btn_w;
     let x_cmd = x_out - btn_w;
+    let x_explain = x_cmd - btn_w;
+    let leftmost_btn = if failed { x_explain } else { x_cmd };
 
-    let buttons = [
-        (
-            BlockButton::CopyCommand,
-            Rect::new(x_cmd, btn_y, btn_w, btn_h),
-            has_command,
-        ),
-        (
-            BlockButton::CopyOutput,
-            Rect::new(x_out, btn_y, btn_w, btn_h),
-            true,
-        ),
-        (
-            BlockButton::AskAgent,
-            Rect::new(x_agent, btn_y, btn_w, btn_h),
-            true,
-        ),
-        (
-            BlockButton::Rerun,
-            Rect::new(x_rerun, btn_y, btn_w, btn_h),
-            has_command,
-        ),
-    ];
+    let zero = Rect::new(0.0, 0.0, 0.0, 0.0);
+    let buttons = if failed {
+        ToolbarButtons {
+            items: [
+                (
+                    BlockButton::ExplainError,
+                    Rect::new(x_explain, btn_y, btn_w, btn_h),
+                    true,
+                ),
+                (
+                    BlockButton::CopyCommand,
+                    Rect::new(x_cmd, btn_y, btn_w, btn_h),
+                    has_command,
+                ),
+                (
+                    BlockButton::CopyOutput,
+                    Rect::new(x_out, btn_y, btn_w, btn_h),
+                    true,
+                ),
+                (
+                    BlockButton::AskAgent,
+                    Rect::new(x_agent, btn_y, btn_w, btn_h),
+                    true,
+                ),
+                (
+                    BlockButton::Rerun,
+                    Rect::new(x_rerun, btn_y, btn_w, btn_h),
+                    has_command,
+                ),
+            ],
+            len: 5,
+        }
+    } else {
+        ToolbarButtons {
+            items: [
+                (
+                    BlockButton::CopyCommand,
+                    Rect::new(x_cmd, btn_y, btn_w, btn_h),
+                    has_command,
+                ),
+                (
+                    BlockButton::CopyOutput,
+                    Rect::new(x_out, btn_y, btn_w, btn_h),
+                    true,
+                ),
+                (
+                    BlockButton::AskAgent,
+                    Rect::new(x_agent, btn_y, btn_w, btn_h),
+                    true,
+                ),
+                (
+                    BlockButton::Rerun,
+                    Rect::new(x_rerun, btn_y, btn_w, btn_h),
+                    has_command,
+                ),
+                (BlockButton::ExplainError, zero, false),
+            ],
+            len: 4,
+        }
+    };
 
     let label_pad = pad;
     let (meta, left) = match meta_w.filter(|&w| w > 0.0) {
         Some(w) => {
-            let avail = (x_cmd - label_pad - min_left - label_pad).max(0.0);
+            let avail = (leftmost_btn - label_pad - min_left - label_pad).max(0.0);
             if avail >= (24.0 * scale) {
                 let lw = w.ceil().min(avail);
-                let mx = x_cmd - label_pad - lw;
+                let mx = leftmost_btn - label_pad - lw;
                 (Some(Rect::new(mx, y, lw, toolbar_h)), mx - label_pad)
             } else {
-                (None, x_cmd - inner_pad)
+                (None, leftmost_btn - inner_pad)
             }
         }
-        None => (None, x_cmd - inner_pad),
+        None => (None, leftmost_btn - inner_pad),
     };
 
     Some(CardToolbarLayout {

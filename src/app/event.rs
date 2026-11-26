@@ -39,6 +39,8 @@ pub enum AppEvent {
     ComposerDir(PathBuf, Vec<crate::composer::complete::DirEntryInfo>),
     /// Project directories (MRU + scanned git repos) resolved off the UI thread.
     Projects(u64, Vec<crate::projects::ProjectItem>),
+    /// Result of a non-interactive built-in AI CLI request.
+    AiComplete(u64, crate::ai::AiResult),
 }
 
 /// Longest title kept from a program, in characters.

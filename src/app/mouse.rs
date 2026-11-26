@@ -35,6 +35,10 @@ impl App {
     pub(super) fn on_cursor_moved(&mut self, x: f64, y: f64) {
         self.pointer.pos = (x, y);
         self.window.update_sidebar_drag();
+        if let Some(icon) = self.ai_consent_cursor(x, y) {
+            self.window.set_cursor_icon(icon);
+            return;
+        }
         if self.palette_open() {
             let hit = self.window.palette_hit(x, y);
             let icon = if matches!(hit, crate::render::scene::palette::PaletteHit::Item(_)) {
@@ -53,6 +57,11 @@ impl App {
         let over_sidebar = self.window.sidebar_contains(&self.ws, x, y);
         let captured = self.pointer.capture.is_some();
         self.update_chrome_hover(&hit, captured);
+        if let Some(icon) = self.block_ai_cursor(x, y).filter(|_| !captured) {
+            self.window.set_block_hover(None);
+            self.window.set_cursor_icon(icon);
+            return;
+        }
         if let Some(icon) = self.composer_cursor(x, y).filter(|_| !captured) {
             self.window.set_block_hover(None);
             self.window.set_cursor_icon(icon);
@@ -144,8 +153,17 @@ impl App {
 
     /// Returns true when the press closed the last pane and the window should exit.
     pub(super) fn on_mouse_input(&mut self, button: MouseButton, pressed: bool) -> bool {
+        if self.ai_consent_open() {
+            if pressed {
+                self.ai_consent_mouse_press(button);
+            }
+            return false;
+        }
         if self.palette_open() {
             return pressed && self.on_palette_mouse_press(button);
+        }
+        if pressed && self.block_ai_mouse_press(button) {
+            return false;
         }
         if pressed && self.review_mouse_press(button) {
             return false;
@@ -258,12 +276,15 @@ impl App {
     }
 
     pub(super) fn on_wheel(&mut self, delta: MouseScrollDelta) {
-        if self.palette_open() {
+        if self.ai_consent_open() || self.palette_open() {
             return;
         }
         let line_height = self.window.line_height().unwrap_or(20.0);
         let lines = wheel_lines(delta, line_height);
         if !lines.is_finite() || lines == 0.0 {
+            return;
+        }
+        if self.block_ai_wheel(lines) {
             return;
         }
         if self
@@ -569,6 +590,9 @@ impl App {
     /// Execute a floating toolbar button action for `block_id` in pane `id`.
     fn run_block_button(&mut self, id: PaneId, block_id: u64, button: BlockButton) {
         match button {
+            BlockButton::ExplainError => {
+                self.analyze_failed_block(id, block_id, crate::ai::BlockAiMode::Explain);
+            }
             BlockButton::CopyCommand => {
                 let cmd = self
                     .ws

@@ -182,17 +182,60 @@ pub enum ComposerAction {
     RequestPaste,
     /// Path completion needs directory entries for `PathBuf` loaded off the UI thread.
     RequestDir(PathBuf),
+    /// Natural-language request (`# ...`, Ctrl+Enter, or Generate button) to send to the AI agent.
+    /// The reply is placed back into the editor for review and NEVER executed automatically.
+    GenerateAi(String),
+    /// Esc cancelled an in-flight AI command generation.
+    CancelAi,
+    /// Esc discarded a generated AI command under review.
+    DiscardAi,
+}
+
+/// Extract a natural-language AI request when the composer buffer starts with `#`.
+pub fn extract_hash_ai_request(text: &str) -> Option<String> {
+    let trimmed = text.trim_start();
+    let rest = trimmed.strip_prefix('#')?.trim();
+    (!rest.is_empty()).then(|| rest.to_owned())
+}
+
+/// Extract a natural-language AI request for explicit triggers (Ctrl+Enter or the Generate button),
+/// stripping an optional leading `#`.
+pub fn extract_ai_request(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    let rest = trimmed.strip_prefix('#').map_or(trimmed, str::trim);
+    (!rest.is_empty()).then(|| rest.to_owned())
 }
 
 /// Full interactive state of the command composer (editing, history browsing, completion popup,
-/// inline ghost suggestion).
-#[derive(Clone, Debug, Default)]
+/// inline ghost suggestion, and built-in AI command generation review).
+#[derive(Clone, Debug)]
 pub struct ComposerState {
     pub editor: TextEditor,
     history_index: Option<usize>,
     draft_before_history: String,
     pub popup: Option<PopupState>,
     pub ghost: Option<String>,
+    /// Mirrors `config.ai` so `#` and Ctrl+Enter only trigger AI when enabled.
+    pub ai_enabled: bool,
+    /// True while a non-interactive AI request is in flight for this composer.
+    pub ai_loading: bool,
+    /// True while the editor holds an AI-generated command awaiting user review.
+    pub ai_reviewing: bool,
+}
+
+impl Default for ComposerState {
+    fn default() -> Self {
+        Self {
+            editor: TextEditor::new(),
+            history_index: None,
+            draft_before_history: String::new(),
+            popup: None,
+            ghost: None,
+            ai_enabled: true,
+            ai_loading: false,
+            ai_reviewing: false,
+        }
+    }
 }
 
 impl ComposerState {
@@ -206,6 +249,31 @@ impl ComposerState {
         self.draft_before_history.clear();
         self.popup = None;
         self.ghost = None;
+        self.ai_loading = false;
+        self.ai_reviewing = false;
+    }
+
+    /// Place a generated AI command into the editor for user review.
+    ///
+    /// Strictly NEVER submits or executes the command: the user must explicitly press Enter to
+    /// run it, or Esc to discard it.
+    pub fn apply_ai_command(&mut self, command: &str) {
+        self.editor.set_text(command.to_owned());
+        self.history_index = None;
+        self.popup = None;
+        self.ghost = None;
+        self.ai_loading = false;
+        self.ai_reviewing = true;
+    }
+
+    /// Discard an AI-generated command currently under review without running it.
+    pub fn discard_ai_command(&mut self) {
+        self.editor = TextEditor::new();
+        self.history_index = None;
+        self.popup = None;
+        self.ghost = None;
+        self.ai_loading = false;
+        self.ai_reviewing = false;
     }
 
     /// Recompute inline ghost suggestion (and clear stale popup if needed).
@@ -270,6 +338,9 @@ impl ComposerState {
     fn on_buffer_edited(&mut self, history: &[String], workflows: &[Workflow]) {
         self.history_index = None;
         self.popup = None;
+        if self.editor.text().is_empty() {
+            self.ai_reviewing = false;
+        }
         self.refresh_ghost(history, workflows);
     }
 
@@ -339,6 +410,25 @@ impl ComposerState {
         let alt = modifiers.alt_key();
         let super_key = modifiers.super_key();
 
+        // While waiting on an AI response, only Esc (cancel) and Copy are active.
+        if self.ai_loading {
+            if matches!(key, Key::Named(NamedKey::Escape)) {
+                self.ai_loading = false;
+                return ComposerAction::CancelAi;
+            }
+            if ctrl && !alt && !super_key {
+                let letter =
+                    logical_ascii_letter(key).or_else(|| physical.and_then(physical_letter));
+                if letter == Some('c') {
+                    return match self.editor.copy() {
+                        Some(copied) => ComposerAction::Copy(copied),
+                        None => ComposerAction::None,
+                    };
+                }
+            }
+            return ComposerAction::None;
+        }
+
         // Ctrl shortcuts (layout-independent via physical key fallback so Arabic layout works).
         if ctrl && !alt && !super_key {
             let letter = logical_ascii_letter(key).or_else(|| physical.and_then(physical_letter));
@@ -389,12 +479,23 @@ impl ComposerState {
             Key::Named(NamedKey::Escape) => {
                 if self.popup.take().is_some() {
                     ComposerAction::Redraw
+                } else if self.ai_reviewing {
+                    self.discard_ai_command();
+                    ComposerAction::DiscardAi
                 } else {
                     ComposerAction::Close
                 }
             }
             Key::Named(NamedKey::Enter) => {
-                if shift && !ctrl && !alt {
+                if ctrl && !shift && !alt && !super_key {
+                    if self.ai_enabled {
+                        if let Some(req) = extract_ai_request(self.editor.text()) {
+                            self.popup = None;
+                            return ComposerAction::GenerateAi(req);
+                        }
+                    }
+                    ComposerAction::None
+                } else if shift && !ctrl && !alt {
                     self.popup = None;
                     self.editor.insert_newline();
                     self.on_buffer_edited(history, workflows);
@@ -403,6 +504,15 @@ impl ComposerState {
                     if let Some(item) = self.popup.as_ref().and_then(PopupState::current).cloned() {
                         self.apply_completion(&item, history, workflows);
                         ComposerAction::Redraw
+                    } else if self.ai_enabled
+                        && !self.ai_reviewing
+                        && self.editor.text().trim_start().starts_with('#')
+                    {
+                        if let Some(req) = extract_hash_ai_request(self.editor.text()) {
+                            ComposerAction::GenerateAi(req)
+                        } else {
+                            ComposerAction::None
+                        }
                     } else {
                         let cmd = self.editor.text().to_owned();
                         self.reset();

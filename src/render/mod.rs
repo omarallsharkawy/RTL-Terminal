@@ -103,6 +103,10 @@ pub(crate) struct Renderer {
     palette_view: Option<PaletteView>,
     /// The docked command composer, while it is visible.
     composer_view: Option<scene::composer::ComposerView>,
+    /// The failed-block AI explanation/fix popover, while it is open.
+    block_ai_view: Option<scene::ai::BlockAiView>,
+    /// The one-time AI privacy consent modal, while it is open.
+    ai_consent_view: Option<scene::ai::ConsentOverlayView>,
     /// The code review panel, while it is open.
     review_view: Option<crate::review::panel::View>,
     review_labels: scene::review::ReviewCache,
@@ -145,6 +149,8 @@ impl Renderer {
             ime: Default::default(),
             palette_view: None,
             composer_view: None,
+            block_ai_view: None,
+            ai_consent_view: None,
             review_view: None,
             review_labels: Default::default(),
             block_cards: true,
@@ -275,6 +281,49 @@ impl Renderer {
     /// Show the command composer (`Some`) or hide it.
     pub(crate) fn set_composer(&mut self, view: Option<scene::composer::ComposerView>) {
         self.composer_view = view;
+    }
+
+    /// Show the failed-block AI explanation/fix popover (`Some`) or hide it.
+    pub(crate) fn set_block_ai(&mut self, view: Option<scene::ai::BlockAiView>) {
+        self.block_ai_view = view;
+    }
+
+    /// Show the one-time AI privacy consent modal (`Some`) or hide it.
+    pub(crate) fn set_ai_consent(&mut self, view: Option<scene::ai::ConsentOverlayView>) {
+        self.ai_consent_view = view;
+    }
+
+    /// Hit-test physical pixel `(x, y)` against the open AI privacy consent modal, if any.
+    pub(crate) fn ai_consent_hit(&self, x: f64, y: f64) -> scene::ai::ConsentHit {
+        let Some(view) = &self.ai_consent_view else {
+            return scene::ai::ConsentHit::Outside;
+        };
+        scene::ai::ConsentLayout::new(self.metrics.scale, self.surface_size(), view.language)
+            .hit(x, y)
+    }
+
+    /// Hit-test physical pixel `(x, y)` against the open block AI popover, if any.
+    pub(crate) fn block_ai_hit(&self, x: f64, y: f64) -> scene::ai::BlockAiHit {
+        let Some(view) = &self.block_ai_view else {
+            return scene::ai::BlockAiHit::Outside;
+        };
+        let has_fix = matches!(
+            &view.status,
+            crate::ai::BlockAiCardStatus::Ready(reply) if reply.suggested_command.is_some()
+        );
+        let show_suggest_fix = matches!(&view.status, crate::ai::BlockAiCardStatus::Ready(_))
+            && view.mode == crate::ai::BlockAiMode::Explain
+            && !has_fix;
+        scene::ai::BlockAiLayout::new(
+            self.metrics.scale,
+            self.surface_size(),
+            view.anchor,
+            view.command.is_some(),
+            has_fix,
+            show_suggest_fix,
+            view.language,
+        )
+        .hit(x, y)
     }
 
     /// Show the code review panel (`Some`) or hide it.
@@ -422,8 +471,14 @@ impl Renderer {
         if let Some(view) = &self.composer_view {
             frame.add_composer(&mut ctx, style, &self.ui_font, view);
         }
+        if let Some(view) = &self.block_ai_view {
+            frame.add_block_ai(&mut ctx, style, &self.ui_font, view);
+        }
         if let Some(view) = &self.palette_view {
             frame.add_palette(&mut ctx, style, &self.ui_font, view);
+        }
+        if let Some(view) = &self.ai_consent_view {
+            frame.add_ai_consent(&mut ctx, style, &self.ui_font, view);
         }
         if let Some((x, y, w, h)) = frame.ime_area {
             self.window.set_ime_cursor_area(

@@ -68,6 +68,8 @@ commands! {
     "block.prev", "Previous command block", "البلوك اللي قبله", Some("Ctrl+Shift+Up") => InputAction::PrevBlock;
     "block.next", "Next command block", "البلوك اللي بعده", Some("Ctrl+Shift+Down") => InputAction::NextBlock;
     "block.copy-output", "Copy command output", "انسخ ناتج الأمر", Some("Ctrl+Shift+Y") => InputAction::CopyBlockOutput;
+    "ai.explain-error", "Explain error", "اشرح الخطأ", None => InputAction::ExplainBlockError;
+    "ai.suggest-fix", "Suggest a fix", "اقترح حل", None => InputAction::SuggestBlockFix;
     "agent.ask", "Ask an agent about this output", "اسأل وكيل عن الناتج ده", Some("Ctrl+Shift+A") => InputAction::AskAgent;
     "review.toggle", "Review changes", "راجع التغييرات", Some("Ctrl+Shift+R") => InputAction::ToggleReview;
     "edit.copy", "Copy", "نسخ", Some("Ctrl+Shift+C") => InputAction::Copy;

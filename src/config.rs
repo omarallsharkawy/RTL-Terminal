@@ -64,6 +64,14 @@ pub struct TwittyConfig {
     /// Command run by "Ask an agent", e.g. "claude" or "codex". Unset: the first one installed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_command: Option<String>,
+    /// Master switch for built-in AI features (composer command generation, failed-block explain/fix).
+    pub ai: bool,
+    /// Coding agent CLI override for built-in AI (e.g. "claude", "codex", "gemini", "opencode").
+    /// Unset: falls back to `agent_command`, then auto-detects on `PATH`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ai_agent: Option<String>,
+    /// Timeout in seconds for non-interactive built-in AI requests (default 60, clamped 5..=300).
+    pub ai_timeout_secs: u64,
     /// Directories scanned (1-2 levels deep) for git repositories in the project switcher.
     #[serde(default = "crate::projects::scan::default_project_roots")]
     pub project_roots: Vec<String>,
@@ -107,6 +115,9 @@ impl Default for TwittyConfig {
             shell_integration: true,
             restore_session: true,
             agent_command: None,
+            ai: true,
+            ai_agent: None,
+            ai_timeout_secs: 60,
             project_roots: crate::projects::scan::default_project_roots(),
             commands: Vec::new(),
             extra: serde_json::Map::new(),
@@ -391,6 +402,11 @@ impl TwittyConfig {
             ));
             self.composer = defaults.composer;
         }
+        self.ai_timeout_secs = if self.ai_timeout_secs == 0 {
+            defaults.ai_timeout_secs
+        } else {
+            self.ai_timeout_secs.clamp(5, 300)
+        };
     }
 
     pub(crate) fn save(&self) {

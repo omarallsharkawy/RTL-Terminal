@@ -64,6 +64,7 @@ fn card_strip_color(style: UiStyle, status: BlockStatus) -> Option<Rgba> {
 
 fn button_icon(button: BlockButton) -> Icon {
     match button {
+        BlockButton::ExplainError => Icon::Explain,
         BlockButton::CopyCommand => Icon::CopyCommand,
         BlockButton::CopyOutput => Icon::Copy,
         BlockButton::AskAgent => Icon::Agent,

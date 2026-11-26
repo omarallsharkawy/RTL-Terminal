@@ -83,6 +83,10 @@ pub enum InputAction {
     CopyBlockOutput,
     /// Ask a coding agent about the selected (or last) command block.
     AskAgent,
+    /// Explain a failed command block using the built-in non-interactive AI agent.
+    ExplainBlockError,
+    /// Suggest a fix command for a failed command block using the built-in AI agent.
+    SuggestBlockFix,
     /// Show or hide the code review panel (the focused repository's uncommitted changes).
     ToggleReview,
     /// Open or close the command composer docked at the bottom of the focused pane.

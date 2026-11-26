@@ -86,12 +86,40 @@ impl App {
         self.composer.manual_open = true;
         self.composer.dismissed_for_prompt = false;
         self.composer.focused = true;
+        self.composer.state.ai_enabled = self.config.ai;
+        self.prepare_composer_sources();
+        self.cursor_blink.reset(Instant::now());
+        self.window.request_redraw();
+    }
+
+    /// Open the composer populated with a suggested AI fix command for review (NEVER auto-runs).
+    pub(super) fn open_composer_with_ai_fix(&mut self, command: &str) {
+        if self.config.composer_mode() == ComposerMode::Off {
+            return;
+        }
+        self.reset_pointer_gesture();
+        self.composer.manual_open = true;
+        self.composer.dismissed_for_prompt = false;
+        self.composer.focused = true;
+        self.composer.state.ai_enabled = self.config.ai;
+        self.composer.state.apply_ai_command(command);
+        let explanation = match self.window.ui_language() {
+            crate::ui::chrome::UiLanguage::Arabic => "حل مقترح — راجع الأمر قبل التشغيل".to_owned(),
+            crate::ui::chrome::UiLanguage::English => {
+                "Suggested fix — review before running".to_owned()
+            }
+        };
+        self.ai.composer_ai = crate::ai::ComposerAiState::Ready {
+            explanation,
+            original_prompt: String::new(),
+        };
         self.prepare_composer_sources();
         self.cursor_blink.reset(Instant::now());
         self.window.request_redraw();
     }
 
     pub(super) fn close_composer(&mut self) {
+        self.clear_composer_ai_state();
         let mode = self.config.composer_mode();
         self.composer.manual_open = false;
         if mode == ComposerMode::Always {
@@ -312,6 +340,7 @@ impl App {
             .dir_cache
             .as_ref()
             .map(|(d, e)| (d.as_path(), e.as_slice()));
+        self.composer.state.ai_enabled = self.config.ai;
         let action = self.composer.state.key(
             &event.logical_key,
             physical,
@@ -387,7 +416,18 @@ impl App {
                 self.request_composer_dir(dir);
                 self.window.request_redraw();
             }
+            ComposerAction::GenerateAi(request) => {
+                self.trigger_composer_ai(request);
+            }
+            ComposerAction::CancelAi => {
+                self.cancel_ai_request();
+            }
+            ComposerAction::DiscardAi => {
+                self.clear_composer_ai_state();
+                self.window.request_redraw();
+            }
             ComposerAction::Submit(cmd) => {
+                self.clear_composer_ai_state();
                 if !cmd.trim().is_empty() {
                     self.composer.history.push_session(&cmd);
                 }
@@ -422,13 +462,16 @@ impl App {
             .popup
             .as_ref()
             .map_or(0, |p| p.visible_range().len());
-        Some(ComposerLayout::new(
+        let ai_view = self.composer_ai_view();
+        Some(ComposerLayout::new_with_ai(
             pane_rect,
             metrics,
             metrics.scale,
             line_count,
             caret_line,
             popup_items,
+            ai_view.enabled,
+            ai_view.has_banner(),
         ))
     }
 
@@ -437,7 +480,7 @@ impl App {
         let layout = self.composer_layout()?;
         match layout.hit(x, y) {
             ComposerHit::Outside => None,
-            ComposerHit::PopupItem(_) => Some(CursorIcon::Pointer),
+            ComposerHit::PopupItem(_) | ComposerHit::GenerateButton => Some(CursorIcon::Pointer),
             ComposerHit::Input => Some(CursorIcon::Text),
             ComposerHit::Card | ComposerHit::Popup => Some(CursorIcon::Default),
         }
@@ -457,6 +500,22 @@ impl App {
                     self.window.request_redraw();
                 }
                 false
+            }
+            ComposerHit::GenerateButton => {
+                self.composer.focused = true;
+                if button == MouseButton::Left && self.config.ai && !self.composer.state.ai_loading
+                {
+                    if let Some(req) =
+                        crate::composer::extract_ai_request(self.composer.state.editor.text())
+                    {
+                        self.trigger_composer_ai(req);
+                    } else {
+                        self.composer.state.editor.set_text("# ".into());
+                        self.cursor_blink.reset(Instant::now());
+                        self.window.request_redraw();
+                    }
+                }
+                true
             }
             ComposerHit::PopupItem(vis_row) => {
                 self.composer.focused = true;
@@ -532,6 +591,7 @@ impl App {
             cursor_blink_on: self.cursor_blink.visible(),
             popup,
             language: self.window.ui_language(),
+            ai: self.composer_ai_view(),
         })
     }
 }

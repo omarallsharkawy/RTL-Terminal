@@ -248,6 +248,39 @@ impl Window {
         }
     }
 
+    /// Hand the failed-block AI explanation/fix popover view to the renderer (`None` hides it).
+    pub(super) fn set_block_ai(&mut self, view: Option<crate::render::scene::ai::BlockAiView>) {
+        if let Some(ref mut r) = self.renderer {
+            r.set_block_ai(view);
+        }
+    }
+
+    /// Hand the one-time AI privacy consent modal view to the renderer (`None` hides it).
+    pub(super) fn set_ai_consent(
+        &mut self,
+        view: Option<crate::render::scene::ai::ConsentOverlayView>,
+    ) {
+        if let Some(ref mut r) = self.renderer {
+            r.set_ai_consent(view);
+        }
+    }
+
+    pub(super) fn ai_consent_hit(&self, x: f64, y: f64) -> crate::render::scene::ai::ConsentHit {
+        self.renderer
+            .as_ref()
+            .map_or(crate::render::scene::ai::ConsentHit::Outside, |r| {
+                r.ai_consent_hit(x, y)
+            })
+    }
+
+    pub(super) fn block_ai_hit(&self, x: f64, y: f64) -> crate::render::scene::ai::BlockAiHit {
+        self.renderer
+            .as_ref()
+            .map_or(crate::render::scene::ai::BlockAiHit::Outside, |r| {
+                r.block_ai_hit(x, y)
+            })
+    }
+
     pub(super) fn ui_language(&self) -> UiLanguage {
         self.language
     }
@@ -928,6 +961,10 @@ impl App {
         self.window.set_review(review);
         let composer = self.composer_view();
         self.window.set_composer(composer);
+        let block_ai = self.block_ai_view();
+        self.window.set_block_ai(block_ai);
+        let consent = self.ai_consent_view();
+        self.window.set_ai_consent(consent);
         let (panes, dividers) = self.frame();
         let visible = self.cursor_blink.visible();
         let broadcast = self.active_tab_broadcast();

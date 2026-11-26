@@ -947,6 +947,7 @@ fn composer_scene_clips_underlying_terminal_text_and_scales_light_dark() {
                     selected: 0,
                 }),
                 language: UiLanguage::Arabic,
+                ai: Default::default(),
             };
 
             let layout = ComposerLayout::new(pane_rect, metrics, scale, 2, 0, 2);

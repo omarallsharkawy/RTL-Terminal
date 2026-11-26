@@ -93,6 +93,12 @@ pub struct Frame {
     composer_texts: Vec<super::composer::ComposerText>,
     composer_labels: Vec<UiLabel>,
     composer_clips: Vec<Rect>,
+    /// Failed-block AI explanation popover labels and clip rect.
+    block_ai_labels: Vec<UiLabel>,
+    block_ai_rect: Option<Rect>,
+    /// One-time AI privacy consent modal labels and clip rect (drawn above everything).
+    consent_labels: Vec<UiLabel>,
+    consent_rect: Option<Rect>,
 }
 
 /// The parts of `bounds` outside `hole`: up to four strips (above, below, left, right).
@@ -341,6 +347,10 @@ fn build_frame_inner(
         composer_texts: Vec::new(),
         composer_labels: Vec::new(),
         composer_clips: Vec::new(),
+        block_ai_labels: Vec::new(),
+        block_ai_rect: None,
+        consent_labels: Vec::new(),
+        consent_rect: None,
     }
 }
 
@@ -419,6 +429,46 @@ impl Frame {
                 self.ime_area = Some(area);
             }
         }
+    }
+
+    /// Draw the failed-block AI explanation / fix popover above terminal content and below overlays.
+    pub fn add_block_ai(
+        &mut self,
+        ctx: &mut DrawContext,
+        style: UiStyle,
+        font: &UiFont,
+        view: &super::ai::BlockAiView,
+    ) {
+        let (rect, labels) = super::ai::block_ai_overlay(
+            ctx,
+            style,
+            font,
+            view,
+            self.surface,
+            &mut self.shapes.chrome,
+        );
+        self.block_ai_rect = rect;
+        self.block_ai_labels = labels;
+    }
+
+    /// Draw the one-time AI privacy consent modal above everything else.
+    pub fn add_ai_consent(
+        &mut self,
+        ctx: &mut DrawContext,
+        style: UiStyle,
+        font: &UiFont,
+        view: &super::ai::ConsentOverlayView,
+    ) {
+        let (rect, labels) = super::ai::consent_overlay(
+            ctx,
+            style,
+            font,
+            view,
+            self.surface,
+            &mut self.shapes.overlay,
+        );
+        self.consent_rect = rect;
+        self.consent_labels = labels;
     }
 
     /// Draw the command palette above everything else.
@@ -656,10 +706,18 @@ impl Frame {
             }
         }
         runs.extend(self.composer_labels.iter().map(ui_run));
+        if let Some(hole) = self.block_ai_rect {
+            runs = clip_runs(runs, hole);
+        }
+        runs.extend(self.block_ai_labels.iter().map(ui_run));
         if let Some(hole) = self.overlay_rect {
             runs = clip_runs(runs, hole);
         }
         runs.extend(self.overlay.iter().map(ui_run));
+        if let Some(hole) = self.consent_rect {
+            runs = clip_runs(runs, hole);
+        }
+        runs.extend(self.consent_labels.iter().map(ui_run));
         runs
     }
 }

@@ -49,6 +49,32 @@ pub struct ComposerPopupView {
     pub selected: usize,
 }
 
+/// Status banner shown inside the composer during or after AI command generation.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum ComposerAiBanner {
+    #[default]
+    None,
+    /// Waiting on the non-interactive coding agent (`phase` animates the spinner dots).
+    Loading { phase: usize },
+    /// A generated command is in the editor awaiting review (never auto-run).
+    Ready { explanation: String },
+    /// Bilingual error message from the last AI attempt.
+    Error { message: String },
+}
+
+/// Built-in AI UI state rendered inside the command composer.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ComposerAiView {
+    pub enabled: bool,
+    pub banner: ComposerAiBanner,
+}
+
+impl ComposerAiView {
+    pub fn has_banner(&self) -> bool {
+        !matches!(self.banner, ComposerAiBanner::None)
+    }
+}
+
 /// Everything the renderer needs to draw the docked command composer.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ComposerView {
@@ -72,6 +98,8 @@ pub struct ComposerView {
     pub popup: Option<ComposerPopupView>,
     /// System UI language for chrome hints and placeholders.
     pub language: UiLanguage,
+    /// Built-in AI button and thinking/review/error banner.
+    pub ai: ComposerAiView,
 }
 
 /// Pointer hit test target on the composer.
@@ -80,6 +108,7 @@ pub enum ComposerHit {
     Outside,
     Card,
     Input,
+    GenerateButton,
     Popup,
     PopupItem(usize),
 }
@@ -89,7 +118,9 @@ pub enum ComposerHit {
 pub struct ComposerLayout {
     pub card: Rect,
     pub header: Rect,
+    pub generate_button: Option<Rect>,
     pub input: Rect,
+    pub banner: Option<Rect>,
     pub popup: Option<Rect>,
     pub popup_row_height: f32,
     pub popup_rows: usize,
@@ -106,6 +137,29 @@ impl ComposerLayout {
         line_count: usize,
         caret_line: usize,
         popup_items: usize,
+    ) -> Self {
+        Self::new_with_ai(
+            pane_rect,
+            metrics,
+            scale,
+            line_count,
+            caret_line,
+            popup_items,
+            false,
+            false,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_ai(
+        pane_rect: Rect,
+        metrics: CellMetrics,
+        scale: f32,
+        line_count: usize,
+        caret_line: usize,
+        popup_items: usize,
+        ai_enabled: bool,
+        has_banner: bool,
     ) -> Self {
         let margin = (SPACE_8 * scale)
             .min(pane_rect.w / 8.0)
@@ -125,10 +179,22 @@ impl ComposerLayout {
         } else {
             0.0
         };
+        let show_banner = has_banner && pane_rect.h >= line_height * 3.0;
+        let banner_h = if show_banner {
+            (22.0 * scale).round()
+        } else {
+            0.0
+        };
+        let banner_gap = if show_banner {
+            (SPACE_4 * scale).round()
+        } else {
+            0.0
+        };
 
-        let max_card_h = (pane_rect.h * 0.45).max(line_height + 2.0 * pad_y);
+        let max_card_h =
+            (pane_rect.h * 0.48).max(line_height + 2.0 * pad_y + banner_h + banner_gap);
         let max_card_h = max_card_h.min((pane_rect.h - 2.0 * margin).max(0.0));
-        let chrome_h = header_h + header_gap + 2.0 * pad_y;
+        let chrome_h = header_h + header_gap + banner_h + banner_gap + 2.0 * pad_y;
         let max_lines = (((max_card_h - chrome_h).max(line_height)) / line_height)
             .floor()
             .clamp(1.0, MAX_VISIBLE_LINES as f32) as usize;
@@ -145,17 +211,38 @@ impl ComposerLayout {
 
         let inner_w = (card.w - 2.0 * pad_x).max(0.0);
         let header = Rect::new(card.x + pad_x, card.y + pad_y, inner_w, header_h);
+        let generate_button = if ai_enabled && show_header && header.w >= (110.0 * scale) {
+            let btn_w = if header.w >= (320.0 * scale) {
+                (118.0 * scale).round()
+            } else {
+                (76.0 * scale).round()
+            }
+            .min(header.w * 0.45);
+            let btn_h = header.h;
+            Some(Rect::new(header.right() - btn_w, header.y, btn_w, btn_h))
+        } else {
+            None
+        };
+
         let input_y = if show_header {
             header.bottom() + header_gap
         } else {
             card.y + pad_y
         };
+        let avail_for_input = (card.bottom() - pad_y - banner_h - banner_gap - input_y).max(0.0);
         let input = Rect::new(
             card.x + pad_x,
             input_y,
             inner_w,
-            input_h.min((card.bottom() - input_y).max(0.0)),
+            input_h.min(avail_for_input),
         );
+        let banner = if show_banner && inner_w > 0.0 {
+            let by = (input.bottom() + banner_gap).round();
+            let bh = banner_h.min((card.bottom() - pad_y - by).max(0.0));
+            (bh > 0.0).then_some(Rect::new(card.x + pad_x, by, inner_w, bh))
+        } else {
+            None
+        };
 
         let scroll_line = if caret_line >= visible_lines {
             caret_line + 1 - visible_lines
@@ -181,7 +268,9 @@ impl ComposerLayout {
         Self {
             card,
             header,
+            generate_button,
             input,
+            banner,
             popup,
             popup_row_height,
             popup_rows,
@@ -216,7 +305,9 @@ impl ComposerLayout {
                 return ComposerHit::Popup;
             }
         }
-        if self.input.contains(x, y) {
+        if self.generate_button.is_some_and(|b| b.contains(x, y)) {
+            ComposerHit::GenerateButton
+        } else if self.input.contains(x, y) {
             ComposerHit::Input
         } else if self.card.contains(x, y) {
             ComposerHit::Card
@@ -481,13 +572,15 @@ pub fn build(
     view: &ComposerView,
 ) -> ComposerScene {
     let popup_count = view.popup.as_ref().map_or(0, |p| p.items.len());
-    let layout = ComposerLayout::new(
+    let layout = ComposerLayout::new_with_ai(
         view.pane_rect,
         ctx.metrics,
         style.scale,
         view.lines.len(),
         view.caret.0,
         popup_count,
+        view.ai.enabled,
+        view.ai.has_banner(),
     );
     let mut scene = ComposerScene {
         shapes: Vec::new(),
@@ -535,7 +628,12 @@ pub fn build(
         ctx.color(style.bg2),
     ));
 
-    // 3. Header bar: terminal icon + bilingual title + compact hints.
+    // 3. Header bar: terminal icon + bilingual title + compact hints + optional AI Generate button.
+    let hash_mode = view.ai.enabled
+        && view
+            .lines
+            .first()
+            .is_some_and(|l| l.trim_start().starts_with('#'));
     if layout.header.h > 0.0 && layout.header.w > 0.0 {
         let icon_side = style.px(13.0).min(layout.header.h);
         let icon_rect = Rect::new(
@@ -544,7 +642,75 @@ pub fn build(
             icon_side,
             icon_side,
         );
-        Icon::Terminal.draw(icon_rect, ctx.color(style.accent), &mut scene.shapes);
+        let header_icon = if hash_mode {
+            Icon::Agent
+        } else {
+            Icon::Terminal
+        };
+        header_icon.draw(icon_rect, ctx.color(style.accent), &mut scene.shapes);
+
+        let header_right = match layout.generate_button {
+            Some(btn) => {
+                let fill =
+                    if hash_mode || matches!(view.ai.banner, ComposerAiBanner::Loading { .. }) {
+                        style.accent_tint(style.bg2)
+                    } else {
+                        style.bg2
+                    };
+                scene.shapes.push(Shape::RoundedRect {
+                    rect: btn,
+                    radii: [style.px(RADIUS_6); 4],
+                    fill: ctx.color(fill),
+                    border: Some(Border {
+                        width: style.hairline(),
+                        color: ctx.color(if hash_mode {
+                            style.accent
+                        } else {
+                            style.border
+                        }),
+                    }),
+                    shadow: None,
+                });
+                let bi_side = style.px(11.0).min(btn.h - style.px(4.0)).max(0.0);
+                let bi_rect = Rect::new(
+                    btn.x + style.px(6.0),
+                    btn.y + (btn.h - bi_side) / 2.0,
+                    bi_side,
+                    bi_side,
+                );
+                Icon::Agent.draw(bi_rect, ctx.color(style.accent), &mut scene.shapes);
+                let label_text = if btn.w >= style.px(105.0) {
+                    "Generate / ولّد"
+                } else if view.language == UiLanguage::Arabic {
+                    "ولّد"
+                } else {
+                    "Generate"
+                };
+                let label_x = bi_rect.right() + style.px(4.0);
+                let label_rect = Rect::new(
+                    label_x,
+                    btn.y,
+                    (btn.right() - label_x - style.px(4.0)).max(0.0),
+                    btn.h,
+                );
+                let btn_buf = font.fit(
+                    ctx.font_system,
+                    UiSize::Small,
+                    UiWeight::Semibold,
+                    style.scale,
+                    label_text,
+                    label_rect.w,
+                );
+                scene.labels.push(UiLabel::new(
+                    btn_buf,
+                    label_rect,
+                    UiAlign::Center,
+                    style.text,
+                ));
+                btn.x - style.px(SPACE_8)
+            }
+            None => layout.header.right(),
+        };
 
         let title_text = match view.language {
             UiLanguage::Arabic => "اكتب أمر",
@@ -552,11 +718,19 @@ pub fn build(
         };
         let bilingual_title = "Compose command / اكتب أمر";
         let title_x = icon_rect.right() + style.px(6.0);
-        let avail_w = (layout.header.right() - title_x).max(0.0);
+        let avail_w = (header_right - title_x).max(0.0);
 
-        let hint_text = match view.language {
-            UiLanguage::Arabic => "Enter تشغيل · Shift+Enter سطر · Tab إكمال · Esc إغلاق",
-            UiLanguage::English => "Enter Run · Shift+Enter Newline · Tab Complete · Esc Close",
+        let hint_text = match (view.language, view.ai.enabled) {
+            (UiLanguage::Arabic, true) => {
+                "Enter تشغيل · # أو Ctrl+Enter ذكاء · Tab إكمال · Esc إغلاق"
+            }
+            (UiLanguage::English, true) => {
+                "Enter Run · # / Ctrl+Enter AI · Tab Complete · Esc Close"
+            }
+            (UiLanguage::Arabic, false) => "Enter تشغيل · Shift+Enter سطر · Tab إكمال · Esc إغلاق",
+            (UiLanguage::English, false) => {
+                "Enter Run · Shift+Enter Newline · Tab Complete · Esc Close"
+            }
         };
         let hint_buf = font.shape(
             ctx.font_system,
@@ -585,7 +759,7 @@ pub fn build(
                 style.text_dim,
             ));
             let hint_rect = Rect::new(
-                layout.header.right() - hint_w,
+                header_right - hint_w,
                 layout.header.y,
                 hint_w,
                 layout.header.h,
@@ -596,7 +770,7 @@ pub fn build(
                 UiAlign::Right,
                 style.text_faint,
             ));
-        } else {
+        } else if avail_w > 0.0 {
             let short_buf = font.fit(
                 ctx.font_system,
                 UiSize::Small,
@@ -625,9 +799,13 @@ pub fn build(
     };
 
     if all_empty {
-        let placeholder = match view.language {
-            UiLanguage::Arabic => "اكتب أمرك هنا…",
-            UiLanguage::English => "Type a command… / اكتب أمرك هنا…",
+        let placeholder = match (view.language, view.ai.enabled) {
+            (UiLanguage::Arabic, true) => "اكتب أمرك أو # للذكاء الاصطناعي…",
+            (UiLanguage::English, true) => {
+                "Type a command or # for AI… / اكتب أمرك أو # للذكاء الاصطناعي…"
+            }
+            (UiLanguage::Arabic, false) => "اكتب أمرك هنا…",
+            (UiLanguage::English, false) => "Type a command… / اكتب أمرك هنا…",
         };
         let ph_buf = font.fit(
             ctx.font_system,
@@ -777,6 +955,151 @@ pub fn build(
                 top: y,
                 bounds: line_bounds,
             });
+        }
+    }
+
+    // 4b. Optional AI banner below the input area (thinking spinner, explanation review, or error).
+    if let Some(banner_rect) = layout.banner {
+        let pad = style.px(SPACE_8);
+        match &view.ai.banner {
+            ComposerAiBanner::None => {}
+            ComposerAiBanner::Loading { phase } => {
+                scene.shapes.push(Shape::rounded(
+                    banner_rect,
+                    style.px(RADIUS_6),
+                    ctx.color(style.accent_tint(style.bg2)),
+                ));
+                let dot_r = style.px(2.5).max(1.5);
+                let dot_step = style.px(7.0);
+                let dot_y = banner_rect.y + banner_rect.h * 0.5;
+                let active = phase % 3;
+                for i in 0..3 {
+                    let dot_x = banner_rect.x + pad + dot_r + i as f32 * dot_step;
+                    let color = if i == active {
+                        style.accent
+                    } else {
+                        style.text_faint
+                    };
+                    scene.shapes.push(Shape::rounded(
+                        Rect::new(dot_x - dot_r, dot_y - dot_r, dot_r * 2.0, dot_r * 2.0),
+                        dot_r,
+                        ctx.color(color),
+                    ));
+                }
+                let text_x = banner_rect.x + pad + 3.0 * dot_step + style.px(4.0);
+                let text_rect = Rect::new(
+                    text_x,
+                    banner_rect.y,
+                    (banner_rect.right() - text_x - pad).max(0.0),
+                    banner_rect.h,
+                );
+                let label = "Thinking… / بيفكر… (Esc to cancel / للإلغاء)";
+                let buf = font.fit(
+                    ctx.font_system,
+                    UiSize::Small,
+                    UiWeight::Semibold,
+                    style.scale,
+                    label,
+                    text_rect.w,
+                );
+                scene
+                    .labels
+                    .push(UiLabel::new(buf, text_rect, UiAlign::Start, style.text));
+            }
+            ComposerAiBanner::Ready { explanation } => {
+                scene.shapes.push(Shape::rounded(
+                    banner_rect,
+                    style.px(RADIUS_6),
+                    ctx.color(style.accent_tint(style.bg2)),
+                ));
+                let icon_side = style.px(12.0).min(banner_rect.h - style.px(4.0)).max(0.0);
+                let icon_rect = Rect::new(
+                    banner_rect.x + pad,
+                    banner_rect.y + (banner_rect.h - icon_side) / 2.0,
+                    icon_side,
+                    icon_side,
+                );
+                Icon::Agent.draw(icon_rect, ctx.color(style.accent), &mut scene.shapes);
+
+                let review_hint = match view.language {
+                    UiLanguage::Arabic => "Enter تشغيل · Esc إلغاء",
+                    UiLanguage::English => "Enter Run · Esc Discard",
+                };
+                let hint_buf = font.shape(
+                    ctx.font_system,
+                    UiSize::Small,
+                    UiWeight::Regular,
+                    style.scale,
+                    review_hint,
+                );
+                let hint_w = label_width(&hint_buf).ceil() + style.px(8.0);
+                let text_x = icon_rect.right() + style.px(6.0);
+                let total_w = (banner_rect.right() - text_x - pad).max(0.0);
+                let (exp_w, show_hint) = if total_w > hint_w + style.px(80.0) {
+                    (total_w - hint_w, true)
+                } else {
+                    (total_w, false)
+                };
+                let exp_rect = Rect::new(text_x, banner_rect.y, exp_w, banner_rect.h);
+                let exp_buf = font.fit(
+                    ctx.font_system,
+                    UiSize::Small,
+                    UiWeight::Regular,
+                    style.scale,
+                    explanation,
+                    exp_rect.w,
+                );
+                scene
+                    .labels
+                    .push(UiLabel::new(exp_buf, exp_rect, UiAlign::Start, style.text));
+                if show_hint {
+                    let hint_rect = Rect::new(
+                        banner_rect.right() - pad - hint_w,
+                        banner_rect.y,
+                        hint_w,
+                        banner_rect.h,
+                    );
+                    scene.labels.push(UiLabel::new(
+                        hint_buf,
+                        hint_rect,
+                        UiAlign::Right,
+                        style.text_dim,
+                    ));
+                }
+            }
+            ComposerAiBanner::Error { message } => {
+                scene.shapes.push(Shape::rounded(
+                    banner_rect,
+                    style.px(RADIUS_6),
+                    ctx.color(style.bg2.mix(style.danger, 0.16)),
+                ));
+                let icon_side = style.px(12.0).min(banner_rect.h - style.px(4.0)).max(0.0);
+                let icon_rect = Rect::new(
+                    banner_rect.x + pad,
+                    banner_rect.y + (banner_rect.h - icon_side) / 2.0,
+                    icon_side,
+                    icon_side,
+                );
+                Icon::Warning.draw(icon_rect, ctx.color(style.danger), &mut scene.shapes);
+                let text_x = icon_rect.right() + style.px(6.0);
+                let text_rect = Rect::new(
+                    text_x,
+                    banner_rect.y,
+                    (banner_rect.right() - text_x - pad).max(0.0),
+                    banner_rect.h,
+                );
+                let buf = font.fit(
+                    ctx.font_system,
+                    UiSize::Small,
+                    UiWeight::Regular,
+                    style.scale,
+                    message,
+                    text_rect.w,
+                );
+                scene
+                    .labels
+                    .push(UiLabel::new(buf, text_rect, UiAlign::Start, style.text));
+            }
         }
     }
 

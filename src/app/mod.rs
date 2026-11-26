@@ -13,6 +13,7 @@
 //! - `selection`: mouse selection and the clipboard.
 
 mod agent;
+mod ai;
 mod branches;
 mod composer;
 mod control;
@@ -98,6 +99,8 @@ pub struct App {
     git_diff: git_diff::GitDiffWatch,
     /// The docked command composer.
     composer: composer::ComposerHost,
+    /// Built-in non-interactive AI assistant (composer generation, block explain/fix, consent).
+    ai: ai::AiHost,
     /// Project switcher MRU and off-thread git repo scan state.
     projects: projects::ProjectState,
     /// Persistent store of named tab layouts.
@@ -142,6 +145,7 @@ impl App {
             review: Default::default(),
             git_diff: git_diff::GitDiffWatch::default(),
             composer: composer::ComposerHost::default(),
+            ai: ai::AiHost::load(),
             projects: projects::ProjectState::load(),
             layouts: crate::layouts::LayoutStore::default(),
             closed_tabs: crate::session::closed::ClosedTabs::new(),
@@ -241,6 +245,7 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::ComposerHistory(entries) => self.on_composer_history(entries),
             AppEvent::ComposerDir(dir, entries) => self.on_composer_dir(dir, entries),
             AppEvent::Projects(generation, items) => self.on_projects_loaded(generation, items),
+            AppEvent::AiComplete(request_id, result) => self.on_ai_complete(request_id, result),
         }
     }
 
@@ -277,6 +282,7 @@ impl ApplicationHandler<AppEvent> for App {
             selection_due,
             ssh_due,
             self.poll_git_diff(now),
+            self.poll_ai_animation(now),
             self.window.poll_sidebar_animation(now),
         ]
         .into_iter()
@@ -289,6 +295,7 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.ai.cancel_active();
         self.finish_projects();
         self.session.finish(&self.ws, self.window.sidebar_visible());
         self.control = None;

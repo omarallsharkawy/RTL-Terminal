@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 pub mod agent;
+pub mod ai;
 pub mod app;
 pub mod blink;
 pub mod blocks;

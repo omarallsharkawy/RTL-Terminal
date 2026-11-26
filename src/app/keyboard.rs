@@ -24,11 +24,17 @@ fn is_plain_escape(event: &KeyEvent, modifiers: ModifiersState) -> bool {
 impl App {
     /// A key press or release. Returns true when the window should close.
     pub(super) fn on_key(&mut self, event: &KeyEvent) -> bool {
+        if self.handle_ai_consent_key(event) {
+            return false;
+        }
         if self.palette_open() {
             return self.handle_palette_key(event);
         }
         if let Some(close) = self.handle_composer_key(event) {
             return close;
+        }
+        if self.handle_block_ai_key(event) {
+            return false;
         }
         if let Some(close) = self.handle_review_key(event) {
             return close;
@@ -246,6 +252,12 @@ impl App {
             InputAction::NotificationList => self.open_palette(PaletteMode::Notifications),
             InputAction::SearchAll => self.open_palette(PaletteMode::Search),
             InputAction::AskAgent => self.ask_agent(id),
+            InputAction::ExplainBlockError => {
+                self.analyze_focused_failed_block(id, crate::ai::BlockAiMode::Explain);
+            }
+            InputAction::SuggestBlockFix => {
+                self.analyze_focused_failed_block(id, crate::ai::BlockAiMode::SuggestFix);
+            }
             InputAction::ToggleReview => self.toggle_review(),
             InputAction::ToggleComposer => self.toggle_composer(),
             InputAction::PrevBlock => self.navigate_blocks(id, BlockList::select_prev),
