@@ -193,6 +193,19 @@ fn docking_geometry_respects_38_percent_min_max_50_percent_and_arabic_mirroring(
     assert_eq!(panel_narrow.w, 310.0);
     assert!(term_narrow.w >= narrow.w * 0.5);
 
+    // Very narrow window: the panel still opens at its usable minimum; the terminal shrinks.
+    let tight = Rect::new(0.0, 36.0, 420.0, 600.0);
+    let (term_tight, panel_tight) = split_agent_content(tight, 1.0, None, UiLanguage::English);
+    assert_eq!(
+        panel_tight.expect("panel opens on a narrow window").w,
+        240.0
+    );
+    assert_eq!(term_tight.w, 180.0);
+    let tiny = Rect::new(0.0, 36.0, 380.0, 600.0);
+    assert!(split_agent_content(tiny, 1.0, None, UiLanguage::English)
+        .1
+        .is_none());
+
     // 1.5x scale factor scales min/max cleanly.
     let hidpi = Rect::new(0.0, 54.0, 1800.0, 1000.0);
     let (_, panel_hi) = split_agent_content(hidpi, 1.5, Some(300.0), UiLanguage::English);

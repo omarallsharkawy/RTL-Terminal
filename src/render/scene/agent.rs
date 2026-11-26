@@ -32,9 +32,10 @@ use crate::render::ui_style::{
 use crate::review::diff::{parse as parse_diff, Limits as DiffLimits, LineKind};
 use crate::ui::agent_panel::{
     arabic_count, format_context_strip, format_deny_reason, format_duration_ms, format_usage_pill,
-    included_context_tokens, paragraph_is_rtl, read_tool_name, AgentFocus, AgentPanelHit,
-    AgentPanelLayout, AgentPanelView, CardButton, CardLayout, StepEntry, CARD_EDITOR_MAX_LINES,
-    COMPOSER_MAX_LINES, EXAMPLE_CHIPS, MAX_PATCH_DIFF_ROWS, PLAN_COLLAPSED_LINES,
+    included_context_tokens, paragraph_is_rtl, read_tool_name, wrap_words, AgentFocus,
+    AgentPanelHit, AgentPanelLayout, AgentPanelView, CardButton, CardLayout, StepEntry,
+    CARD_EDITOR_MAX_LINES, COMPOSER_MAX_LINES, EMPTY_INTRO_LINE_H, EMPTY_INTRO_TOP, EXAMPLE_CHIPS,
+    MAX_PATCH_DIFF_ROWS, PLAN_COLLAPSED_LINES,
 };
 use crate::ui::chrome::UiLanguage;
 
@@ -328,14 +329,9 @@ impl AgentDrawer<'_, '_> {
             &mut self.scene.shapes,
         );
 
-        let intro = self.lang().text(
-            "Ask the agent to read files, run commands, or edit code. Every command and patch asks first.",
-            "اطلب من الوكيل قراءة الملفات أو تشغيل الأوامر أو تعديل الكود. كل أمر وتعديل يطلب موافقتك أولاً.",
-        );
         let intro_w = (b.w - 2.0 * pad).max(0.0);
-        let lines = wrap_lines(intro, intro_w, s.px(7.0), 3);
-        let mut y = b.y + s.px(44.0);
-        for line in lines {
+        let mut y = b.y + s.px(EMPTY_INTRO_TOP);
+        for line in self.layout.empty_intro.clone() {
             self.push_label(
                 Rect::new(b.x + pad, y, intro_w, s.px(18.0)),
                 &line,
@@ -345,7 +341,7 @@ impl AgentDrawer<'_, '_> {
                 s.text_dim,
                 Some(body_clip),
             );
-            y += s.px(17.0);
+            y += s.px(EMPTY_INTRO_LINE_H);
         }
 
         for (idx, &chip_rect) in self.layout.empty_chips.iter().enumerate() {
@@ -1595,7 +1591,7 @@ impl AgentDrawer<'_, '_> {
         let rtl = paragraph_is_rtl(text);
         let align = if rtl { UiAlign::Right } else { UiAlign::Left };
         let line_h = s.px(18.0);
-        let lines = wrap_lines(text, width, s.px(7.2), max_lines);
+        let lines = wrap_words(text, width, s.px(7.2), max_lines);
         for (i, line) in lines.iter().enumerate() {
             let y = start_y + i as f32 * line_h;
             self.push_label(
@@ -1732,48 +1728,6 @@ fn intersect_bounds(a: TextBounds, b: TextBounds) -> TextBounds {
         right: a.right.min(b.right),
         bottom: a.bottom.min(b.bottom),
     }
-}
-
-fn wrap_lines(text: &str, max_w: f32, char_w: f32, max_lines: usize) -> Vec<String> {
-    let cols = (max_w / char_w.max(6.0)).floor().max(12.0) as usize;
-    let mut out = Vec::new();
-    for para in text.lines() {
-        if para.trim().is_empty() {
-            out.push(String::new());
-            if out.len() >= max_lines {
-                return out;
-            }
-            continue;
-        }
-        let mut cur = String::new();
-        let mut cur_len = 0usize;
-        for word in para.split_whitespace() {
-            let wlen = word.chars().count();
-            if cur_len > 0 && cur_len + 1 + wlen > cols {
-                out.push(std::mem::take(&mut cur));
-                cur_len = 0;
-                if out.len() >= max_lines {
-                    return out;
-                }
-            }
-            if cur_len > 0 {
-                cur.push(' ');
-                cur_len += 1;
-            }
-            cur.push_str(word);
-            cur_len += wlen;
-        }
-        if !cur.is_empty() {
-            out.push(cur);
-            if out.len() >= max_lines {
-                return out;
-            }
-        }
-    }
-    if out.is_empty() {
-        out.push(String::new());
-    }
-    out
 }
 
 fn wrap_mono_lines(text: &str, max_w: f32, char_w: f32, max_lines: usize) -> Vec<String> {

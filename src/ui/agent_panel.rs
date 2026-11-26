@@ -35,8 +35,10 @@ pub const MIN_PANEL_PX: f32 = 340.0;
 pub const MAX_PANEL_PX: f32 = 560.0;
 /// Maximum share of the tab area the panel may occupy (terminal keeps at least 50%).
 pub const MAX_TAB_SHARE: f32 = 0.50;
-/// Below this logical width the panel does not dock.
+/// The panel never docks narrower than this (logical px).
 pub const MIN_USABLE_PX: f32 = 240.0;
+/// On a narrow window the terminal may shrink below 50%, but never below this (logical px).
+pub const MIN_TERMINAL_PX: f32 = 160.0;
 /// Fixed header height in logical pixels (AGENT.md §1.1).
 pub const HEADER_HEIGHT_PX: f32 = 36.0;
 /// Hit slop along the draggable divider edge in logical pixels.
@@ -64,6 +66,16 @@ impl ExampleChip {
         language.text(self.prompt_en, self.prompt_ar)
     }
 }
+
+/// Empty-state intro text (AGENT.md §1.1), wrapped by the layout so the chips sit below it.
+pub const EMPTY_INTRO: (&str, &str) = (
+    "Ask the agent to read files, run commands, or edit code. Every command and patch asks first.",
+    "اطلب من الوكيل قراءة الملفات أو تشغيل الأوامر أو تعديل الكود. كل أمر وتعديل يطلب موافقتك أولاً.",
+);
+/// Logical px from the body top to the first intro line, and between intro lines.
+pub const EMPTY_INTRO_TOP: f32 = 44.0;
+pub const EMPTY_INTRO_LINE_H: f32 = 17.0;
+const EMPTY_INTRO_MAX_LINES: usize = 5;
 
 /// Three bilingual empty-state starter chips (AGENT.md §1.1).
 pub const EXAMPLE_CHIPS: [ExampleChip; 3] = [
@@ -104,8 +116,16 @@ pub fn split_agent_content(
             .round(),
     };
     let max_share = (content.w * MAX_TAB_SHARE).floor();
-    let width = want.min(max_share);
-    if !width.is_finite() || width < MIN_USABLE_PX * scale {
+    let mut width = want.min(max_share);
+    if width < MIN_USABLE_PX * scale {
+        // Narrow window: give the panel its usable minimum while the terminal keeps a few
+        // columns, instead of silently not opening.
+        width = (MIN_USABLE_PX * scale).round();
+        if content.w - width < MIN_TERMINAL_PX * scale {
+            return (content, None);
+        }
+    }
+    if !width.is_finite() {
         return (content, None);
     }
     let term_w = (content.w - width).max(0.0);
@@ -2074,6 +2094,8 @@ pub struct AgentPanelLayout {
     pub body: Rect,
     pub jump_to_latest: Option<Rect>,
     pub empty_chips: Vec<Rect>,
+    /// Wrapped empty-state intro lines (drawn above the chips).
+    pub empty_intro: Vec<String>,
     pub cards: Vec<CardLayout>,
     pub footer: Rect,
     pub context_strip: Rect,
@@ -2200,6 +2222,7 @@ impl AgentPanelLayout {
 
         // Empty state chips or timeline cards.
         let mut empty_chips = Vec::new();
+        let mut empty_intro = Vec::new();
         let mut cards = Vec::new();
         let mut max_scroll = 0.0_f32;
         let mut scroll_px = 0.0_f32;
@@ -2210,7 +2233,17 @@ impl AgentPanelLayout {
             let chip_h = px(32.0).round();
             let chip_gap = px(8.0).round();
             let chip_w = (body.w - 2.0 * pad).max(0.0);
-            let start_y = body.y + px(84.0);
+            empty_intro = wrap_words(
+                view.language.text(EMPTY_INTRO.0, EMPTY_INTRO.1),
+                chip_w,
+                px(7.0),
+                EMPTY_INTRO_MAX_LINES,
+            );
+            let start_y = (body.y
+                + px(EMPTY_INTRO_TOP)
+                + empty_intro.len() as f32 * px(EMPTY_INTRO_LINE_H)
+                + px(12.0))
+            .round();
             for i in 0..EXAMPLE_CHIPS.len() {
                 let y = start_y + i as f32 * (chip_h + chip_gap);
                 if y + chip_h <= body.bottom() {
@@ -2393,6 +2426,7 @@ impl AgentPanelLayout {
             body,
             jump_to_latest,
             empty_chips,
+            empty_intro,
             cards,
             footer,
             context_strip,
@@ -2516,6 +2550,49 @@ fn patch_files_height(kind: &StepKind, row_h: f32) -> f32 {
 }
 
 /// Estimate wrapped line count for a piece of text inside `max_w` physical pixels.
+/// Greedy word wrap by an estimated character width (UI text, not terminal cells).
+pub fn wrap_words(text: &str, max_w: f32, char_w: f32, max_lines: usize) -> Vec<String> {
+    let cols = (max_w / char_w.max(6.0)).floor().max(12.0) as usize;
+    let mut out = Vec::new();
+    for para in text.lines() {
+        if para.trim().is_empty() {
+            out.push(String::new());
+            if out.len() >= max_lines {
+                return out;
+            }
+            continue;
+        }
+        let mut cur = String::new();
+        let mut cur_len = 0usize;
+        for word in para.split_whitespace() {
+            let wlen = word.chars().count();
+            if cur_len > 0 && cur_len + 1 + wlen > cols {
+                out.push(std::mem::take(&mut cur));
+                cur_len = 0;
+                if out.len() >= max_lines {
+                    return out;
+                }
+            }
+            if cur_len > 0 {
+                cur.push(' ');
+                cur_len += 1;
+            }
+            cur.push_str(word);
+            cur_len += wlen;
+        }
+        if !cur.is_empty() {
+            out.push(cur);
+            if out.len() >= max_lines {
+                return out;
+            }
+        }
+    }
+    if out.is_empty() {
+        out.push(String::new());
+    }
+    out
+}
+
 pub fn estimate_wrapped_lines(text: &str, max_w: f32, char_w: f32, max_lines: usize) -> usize {
     let cols = (max_w / char_w.max(6.0)).floor().max(12.0) as usize;
     let mut total = 0usize;
