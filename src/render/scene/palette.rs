@@ -37,6 +37,21 @@ pub struct PaletteItem {
     pub dimmed: bool,
 }
 
+/// Optional pictograms for the active mode and the visible command rows.
+pub struct PaletteIcons {
+    pub leading: Icon,
+    pub rows: Vec<Option<Icon>>,
+}
+
+impl Default for PaletteIcons {
+    fn default() -> Self {
+        Self {
+            leading: Icon::Search,
+            rows: Vec::new(),
+        }
+    }
+}
+
 /// Result of hit-testing a pointer press against an open command palette panel.
 ///
 /// Clicking outside the panel closes the palette and consumes the click so nothing reaches
@@ -155,6 +170,7 @@ pub(crate) fn palette_overlay(
     style: UiStyle,
     font: &UiFont,
     view: &PaletteView,
+    icons: &PaletteIcons,
     surface: (f32, f32),
     shapes: &mut Vec<Shape>,
 ) -> (Option<Rect>, Vec<UiLabel>) {
@@ -193,7 +209,7 @@ pub(crate) fn palette_overlay(
             side,
             side,
         );
-        Icon::Search.draw(icon, ctx.color(style.text_dim), shapes);
+        icons.leading.draw(icon, ctx.color(style.text_dim), shapes);
         let x = icon.right() + style.px(8.0);
         let text = Rect::new(
             x,
@@ -311,14 +327,26 @@ pub(crate) fn palette_overlay(
             } else {
                 rect.x
             };
-            let text = Rect::new(x, rect.y, width, rect.h);
+            let mut text = Rect::new(x, rect.y, width, rect.h);
+            if matches!(align, UiAlign::Left) {
+                if let Some(Some(icon)) = icons.rows.get(i).filter(|_| width > style.px(64.0)) {
+                    let side = style.px(14.0);
+                    icon.draw(
+                        Rect::new(x, row.y + (row.h - side) / 2.0, side, side),
+                        ctx.color(style.text_dim),
+                        shapes,
+                    );
+                    text.x += side + pad;
+                    text.w -= side + pad;
+                }
+            }
             let buffer = font.fit(
                 ctx.font_system,
                 UiSize::Body,
                 UiWeight::Regular,
                 style.scale,
                 title,
-                width,
+                text.w,
             );
             texts.push(UiLabel::new(buffer, text, align, color));
         }

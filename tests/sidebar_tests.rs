@@ -1459,3 +1459,50 @@ fn desktop_command_uses_literal_arguments_and_ends_option_parsing() {
         ]
     );
 }
+
+#[test]
+fn arabic_title_and_unread_badge_follow_the_title_direction_in_both_languages() {
+    use twitty::render::text::ui::label_width;
+
+    let mut fonts = twitty::render::text::fonts::new_font_system();
+    let font = UiFont::new(&mut fonts, None);
+    let palette = Palette::default();
+    let mut cache = LabelCache::default();
+    let title = "مراجعة التغييرات";
+    let entry = Entry::new(title, None, false, None, [Notice::new(None, "Ready")]);
+    for (language, side) in [
+        (UiLanguage::English, SidebarPosition::Left),
+        (UiLanguage::Arabic, SidebarPosition::Right),
+    ] {
+        let scale = 1.5;
+        let area = Rect::new(200.0, 0.0, 360.0, 400.0);
+        let mut ctx = DrawContext {
+            font_system: &mut fonts,
+            family: None,
+            palette: &palette,
+            metrics: CellMetrics { scale, ..metrics() },
+            is_srgb: false,
+        };
+        let cards = cache.cards(&font, ctx.font_system, vec![entry.clone()], area, scale);
+        let view = ScrollState::default().view(&cards, 0, area, scale, side, language);
+        let scene = build(
+            &mut ctx,
+            &view,
+            &mut cache,
+            UiStyle::new(&palette, None, scale),
+            &font,
+        );
+        let label = |text| {
+            scene
+                .labels
+                .iter()
+                .find(|label| label.buffer.lines[0].text() == text)
+                .unwrap()
+        };
+        let title_label = label(title);
+        let badge = label("1");
+        let title_edge = title_label.left + label_width(&title_label.buffer);
+        assert!((title_edge - view.items[0].layout(&view).title.right()).abs() <= 1.0);
+        assert!((title_label.left - badge.bounds.right as f32 - 4.0 * scale).abs() <= 1.0);
+    }
+}

@@ -247,7 +247,7 @@ impl ApplicationHandler<AppEvent> for App {
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
         let (blinking, shown) = if self.composer_has_keys() {
-            (self.config.cursor_blink, true)
+            (self.config.cursor_blink && !self.config.reduce_motion, true)
         } else {
             self.focused_id()
                 .and_then(|id| {
@@ -267,17 +267,15 @@ impl ApplicationHandler<AppEvent> for App {
             self.window.request_redraw();
         }
         let search_due = self.poll_search_all(now);
-        let flash_due = self.window.tick_pane_flash(now);
         let selection_due = self.poll_selection_clears(now);
         let ssh_due = self.poll_ssh_retries(now);
         let deadline = [
             self.cursor_blink.next_deadline(),
             search_due,
-            flash_due,
             selection_due,
             ssh_due,
             self.poll_git_diff(now),
-            self.window.poll_sidebar_animation(now),
+            self.window.poll_motion(now),
         ]
         .into_iter()
         .flatten()

@@ -39,14 +39,17 @@ use crate::blocks::cards::BlockHover;
 use crate::color::{Palette, Rgba};
 use crate::layout::{PaneId, Rect};
 use crate::terminal::{CursorState, LineData};
+use crate::ui::motion::{AnimatedView, ChromeMotion, HOVER};
 use gpu::Gpu;
+use scene::blocks::{BlockFades, BlockPaint};
 use scene::context::DrawContext;
-use scene::frame::{build_frame, build_frame_with_cards, FrameOptions};
-use scene::palette::{PaletteLayout, PaletteView};
+use scene::frame::{build_frame_base, FrameOptions};
+use scene::palette::{PaletteIcons, PaletteLayout, PaletteView};
 use scene::preedit::PreeditState;
 use scene::sidebar::LabelCache;
 use scene::window_chrome::ChromeView;
-use text::fonts::{installed_family, new_font_system};
+use std::time::{Duration, Instant};
+use text::fonts::{installed_family, new_font_system, ui_font_system};
 use text::ui::UiFont;
 use ui_style::UiStyle;
 
@@ -79,6 +82,7 @@ pub(crate) struct Renderer {
     config: wgpu::SurfaceConfiguration,
     gpu: Gpu,
     font_system: FontSystem,
+    ui_font_system: FontSystem,
     /// Configured terminal font family (leaked once per change; `None` = monospace).
     font_family: Option<&'static str>,
     palette: Palette,
@@ -99,17 +103,19 @@ pub(crate) struct Renderer {
     sidebar_labels: LabelCache,
     /// Input-method composition drawn at the cursor.
     ime: PreeditState,
+    reduce_motion: bool,
     /// The command palette, while it is open.
-    palette_view: Option<PaletteView>,
+    palette_view: AnimatedView<(PaletteView, PaletteIcons)>,
     /// The docked command composer, while it is visible.
-    composer_view: Option<scene::composer::ComposerView>,
+    composer_view: AnimatedView<scene::composer::ComposerView>,
     /// The code review panel, while it is open.
-    review_view: Option<crate::review::panel::View>,
+    review_view: AnimatedView<crate::review::panel::View>,
     review_labels: scene::review::ReviewCache,
     /// Render OSC 133 command blocks as rounded cards with a hover toolbar.
     block_cards: bool,
     /// Block card (and optional toolbar button) currently hovered by the pointer.
     block_hover: Option<BlockHover>,
+    block_fades: BlockFades,
 }
 
 impl Renderer {
@@ -118,11 +124,14 @@ impl Renderer {
         let is_srgb = config.format.is_srgb();
 
         let scale = window.scale_factor() as f32;
+        let font_system = new_font_system();
+        let ui_font_system = ui_font_system(&font_system);
         let mut renderer = Self {
             window,
             config,
             gpu,
-            font_system: new_font_system(),
+            font_system,
+            ui_font_system,
             font_family: None,
             palette: Palette::default(),
             ui_accent: None,
@@ -143,12 +152,14 @@ impl Renderer {
             row_cache: RowCache::default(),
             sidebar_labels: LabelCache::default(),
             ime: Default::default(),
-            palette_view: None,
-            composer_view: None,
-            review_view: None,
+            reduce_motion: false,
+            palette_view: AnimatedView::default(),
+            composer_view: AnimatedView::default(),
+            review_view: AnimatedView::default(),
             review_labels: Default::default(),
             block_cards: true,
             block_hover: None,
+            block_fades: BlockFades::default(),
         };
         renderer.update_metrics();
         Ok(renderer)
@@ -196,7 +207,7 @@ impl Renderer {
     }
 
     pub(crate) fn set_ui_style(&mut self, family: Option<&str>, accent: Option<Rgba>) {
-        self.ui_font = UiFont::new(&mut self.font_system, family);
+        self.ui_font = UiFont::new(&mut self.ui_font_system, family);
         self.ui_accent = accent;
         self.sidebar_labels.clear();
     }
@@ -260,6 +271,20 @@ impl Renderer {
     /// Update the hovered block card / toolbar button.
     pub(crate) fn set_block_hover(&mut self, hover: Option<BlockHover>) {
         self.block_hover = hover;
+        let now = Instant::now();
+        let duration = if self.reduce_motion {
+            Duration::ZERO
+        } else {
+            HOVER
+        };
+        self.block_fades.cards.set(
+            hover.map(|h| BlockHover { button: None, ..h }),
+            now,
+            duration,
+        );
+        self.block_fades
+            .buttons
+            .set(hover.filter(|h| h.button.is_some()), now, duration);
     }
 
     /// Forget the cached rows of a closed pane.
@@ -267,24 +292,47 @@ impl Renderer {
         self.row_cache.forget(id);
     }
 
+    pub(crate) fn set_reduce_motion(&mut self, reduced: bool) {
+        self.reduce_motion = reduced;
+    }
+
+    pub(crate) fn next_motion_frame(&self, now: Instant) -> Option<Instant> {
+        [
+            self.review_view.next_frame(now),
+            self.composer_view.next_frame(now),
+            self.palette_view.next_frame(now),
+            self.block_fades.cards.next_frame(now),
+            self.block_fades.buttons.next_frame(now),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+    }
+
     /// Show the command palette (`Some`) or hide it.
-    pub(crate) fn set_command_palette(&mut self, view: Option<PaletteView>) {
-        self.palette_view = view;
+    pub(crate) fn set_command_palette(&mut self, view: Option<(PaletteView, PaletteIcons)>) {
+        self.palette_view
+            .set(view, Instant::now(), self.reduce_motion);
     }
 
     /// Show the command composer (`Some`) or hide it.
-    pub(crate) fn set_composer(&mut self, view: Option<scene::composer::ComposerView>) {
-        self.composer_view = view;
+    pub(crate) fn set_composer(&mut self, mut view: Option<scene::composer::ComposerView>) {
+        if let Some(view) = view.as_mut().filter(|_| self.reduce_motion) {
+            view.cursor_blink_on = true;
+        }
+        self.composer_view
+            .set(view, Instant::now(), self.reduce_motion);
     }
 
     /// Show the code review panel (`Some`) or hide it.
     pub(crate) fn set_review(&mut self, view: Option<crate::review::panel::View>) {
-        self.review_view = view;
+        self.review_view
+            .set(view, Instant::now(), self.reduce_motion);
     }
 
     /// Hit-test physical pixel `(x, y)` against the open command palette, if any.
     pub(crate) fn palette_hit(&self, x: f64, y: f64) -> scene::palette::PaletteHit {
-        let Some(view) = &self.palette_view else {
+        let Some((view, _)) = self.palette_view.live() else {
             return scene::palette::PaletteHit::Outside;
         };
         PaletteLayout::new(self.metrics.scale, self.surface_size(), view.items.len()).hit(x, y)
@@ -337,7 +385,7 @@ impl Renderer {
     ) -> Vec<crate::sidebar::cards::Card> {
         self.sidebar_labels.cards(
             &self.ui_font,
-            &mut self.font_system,
+            &mut self.ui_font_system,
             entries,
             area,
             self.metrics.scale,
@@ -348,6 +396,7 @@ impl Renderer {
     pub fn render(
         &mut self,
         chrome: &ChromeView,
+        motion: &ChromeMotion<'_>,
         panes: &[PaneFrame],
         dividers: &[Rect],
         sidebar: Option<&crate::sidebar::cards::View>,
@@ -369,32 +418,35 @@ impl Renderer {
             palette: &self.palette,
             is_srgb: self.is_srgb,
         };
+        let mut frame = build_frame_base(
+            &mut ctx,
+            &opts,
+            &mut self.row_cache,
+            &mut self.ime,
+            &[],
+            panes,
+            dividers,
+            !self.block_cards,
+        );
+        let mut ctx = DrawContext {
+            font_system: &mut self.ui_font_system,
+            ..ctx
+        };
         let style = UiStyle::new(&self.palette, self.ui_accent, self.metrics.scale);
-        let mut frame = if self.block_cards {
-            build_frame_with_cards(
+        if self.block_cards {
+            let paint = BlockPaint {
+                hover: self.block_hover,
+                fades: Some((&self.block_fades, motion.now)),
+            };
+            frame.add_block_paint(
                 &mut ctx,
-                &opts,
-                &mut self.row_cache,
-                &mut self.ime,
-                &[],
-                panes,
-                dividers,
                 style,
                 &self.ui_font,
-                self.block_hover,
-                chrome.language,
-            )
-        } else {
-            build_frame(
-                &mut ctx,
-                &opts,
-                &mut self.row_cache,
-                &mut self.ime,
-                &[],
                 panes,
-                dividers,
-            )
-        };
+                &paint,
+                chrome.language,
+            );
+        }
         if let Some(view) = sidebar {
             frame.add_sidebar(
                 &mut ctx,
@@ -406,24 +458,25 @@ impl Renderer {
         } else {
             self.sidebar_labels.clear();
         }
-        if let Some(view) = &self.review_view {
-            frame.add_review(
+        frame.add_chrome_motion(&mut ctx, style, &self.ui_font, chrome, Some(motion));
+        if let Some((view, opacity, _)) = self.review_view.sample(motion.now) {
+            frame.add_review_motion(
                 &mut ctx,
                 view,
                 &mut self.review_labels,
                 style,
                 &self.ui_font,
                 chrome.language,
+                opacity,
             );
         } else {
             self.review_labels.clear();
         }
-        frame.add_chrome(&mut ctx, style, &self.ui_font, chrome);
-        if let Some(view) = &self.composer_view {
-            frame.add_composer(&mut ctx, style, &self.ui_font, view);
+        if let Some((view, opacity, open)) = self.composer_view.sample(motion.now) {
+            frame.add_composer_motion(&mut ctx, style, &self.ui_font, view, opacity, open);
         }
-        if let Some(view) = &self.palette_view {
-            frame.add_palette(&mut ctx, style, &self.ui_font, view);
+        if let Some(((view, icons), opacity, _)) = self.palette_view.sample(motion.now) {
+            frame.add_palette_motion(&mut ctx, style, &self.ui_font, view, icons, opacity);
         }
         if let Some((x, y, w, h)) = frame.ime_area {
             self.window.set_ime_cursor_area(
@@ -436,7 +489,7 @@ impl Renderer {
             surface_texture,
             (&frame.quads, &frame.shapes),
             runs,
-            &mut self.font_system,
+            &mut self.ui_font_system,
             frame.background,
             self.opacity,
         )

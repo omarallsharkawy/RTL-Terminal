@@ -11,3 +11,14 @@ below. Each file that does says so in its header comment, with the upstream path
 
 Code from GPL-3.0-or-later sources is combined with Twitty under section 13 of the GPL v3 /
 AGPL v3. The names and logos of these projects are not used.
+
+## Bundled UI fonts
+
+| Source | License | Copyright | Bundled files |
+|---|---|---|---|
+| [Inter 4.001](https://github.com/rsms/inter) | SIL OFL 1.1 ([Inter-OFL.txt](Inter-OFL.txt)) | The Inter Project Authors | `TwittyLatinUI-{Regular,SemiBold}.ttf` |
+| [IBM Plex Sans Arabic 1.101](https://github.com/IBM/plex) | SIL OFL 1.1 ([IBM-Plex-OFL.txt](IBM-Plex-OFL.txt)) | IBM Corp. | `TwittyArabicUI-{Regular,SemiBold}.ttf` |
+
+The renamed subsets in `assets/fonts/` retain Latin or Arabic script characters for UI text,
+common punctuation, and the OpenType tables for shaping. The Arabic subset also keeps basic
+Latin for punctuation and numerals used alongside Arabic.
