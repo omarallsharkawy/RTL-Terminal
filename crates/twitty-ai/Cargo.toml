@@ -14,7 +14,11 @@ serde_json.workspace = true
 tracing.workspace = true
 twitty-core.workspace = true
 twitty-store.workspace = true
+ureq = { version = "3.5.2", default-features = false, features = ["rustls"] }
+# ureq trace logging includes raw wire bytes. Compile it out in every profile.
+log = { version = "0.4.34", features = ["max_level_debug"] }
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
+rustix.workspace = true
 twitty-control.workspace = true
