@@ -2,7 +2,7 @@
 
 use alacritty_terminal::term::cell::Flags as CellFlags;
 
-use super::boxdraw::try_render_box_or_block;
+use super::boxdraw::{is_box_or_block, try_render_box_or_block};
 use crate::color::{Palette, Rgba};
 use crate::render::row::visual_cell_extents;
 use crate::render::style::{cell_colors, target_color, Quad};
@@ -19,13 +19,22 @@ pub fn build_row_quads(
     line: &LineData,
     segments: &[CachedSegment],
 ) -> Vec<Quad> {
+    let visual = visual_cell_extents(line, segments, metrics.0);
+    quads_with_extents(palette, is_srgb, metrics, line, &visual)
+}
+
+pub(super) fn quads_with_extents(
+    palette: &Palette,
+    is_srgb: bool,
+    metrics: (f32, f32, f32),
+    line: &LineData,
+    visual: &[Option<(f32, f32)>],
+) -> Vec<Quad> {
     let (cw, lh, font_px) = metrics;
     let target = |rgba: Rgba| target_color(rgba, is_srgb);
     let thickness = (font_px / 14.0).round().max(1.0);
     let underline_y = ((lh + font_px) * 0.5).round().min(lh - thickness);
     let strike_y = (lh * 0.5).round();
-
-    let visual = visual_cell_extents(line, segments, cw);
 
     let mut quads = Vec::new();
     for (c, cell) in line.cells.iter().enumerate() {
@@ -34,11 +43,20 @@ pub fn build_row_quads(
         if bg != palette.background && w > 0.0 {
             quads.push((x, 0.0, w, lh, target(bg)));
         }
+        let geometry = !cell.flags.contains(CellFlags::HIDDEN) && is_box_or_block(cell.c);
+        let decoration = w > 0.0
+            && (cell.link_hover
+                || cell
+                    .flags
+                    .intersects(CellFlags::ALL_UNDERLINES | CellFlags::STRIKEOUT));
+        if !geometry && !decoration {
+            continue;
+        }
         let fg_color = target(fg);
-        if !cell.flags.contains(CellFlags::HIDDEN) {
+        if geometry {
             try_render_box_or_block(cell.c, x, 0.0, w, lh, fg_color, &mut quads);
         }
-        if w <= 0.0 {
+        if !decoration {
             continue;
         }
         if cell.flags.contains(CellFlags::DOUBLE_UNDERLINE) {

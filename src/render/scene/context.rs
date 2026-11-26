@@ -4,9 +4,9 @@ use cosmic_text::{Buffer, FontSystem};
 
 use crate::color::{Palette, Rgba};
 use crate::render::metrics::CellMetrics;
-use crate::render::scene::row_quads::build_row_quads;
-use crate::render::style::{target_color, Quad};
-use crate::render::text::segment::CachedSegment;
+use crate::render::row::{visual_cell_extents, CachedRow, RowCursor};
+use crate::render::scene::row_quads::quads_with_extents;
+use crate::render::style::target_color;
 use crate::render::text::shaper::{shape_label, RowShaper};
 use crate::terminal::LineData;
 
@@ -44,14 +44,22 @@ impl DrawContext<'_> {
         }
     }
 
-    pub(crate) fn row_quads(&self, line: &LineData, segments: &[CachedSegment]) -> Vec<Quad> {
+    pub(crate) fn build_row(
+        &mut self,
+        hash: u64,
+        line: &LineData,
+        cursor: Option<RowCursor>,
+    ) -> CachedRow {
+        let segments = self.shaper().build_row(line, cursor);
         let m = &self.metrics;
-        build_row_quads(
+        let visual = visual_cell_extents(line, &segments, m.char_width);
+        let quads = quads_with_extents(
             self.palette,
             self.is_srgb,
             (m.char_width, m.line_height, m.font_px()),
             line,
-            segments,
-        )
+            &visual,
+        );
+        CachedRow::with_extents(hash, line, segments, quads, visual)
     }
 }

@@ -3,7 +3,8 @@
 use crate::layout::{PaneId, Rect};
 use crate::render::icons::Icon;
 use crate::render::shapes::{Border, Shape};
-use crate::render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
+use crate::render::text::labels::UiLabels;
+use crate::render::text::ui::{label_width, UiAlign, UiLabel, UiSize, UiWeight};
 use crate::render::ui_style::{UiStyle, RADIUS_6, RADIUS_8, SPACE_12, SPACE_16, SPACE_4, SPACE_8};
 use crate::render::TabLabel;
 use crate::ui::chrome::{
@@ -43,7 +44,7 @@ pub struct ChromeView<'a> {
 pub(crate) fn draw(
     ctx: &mut DrawContext,
     style: UiStyle,
-    font: &UiFont,
+    font: UiLabels<'_>,
     view: &ChromeView,
     shapes: &mut Vec<Shape>,
     motion: Option<&ChromeMotion<'_>>,
@@ -67,7 +68,7 @@ pub(crate) fn draw(
 struct Chrome<'a, 'b> {
     ctx: &'a mut DrawContext<'b>,
     style: UiStyle,
-    font: &'a UiFont,
+    font: UiLabels<'a>,
     shapes: &'a mut Vec<Shape>,
     labels: Vec<UiLabel>,
     motion: Option<&'a ChromeMotion<'a>>,

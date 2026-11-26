@@ -1,6 +1,7 @@
 //! Font setup: the embedded Arabic fallback and the configurable terminal font family.
 
 use cosmic_text::{fontdb, Family, FontSystem};
+use std::sync::Arc;
 
 /// Noto Naskh Arabic (SIL OFL 1.1, see `assets/fonts/OFL.txt`). Embedded so Arabic renders
 /// on machines that have no Arabic font installed.
@@ -13,7 +14,7 @@ pub fn new_font_system() -> FontSystem {
     let mut font_system = FontSystem::new();
     font_system
         .db_mut()
-        .load_font_data(NOTO_NASKH_ARABIC.to_vec());
+        .load_font_source(fontdb::Source::Binary(Arc::new(NOTO_NASKH_ARABIC)));
     font_system
 }
 

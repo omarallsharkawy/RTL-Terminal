@@ -1,7 +1,8 @@
 //! The winit application: owns the window, the workspace of tabs and panes, and the input
 //! state, and routes each event to the module that handles it.
 //!
-//! - `event`: shell output and terminal requests arriving through the event proxy.
+//! - `event`: shell signals and terminal requests arriving through the event proxy.
+//! - `output`: buffered PTY output and process exits.
 //! - `window`: the window and renderer (every renderer call lives there).
 //! - `panes`: opening, splitting, focusing and closing tabs and panes.
 //! - `keyboard`: keys, input-method text, the search bar and shortcut actions.
@@ -22,6 +23,7 @@ mod git_diff;
 mod keyboard;
 mod layouts;
 mod mouse;
+mod output;
 mod palette;
 mod panes;
 mod ports;
@@ -69,6 +71,7 @@ use window::Window;
 pub struct App {
     proxy: EventLoopProxy<AppEvent>,
     ws: Workspace,
+    output: output::OutputWork,
     window: Window,
     modifiers: ModifiersState,
     pointer: PointerState,
@@ -116,6 +119,7 @@ pub struct App {
 
 impl App {
     pub fn new(proxy: EventLoopProxy<AppEvent>) -> Self {
+        let perf = crate::perf::Perf::from_env();
         let config = TwittyConfig::load();
         let session = SessionStore::new();
         let startup_session = if config.restore_session {
@@ -126,7 +130,8 @@ impl App {
         Self {
             proxy,
             ws: Workspace::new(),
-            window: Window::new(),
+            output: output::OutputWork::default(),
+            window: Window::new(perf),
             modifiers: ModifiersState::empty(),
             pointer: PointerState::default(),
             clipboard: Clipboard::default(),
@@ -227,17 +232,13 @@ impl ApplicationHandler<AppEvent> for App {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
-            AppEvent::PtyOutput(id) => self.on_pty_output(id),
+            AppEvent::PtyOutput(id) => self.output.schedule.queue(id),
             AppEvent::Terminal(id, event) => self.on_terminal_event(id, event),
-            // The shell of a pane exited (`exit`, crash, or closed by the OS): close that pane,
-            // and the window once nothing is left.
-            AppEvent::PtyExit(id, status) => {
-                if !self.on_ssh_exit(id, status) && self.close_pane(id) {
-                    event_loop.exit();
-                }
-            }
+            AppEvent::PtyExit(id, status) => self.on_pty_exit(event_loop, id, status),
             AppEvent::SshAttached(id) => self.on_ssh_attached(id),
             AppEvent::Control(request, reply, cancelled) => {
+                // A read can observe already-queued output, within the same work budget.
+                self.poll_pty_output(event_loop);
                 if self.on_control_request(request, reply, cancelled) {
                     event_loop.exit();
                 }
@@ -258,8 +259,12 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.poll_pty_output(event_loop);
         let now = Instant::now();
-        let (blinking, shown) = if self.composer_has_keys() {
+        let output_due = self.output.schedule.end_turn(now);
+        let (blinking, shown) = if self.window.is_occluded() {
+            (false, false)
+        } else if self.composer_has_keys() {
             (self.config.cursor_blink && !self.config.reduce_motion, true)
         } else {
             self.focused_id()
@@ -276,7 +281,7 @@ impl ApplicationHandler<AppEvent> for App {
         self.cursor_blink.set_enabled(now, blinking && shown);
         self.cursor_blink.tick(now);
 
-        if self.window.blink_differs(self.cursor_blink.visible()) {
+        if !self.window.is_occluded() && self.window.blink_differs(self.cursor_blink.visible()) {
             self.window.request_redraw();
         }
         let search_due = self.poll_search_all(now);
@@ -284,12 +289,14 @@ impl ApplicationHandler<AppEvent> for App {
         let ssh_due = self.poll_ssh_retries(now);
         let deadline = [
             self.cursor_blink.next_deadline(),
+            output_due,
             search_due,
             selection_due,
             ssh_due,
             self.poll_git_diff(now),
             self.poll_ai_animation(now),
             self.window.poll_motion(now),
+            self.window.poll_perf(now),
         ]
         .into_iter()
         .flatten()

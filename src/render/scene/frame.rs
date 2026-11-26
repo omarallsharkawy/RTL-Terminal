@@ -21,9 +21,10 @@ use crate::blocks::cards::BlockHover;
 use crate::layout::{PaneId, Rect};
 use crate::render::metrics::CellMetrics;
 use crate::render::row::cache::RowCache;
-use crate::render::row::{hash_row, CachedRow, RowCursor};
+use crate::render::row::{hash_row, RowCursor};
 use crate::render::shapes::ShapeLayers;
 use crate::render::style::Quad;
+use crate::render::text::labels::UiLabels;
 use crate::render::text::ui::{UiFont, UiLabel};
 use crate::render::ui_style::UiStyle;
 use crate::render::{PaneFrame, TabLabel};
@@ -249,11 +250,9 @@ pub(crate) fn build_frame_base(
                 });
 
             let hash = hash_row(line, row_cursor);
-            let row = previous.take(r, hash).unwrap_or_else(|| {
-                let segments = ctx.shaper().build_row(line, row_cursor);
-                let row_quads = ctx.row_quads(line, &segments);
-                CachedRow::new(hash, line, segments, row_quads, m.char_width)
-            });
+            let row = previous
+                .take(r, hash)
+                .unwrap_or_else(|| ctx.build_row(hash, line, row_cursor));
             rows.push(row);
 
             let cached = &rows[r];
@@ -402,21 +401,21 @@ impl Frame {
     }
 
     /// Draw the toolbar and pane headers. The `PaneFrame` rectangles already describe grids.
-    pub fn add_chrome(
+    pub fn add_chrome<'a>(
         &mut self,
         ctx: &mut DrawContext,
         style: UiStyle,
-        font: &UiFont,
+        font: impl Into<UiLabels<'a>>,
         view: &ChromeView,
     ) {
-        self.add_chrome_motion(ctx, style, font, view, None);
+        self.add_chrome_motion(ctx, style, font.into(), view, None);
     }
 
     pub(crate) fn add_chrome_motion(
         &mut self,
         ctx: &mut DrawContext,
         style: UiStyle,
-        font: &UiFont,
+        font: UiLabels<'_>,
         view: &ChromeView,
         motion: Option<&ChromeMotion<'_>>,
     ) {
@@ -544,11 +543,11 @@ impl Frame {
     }
 
     /// Draw at a sampled transition opacity, including the translated text clip.
-    pub fn add_palette_motion(
+    pub fn add_palette_motion<'a>(
         &mut self,
         ctx: &mut DrawContext,
         style: UiStyle,
-        font: &UiFont,
+        font: impl Into<UiLabels<'a>>,
         view: &PaletteView,
         icons: &PaletteIcons,
         opacity: f32,
@@ -560,7 +559,7 @@ impl Frame {
         let (outer, mut texts) = palette_overlay(
             ctx,
             style,
-            font,
+            font.into(),
             view,
             icons,
             self.surface,

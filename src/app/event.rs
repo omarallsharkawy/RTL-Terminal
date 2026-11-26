@@ -5,12 +5,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{mpsc, Arc};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use super::App;
 use crate::control::{Request, Response};
 use crate::layout::PaneId;
-use crate::pty::Pty;
 use crate::session::pane::Notification;
 use crate::shell_integration::{MarkKind, ShellEvent, Signal};
 
@@ -81,57 +80,9 @@ pub fn clean_title(title: &str) -> String {
     )
 }
 
-/// Longest stretch spent parsing output before the screen is redrawn.
-const OUTPUT_BUDGET: Duration = Duration::from_millis(12);
-
 impl App {
-    /// Output from the shell of pane `id`: everything queued since the last event, in one go.
-    pub(super) fn on_pty_output(&mut self, id: PaneId) {
-        let Some(pane) = self.ws.pane_mut(id) else {
-            return;
-        };
-        let term = &mut pane.terminal;
-        let before = term.cursor_position();
-        // Keep taking output that arrives meanwhile, but leave time for a frame: a flood never
-        // freezes the screen, and an idle shell is drawn as soon as its output is parsed.
-        let start = Instant::now();
-        let mut any = false;
-        loop {
-            let data = pane.pty.as_ref().map(Pty::take_output).unwrap_or_default();
-            if data.is_empty() {
-                break;
-            }
-            any = true;
-            term.process_bytes(&data);
-            if start.elapsed() >= OUTPUT_BUDGET {
-                break;
-            }
-        }
-        if !any {
-            return;
-        }
-        let events = term.take_shell_events();
-        pane.blocks.refresh(&pane.terminal);
-        let term = &pane.terminal;
-        let moved = term.cursor_position() != before;
-        // Output that moves the cursor keeps it solid while text is appearing.
-        if moved && self.focused_id() == Some(id) {
-            self.cursor_blink.reset(Instant::now());
-        }
-        if self.ws.is_visible(id) {
-            self.window.request_redraw();
-        }
-        // The output may have replaced the link under a Ctrl-hovering pointer.
-        if self.modifiers.control_key() && !self.palette_open() && !self.settings_open() {
-            self.update_link_hover(id);
-        }
-        for event in events {
-            self.on_shell_event(id, event);
-        }
-    }
-
     /// A shell signal from pane `id` (see `shell_integration`).
-    fn on_shell_event(&mut self, id: PaneId, event: ShellEvent) {
+    pub(super) fn on_shell_event(&mut self, id: PaneId, event: ShellEvent) {
         let Some(pane) = self.ws.pane_mut(id) else {
             return;
         };

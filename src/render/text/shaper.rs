@@ -9,7 +9,7 @@ use super::fonts::{arabic_family, grid_family, is_arabic_script};
 use super::segment::CachedSegment;
 use crate::color::Palette;
 use crate::render::row::RowCursor;
-use crate::render::scene::boxdraw::try_render_box_or_block;
+use crate::render::scene::boxdraw::is_box_or_block;
 use crate::render::style::cell_colors;
 use crate::terminal::{CellData, LineData};
 
@@ -27,12 +27,20 @@ pub struct RowShaper<'a> {
 }
 
 impl RowShaper<'_> {
-    fn shape_buffer(&mut self, spans: &[(String, Attrs<'static>)], shaping: Shaping) -> Buffer {
+    fn shape_buffer(
+        &mut self,
+        text: &str,
+        spans: &[(usize, Attrs<'static>)],
+        shaping: Shaping,
+    ) -> Buffer {
         let metrics = Metrics::new(self.font_px, self.line_height);
         let default_attrs = Attrs::new().family(grid_family(self.family));
         let mut buf = Buffer::new_empty(metrics);
         buf.set_rich_text(
-            spans.iter().map(|(s, a)| (s.as_str(), a.clone())),
+            spans.iter().enumerate().map(|(i, (start, attrs))| {
+                let end = spans.get(i + 1).map_or(text.len(), |(end, _)| *end);
+                (&text[*start..end], attrs.clone())
+            }),
             &default_attrs,
             shaping,
             None,
@@ -50,9 +58,9 @@ impl RowShaper<'_> {
         has_rtl: bool,
         cursor: Option<RowCursor>,
     ) -> (Buffer, Vec<usize>) {
-        let mut spans: Vec<(String, Attrs<'static>)> = Vec::new();
+        let mut text = String::with_capacity(end - start);
+        let mut spans: Vec<(usize, Attrs<'static>)> = Vec::new();
         let mut cell_bytes = Vec::with_capacity(end - start);
-        let mut byte = 0;
         let mut complex = has_rtl;
         let arabic = if has_rtl {
             arabic_family(self.font_system, self.family).map(Family::Name)
@@ -62,8 +70,9 @@ impl RowShaper<'_> {
         // Words (runs of non-blank cells) holding an Arabic letter are shaped in the Arabic font
         // as a whole: cosmic-text misorders the pieces of a right-to-left word whose attributes
         // change inside it, so "مرحبا!" must not switch fonts before the "!".
-        let mut arabic_word = vec![false; end - start];
+        let mut arabic_word = Vec::new();
         if arabic.is_some() {
+            arabic_word.resize(end - start, false);
             let mut c = start;
             while c < end {
                 let word_start = c;
@@ -85,19 +94,17 @@ impl RowShaper<'_> {
         let rtl_base = phrase == Some(start);
         if has_rtl {
             let mark = if rtl_base { RLM } else { LRM };
-            spans.push((
-                mark.to_string(),
-                Attrs::new().family(grid_family(self.family)),
-            ));
-            byte += mark.len();
+            spans.push((0, Attrs::new().family(grid_family(self.family))));
+            text.push_str(mark);
         }
         // A phrase after a left-to-right lead (a prompt, `echo `) is isolated right to left.
         let phrase_isolate = phrase.filter(|&p| p > start);
 
         // Words (runs of non-blank cells) with Latin letters or digits and no Arabic. Neighbouring
         // ones share one isolate so "world 123" keeps its order inside right-to-left text.
-        let mut isolate = vec![(false, false); end - start];
+        let mut isolate = Vec::new();
         if has_rtl {
+            isolate.resize(end - start, (false, false));
             let mut open: Option<usize> = None;
             let mut last_end = start;
             let mut c = start;
@@ -128,24 +135,20 @@ impl RowShaper<'_> {
         }
 
         for (col, cell) in cells.iter().enumerate().take(end).skip(start) {
-            let (opens, closes) = isolate[col - start];
-            let mut text = String::new();
+            let (opens, closes) = isolate.get(col - start).copied().unwrap_or_default();
+            let span_start = text.len();
             if phrase_isolate == Some(col) {
                 text.push_str(RLI);
-                byte += RLI.len();
             }
             if opens {
                 text.push_str(LRI);
-                byte += LRI.len();
             }
-            cell_bytes.push(byte);
-            byte += cell.text_len();
+            cell_bytes.push(text.len());
             cell.push_text(&mut text);
             if closes {
                 text.push_str(PDI);
-                byte += PDI.len();
             }
-            if text.is_empty() {
+            if text.len() == span_start {
                 continue;
             }
             complex |= !cell.c.is_ascii() || !cell.zerowidth.is_empty();
@@ -175,30 +178,23 @@ impl RowShaper<'_> {
                 attrs = attrs.style(cosmic_text::Style::Italic);
             }
 
-            match spans.last_mut() {
-                Some((existing, a))
-                    if a.color_opt == attrs.color_opt
-                        && a.family == attrs.family
-                        && a.weight == attrs.weight
-                        && a.style == attrs.style =>
-                {
-                    existing.push_str(&text)
-                }
-                _ => spans.push((text, attrs)),
+            if !spans.last().is_some_and(|(_, a)| {
+                a.color_opt == attrs.color_opt
+                    && a.family == attrs.family
+                    && a.weight == attrs.weight
+                    && a.style == attrs.style
+            }) {
+                spans.push((span_start, attrs));
             }
         }
 
         // Spaces and punctuation after the last Arabic letter belong to it: keep them on its left
-        // (typed spaces, "تم ✓", "مرحبا!"), not at the far right of the LTR paragraph.
+        // (typed spaces, "تم ✓", "مرحبا!"), with the preceding span's attributes.
         if has_rtl && trails_rtl_neutrals(&cells[start..end]) {
-            if let Some((text, _)) = spans.last_mut() {
-                text.push_str(RLM);
-            }
+            text.push_str(RLM);
         }
         if phrase_isolate.is_some() {
-            if let Some((text, _)) = spans.last_mut() {
-                text.push_str(PDI);
-            }
+            text.push_str(PDI);
         }
 
         let shaping = if complex {
@@ -206,7 +202,7 @@ impl RowShaper<'_> {
         } else {
             Shaping::Basic
         };
-        (self.shape_buffer(&spans, shaping), cell_bytes)
+        (self.shape_buffer(&text, &spans, shaping), cell_bytes)
     }
 
     /// True when every glyph of an LTR buffer starts exactly at its cell's grid column.
@@ -224,18 +220,10 @@ impl RowShaper<'_> {
     pub fn build_row(&mut self, line: &LineData, cursor: Option<RowCursor>) -> Vec<CachedSegment> {
         let cells = &line.cells;
         let cols = cells.len();
-        let geom: Vec<bool> = cells
-            .iter()
-            .map(|cell| {
-                let mut scratch = Vec::new();
-                try_render_box_or_block(cell.c, 0.0, 0.0, 1.0, 1.0, [0.0; 4], &mut scratch)
-            })
-            .collect();
-
         let mut segments = Vec::new();
         let mut col = 0;
         while col < cols {
-            while col < cols && (geom[col] || cells[col].is_blank()) {
+            while col < cols && (is_box_or_block(cells[col].c) || cells[col].is_blank()) {
                 col += 1;
             }
             if col >= cols {
@@ -245,7 +233,7 @@ impl RowShaper<'_> {
             // Grow the segment, keeping short space runs so bidi context spans whole phrases.
             let start = col;
             let mut end = col;
-            while end < cols && !geom[end] {
+            while end < cols && !is_box_or_block(cells[end].c) {
                 if end > start && is_region_boundary(cells, end) {
                     break;
                 }
@@ -254,7 +242,7 @@ impl RowShaper<'_> {
                     while peek < cols && cells[peek].is_blank() {
                         peek += 1;
                     }
-                    if peek - end >= 8 || peek == cols || geom[peek] {
+                    if peek - end >= 8 || peek == cols || is_box_or_block(cells[peek].c) {
                         break;
                     }
                 }

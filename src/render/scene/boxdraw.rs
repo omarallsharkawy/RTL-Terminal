@@ -399,6 +399,17 @@ impl Cell<'_> {
     }
 }
 
+/// Whether this character draws as quads, so the text shaper can leave its cell alone.
+pub(crate) fn is_box_or_block(c: char) -> bool {
+    match c {
+        '\u{2580}'..='\u{259F}' => true,
+        '\u{2500}'..='\u{257F}' => {
+            line_arms(c).is_some() || dash_spec(c).is_some() || double_line_rects(c).is_some()
+        }
+        _ => false,
+    }
+}
+
 /// Direct geometric rendering of box-drawing and block elements.
 /// Avoids font margin gaps and ensures seamless borders.
 ///

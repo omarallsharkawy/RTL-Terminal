@@ -18,6 +18,10 @@ pub fn text_color_mode(is_srgb: bool) -> ColorMode {
     }
 }
 
+// Glyphon's texture atlas evicts unused glyphs when it needs room. Swash also keeps its own
+// raster images in an unbounded CPU cache (including variants from past zoom levels).
+const RASTER_CACHE_ENTRIES: usize = 16_384;
+
 pub(crate) struct TextPipeline {
     swash_cache: SwashCache,
     atlas: TextAtlas,
@@ -66,6 +70,9 @@ impl TextPipeline {
         font_system: &mut FontSystem,
         runs: impl IntoIterator<Item = TextRun<'a>>,
     ) -> anyhow::Result<()> {
+        if self.swash_cache.image_cache.len() >= RASTER_CACHE_ENTRIES {
+            self.swash_cache.image_cache.clear();
+        }
         let areas = runs.into_iter().map(|run| TextArea {
             buffer: run.buffer,
             left: run.left,
@@ -94,7 +101,7 @@ impl TextPipeline {
             .map_err(|e| anyhow::anyhow!("Text render error: {:?}", e))
     }
 
-    /// Free atlas space taken by glyphs not used this frame.
+    /// Let the atlas evict old glyphs when the next frame needs space.
     pub(crate) fn trim(&mut self) {
         self.atlas.trim();
     }
