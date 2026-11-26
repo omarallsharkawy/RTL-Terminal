@@ -135,7 +135,7 @@ impl Offscreen {
         (self.width, self.height)
     }
 
-    /// Draw `quads` then `runs` over a target cleared to `background` at `opacity` (as the
+    /// Compose the background and quads at `opacity` before drawing text (as the
     /// window would be) and return its pixels: `width * height` RGBA8 values, row by row from
     /// the top, without padding.
     pub fn render<'a>(

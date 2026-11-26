@@ -628,6 +628,12 @@ fn headless_render_two_block_cards_ok_and_failed_dark_and_light() {
 
         // 2 cards + 2 status strips in underlay (drawn behind quads).
         assert_eq!(frame.shapes.underlay.len(), 4, "{theme_name}");
+        for index in [0, 2] {
+            let Shape::RoundedRect { fill, .. } = frame.shapes.underlay[index] else {
+                panic!("expected a block fill");
+            };
+            assert!(fill[3] > 0.0 && fill[3] < 0.1, "{theme_name}: {fill:?}");
+        }
         // Floating toolbar and icons in chrome (drawn above quads).
         assert!(!frame.shapes.chrome.is_empty(), "{theme_name}");
 
@@ -732,6 +738,29 @@ fn headless_render_two_block_cards_ok_and_failed_dark_and_light() {
             bg_sample, outside_sample,
             "{theme_name}: card must contrast with bg0"
         );
+
+        for opacity in [0.78, 0.5] {
+            let translucent = target
+                .render_layers(
+                    (&frame.quads, &frame.shapes),
+                    frame.text_runs(&panes, &cache, &ime),
+                    &mut font_system,
+                    frame.background,
+                    opacity,
+                )
+                .expect("offscreen render at configured opacity");
+            for (x, y) in [
+                (ok_card.card.x + 180.0, ok_card.card.y + 10.0),
+                (fail_card.card.x + 180.0, fail_card.card.bottom() - 4.0),
+                (pane_rect.right() - 1.0, pane_rect.bottom() - 2.0),
+            ] {
+                let solid = pixel(x, y);
+                let off = ((y.round() as usize) * w + x.round() as usize) * 4;
+                for (&actual, solid) in translucent[off..off + 4].iter().zip(solid) {
+                    assert!(actual.abs_diff((f32::from(solid) * opacity).round() as u8) <= 1);
+                }
+            }
+        }
 
         // Left status strips match ok (green) and danger (red).
         let ok_strip = pixel(

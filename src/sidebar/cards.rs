@@ -2,7 +2,6 @@
 
 use std::time::{Duration, Instant};
 
-use unicode_bidi::{bidi_class, BidiClass};
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::{AgentState, Entry};
@@ -130,27 +129,18 @@ impl CardLayout {
         } else {
             0.0
         };
-        let title = card.entry.title.trim();
-        let rtl = if title.is_empty() || matches!(title, "…" | "...") {
-            language == UiLanguage::Arabic
-        } else {
-            title
-                .chars()
-                .find_map(|ch| match bidi_class(ch) {
-                    BidiClass::R | BidiClass::AL => Some(true),
-                    BidiClass::L => Some(false),
-                    _ => None,
-                })
-                .unwrap_or(false)
-        };
-        let unread_x = if rtl {
+        let unread_x = if mirrored {
             body_x
         } else {
             body_x + body_w - badge_w
         };
         let unread = Rect::new(unread_x, inner.y, badge_w, inner.h);
         let title = Rect::new(
-            if rtl { body_x + badge_slot } else { body_x },
+            if mirrored {
+                body_x + badge_slot
+            } else {
+                body_x
+            },
             inner.y,
             body_w - badge_slot,
             inner.h,
@@ -443,7 +433,7 @@ impl ScrollState {
         View {
             area,
             scale,
-            mirrored: position == SidebarPosition::Right || language == UiLanguage::Arabic,
+            mirrored: language == UiLanguage::Arabic,
             position,
             items,
             new_tab: Rect::new(x, y, w, NEW_TAB_HEIGHT * scale),

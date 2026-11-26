@@ -403,11 +403,12 @@ fn workspace_cards_draw_in_dark_and_light_themes() {
     use twitty::color::Rgba;
     use twitty::layout::SidebarPosition;
     use twitty::render::scene::sidebar::LabelCache;
+    use twitty::render::scene::window_chrome::{ChromeView, PaneHeaderView};
     use twitty::render::text::ui::UiFont;
     use twitty::render::ui_style::UiStyle;
     use twitty::sidebar::cards::ScrollState;
     use twitty::sidebar::{AgentState, AgentStatus, Entry, Notice};
-    use twitty::ui::chrome::UiLanguage;
+    use twitty::ui::chrome::{PaneHeaderLayout, TopBarLayout, UiLanguage, WindowLayout};
 
     let _gpu = GPU.lock().unwrap_or_else(|e| e.into_inner());
     let (width, height) = (360, 280);
@@ -440,7 +441,33 @@ fn workspace_cards_draw_in_dark_and_light_themes() {
         None,
         [Notice::new(None, "هل أتابع النشر؟")],
     );
-    let area = Rect::new(110.0, 0.0, 250.0, height as f32);
+    let surface = (width as f32, height as f32);
+    let window = WindowLayout::new(metrics, surface, 3, (SidebarPosition::Right, 250.0), true);
+    let top = window.top_bar.bottom();
+    let area = Rect::new(110.0, top, 250.0, height as f32 - top);
+    let header = PaneHeaderLayout::new(Rect::new(0.0, top, area.x, area.h), 1.0, true);
+    let pane_headers = [PaneHeaderView {
+        id: PaneId(1),
+        layout: header,
+        title: "Terminal".into(),
+        agent: false,
+        focused: false,
+        attention: false,
+        zoomed: false,
+        flash: 0.0,
+    }];
+    let chrome = ChromeView {
+        layout: &window,
+        top: TopBarLayout::new(window.top_bar, 1.0, None),
+        diff: None,
+        unread: 0,
+        sidebar_visible: true,
+        hover: None,
+        hover_tab: None,
+        language: UiLanguage::English,
+        panes: &pane_headers,
+        tabs: &[],
+    };
     let entries = [selected, waiting, arabic];
     for palette in [Palette::default(), Palette::named("github-light").unwrap()] {
         let style = UiStyle::new(&palette, Some(Rgba::from_rgb8(54, 86, 170)), 1.0);
@@ -477,6 +504,7 @@ fn workspace_cards_draw_in_dark_and_light_themes() {
         let mut ime = PreeditState::default();
         let mut frame = build_frame(&mut ctx, &opts, &mut rows, &mut ime, &[], &[], &[]);
         frame.add_sidebar(&mut ctx, &view, &mut labels, style, &font);
+        frame.add_chrome(&mut ctx, style, &font, &chrome);
         let runs = frame.text_runs(&[], &rows, &ime);
         let ar = runs
             .iter()
@@ -504,19 +532,47 @@ fn workspace_cards_draw_in_dark_and_light_themes() {
         assert!(near(sample(view.items[0].rect), style.bg3));
         assert!(near(sample(waiting), style.bg2));
         assert!(near(sample(view.items[2].rect), style.bg1));
-        assert!(near(pixel(area.x as usize + 1, 1), style.bg1));
+        let terminal_sample = (1, header.grid.y as usize + 1);
+        let top_sample = (1, 1);
+        let header_sample = (1, top as usize + 1);
+        let sidebar_sample = (area.x as usize + 1, top as usize + 1);
+        assert!(near(pixel(terminal_sample.0, terminal_sample.1), style.bg0));
+        for (x, y) in [top_sample, header_sample, sidebar_sample] {
+            assert!(near(pixel(x, y), style.bg1));
+        }
         let first = view.items[0].rect;
         assert!(
             near(pixel(first.x as usize, first.y as usize), style.bg1),
             "rounded corner"
         );
+        // Accumulated card fills and the sidebar base share terminal opacity.
+        for opacity in [0.78, 0.5] {
+            let translucent = target
+                .render_layers(
+                    (&frame.quads, &frame.shapes),
+                    frame.text_runs(&[], &rows, &ime),
+                    ctx.font_system,
+                    frame.background,
+                    opacity,
+                )
+                .unwrap();
+            for (x, y) in [
+                terminal_sample,
+                top_sample,
+                header_sample,
+                sidebar_sample,
+                ((first.x + 10.0) as usize, (first.bottom() - 5.0) as usize),
+            ] {
+                let off = (y * width as usize + x) * 4;
+                for (&actual, &solid) in translucent[off..off + 4].iter().zip(pixel(x, y)) {
+                    assert!(actual.abs_diff((f32::from(solid) * opacity).round() as u8) <= 1);
+                }
+            }
+        }
         let title = view.items[0].layout(&view).title;
         assert!(
             near(
-                pixel(
-                    (first.right() - 5.0) as usize,
-                    (title.y + title.h / 2.0) as usize
-                ),
+                pixel((first.x + 5.0) as usize, (title.y + title.h / 2.0) as usize),
                 style.accent,
             ),
             "active card accent strip"
@@ -528,7 +584,7 @@ fn workspace_cards_draw_in_dark_and_light_themes() {
             .map(|value| (value * 255.0).round() as u8);
         assert!(
             (state.y as usize..state.bottom() as usize).any(|y| {
-                ((state.right() - 12.0) as usize..state.right() as usize).any(|x| {
+                (state.x as usize..(state.x + 12.0) as usize).any(|x| {
                     // The 12 px icon's thin SDF strokes are antialiased even in the center.
                     pixel(x, y)
                         .iter()

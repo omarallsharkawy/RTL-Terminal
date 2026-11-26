@@ -1008,3 +1008,62 @@ fn composer_scene_clips_underlying_terminal_text_and_scales_light_dark() {
         }
     }
 }
+
+#[test]
+fn empty_composer_hint_starts_after_the_beam_at_each_scale() {
+    let mut fonts = test_font_system();
+    let font = UiFont::default();
+    let palette = Palette::default();
+    for scale in [1.0, 1.5, 2.0] {
+        let metrics = CellMetrics::measure(&mut fonts, None, 15.0, scale);
+        let mut ctx = DrawContext {
+            font_system: &mut fonts,
+            family: None,
+            palette: &palette,
+            metrics,
+            is_srgb: false,
+        };
+        let style = UiStyle::new(&palette, None, scale);
+        for (language, prefix) in [
+            (UiLanguage::English, "Type a command"),
+            (UiLanguage::Arabic, "اكتب أمرك هنا"),
+        ] {
+            let mut view = ComposerView {
+                pane_rect: Rect::new(120.0, 40.0, 550.0, 280.0),
+                lines: vec![String::new()],
+                caret: (0, 0),
+                selection: None,
+                preedit: None,
+                ghost: None,
+                highlights: Vec::new(),
+                lints: Vec::new(),
+                focused: true,
+                cursor_blink_on: true,
+                popup: None,
+                language,
+            };
+            let hint_left = |scene: &twitty::render::scene::composer::ComposerScene| {
+                scene
+                    .labels
+                    .iter()
+                    .find(|label| label.buffer.lines[0].text().starts_with(prefix))
+                    .unwrap()
+                    .left
+            };
+            let empty = build_composer_scene(&mut ctx, style, &font, &view);
+            let beam_x = empty.ime_area.unwrap().0 as f32;
+            assert!(
+                (hint_left(&empty) - beam_x - (2.0 * scale).round() - 2.0 * scale).abs() <= 1.0
+            );
+            view.cursor_blink_on = false;
+            assert_eq!(
+                hint_left(&empty),
+                hint_left(&build_composer_scene(&mut ctx, style, &font, &view))
+            );
+            view.lines[0] = "echo text".into();
+            let typed = build_composer_scene(&mut ctx, style, &font, &view);
+            assert_eq!(typed.ime_area, empty.ime_area);
+            assert!((typed.texts[0].left - beam_x).abs() <= 1.0);
+        }
+    }
+}

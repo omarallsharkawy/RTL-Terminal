@@ -158,12 +158,8 @@ pub(crate) fn draw_cards(
     let pad = style.px(SPACE_4).round();
     for card in cards {
         let decor = pane.blocks.iter().find(|d| d.id == card.id);
-        let fill = if card.selected {
-            style.bg2.mix(style.accent, 0.08)
-        } else {
-            let hover = paint.emphasis(pane.id, card.id, None, card.hovered);
-            style.bg1.mix(style.bg2, hover)
-        };
+        let hover = paint.emphasis(pane.id, card.id, None, card.hovered);
+        let fill = style.block_tint(card.selected, hover);
         shapes.underlay.push(Shape::RoundedRect {
             rect: card.card,
             radii: card.radii,
