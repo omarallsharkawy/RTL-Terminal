@@ -1,3 +1,6 @@
+// Several tests below run fake agent scripts and are Unix-only; their imports go unused elsewhere.
+#![cfg_attr(not(unix), allow(unused_imports))]
+
 //! Window-free and fake-agent tests for built-in AI (lane N13):
 //! - Per-agent non-interactive argv table & agent resolution
 //! - Reply parsing (fenced, unfenced, multiple blocks, Arabic prose around it, empty, explain/fix)

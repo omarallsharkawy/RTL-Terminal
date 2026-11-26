@@ -166,6 +166,7 @@ impl SandboxTempDir {
         for attempt in 0..64u32 {
             let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
             let path = base.join(format!("twitty-ai-sandbox-{pid}-{nanos}-{seq}-{attempt}"));
+            #[cfg_attr(not(unix), allow(unused_mut))]
             let mut builder = std::fs::DirBuilder::new();
             #[cfg(unix)]
             {
