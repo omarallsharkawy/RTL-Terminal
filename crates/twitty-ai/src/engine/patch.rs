@@ -205,6 +205,9 @@ fn new_permissions(_: &Path) -> io::Result<fs::Permissions> {
 }
 
 #[cfg(not(unix))]
+// Only compiled off Unix, where the lint's concern (a world-writable file) does not apply:
+// Windows has no mode bits and access comes from the folder's ACL.
+#[allow(clippy::permissions_set_readonly_false)]
 fn new_permissions(root: &Path) -> io::Result<fs::Permissions> {
     let mut permissions = fs::metadata(root)?.permissions();
     permissions.set_readonly(false);
