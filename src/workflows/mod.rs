@@ -22,7 +22,9 @@ use crate::shell_integration::clean_text;
 use crate::ui::palette::{PaletteEntry, PaletteId};
 
 pub use discover::{discover_project_file, discover_project_file_default};
-pub use parse::{deserialize_config_commands, parse_entries_slice, parse_project_bytes};
+pub use parse::{
+    deserialize_config_commands, parse_entries_slice, parse_entry, parse_project_bytes,
+};
 pub use sha256::{sha256, sha256_hex};
 pub use trust::{TrustEntry, TrustStore, MAX_TRUST_FILE_BYTES, TRUST_STORE_VERSION};
 

@@ -32,15 +32,17 @@ pub enum SettingsSection {
     Appearance,
     Behaviour,
     Ai,
+    Commands,
     Keys,
     About,
 }
 
 impl SettingsSection {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Appearance,
         Self::Behaviour,
         Self::Ai,
+        Self::Commands,
         Self::Keys,
         Self::About,
     ];
@@ -50,8 +52,9 @@ impl SettingsSection {
             Self::Appearance => 0,
             Self::Behaviour => 1,
             Self::Ai => 2,
-            Self::Keys => 3,
-            Self::About => 4,
+            Self::Commands => 3,
+            Self::Keys => 4,
+            Self::About => 5,
         }
     }
 
@@ -64,6 +67,7 @@ impl SettingsSection {
             Self::Appearance => "Appearance",
             Self::Behaviour => "Behaviour",
             Self::Ai => "AI",
+            Self::Commands => "Commands",
             Self::Keys => "Keys",
             Self::About => "About",
         }
@@ -74,6 +78,7 @@ impl SettingsSection {
             Self::Appearance => "المظهر",
             Self::Behaviour => "السلوك",
             Self::Ai => "الذكاء الاصطناعي",
+            Self::Commands => "الأوامر",
             Self::Keys => "الاختصارات",
             Self::About => "حول",
         }
@@ -805,6 +810,8 @@ pub struct SettingsOutcome {
     pub clear_agent_history: bool,
     /// Open the Project Memory overlay (Settings -> AI -> Project memory).
     pub open_memory: bool,
+    /// `config.commands` changed (Settings -> Commands): save and reload commands.
+    pub commands_changed: bool,
 }
 
 /// One option inside a picker list (Theme / Font family).
@@ -870,6 +877,8 @@ pub struct SettingsPanelState {
     pub ai: crate::ui::settings_ai::AiSettingsState,
     /// Raw text of the text field being edited, e.g. `~/a, ` before the next folder is typed.
     text_draft: Option<(SettingId, String)>,
+    /// State for the Settings → Commands section.
+    pub commands_editor: crate::ui::settings_commands::CommandsEditorState,
 }
 
 impl Default for SettingsPanelState {
@@ -908,6 +917,7 @@ impl SettingsPanelState {
             hover: None,
             commands: commands::all(),
             ai: crate::ui::settings_ai::AiSettingsState::default(),
+            commands_editor: Default::default(),
         }
     }
 
@@ -954,7 +964,7 @@ impl SettingsPanelState {
             SettingsSection::Appearance => &SettingId::APPEARANCE,
             SettingsSection::Behaviour => &SettingId::BEHAVIOUR,
             SettingsSection::Ai => &SettingId::AI,
-            SettingsSection::Keys => &[],
+            SettingsSection::Commands | SettingsSection::Keys => &[],
             SettingsSection::About => &SettingId::ABOUT,
         }
     }
@@ -1062,6 +1072,9 @@ impl SettingsPanelState {
         if self.section == SettingsSection::Keys {
             return true;
         }
+        if self.section == SettingsSection::Commands {
+            return self.commands_editor.form.is_some();
+        }
         if self.section == SettingsSection::Ai {
             return self.ai.active_field.is_some();
         }
@@ -1112,6 +1125,7 @@ impl SettingsPanelState {
         if self.section != section {
             self.ai.clear_key_draft();
             self.ai.active_field = None;
+            self.commands_editor.form = None;
             self.section = section;
             self.selected = 0;
             self.scroll_y = 0.0;
@@ -1262,6 +1276,9 @@ impl SettingsPanelState {
             }
             return outcome;
         }
+        if self.section == SettingsSection::Commands {
+            return Self::commands_outcome(self.commands_editor.on_text(text));
+        }
         if self.section == SettingsSection::Ai {
             use crate::ui::settings_ai::AiTextField;
             match self.ai.active_field {
@@ -1405,6 +1422,18 @@ impl SettingsPanelState {
             }
         }
 
+        // 1b. The Commands add/edit form owns every key while open (Esc cancels it, Tab moves
+        // between its fields).
+        if self.section == SettingsSection::Commands
+            && self.focus == FocusZone::Content
+            && self.commands_editor.form.is_some()
+        {
+            let result = self
+                .commands_editor
+                .on_form_key(key, text, modifiers, config);
+            return Self::commands_outcome(result);
+        }
+
         // 2. Escape closes settings and reverts any uncommitted preview.
         if matches!(key, Key::Named(NamedKey::Escape)) {
             let mut revert = self.revert_preview(config);
@@ -1541,6 +1570,18 @@ impl SettingsPanelState {
                     }
                 }
             }
+        }
+
+        // 5a. Commands list: arrows, Enter edits, Delete removes, Ctrl+N / Insert adds.
+        if self.section == SettingsSection::Commands {
+            let visible = SettingsLayout::build(surface, scale, self, config)
+                .commands
+                .as_ref()
+                .map_or(1, |c| c.visible_rows);
+            let result = self
+                .commands_editor
+                .on_list_key(key, modifiers, config, visible);
+            return Self::commands_outcome(result);
         }
 
         // 5b. Keys section content: searchable, editable shortcut list.
@@ -1790,6 +1831,14 @@ impl SettingsPanelState {
         }
     }
 
+    fn commands_outcome(result: crate::ui::settings_commands::CommandsOutcome) -> SettingsOutcome {
+        SettingsOutcome {
+            redraw: result.redraw,
+            commands_changed: result.changed,
+            ..Default::default()
+        }
+    }
+
     fn keep_keys_row_visible(&mut self, visible: usize) {
         if self.selected < self.keys_scroll {
             self.keys_scroll = self.selected;
@@ -1802,7 +1851,10 @@ impl SettingsPanelState {
         if self.focus != FocusZone::Content
             || matches!(
                 self.section,
-                SettingsSection::Ai | SettingsSection::Keys | SettingsSection::About
+                SettingsSection::Ai
+                    | SettingsSection::Commands
+                    | SettingsSection::Keys
+                    | SettingsSection::About
             )
         {
             return;
@@ -2258,6 +2310,50 @@ impl SettingsPanelState {
                 self.focus_setting(SettingId::ProjectMemory);
                 outcome.open_memory = true;
             }
+            SettingsHit::CommandsAdd => {
+                self.focus = FocusZone::Content;
+                self.commands_editor.start_add();
+                outcome.redraw = true;
+            }
+            SettingsHit::CommandRow(index) => {
+                self.focus = FocusZone::Content;
+                self.commands_editor.selected = index;
+                outcome.redraw = true;
+            }
+            SettingsHit::CommandEdit(index) => {
+                self.focus = FocusZone::Content;
+                self.commands_editor.start_edit(index, config);
+                outcome.redraw = true;
+            }
+            SettingsHit::CommandDelete(index) => {
+                self.focus = FocusZone::Content;
+                outcome.commands_changed = self.commands_editor.delete(index, config);
+                outcome.redraw = true;
+            }
+            SettingsHit::CommandField(field) => {
+                self.focus = FocusZone::Content;
+                if let Some(form) = &mut self.commands_editor.form {
+                    form.field = field;
+                }
+                outcome.redraw = true;
+            }
+            SettingsHit::CommandModeButton(mode) => {
+                self.focus = FocusZone::Content;
+                if let Some(form) = &mut self.commands_editor.form {
+                    form.mode = mode;
+                    form.field = crate::ui::settings_commands::FormField::Mode;
+                }
+                outcome.redraw = true;
+            }
+            SettingsHit::CommandSave => {
+                self.focus = FocusZone::Content;
+                outcome.commands_changed = self.commands_editor.save(config);
+                outcome.redraw = true;
+            }
+            SettingsHit::CommandCancel => {
+                self.commands_editor.form = None;
+                outcome.redraw = true;
+            }
             SettingsHit::Inside => {
                 // Clicking empty space inside the panel collapses an open picker (reverting preview)
                 // or cancels an active key capture.
@@ -2316,6 +2412,25 @@ impl SettingsPanelState {
                     }
                 }
             }
+        }
+        if self.section == SettingsSection::Commands {
+            if let Some(list) = &layout.commands {
+                let max = config
+                    .commands
+                    .len()
+                    .saturating_sub(list.visible_rows.max(1));
+                let scroll = self.commands_editor.scroll.min(max);
+                let next = if lines < 0.0 {
+                    (scroll + 1).min(max)
+                } else {
+                    scroll.saturating_sub(1)
+                };
+                if next != self.commands_editor.scroll {
+                    self.commands_editor.scroll = next;
+                    outcome.redraw = true;
+                }
+            }
+            return outcome;
         }
         if self.section == SettingsSection::Keys {
             let total = self.filtered_commands().len();
@@ -2673,6 +2788,14 @@ pub enum SettingsHit {
     AiAllowRemove(usize),
     AiClearHistory,
     OpenMemory,
+    CommandsAdd,
+    CommandRow(usize),
+    CommandEdit(usize),
+    CommandDelete(usize),
+    CommandField(crate::ui::settings_commands::FormField),
+    CommandModeButton(crate::workflows::CommandMode),
+    CommandSave,
+    CommandCancel,
 }
 
 impl SettingsHit {
@@ -2692,6 +2815,11 @@ impl SettingsHit {
                 | Self::AiOllamaInput
                 | Self::AiCostCapInput
                 | Self::AiAllowInput
+                | Self::CommandField(
+                    crate::ui::settings_commands::FormField::Name
+                        | crate::ui::settings_commands::FormField::NameAr
+                        | crate::ui::settings_commands::FormField::Command
+                )
         )
     }
 }
@@ -2765,9 +2893,10 @@ pub struct SettingsLayout {
     pub divider: Rect,
     pub content: Rect,
     pub viewport: Rect,
-    pub sections: [(SettingsSection, Rect); 5],
+    pub sections: [(SettingsSection, Rect); 6],
     pub rows: Vec<ControlRowLayout>,
     pub ai: Option<crate::ui::settings_ai::AiSectionLayout>,
+    pub commands: Option<crate::ui::settings_commands::CommandsLayout>,
     pub keys_search: Option<Rect>,
     pub keys_reset_all: Option<Rect>,
     pub keys_banner: Option<Rect>,
@@ -2900,6 +3029,7 @@ impl SettingsLayout {
             sections,
             rows: Vec::new(),
             ai: None,
+            commands: None,
             keys_search: None,
             keys_reset_all: None,
             keys_banner: None,
@@ -2920,6 +3050,15 @@ impl SettingsLayout {
             }
             SettingsSection::Ai => {
                 layout.build_ai_layout(scale, state, config);
+            }
+            SettingsSection::Commands => {
+                layout.commands = Some(crate::ui::settings_commands::CommandsLayout::build(
+                    layout.viewport,
+                    scale,
+                    mirrored,
+                    &state.commands_editor,
+                    config,
+                ));
             }
             SettingsSection::Keys => {
                 layout.build_keys_layout(scale, state, config);
@@ -3493,6 +3632,42 @@ impl SettingsLayout {
         if let Some(copy_btn) = self.copy_button {
             if copy_btn.contains(x, y) {
                 return SettingsHit::CopyConfigPath;
+            }
+        }
+        if let Some(list) = self
+            .commands
+            .as_ref()
+            .filter(|_| self.viewport.contains(x, y))
+        {
+            if list.add_button.is_some_and(|r| r.contains(x, y)) {
+                return SettingsHit::CommandsAdd;
+            }
+            for row in &list.rows {
+                if row.edit.contains(x, y) {
+                    return SettingsHit::CommandEdit(row.index);
+                }
+                if row.delete.contains(x, y) {
+                    return SettingsHit::CommandDelete(row.index);
+                }
+                if row.rect.contains(x, y) {
+                    return SettingsHit::CommandRow(row.index);
+                }
+            }
+            for &(mode, rect) in &list.mode_buttons {
+                if rect.contains(x, y) {
+                    return SettingsHit::CommandModeButton(mode);
+                }
+            }
+            for &(field, _, input) in &list.fields {
+                if field != crate::ui::settings_commands::FormField::Mode && input.contains(x, y) {
+                    return SettingsHit::CommandField(field);
+                }
+            }
+            if list.save.is_some_and(|r| r.contains(x, y)) {
+                return SettingsHit::CommandSave;
+            }
+            if list.cancel.is_some_and(|r| r.contains(x, y)) {
+                return SettingsHit::CommandCancel;
             }
         }
         if let Some(ai) = &self.ai {

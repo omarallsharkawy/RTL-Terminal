@@ -262,7 +262,14 @@ impl App {
         if outcome.keybindings_changed {
             self.keybindings = KeyBindings::from_config(&self.config.keybindings);
         }
-        if !outcome.changed.is_empty() || outcome.keybindings_changed || outcome.ai_config_changed {
+        if outcome.commands_changed {
+            self.invalidate_composer_workflows();
+        }
+        if !outcome.changed.is_empty()
+            || outcome.keybindings_changed
+            || outcome.ai_config_changed
+            || outcome.commands_changed
+        {
             let mut needs_layout = false;
             for setting in &outcome.changed {
                 match setting {
@@ -375,6 +382,7 @@ impl App {
             || !outcome.changed.is_empty()
             || outcome.keybindings_changed
             || outcome.ai_config_changed
+            || outcome.commands_changed
             || outcome.clear_agent_history
             || outcome.preview_theme.is_some()
         {

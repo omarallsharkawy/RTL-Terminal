@@ -118,8 +118,8 @@ fn ctrl_comma_and_command_palette_open_settings() {
 
 #[test]
 fn model_sections_labels_and_every_control_round_trips_through_save_and_load() {
-    // All 5 sections have English and Arabic labels.
-    assert_eq!(SettingsSection::ALL.len(), 5);
+    // All 6 sections have English and Arabic labels.
+    assert_eq!(SettingsSection::ALL.len(), 6);
     for section in SettingsSection::ALL {
         assert!(!section.label_en().is_empty());
         assert!(!section.label_ar().is_empty());
@@ -672,6 +672,15 @@ fn keyboard_navigation_tab_shift_tab_sidebar_and_about_copy() {
         1.0,
     );
     assert_eq!(state.section, SettingsSection::Ai);
+    state.on_key(
+        &Key::Named(NamedKey::ArrowDown),
+        None,
+        none,
+        &mut cfg,
+        SURFACE,
+        1.0,
+    );
+    assert_eq!(state.section, SettingsSection::Commands);
     state.on_key(
         &Key::Named(NamedKey::ArrowDown),
         None,
@@ -1463,8 +1472,8 @@ fn focus_setting(state: &mut SettingsPanelState, cfg: &TwittyConfig, id: Setting
 
 #[test]
 fn every_config_key_except_structured_lists_has_a_settings_control() {
-    // Keys with their own screens: keybindings (Keys), memory_exclude (Memory), commands and
-    // colors (structured lists), AI provider keys (Settings -> AI custom rows).
+    // Keys with their own screens: keybindings (Keys), memory_exclude (Memory), commands
+    // (Commands), colors (structured list), AI provider keys (Settings -> AI custom rows).
     let elsewhere = [
         "keybindings",
         "memory_exclude",

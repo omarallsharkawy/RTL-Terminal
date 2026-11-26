@@ -75,7 +75,7 @@ pub fn parse_entries_slice(values: &[Value], source_label: &str) -> Vec<Workflow
     out
 }
 
-fn parse_entry(value: &Value) -> Result<WorkflowSpec, String> {
+pub fn parse_entry(value: &Value) -> Result<WorkflowSpec, String> {
     let Some(obj) = value.as_object() else {
         return Err("entry must be a JSON object".into());
     };

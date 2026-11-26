@@ -1361,6 +1361,10 @@ fn check_settings_golden(
     palette_name: &str,
     lang: twitty::ui::chrome::UiLanguage,
     section: twitty::ui::settings_panel::SettingsSection,
+    prepare: impl FnOnce(
+        &mut twitty::ui::settings_panel::SettingsPanelState,
+        &twitty::config::TwittyConfig,
+    ),
 ) {
     use twitty::config::TwittyConfig;
     use twitty::render::scene::settings::SettingsView;
@@ -1393,8 +1397,16 @@ fn check_settings_golden(
     let mut cfg = TwittyConfig::default();
     cfg.theme = Some(palette_name.into());
     cfg.project_roots = vec!["~/Projects".into(), "~/src".into()];
+    cfg.commands = [
+        serde_json::json!({"name": "Run tests", "name_ar": "شغّل الاختبارات", "command": "cargo test --workspace"}),
+        serde_json::json!({"name": "Deploy staging", "name_ar": "انشر على التجربة", "command": "./scripts/deploy.sh staging", "mode": "run"}),
+    ]
+    .iter()
+    .map(|v| twitty::workflows::parse_entry(v).unwrap())
+    .collect();
     let mut state = SettingsPanelState::new(Vec::new(), Vec::new(), None, lang);
     state.select_section(section, &cfg);
+    prepare(&mut state, &cfg);
 
     let mut cache = RowCache::default();
     let mut ime = PreeditState::default();
@@ -1453,11 +1465,36 @@ fn golden_settings_behaviour_ar_light_and_ai_en_dark() {
         "twitty-light",
         UiLanguage::Arabic,
         SettingsSection::Behaviour,
+        |_, _| {},
     );
     check_settings_golden(
         "settings_ai_en_dark",
         "twitty-dark",
         UiLanguage::English,
         SettingsSection::Ai,
+        |_, _| {},
+    );
+}
+
+#[test]
+fn golden_settings_commands_en_dark_and_edit_form_ar_light() {
+    use twitty::ui::chrome::UiLanguage;
+    use twitty::ui::settings_panel::{FocusZone, SettingsSection};
+    check_settings_golden(
+        "settings_commands_en_dark",
+        "twitty-dark",
+        UiLanguage::English,
+        SettingsSection::Commands,
+        |state, _| state.focus = FocusZone::Content,
+    );
+    check_settings_golden(
+        "settings_commands_form_ar_light",
+        "twitty-light",
+        UiLanguage::Arabic,
+        SettingsSection::Commands,
+        |state, cfg| {
+            state.focus = FocusZone::Content;
+            state.commands_editor.start_edit(1, cfg);
+        },
     );
 }

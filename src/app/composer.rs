@@ -160,6 +160,12 @@ impl App {
         self.window.request_redraw();
     }
 
+    /// Reload saved commands on the next composer refresh (after Settings → Commands edits).
+    pub(super) fn invalidate_composer_workflows(&mut self) {
+        self.composer.workflows_cwd = None;
+        self.composer.workflows = WorkflowSet::default();
+    }
+
     /// Called when focus moves to another pane or tab.
     pub(super) fn on_composer_focus_changed(&mut self) {
         self.composer.manual_open = false;

@@ -14,5 +14,6 @@ pub mod search_all;
 pub mod selection;
 pub mod settings;
 pub mod settings_ai;
+pub mod settings_commands;
 pub mod settings_panel;
 pub mod welcome;
