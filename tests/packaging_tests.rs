@@ -562,6 +562,69 @@ mod script_tests {
         }
         fs::copy(repo_root().join(src_rel), &dst)
             .unwrap_or_else(|e| panic!("failed to copy {src_rel} to {}: {e}", dst.display()));
+        pin_fixture_version(src_rel, &dst);
+    }
+
+    /// The script tests release `FIXTURE_NEXT` from a copy of the repository pinned at
+    /// `FIXTURE_VERSION` with a non-empty Unreleased section, so they keep passing after
+    /// every real release bumps the live version and empties Unreleased.
+    const FIXTURE_VERSION: &str = "3.0.0";
+
+    fn current_version() -> String {
+        let cargo = fs::read_to_string(repo_root().join("Cargo.toml")).expect("read Cargo.toml");
+        cargo
+            .lines()
+            .find_map(|l| l.strip_prefix("version = \""))
+            .and_then(|rest| rest.strip_suffix('"'))
+            .expect("Cargo.toml package version")
+            .to_string()
+    }
+
+    fn pin_fixture_version(src_rel: &str, dst: &Path) {
+        let current = current_version();
+        let text = fs::read_to_string(dst).expect("read copied fixture");
+        let pinned = match src_rel {
+            "Cargo.toml" => text.replacen(
+                &format!("version = \"{current}\""),
+                &format!("version = \"{FIXTURE_VERSION}\""),
+                1,
+            ),
+            "Cargo.lock" => text.replacen(
+                &format!("name = \"twitty\"\nversion = \"{current}\""),
+                &format!("name = \"twitty\"\nversion = \"{FIXTURE_VERSION}\""),
+                1,
+            ),
+            p if p.starts_with("packaging/aur/") => text.replace(&current, FIXTURE_VERSION),
+            p if p.ends_with(".metainfo.xml") && current != FIXTURE_VERSION => {
+                // Drop the live release entry newer than the fixture version.
+                let open = format!("<release version=\"{current}\"");
+                match text.find(&open) {
+                    Some(start) => {
+                        let line_start = text[..start].rfind('\n').map_or(0, |i| i + 1);
+                        let end = text[start..]
+                            .find("</release>\n")
+                            .map(|i| start + i + "</release>\n".len())
+                            .expect("closing </release>");
+                        format!("{}{}", &text[..line_start], &text[end..])
+                    }
+                    None => text,
+                }
+            }
+            "CHANGELOG.md" => {
+                let empty = text.contains("## Unreleased\n\n## ");
+                if empty {
+                    text.replacen(
+                        "## Unreleased\n\n",
+                        "## Unreleased\n\n### Fixture\n\n- Test entry.\n\n",
+                        1,
+                    )
+                } else {
+                    text
+                }
+            }
+            _ => return,
+        };
+        fs::write(dst, pinned).expect("write pinned fixture");
     }
 
     fn run_git(dir: &Path, args: &[&str]) {
