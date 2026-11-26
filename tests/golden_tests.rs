@@ -1354,3 +1354,110 @@ fn golden_slash_menu_en_dark_and_ar_light() {
     check_slash_menu_golden("slash_menu_en_dark", "twitty-dark", UiLanguage::English);
     check_slash_menu_golden("slash_menu_ar_light", "twitty-light", UiLanguage::Arabic);
 }
+
+/// One Settings section over an empty terminal.
+fn check_settings_golden(
+    name: &str,
+    palette_name: &str,
+    lang: twitty::ui::chrome::UiLanguage,
+    section: twitty::ui::settings_panel::SettingsSection,
+) {
+    use twitty::config::TwittyConfig;
+    use twitty::render::scene::settings::SettingsView;
+    use twitty::render::text::ui::UiFont;
+    use twitty::render::ui_style::UiStyle;
+    use twitty::ui::settings_panel::SettingsPanelState;
+
+    let (width, height) = (900u32, 640u32);
+    let surface = (width as f32, height as f32);
+    let mut fonts = font_system();
+    let ui_font = UiFont::default();
+    let palette = Palette::named(palette_name).unwrap();
+    let metrics = CellMetrics::measure(&mut fonts, None, 14.5, 1.0);
+    let style = UiStyle::new(&palette, None, 1.0);
+    let rect = Rect::new(0.0, 0.0, surface.0, surface.1);
+    let (cols, rows) = metrics.grid_size(rect);
+    let mut term = Terminal::new(cols.max(20), rows.max(10), |_| {});
+    term.process_bytes(b"\x1b[?25l");
+    let (lines, cursor) = term.snapshot();
+    let panes = [PaneFrame {
+        id: PaneId(1),
+        rect,
+        lines,
+        cursor,
+        focused: true,
+        status: None,
+        blocks: Vec::new(),
+    }];
+
+    let mut cfg = TwittyConfig::default();
+    cfg.theme = Some(palette_name.into());
+    cfg.project_roots = vec!["~/Projects".into(), "~/src".into()];
+    let mut state = SettingsPanelState::new(Vec::new(), Vec::new(), None, lang);
+    state.select_section(section, &cfg);
+
+    let mut cache = RowCache::default();
+    let mut ime = PreeditState::default();
+    let mut ctx = DrawContext {
+        font_system: &mut fonts,
+        family: None,
+        palette: &palette,
+        metrics,
+        is_srgb: false,
+    };
+    let opts = FrameOptions {
+        window_focused: true,
+        cursor_style: "block",
+        cursor_blink_on: false,
+        surface,
+    };
+    let mut frame = build_frame(&mut ctx, &opts, &mut cache, &mut ime, &[], &panes, &[]);
+    frame.add_settings(
+        &mut ctx,
+        style,
+        &ui_font,
+        &SettingsView { state, config: cfg },
+    );
+    let runs = frame.text_runs(&panes, &cache, &ime);
+    let _gpu = GPU.lock().unwrap_or_else(|e| e.into_inner());
+    let mut target = match Offscreen::new(width, height) {
+        Ok(target) => target,
+        Err(e) => {
+            assert!(
+                !env_flag("TWITTY_REQUIRE_GOLDEN"),
+                "TWITTY_REQUIRE_GOLDEN is set but golden test {name} cannot run: {e}"
+            );
+            eprintln!("note: skipping golden image {name}: {e}");
+            return;
+        }
+    };
+    let actual = target
+        .render_layers(
+            (&frame.quads, &frame.shapes),
+            runs,
+            ctx.font_system,
+            frame.background,
+            1.0,
+        )
+        .expect("offscreen render");
+    let (w, h) = target.size();
+    compare_golden(name, w, h, &actual);
+}
+
+#[test]
+fn golden_settings_behaviour_ar_light_and_ai_en_dark() {
+    use twitty::ui::chrome::UiLanguage;
+    use twitty::ui::settings_panel::SettingsSection;
+    check_settings_golden(
+        "settings_behaviour_ar_light",
+        "twitty-light",
+        UiLanguage::Arabic,
+        SettingsSection::Behaviour,
+    );
+    check_settings_golden(
+        "settings_ai_en_dark",
+        "twitty-dark",
+        UiLanguage::English,
+        SettingsSection::Ai,
+    );
+}

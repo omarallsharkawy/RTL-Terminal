@@ -330,7 +330,20 @@ impl App {
                     SettingId::BlockCards => {
                         self.window.set_block_cards(self.config.block_cards);
                     }
+                    SettingId::ReduceMotion => {
+                        self.window.set_reduce_motion(self.config.reduce_motion);
+                    }
+                    SettingId::ComposerMode => {
+                        if self.config.composer_mode() == crate::composer::ComposerMode::Off {
+                            self.close_composer();
+                        }
+                    }
+                    SettingId::ProjectRoots => self.start_project_scan(),
+                    SettingId::BuiltInAi => {
+                        self.composer.state.ai_enabled = self.config.ai;
+                    }
                     SettingId::DesktopNotifications
+                    | SettingId::AiTimeout
                     | SettingId::RestoreSession
                     | SettingId::ShellIntegration
                     | SettingId::RecordHistory

@@ -102,6 +102,7 @@ pub enum SettingId {
     TopBar,
     PaneHeaders,
     BlockCards,
+    ReduceMotion,
     // Behaviour
     DesktopNotifications,
     RestoreSession,
@@ -111,14 +112,18 @@ pub enum SettingId {
     ControlSocket,
     CmuxCompat,
     AgentCommand,
+    ComposerMode,
+    ProjectRoots,
     // AI
     ProjectMemory,
+    BuiltInAi,
+    AiTimeout,
     // About
     CopyConfigPath,
 }
 
 impl SettingId {
-    pub const APPEARANCE: [Self; 14] = [
+    pub const APPEARANCE: [Self; 15] = [
         Self::Theme,
         Self::FontFamily,
         Self::FontSize,
@@ -133,9 +138,10 @@ impl SettingId {
         Self::TopBar,
         Self::PaneHeaders,
         Self::BlockCards,
+        Self::ReduceMotion,
     ];
 
-    pub const BEHAVIOUR: [Self; 8] = [
+    pub const BEHAVIOUR: [Self; 10] = [
         Self::DesktopNotifications,
         Self::RestoreSession,
         Self::ShellIntegration,
@@ -144,14 +150,16 @@ impl SettingId {
         Self::ControlSocket,
         Self::CmuxCompat,
         Self::AgentCommand,
+        Self::ComposerMode,
+        Self::ProjectRoots,
     ];
 
-    pub const AI: [Self; 1] = [Self::ProjectMemory];
+    pub const AI: [Self; 3] = [Self::ProjectMemory, Self::BuiltInAi, Self::AiTimeout];
 
     pub const ABOUT: [Self; 1] = [Self::CopyConfigPath];
 
     /// All config-backed settings (Appearance + Behaviour).
-    pub const CONFIG_SETTINGS: [Self; 22] = [
+    pub const CONFIG_SETTINGS: [Self; 27] = [
         Self::Theme,
         Self::FontFamily,
         Self::FontSize,
@@ -174,6 +182,11 @@ impl SettingId {
         Self::ControlSocket,
         Self::CmuxCompat,
         Self::AgentCommand,
+        Self::ReduceMotion,
+        Self::ComposerMode,
+        Self::ProjectRoots,
+        Self::BuiltInAi,
+        Self::AiTimeout,
     ];
 
     pub fn section(self) -> SettingsSection {
@@ -191,7 +204,8 @@ impl SettingId {
             | Self::SidebarWidth
             | Self::TopBar
             | Self::PaneHeaders
-            | Self::BlockCards => SettingsSection::Appearance,
+            | Self::BlockCards
+            | Self::ReduceMotion => SettingsSection::Appearance,
             Self::DesktopNotifications
             | Self::RestoreSession
             | Self::ShellIntegration
@@ -199,8 +213,10 @@ impl SettingId {
             | Self::ClaudeHooks
             | Self::ControlSocket
             | Self::CmuxCompat
-            | Self::AgentCommand => SettingsSection::Behaviour,
-            Self::ProjectMemory => SettingsSection::Ai,
+            | Self::AgentCommand
+            | Self::ComposerMode
+            | Self::ProjectRoots => SettingsSection::Behaviour,
+            Self::ProjectMemory | Self::BuiltInAi | Self::AiTimeout => SettingsSection::Ai,
             Self::CopyConfigPath => SettingsSection::About,
         }
     }
@@ -230,6 +246,11 @@ impl SettingId {
             Self::ControlSocket => "control_socket",
             Self::CmuxCompat => "cmux_compat",
             Self::AgentCommand => "agent_command",
+            Self::ReduceMotion => "reduce_motion",
+            Self::ComposerMode => "composer",
+            Self::ProjectRoots => "project_roots",
+            Self::BuiltInAi => "ai",
+            Self::AiTimeout => "ai_timeout_secs",
             Self::ProjectMemory | Self::CopyConfigPath => return None,
         })
     }
@@ -427,8 +448,56 @@ impl SettingId {
                 note_ar: Some("اتركه فارغاً للاكتشاف التلقائي"),
                 kind: ControlKind::TextField {
                     placeholder_en: "Auto (claude, codex…)",
-                    placeholder_ar: "تلقائي (claude, codex…)",
+                    placeholder_ar: "تلقائي: claude أو codex",
                 },
+            },
+            Self::ReduceMotion => SettingDescriptor {
+                id: self,
+                label_en: "Reduce motion",
+                label_ar: "تقليل الحركة",
+                note_en: Some("No animations; the cursor does not blink"),
+                note_ar: Some("بدون حركات، والمؤشر ما بيومضش"),
+                kind: ControlKind::Toggle,
+            },
+            Self::ComposerMode => SettingDescriptor {
+                id: self,
+                label_en: "Command composer",
+                label_ar: "محرر الأوامر",
+                note_en: Some("The editor box under the terminal (Ctrl+Shift+Space)"),
+                note_ar: Some("خانة كتابة الأوامر تحت الطرفية (Ctrl+Shift+Space)"),
+                kind: ControlKind::Segmented(COMPOSER_MODE_OPTIONS),
+            },
+            Self::ProjectRoots => SettingDescriptor {
+                id: self,
+                label_en: "Project folders",
+                label_ar: "مجلدات المشاريع",
+                note_en: Some("Scanned for git projects; separate with commas"),
+                note_ar: Some("بيتدوّر فيها على مشاريع git؛ افصل بينها بفاصلة"),
+                kind: ControlKind::TextField {
+                    placeholder_en: "~/Projects, ~/src",
+                    placeholder_ar: "~/Projects, ~/src",
+                },
+            },
+            Self::BuiltInAi => SettingDescriptor {
+                id: self,
+                label_en: "Built-in AI",
+                label_ar: "الذكاء الاصطناعي المدمج",
+                note_en: Some("Generate commands (#) and explain failed blocks"),
+                note_ar: Some("توليد الأوامر (#) وشرح الأوامر اللي فشلت"),
+                kind: ControlKind::Toggle,
+            },
+            Self::AiTimeout => SettingDescriptor {
+                id: self,
+                label_en: "AI request timeout",
+                label_ar: "مهلة طلب الذكاء الاصطناعي",
+                note_en: None,
+                note_ar: None,
+                kind: ControlKind::Slider(SliderSpec {
+                    min: 5.0,
+                    max: 300.0,
+                    step: 5.0,
+                    unit: SliderUnit::Seconds,
+                }),
             },
             Self::ProjectMemory => SettingDescriptor {
                 id: self,
@@ -504,6 +573,24 @@ pub const UI_LANGUAGE_OPTIONS: &[SegmentedOption] = &[
         value: "ar",
         label_en: "العربية",
         label_ar: "العربية",
+    },
+];
+
+pub const COMPOSER_MODE_OPTIONS: &[SegmentedOption] = &[
+    SegmentedOption {
+        value: "off",
+        label_en: "Off",
+        label_ar: "مقفول",
+    },
+    SegmentedOption {
+        value: "on-demand",
+        label_en: "On demand",
+        label_ar: "عند الطلب",
+    },
+    SegmentedOption {
+        value: "always",
+        label_en: "Always",
+        label_ar: "دايماً",
     },
 ];
 
@@ -593,6 +680,7 @@ pub enum SliderUnit {
     Points,
     Percent,
     Pixels,
+    Seconds,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -615,6 +703,7 @@ impl SliderSpec {
             }
             SliderUnit::Percent => format!("{}%", (value * 100.0).round() as i32),
             SliderUnit::Pixels => format!("{} px", value.round() as i32),
+            SliderUnit::Seconds => format!("{} s", value.round() as i32),
         }
     }
 
@@ -779,6 +868,8 @@ pub struct SettingsPanelState {
     commands: Vec<Command>,
     /// State for the Settings → AI section (AGENT.md §1.6).
     pub ai: crate::ui::settings_ai::AiSettingsState,
+    /// Raw text of the text field being edited, e.g. `~/a, ` before the next folder is typed.
+    text_draft: Option<(SettingId, String)>,
 }
 
 impl Default for SettingsPanelState {
@@ -808,6 +899,7 @@ impl SettingsPanelState {
             capturing_key: None,
             key_capture_notice: None,
             copied_config_path: false,
+            text_draft: None,
             monospace_fonts,
             ui_fonts,
             config_path,
@@ -973,7 +1065,37 @@ impl SettingsPanelState {
         if self.section == SettingsSection::Ai {
             return self.ai.active_field.is_some();
         }
-        matches!(self.focused_setting(), Some(SettingId::AgentCommand))
+        self.focused_setting().is_some_and(is_text_setting)
+    }
+
+    /// Text shown in a text-field setting: the in-progress draft while it is being edited
+    /// (so a trailing `, ` survives), otherwise the saved value.
+    pub fn text_value(&self, setting: SettingId, config: &TwittyConfig) -> String {
+        match &self.text_draft {
+            Some((id, draft)) if *id == setting && draft_matches(setting, draft, config) => {
+                draft.clone()
+            }
+            _ => read_text(setting, config),
+        }
+    }
+
+    /// Apply an edit to the focused text setting's draft and save the parsed value.
+    fn edit_text(
+        &mut self,
+        setting: SettingId,
+        config: &mut TwittyConfig,
+        edit: impl FnOnce(&mut String) -> bool,
+    ) -> SettingsOutcome {
+        let mut outcome = SettingsOutcome::default();
+        let mut draft = self.text_value(setting, config);
+        if edit(&mut draft) {
+            if write_text(setting, &draft, config) {
+                outcome.changed.push(setting);
+            }
+            self.text_draft = Some((setting, draft));
+            outcome.redraw = true;
+        }
+        outcome
     }
 
     /// Switch to `section`, closing any expanded picker and reverting uncommitted previews.
@@ -1166,13 +1288,8 @@ impl SettingsPanelState {
             }
             return outcome;
         }
-        if self.focused_setting() == Some(SettingId::AgentCommand) {
-            let mut val = config.agent_command.clone().unwrap_or_default();
-            if push_bounded(&mut val, text) {
-                set_agent_command(config, val);
-                outcome.changed.push(SettingId::AgentCommand);
-                outcome.redraw = true;
-            }
+        if let Some(setting) = self.focused_setting().filter(|&s| is_text_setting(s)) {
+            return self.edit_text(setting, config, |draft| push_bounded(draft, text));
         }
         outcome
     }
@@ -1530,23 +1647,18 @@ impl SettingsPanelState {
                 outcome
             }
             Key::Named(NamedKey::Space) => {
-                if setting == SettingId::AgentCommand {
+                if is_text_setting(setting) {
                     return self.on_text(" ", config);
                 }
                 self.activate_control(setting, config, &mut outcome, false);
                 self.ensure_focused_visible(config, surface, scale);
                 outcome
             }
-            Key::Named(NamedKey::Backspace) if setting == SettingId::AgentCommand => {
-                let mut val = config.agent_command.clone().unwrap_or_default();
-                if backspace_text(&mut val, modifiers.control_key()) {
-                    set_agent_command(config, val);
-                    outcome.changed.push(SettingId::AgentCommand);
-                    outcome.redraw = true;
-                }
-                outcome
+            Key::Named(NamedKey::Backspace) if is_text_setting(setting) => {
+                let word = modifiers.control_key();
+                self.edit_text(setting, config, |draft| backspace_text(draft, word))
             }
-            _ if setting == SettingId::AgentCommand => {
+            _ if is_text_setting(setting) => {
                 if let Some(t) = text.filter(|_| {
                     !modifiers.control_key() && !modifiers.alt_key() && !modifiers.super_key()
                 }) {
@@ -2265,6 +2377,8 @@ pub fn read_bool(setting: SettingId, config: &TwittyConfig) -> bool {
         SettingId::ClaudeHooks => config.claude_hooks,
         SettingId::ControlSocket => config.control_socket,
         SettingId::CmuxCompat => config.cmux_compat,
+        SettingId::ReduceMotion => config.reduce_motion,
+        SettingId::BuiltInAi => config.ai,
         _ => false,
     }
 }
@@ -2282,6 +2396,8 @@ pub fn write_bool(setting: SettingId, value: bool, config: &mut TwittyConfig) ->
         SettingId::ClaudeHooks => &mut config.claude_hooks,
         SettingId::ControlSocket => &mut config.control_socket,
         SettingId::CmuxCompat => &mut config.cmux_compat,
+        SettingId::ReduceMotion => &mut config.reduce_motion,
+        SettingId::BuiltInAi => &mut config.ai,
         _ => return false,
     };
     if *slot != value {
@@ -2313,6 +2429,11 @@ pub fn read_segmented_index(setting: SettingId, config: &TwittyConfig) -> usize 
             SidebarPosition::Right => 1,
             SidebarPosition::Hidden => 2,
         },
+        SettingId::ComposerMode => match config.composer_mode() {
+            crate::composer::ComposerMode::Off => 0,
+            crate::composer::ComposerMode::OnDemand => 1,
+            crate::composer::ComposerMode::Always => 2,
+        },
         _ => 0,
     }
 }
@@ -2337,6 +2458,10 @@ pub fn write_segmented_index(setting: SettingId, index: usize, config: &mut Twit
             config.sidebar = opt.value.to_owned();
             true
         }
+        SettingId::ComposerMode if config.composer != opt.value => {
+            config.composer = opt.value.to_owned();
+            true
+        }
         _ => false,
     }
 }
@@ -2346,6 +2471,7 @@ pub fn read_slider_value(setting: SettingId, config: &TwittyConfig) -> f32 {
         SettingId::FontSize => config.font_size,
         SettingId::BackgroundOpacity => config.background_opacity,
         SettingId::SidebarWidth => config.sidebar_width,
+        SettingId::AiTimeout => config.ai_timeout_secs as f32,
         _ => 0.0,
     }
 }
@@ -2365,6 +2491,15 @@ pub fn write_slider_value(setting: SettingId, value: f32, config: &mut TwittyCon
             let next = value.clamp(MIN_OPACITY, 1.0);
             if (config.background_opacity - next).abs() > 1e-4 {
                 config.background_opacity = next;
+                true
+            } else {
+                false
+            }
+        }
+        SettingId::AiTimeout => {
+            let next = value.round().clamp(5.0, 300.0) as u64;
+            if config.ai_timeout_secs != next {
+                config.ai_timeout_secs = next;
                 true
             } else {
                 false
@@ -2419,13 +2554,57 @@ pub fn current_picker_value(setting: SettingId, config: &TwittyConfig) -> Option
     }
 }
 
-fn set_agent_command(config: &mut TwittyConfig, value: String) {
-    let cleaned = crate::shell_integration::clean_text(&value, MAX_INPUT_CHARS);
-    config.agent_command = if cleaned.trim().is_empty() {
-        None
-    } else {
-        Some(cleaned)
-    };
+pub fn is_text_setting(setting: SettingId) -> bool {
+    matches!(setting.descriptor().kind, ControlKind::TextField { .. })
+}
+
+/// Saved value of a text-field setting, as shown in its field.
+pub fn read_text(setting: SettingId, config: &TwittyConfig) -> String {
+    match setting {
+        SettingId::AgentCommand => config.agent_command.clone().unwrap_or_default(),
+        SettingId::ProjectRoots => config.project_roots.join(", "),
+        _ => String::new(),
+    }
+}
+
+fn parse_project_roots(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(|p| crate::shell_integration::clean_text(p.trim(), MAX_INPUT_CHARS))
+        .filter(|p| !p.is_empty())
+        .collect()
+}
+
+/// A draft still describes the saved value (it was not changed elsewhere meanwhile).
+fn draft_matches(setting: SettingId, draft: &str, config: &TwittyConfig) -> bool {
+    match setting {
+        SettingId::ProjectRoots => parse_project_roots(draft) == config.project_roots,
+        _ => read_text(setting, config) == draft.trim_end() || read_text(setting, config) == draft,
+    }
+}
+
+/// Save `value` into a text-field setting; true when the config changed.
+pub fn write_text(setting: SettingId, value: &str, config: &mut TwittyConfig) -> bool {
+    match setting {
+        SettingId::AgentCommand => {
+            let cleaned = crate::shell_integration::clean_text(value, MAX_INPUT_CHARS);
+            let next = (!cleaned.trim().is_empty()).then_some(cleaned);
+            if config.agent_command != next {
+                config.agent_command = next;
+                return true;
+            }
+            false
+        }
+        SettingId::ProjectRoots => {
+            let next = parse_project_roots(value);
+            if config.project_roots != next {
+                config.project_roots = next;
+                return true;
+            }
+            false
+        }
+        _ => false,
+    }
 }
 
 fn push_bounded(target: &mut String, text: &str) -> bool {
@@ -2753,6 +2932,53 @@ impl SettingsLayout {
         layout
     }
 
+    /// Split a control row into its label and widget rects (mirrored in Arabic).
+    fn row_rects(&self, kind: ControlKind, rect: Rect, scale: f32) -> (Rect, Rect) {
+        let px = |logical: f32| logical * scale;
+        let inner_pad = px(10.0);
+        let inner = Rect::new(
+            rect.x + inner_pad,
+            rect.y,
+            (rect.w - 2.0 * inner_pad).max(0.0),
+            rect.h,
+        );
+        let widget_w = match kind {
+            ControlKind::Toggle => px(44.0),
+            ControlKind::Segmented(_) => px(220.0).min(inner.w * 0.56),
+            ControlKind::Slider(_) => px(244.0).min(inner.w * 0.58),
+            ControlKind::Swatches => px(228.0).min(inner.w * 0.58),
+            ControlKind::TextField { .. } => px(220.0).min(inner.w * 0.56),
+            ControlKind::ListPicker { .. } => px(220.0).min(inner.w * 0.56),
+            ControlKind::ActionButton => px(130.0).min(inner.w * 0.45),
+        };
+        let gap = px(12.0);
+        if self.mirrored {
+            let w_rect = Rect::new(inner.x, inner.y, widget_w, inner.h);
+            let l_x = w_rect.right() + gap;
+            let l_rect = Rect::new(l_x, inner.y, (inner.right() - l_x).max(0.0), inner.h);
+            (l_rect, w_rect)
+        } else {
+            let w_rect = Rect::new(inner.right() - widget_w, inner.y, widget_w, inner.h);
+            let l_rect = Rect::new(
+                inner.x,
+                inner.y,
+                (w_rect.x - gap - inner.x).max(0.0),
+                inner.h,
+            );
+            (l_rect, w_rect)
+        }
+    }
+
+    /// Height of a plain control row (taller when it has a note line).
+    fn row_height(id: SettingId, scale: f32) -> f32 {
+        let logical = if id.descriptor().note_en.is_some() {
+            48.0
+        } else {
+            40.0
+        };
+        (logical * scale).round()
+    }
+
     fn build_control_rows(
         &mut self,
         scale: f32,
@@ -2799,38 +3025,7 @@ impl SettingsLayout {
                 px(40.0).round()
             };
             let rect = Rect::new(vp.x, y, vp.w, row_h);
-            let inner_pad = px(10.0);
-            let inner = Rect::new(
-                rect.x + inner_pad,
-                rect.y,
-                (rect.w - 2.0 * inner_pad).max(0.0),
-                rect.h,
-            );
-            let widget_w = match desc.kind {
-                ControlKind::Toggle => px(44.0),
-                ControlKind::Segmented(_) => px(220.0).min(inner.w * 0.56),
-                ControlKind::Slider(_) => px(244.0).min(inner.w * 0.58),
-                ControlKind::Swatches => px(228.0).min(inner.w * 0.58),
-                ControlKind::TextField { .. } => px(220.0).min(inner.w * 0.56),
-                ControlKind::ListPicker { .. } => px(220.0).min(inner.w * 0.56),
-                ControlKind::ActionButton => px(130.0).min(inner.w * 0.45),
-            };
-            let gap = px(12.0);
-            let (label, widget) = if self.mirrored {
-                let w_rect = Rect::new(inner.x, inner.y, widget_w, inner.h);
-                let l_x = w_rect.right() + gap;
-                let l_rect = Rect::new(l_x, inner.y, (inner.right() - l_x).max(0.0), inner.h);
-                (l_rect, w_rect)
-            } else {
-                let w_rect = Rect::new(inner.right() - widget_w, inner.y, widget_w, inner.h);
-                let l_rect = Rect::new(
-                    inner.x,
-                    inner.y,
-                    (w_rect.x - gap - inner.x).max(0.0),
-                    inner.h,
-                );
-                (l_rect, w_rect)
-            };
+            let (label, widget) = self.row_rects(desc.kind, rect, scale);
 
             let geometry = build_control_geometry(desc.kind, widget, scale, self.mirrored);
             y += row_h;
@@ -3048,11 +3243,13 @@ impl SettingsLayout {
         } else {
             0.0
         };
-        let mem_row_h = px(48.0).round();
+        let rows_h: f32 = SettingId::AI
+            .iter()
+            .map(|&id| Self::row_height(id, scale) + gap)
+            .sum();
         let deny_h = px(26.0) + HARD_DENY_SUMMARY.len() as f32 * px(18.0) + px(12.0);
         let total_h = notice_h
-            + mem_row_h
-            + gap
+            + rows_h
             + px(56.0) // default provider
             + gap
             + px(44.0) // cli agents
@@ -3081,48 +3278,22 @@ impl SettingsLayout {
             y += px(30.0) + gap;
         }
 
-        // Top row: n21 Project Memory entry (rules-file SHA-256 approvals, facts, commands, env, exclusions).
-        {
-            let rect = Rect::new(vp.x, y, vp.w, mem_row_h);
-            let inner_pad = px(10.0);
-            let inner = Rect::new(
-                rect.x + inner_pad,
-                rect.y,
-                (rect.w - 2.0 * inner_pad).max(0.0),
-                rect.h,
-            );
-            let widget_w = px(130.0).min(inner.w * 0.45);
-            let row_gap = px(12.0);
-            let (label, widget) = if self.mirrored {
-                let w_rect = Rect::new(inner.x, inner.y, widget_w, inner.h);
-                let l_x = w_rect.right() + row_gap;
-                let l_rect = Rect::new(l_x, inner.y, (inner.right() - l_x).max(0.0), inner.h);
-                (l_rect, w_rect)
-            } else {
-                let w_rect = Rect::new(inner.right() - widget_w, inner.y, widget_w, inner.h);
-                let l_rect = Rect::new(
-                    inner.x,
-                    inner.y,
-                    (w_rect.x - row_gap - inner.x).max(0.0),
-                    inner.h,
-                );
-                (l_rect, w_rect)
-            };
-            let geometry = build_control_geometry(
-                SettingId::ProjectMemory.descriptor().kind,
-                widget,
-                scale,
-                self.mirrored,
-            );
+        // Plain rows first: Project memory (n21), built-in AI switch, request timeout.
+        for &id in &SettingId::AI {
+            let row_h = Self::row_height(id, scale);
+            let rect = Rect::new(vp.x, y, vp.w, row_h);
+            let kind = id.descriptor().kind;
+            let (label, widget) = self.row_rects(kind, rect, scale);
+            let geometry = build_control_geometry(kind, widget, scale, self.mirrored);
             self.rows.push(ControlRowLayout {
-                id: SettingId::ProjectMemory,
+                id,
                 rect,
                 label,
                 widget,
                 geometry,
                 picker: None,
             });
-            y += mem_row_h + gap;
+            y += row_h + gap;
         }
 
         // Default provider buttons.

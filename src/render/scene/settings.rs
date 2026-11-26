@@ -694,10 +694,8 @@ impl SettingsDrawer<'_, '_> {
             (input.w - 2.0 * pad).max(0.0),
             input.h,
         );
-        let value = match id {
-            SettingId::AgentCommand => self.view.config.agent_command.as_deref().unwrap_or(""),
-            _ => "",
-        };
+        let value = self.view.state.text_value(id, &self.view.config);
+        let value = value.as_str();
         if value.is_empty() {
             self.push_label(
                 text_rect,

@@ -754,7 +754,10 @@ fn arabic_ime_input_works_in_agent_command_font_search_and_keys_search() {
     // 2. Arabic IME in Behaviour -> Agent command text field.
     state.select_section(SettingsSection::Behaviour, &cfg);
     state.focus = FocusZone::Content;
-    state.selected = SettingId::BEHAVIOUR.len() - 1;
+    state.selected = SettingId::BEHAVIOUR
+        .iter()
+        .position(|&s| s == SettingId::AgentCommand)
+        .unwrap();
     assert_eq!(state.focused_setting(), Some(SettingId::AgentCommand));
     assert!(state.accepts_text_input());
     let res = state.on_text("وكيل", &mut cfg);
@@ -1446,4 +1449,96 @@ fn interface_language_overlay_renders_bilingual_labels_and_flips_live() {
             "Arabic render missing {expected:?} in {ar_texts:?}"
         );
     }
+}
+
+fn focus_setting(state: &mut SettingsPanelState, cfg: &TwittyConfig, id: SettingId) {
+    state.select_section(id.section(), cfg);
+    state.focus = FocusZone::Content;
+    state.selected = SettingsPanelState::controls_in(id.section())
+        .iter()
+        .position(|&s| s == id)
+        .unwrap();
+    assert_eq!(state.focused_setting(), Some(id));
+}
+
+#[test]
+fn every_config_key_except_structured_lists_has_a_settings_control() {
+    // Keys with their own screens: keybindings (Keys), memory_exclude (Memory), commands and
+    // colors (structured lists), AI provider keys (Settings -> AI custom rows).
+    let elsewhere = [
+        "keybindings",
+        "memory_exclude",
+        "commands",
+        "colors",
+        "ai_agent",
+        "ai_default_provider",
+        "ai_ollama_url",
+        "ai_monthly_cost_cap_usd",
+        "ai_project_allow_list",
+    ];
+    let value = serde_json::to_value(TwittyConfig::default()).unwrap();
+    let covered: Vec<&str> = SettingId::CONFIG_SETTINGS
+        .iter()
+        .filter_map(|s| s.config_key())
+        .collect();
+    for key in value.as_object().unwrap().keys() {
+        assert!(
+            covered.contains(&key.as_str()) || elsewhere.contains(&key.as_str()),
+            "config key {key:?} has no control in Settings"
+        );
+    }
+}
+
+#[test]
+fn new_settings_reduce_motion_composer_mode_project_folders_ai_and_timeout() {
+    let mut cfg = TwittyConfig::default();
+    let mut state = SettingsPanelState::default();
+    let none = ModifiersState::empty();
+    let key = |state: &mut SettingsPanelState, cfg: &mut TwittyConfig, k: NamedKey| {
+        state.on_key(&Key::Named(k), None, none, cfg, SURFACE, 1.0)
+    };
+
+    focus_setting(&mut state, &cfg, SettingId::ReduceMotion);
+    let res = key(&mut state, &mut cfg, NamedKey::Space);
+    assert_eq!(res.changed, vec![SettingId::ReduceMotion]);
+    assert!(cfg.reduce_motion);
+
+    focus_setting(&mut state, &cfg, SettingId::ComposerMode);
+    assert_eq!(cfg.composer, "on-demand");
+    let res = key(&mut state, &mut cfg, NamedKey::ArrowRight);
+    assert_eq!(res.changed, vec![SettingId::ComposerMode]);
+    assert_eq!(cfg.composer, "always");
+
+    // Project folders: a trailing ", " survives while typing the next folder.
+    focus_setting(&mut state, &cfg, SettingId::ProjectRoots);
+    assert!(state.accepts_text_input());
+    for _ in 0..80 {
+        key(&mut state, &mut cfg, NamedKey::Backspace);
+    }
+    assert!(cfg.project_roots.is_empty());
+    state.on_text("~/مشاريع", &mut cfg);
+    state.on_text(",", &mut cfg);
+    key(&mut state, &mut cfg, NamedKey::Space);
+    assert_eq!(
+        state.text_value(SettingId::ProjectRoots, &cfg),
+        "~/مشاريع, "
+    );
+    assert_eq!(cfg.project_roots, vec!["~/مشاريع".to_owned()]);
+    let res = state.on_text("~/src", &mut cfg);
+    assert_eq!(res.changed, vec![SettingId::ProjectRoots]);
+    assert_eq!(
+        cfg.project_roots,
+        vec!["~/مشاريع".to_owned(), "~/src".to_owned()]
+    );
+
+    focus_setting(&mut state, &cfg, SettingId::BuiltInAi);
+    assert!(cfg.ai);
+    key(&mut state, &mut cfg, NamedKey::Space);
+    assert!(!cfg.ai);
+
+    focus_setting(&mut state, &cfg, SettingId::AiTimeout);
+    assert_eq!(cfg.ai_timeout_secs, 60);
+    let res = key(&mut state, &mut cfg, NamedKey::ArrowRight);
+    assert_eq!(res.changed, vec![SettingId::AiTimeout]);
+    assert_eq!(cfg.ai_timeout_secs, 65);
 }

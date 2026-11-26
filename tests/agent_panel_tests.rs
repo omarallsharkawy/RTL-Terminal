@@ -901,8 +901,15 @@ fn settings_ai_section_keyring_config_allow_list_and_deny_list() {
     // Project memory entry (n21) lives in the same Settings -> AI section and opens Memory.
     assert_eq!(state.focused_setting(), Some(SettingId::ProjectMemory));
     let mem_layout = SettingsLayout::build(surface, 1.0, &state, &cfg);
-    assert_eq!(mem_layout.rows.len(), 1);
-    assert_eq!(mem_layout.rows[0].id, SettingId::ProjectMemory);
+    let ids: Vec<SettingId> = mem_layout.rows.iter().map(|r| r.id).collect();
+    assert_eq!(
+        ids,
+        [
+            SettingId::ProjectMemory,
+            SettingId::BuiltInAi,
+            SettingId::AiTimeout
+        ]
+    );
     let open_mem = state.on_key(
         &Key::Named(NamedKey::Enter),
         None,

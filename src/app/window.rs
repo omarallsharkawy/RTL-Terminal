@@ -704,6 +704,13 @@ impl Window {
         self.pane_headers = enabled;
     }
 
+    pub(super) fn set_reduce_motion(&mut self, reduced: bool) {
+        self.motion = ChromeAnimations::new(reduced);
+        if let Some(ref mut r) = self.renderer {
+            r.set_reduce_motion(reduced);
+        }
+    }
+
     pub(super) fn set_block_cards(&mut self, enabled: bool) {
         if let Some(ref mut r) = self.renderer {
             r.set_block_cards(enabled);
