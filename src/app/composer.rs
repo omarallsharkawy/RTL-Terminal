@@ -21,6 +21,7 @@ use crate::composer::highlight::{
 };
 use crate::composer::history::{load_shell_history_default, HistoryStore};
 use crate::composer::lint::lint_command;
+use crate::composer::slash::{self, Agent};
 use crate::composer::{
     encode_submit, should_show_composer, ComposerAction, ComposerMode, ComposerState,
 };
@@ -35,6 +36,8 @@ use crate::shell_integration::MarkKind;
 use crate::workflows::WorkflowSet;
 
 const MAX_PATH_STAT_CACHE: usize = 256;
+/// Skills and MCP configs change rarely; rescan at most this often per project.
+const SLASH_CATALOG_TTL: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Window-wide composer state owned by `App`.
 #[derive(Default)]
@@ -53,6 +56,12 @@ pub(super) struct ComposerHost {
     generators_pending: HashSet<GeneratorKey>,
     path_commands: Option<HashSet<String>>,
     path_commands_requested: bool,
+    /// Agent slash catalog: project root it was built for, when, and whether a scan runs.
+    slash_root: Option<Option<PathBuf>>,
+    slash_loaded_at: Option<Instant>,
+    slash_pending: bool,
+    /// A slash-menu command asked to close the window (e.g. it closed the last pane).
+    exit_requested: bool,
     path_exists_cache: HashMap<PathBuf, bool>,
     path_exists_pending: HashSet<PathBuf>,
 }
@@ -229,6 +238,60 @@ impl App {
         self.maybe_request_composer_dir(cwd.as_deref());
         self.maybe_request_composer_generators(cwd.as_deref());
         self.maybe_request_composer_path_stats(cwd.as_deref());
+        self.composer.state.slash_foreground = self
+            .focused_id()
+            .and_then(|id| self.ws.pane(id))
+            .and_then(|pane| pane.pty.as_ref())
+            .and_then(Pty::foreground_argv)
+            .and_then(|argv| Agent::from_argv(&argv));
+        self.maybe_request_slash_catalog(cwd.as_deref());
+    }
+
+    /// Rescan skills, agent commands and MCP servers for the pane's project when the project
+    /// changed or the last scan is older than [`SLASH_CATALOG_TTL`].
+    fn maybe_request_slash_catalog(&mut self, cwd: Option<&Path>) {
+        let root = crate::memory::resolve_active_project_root(cwd);
+        let fresh = self.composer.slash_root.as_ref() == Some(&root)
+            && self
+                .composer
+                .slash_loaded_at
+                .is_some_and(|at| at.elapsed() < SLASH_CATALOG_TTL);
+        if fresh || self.composer.slash_pending {
+            return;
+        }
+        let Some(home) = crate::projects::home_dir() else {
+            return;
+        };
+        self.composer.slash_pending = true;
+        let proxy = self.proxy.clone();
+        let _ = std::thread::Builder::new()
+            .name("twitty-composer-slash".into())
+            .spawn(move || {
+                let catalog = slash::discover(&home, root.as_deref(), &slash::installed_agents());
+                let _ = proxy.send_event(AppEvent::ComposerSlash(Box::new(catalog)));
+            });
+    }
+
+    pub(super) fn on_composer_slash(&mut self, catalog: slash::SlashCatalog) {
+        self.composer.slash_pending = false;
+        self.composer.slash_root = Some(catalog.project_root.clone());
+        self.composer.slash_loaded_at = Some(Instant::now());
+        self.composer.state.slash = std::sync::Arc::new(catalog);
+        // Refresh an open slash menu with the new items.
+        if self.composer.state.popup.is_none()
+            || slash::slash_query(
+                self.composer.state.editor.text(),
+                self.composer.state.editor.caret(),
+            )
+            .is_some()
+        {
+            self.composer
+                .state
+                .open_slash_menu(self.composer.workflows.workflows());
+        }
+        if self.composer_visible() {
+            self.window.request_redraw();
+        }
     }
 
     /// Collect commands from all panes' command blocks (newest first).
@@ -508,7 +571,7 @@ impl App {
             self.composer.path_commands.as_ref(),
         );
         self.apply_composer_action(action, cwd.as_deref());
-        Some(false)
+        Some(std::mem::take(&mut self.composer.exit_requested))
     }
 
     /// Handle IME preedit when the composer has focus. Returns true if consumed.
@@ -586,6 +649,17 @@ impl App {
             }
             ComposerAction::DiscardAi => {
                 self.clear_composer_ai_state();
+                self.window.request_redraw();
+            }
+            ComposerAction::RunCommand(name) => {
+                self.composer.manual_open = false;
+                if self.config.composer_mode() == ComposerMode::OnDemand {
+                    self.composer.focused = false;
+                }
+                match <Self as crate::control::cmux::ControlHost>::command_run(self, &name, None) {
+                    Ok((_, exit)) => self.composer.exit_requested |= exit,
+                    Err(err) => tracing::warn!("slash command {name:?} failed: {err}"),
+                }
                 self.window.request_redraw();
             }
             ComposerAction::Submit(cmd) => {
@@ -685,6 +759,11 @@ impl App {
     }
 
     /// Handle a mouse press when the composer is visible. Returns true if consumed.
+    /// True once after a slash-menu command asked to close the window.
+    pub(super) fn take_composer_exit_request(&mut self) -> bool {
+        std::mem::take(&mut self.composer.exit_requested)
+    }
+
     pub(super) fn composer_mouse_press(&mut self, button: MouseButton) -> bool {
         let Some(layout) = self.composer_layout() else {
             return false;
@@ -726,11 +805,13 @@ impl App {
                         .map(|p| p.visible_range())
                     {
                         let idx = range.start + vis_row;
-                        self.composer.state.accept_popup_index(
+                        let action = self.composer.state.accept_popup_index(
                             idx,
                             self.composer.history.entries(),
                             self.composer.workflows.workflows(),
                         );
+                        let cwd = self.focused_id().and_then(|id| self.pane_cwd(id));
+                        self.apply_composer_action(action, cwd.as_deref());
                     }
                 }
                 self.cursor_blink.reset(Instant::now());

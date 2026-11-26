@@ -34,6 +34,8 @@ pub enum AppEvent {
     GitDiff(u64, Option<crate::ui::git_diff::DiffStat>),
     /// Shell history loaded off the UI thread for the command composer.
     ComposerHistory(Vec<String>),
+    /// Agent skills, slash commands and MCP servers found for the composer's `/` menu.
+    ComposerSlash(Box<crate::composer::slash::SlashCatalog>),
     /// Directory entries loaded off the UI thread for composer path completion.
     ComposerDir(PathBuf, Vec<crate::composer::complete::DirEntryInfo>),
     /// Dynamic completion generator results produced off the UI thread.

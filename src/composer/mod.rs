@@ -12,6 +12,7 @@ pub mod generators;
 pub mod highlight;
 pub mod history;
 pub mod lint;
+pub mod slash;
 pub mod specs;
 
 use std::collections::{HashMap, HashSet};
@@ -25,7 +26,7 @@ use crate::shell_integration::MarkKind;
 use crate::workflows::Workflow;
 use complete::{
     complete_with, extract_path_query, ghost_suggestion, needed_generators, CompleteInputs,
-    CompletionItem, DirEntryInfo,
+    CompletionItem, CompletionKind, DirEntryInfo,
 };
 use editor::TextEditor;
 use generators::{GeneratedItem, GeneratorKey, GeneratorKind};
@@ -199,6 +200,8 @@ pub enum ComposerAction {
     CancelAi,
     /// Esc discarded a generated AI command under review.
     DiscardAi,
+    /// A Twitty command or saved workflow picked from the slash menu, by name.
+    RunCommand(String),
 }
 
 /// Extract a natural-language AI request when the composer buffer starts with `#`.
@@ -231,6 +234,12 @@ pub struct ComposerState {
     pub ai_loading: bool,
     /// True while the editor holds an AI-generated command awaiting user review.
     pub ai_reviewing: bool,
+    /// Agent slash items found for the pane's project (filled off the UI thread).
+    pub slash: std::sync::Arc<slash::SlashCatalog>,
+    /// The coding agent running in the pane, if any (decides what a slash pick inserts).
+    pub slash_foreground: Option<slash::Agent>,
+    /// The open popup is the slash menu (picks of Twitty commands run instead of inserting).
+    slash_popup: bool,
 }
 
 impl Default for ComposerState {
@@ -244,6 +253,9 @@ impl Default for ComposerState {
             ai_enabled: true,
             ai_loading: false,
             ai_reviewing: false,
+            slash: Default::default(),
+            slash_foreground: None,
+            slash_popup: false,
         }
     }
 }
@@ -316,20 +328,37 @@ impl ComposerState {
         index: usize,
         history: &[String],
         workflows: &[Workflow],
-    ) -> bool {
+    ) -> ComposerAction {
         let Some(item) = self
             .popup
             .as_ref()
             .and_then(|p| p.items.get(index))
             .cloned()
         else {
-            return false;
+            return ComposerAction::None;
         };
-        self.apply_completion(&item, history, workflows);
-        true
+        self.apply_completion(&item, history, workflows)
     }
 
+    /// Apply a popup pick: splice its text in, or run it when it is a Twitty command or a
+    /// saved workflow picked from the slash menu.
     fn apply_completion(
+        &mut self,
+        item: &CompletionItem,
+        history: &[String],
+        workflows: &[Workflow],
+    ) -> ComposerAction {
+        if self.slash_popup
+            && matches!(item.kind, CompletionKind::Action | CompletionKind::Workflow)
+        {
+            self.reset();
+            return ComposerAction::RunCommand(item.replacement.clone());
+        }
+        self.splice_completion(item, history, workflows);
+        ComposerAction::Redraw
+    }
+
+    fn splice_completion(
         &mut self,
         item: &CompletionItem,
         history: &[String],
@@ -341,6 +370,7 @@ impl ComposerState {
             &item.replacement,
         );
         self.popup = None;
+        self.slash_popup = false;
         self.history_index = None;
         self.refresh_ghost(history, workflows);
     }
@@ -348,10 +378,34 @@ impl ComposerState {
     fn on_buffer_edited(&mut self, history: &[String], workflows: &[Workflow]) {
         self.history_index = None;
         self.popup = None;
+        self.slash_popup = false;
         if self.editor.text().is_empty() {
             self.ai_reviewing = false;
         }
         self.refresh_ghost(history, workflows);
+        self.open_slash_menu(workflows);
+    }
+
+    /// Open the slash menu while the buffer is `/query` (see [`slash::slash_query`]).
+    pub fn open_slash_menu(&mut self, workflows: &[Workflow]) {
+        if self.ai_reviewing || self.editor.preedit().is_some() {
+            return;
+        }
+        let text = self.editor.text();
+        let Some(query) = slash::slash_query(text, self.editor.caret()) else {
+            return;
+        };
+        let inputs = slash::SlashInputs {
+            catalog: &self.slash,
+            workflows,
+            foreground: self.slash_foreground,
+        };
+        let items = slash::suggestions(query, text.len(), &inputs);
+        if !items.is_empty() {
+            self.ghost = None;
+            self.popup = Some(PopupState { items, selected: 0 });
+            self.slash_popup = true;
+        }
     }
 
     /// Check if path completion at the current caret needs a directory listing loaded.
@@ -562,8 +616,7 @@ impl ComposerState {
                     ComposerAction::Redraw
                 } else if !ctrl && !alt && !super_key {
                     if let Some(item) = self.popup.as_ref().and_then(PopupState::current).cloned() {
-                        self.apply_completion(&item, history, workflows);
-                        ComposerAction::Redraw
+                        self.apply_completion(&item, history, workflows)
                     } else if self.ai_enabled
                         && !self.ai_reviewing
                         && self.editor.text().trim_start().starts_with('#')
@@ -610,8 +663,7 @@ impl ComposerState {
                     path_commands,
                 );
                 if items.len() == 1 && cache_miss.is_none() && missing_gens.is_empty() {
-                    self.apply_completion(&items[0], history, workflows);
-                    return ComposerAction::Redraw;
+                    return self.apply_completion(&items[0], history, workflows);
                 }
                 if !items.is_empty() {
                     self.popup = Some(PopupState { items, selected: 0 });

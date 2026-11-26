@@ -212,7 +212,7 @@ impl App {
             return false;
         }
         if pressed && self.composer_mouse_press(button) {
-            return false;
+            return self.take_composer_exit_request();
         }
         let Some(code) = button_code(button) else {
             return false;

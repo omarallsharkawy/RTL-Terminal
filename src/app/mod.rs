@@ -277,6 +277,7 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::Review(generation, result) => self.on_review_loaded(generation, result),
             AppEvent::GitDiff(generation, stat) => self.on_git_diff(generation, stat),
             AppEvent::ComposerHistory(entries) => self.on_composer_history(entries),
+            AppEvent::ComposerSlash(catalog) => self.on_composer_slash(*catalog),
             AppEvent::ComposerDir(dir, entries) => self.on_composer_dir(dir, entries),
             AppEvent::ComposerGenerator(key, items) => self.on_composer_generator(key, items),
             AppEvent::ComposerPathInfo { commands, existing } => {

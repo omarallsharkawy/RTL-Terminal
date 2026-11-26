@@ -42,6 +42,14 @@ pub enum CompletionKind {
     Path,
     Workflow,
     History,
+    /// A Twitty command picked from the slash menu (runs instead of inserting text).
+    Action,
+    /// An agent skill (`SKILL.md`).
+    Skill,
+    /// An agent's built-in or custom slash command.
+    AgentCommand,
+    /// A configured MCP server.
+    Mcp,
 }
 
 impl CompletionKind {
@@ -64,6 +72,10 @@ impl CompletionKind {
             Self::Path => "path",
             Self::Workflow => "workflow",
             Self::History => "history",
+            Self::Action => "twitty",
+            Self::Skill => "skill",
+            Self::AgentCommand => "command",
+            Self::Mcp => "MCP",
         }
     }
 
@@ -86,6 +98,10 @@ impl CompletionKind {
             Self::Path => "مسار",
             Self::Workflow => "سير عمل",
             Self::History => "سجل",
+            Self::Action => "تويتي",
+            Self::Skill => "مهارة",
+            Self::AgentCommand => "أمر",
+            Self::Mcp => "MCP",
         }
     }
 }

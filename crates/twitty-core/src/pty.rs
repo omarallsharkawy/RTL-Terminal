@@ -440,6 +440,31 @@ impl Pty {
         false
     }
 
+    /// Command line of the pane's foreground job (not the shell itself), e.g. `["claude"]` or
+    /// `["node", "/usr/lib/node_modules/@openai/codex/bin/codex.js"]`. Linux only (`/proc`).
+    pub fn foreground_argv(&self) -> Option<Vec<String>> {
+        #[cfg(target_os = "linux")]
+        {
+            let group = self.master.process_group_leader()?;
+            // A pane started with a program (not a shell) runs it as its own leader.
+            if group <= 0 || (Some(group as u32) == self.pid && !self.direct_program) {
+                return None;
+            }
+            let raw = std::fs::read(format!("/proc/{group}/cmdline")).ok()?;
+            let argv: Vec<String> = raw
+                .split(|b| *b == 0)
+                .filter(|a| !a.is_empty())
+                .take(4)
+                .map(|a| String::from_utf8_lossy(a).into_owned())
+                .collect();
+            (!argv.is_empty()).then_some(argv)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            None
+        }
+    }
+
     /// The shell's current working directory, so a new tab or split can open in it.
     /// Only known on Linux (through `/proc`).
     pub fn cwd(&self) -> Option<PathBuf> {

@@ -888,9 +888,14 @@ fn check_agent_panel_golden(
         )
         .expect("offscreen render");
     let (w, h) = target.size();
+    compare_golden(name, w, h, &actual);
+}
+
+/// Compare `actual` with `tests/golden/<name>.png`, or write it under `TWITTY_BLESS`.
+fn compare_golden(name: &str, w: u32, h: u32, actual: &[u8]) {
     let reference = golden_dir().join(format!("{name}.png"));
     if env_flag("TWITTY_BLESS") {
-        write_png(&reference, w, h, &actual);
+        write_png(&reference, w, h, actual);
         eprintln!("blessed {}", reference.display());
         return;
     }
@@ -903,14 +908,14 @@ fn check_agent_panel_golden(
     let out = failure_dir();
     let actual_path = out.join(format!("{name}.actual.png"));
     if (ew, eh) != (w, h) {
-        write_png(&actual_path, w, h, &actual);
+        write_png(&actual_path, w, h, actual);
         panic!("{name}: size {w}x{h}, reference is {ew}x{eh}");
     }
-    let (bad, diff_image) = diff(&expected, &actual);
+    let (bad, diff_image) = diff(&expected, actual);
     let allowed = ((w * h) as f64 * MAX_BAD_FRACTION) as usize;
     if bad > allowed {
         let diff_path = out.join(format!("{name}.diff.png"));
-        write_png(&actual_path, w, h, &actual);
+        write_png(&actual_path, w, h, actual);
         write_png(&diff_path, w, h, &diff_image);
         panic!(
             "{name}: {bad} pixels differ from {} by more than {CHANNEL_TOLERANCE} (allowed {allowed})\nactual: {}\ndiff:   {}",
@@ -1205,4 +1210,147 @@ fn golden_memory_screen_ar_light() {
         "twitty-light",
         twitty::ui::chrome::UiLanguage::Arabic,
     );
+}
+
+/// The composer's `/` menu over a shell prompt: a Claude skill, an MCP server and Twitty
+/// commands, with English or Arabic details.
+fn check_slash_menu_golden(name: &str, palette_name: &str, lang: twitty::ui::chrome::UiLanguage) {
+    use twitty::composer::slash::{
+        suggestions, Agent, SlashCatalog, SlashInputs, SlashItem, SlashSource,
+    };
+    use twitty::render::scene::composer::{ComposerPopupItem, ComposerPopupView, ComposerView};
+    use twitty::render::text::ui::UiFont;
+    use twitty::render::ui_style::UiStyle;
+
+    let (width, height) = (760u32, 420u32);
+    let surface = (width as f32, height as f32);
+    let mut fonts = font_system();
+    let ui_font = UiFont::default();
+    let palette = Palette::named(palette_name).unwrap();
+    let metrics = CellMetrics::measure(&mut fonts, None, 14.5, 1.0);
+    let style = UiStyle::new(&palette, None, 1.0);
+    let rect = Rect::new(0.0, 0.0, surface.0, surface.1);
+    let (cols, rows) = metrics.grid_size(rect);
+    let mut term = Terminal::new(cols.max(20), rows.max(10), |_| {});
+    term.process_bytes(b"\x1b[?25l~/projects/twitty $ \r\n");
+    let (lines, cursor) = term.snapshot();
+    let panes = [PaneFrame {
+        id: PaneId(1),
+        rect,
+        lines,
+        cursor,
+        focused: true,
+        status: None,
+        blocks: Vec::new(),
+    }];
+
+    let item = |name: &str, source, description: &str| SlashItem {
+        name: name.into(),
+        source,
+        description: description.into(),
+        description_ar: None,
+    };
+    let catalog = SlashCatalog {
+        items: vec![
+            item(
+                "review",
+                SlashSource::Skill(Agent::Claude),
+                "Review the current diff for bugs",
+            ),
+            item(
+                "release-notes",
+                SlashSource::Command(Agent::Claude),
+                "Draft release notes",
+            ),
+            item("rea", SlashSource::Mcp(Agent::Claude), "MCP · rea"),
+        ],
+        project_root: None,
+    };
+    let inputs = SlashInputs {
+        catalog: &catalog,
+        workflows: &[],
+        foreground: None,
+    };
+    let query = "re";
+    let items = suggestions(query, 1 + query.len(), &inputs);
+    let popup = ComposerPopupView {
+        items: items
+            .iter()
+            .take(8)
+            .map(|i| ComposerPopupItem {
+                kind: i.kind,
+                label: i.label.clone(),
+                detail: i.localized_detail(lang).map(str::to_owned),
+            })
+            .collect(),
+        selected: 0,
+    };
+
+    let mut cache = RowCache::default();
+    let mut ime = PreeditState::default();
+    let mut ctx = DrawContext {
+        font_system: &mut fonts,
+        family: None,
+        palette: &palette,
+        metrics,
+        is_srgb: false,
+    };
+    let opts = FrameOptions {
+        window_focused: true,
+        cursor_style: "block",
+        cursor_blink_on: false,
+        surface,
+    };
+    let mut frame = build_frame(&mut ctx, &opts, &mut cache, &mut ime, &[], &panes, &[]);
+    frame.add_composer(
+        &mut ctx,
+        style,
+        &ui_font,
+        &ComposerView {
+            pane_rect: rect,
+            lines: vec![format!("/{query}")],
+            caret: (0, 1 + query.len()),
+            selection: None,
+            preedit: None,
+            ghost: None,
+            highlights: Vec::new(),
+            lints: Vec::new(),
+            focused: true,
+            cursor_blink_on: false,
+            popup: Some(popup),
+            language: lang,
+            ai: Default::default(),
+        },
+    );
+    let runs = frame.text_runs(&panes, &cache, &ime);
+    let _gpu = GPU.lock().unwrap_or_else(|e| e.into_inner());
+    let mut target = match Offscreen::new(width, height) {
+        Ok(target) => target,
+        Err(e) => {
+            assert!(
+                !env_flag("TWITTY_REQUIRE_GOLDEN"),
+                "TWITTY_REQUIRE_GOLDEN is set but golden test {name} cannot run: {e}"
+            );
+            eprintln!("note: skipping golden image {name}: {e}");
+            return;
+        }
+    };
+    let actual = target
+        .render_layers(
+            (&frame.quads, &frame.shapes),
+            runs,
+            ctx.font_system,
+            frame.background,
+            1.0,
+        )
+        .expect("offscreen render");
+    let (w, h) = target.size();
+    compare_golden(name, w, h, &actual);
+}
+
+#[test]
+fn golden_slash_menu_en_dark_and_ar_light() {
+    use twitty::ui::chrome::UiLanguage;
+    check_slash_menu_golden("slash_menu_en_dark", "twitty-dark", UiLanguage::English);
+    check_slash_menu_golden("slash_menu_ar_light", "twitty-light", UiLanguage::Arabic);
 }
