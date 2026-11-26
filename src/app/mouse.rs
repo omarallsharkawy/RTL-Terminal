@@ -81,6 +81,9 @@ impl App {
             return;
         } else if let Some(icon) = self.review_cursor(x, y).filter(|_| !captured) {
             self.window.set_cursor_icon(icon);
+        } else if let Some(icon) = self.agent_panel_mouse_move(x, y).filter(|_| !captured) {
+            self.window.set_cursor_icon(icon);
+            return;
         } else if let Some(icon) = cursor_icon_for(&hit, captured, self.window.cursor_icon()) {
             self.window.set_cursor_icon(icon);
         }
@@ -199,7 +202,13 @@ impl App {
         if pressed && self.block_ai_mouse_press(button) {
             return false;
         }
+        if !pressed && self.agent_panel_mouse_release(button) {
+            return false;
+        }
         if pressed && self.review_mouse_press(button) {
+            return false;
+        }
+        if pressed && self.agent_panel_mouse_press(button) {
             return false;
         }
         if pressed && self.composer_mouse_press(button) {
@@ -339,6 +348,9 @@ impl App {
             return;
         }
         if self.review_wheel(lines) {
+            return;
+        }
+        if self.agent_panel_wheel(lines) {
             return;
         }
         if self

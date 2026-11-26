@@ -58,8 +58,10 @@ pub struct Frame {
     pub shapes: ShapeLayers,
     chrome_labels: Vec<UiLabel>,
     review_labels: Vec<UiLabel>,
+    agent_panel_labels: Vec<UiLabel>,
     sidebar_rect: Option<Rect>,
     review_rect: Option<Rect>,
+    agent_panel_rect: Option<Rect>,
     pane_clips: Vec<(PaneId, TextBounds)>,
     /// Window clear color (the theme background) in surface space.
     pub background: [f32; 4],
@@ -69,6 +71,8 @@ pub struct Frame {
     sidebar_labels: Vec<super::sidebar::Label>,
     /// Labels of the code review panel.
     review_texts: Vec<super::review::ReviewText>,
+    /// Monospace terminal-shaped rows of the Agent side panel.
+    agent_panel_texts: Vec<super::agent::AgentText>,
     /// Per pane: the status line text and its top y.
     statuses: Vec<Option<(Buffer, f32)>>,
     /// Per pane: the badges of its command blocks (legacy mode).
@@ -323,14 +327,17 @@ pub(crate) fn build_frame_base(
         shapes: ShapeLayers::default(),
         chrome_labels: Vec::new(),
         review_labels: Vec::new(),
+        agent_panel_labels: Vec::new(),
         sidebar_rect: None,
         review_rect: None,
+        agent_panel_rect: None,
         pane_clips: Vec::new(),
         background,
         ime_area,
         tab_titles,
         sidebar_labels: Vec::new(),
         review_texts: Vec::new(),
+        agent_panel_texts: Vec::new(),
         statuses,
         badges,
         block_clips: Vec::new(),
@@ -704,6 +711,57 @@ impl Frame {
         self.review_texts = scene.texts;
     }
 
+    /// The Agent side panel, docked beside the panes (clipping underlying terminal text).
+    pub fn add_agent_panel(
+        &mut self,
+        ctx: &mut DrawContext,
+        view: &crate::ui::agent_panel::AgentPanelView,
+        style: UiStyle,
+        font: &UiFont,
+    ) {
+        self.add_agent_panel_motion(ctx, view, style, font, 1.0);
+    }
+
+    pub(crate) fn add_agent_panel_motion(
+        &mut self,
+        ctx: &mut DrawContext,
+        view: &crate::ui::agent_panel::AgentPanelView,
+        style: UiStyle,
+        font: &UiFont,
+        opacity: f32,
+    ) {
+        if opacity <= 0.0 {
+            return;
+        }
+        let mut scene = super::agent::build(ctx, view, style, font);
+        let dir = if view.mirrored() { -1.0 } else { 1.0 };
+        let slide = Slide::new(opacity, [dir * style.px(14.0), 0.0]);
+        if opacity < 1.0 {
+            self.shapes
+                .chrome
+                .extend(scene.quads.into_iter().map(|(x, y, w, h, fill)| {
+                    let mut shape =
+                        crate::render::shapes::Shape::rounded(Rect::new(x, y, w, h), 0.0, fill);
+                    slide.shape(&mut shape);
+                    shape
+                }));
+            scene.shapes.iter_mut().for_each(|shape| slide.shape(shape));
+            scene.labels.iter_mut().for_each(|label| slide.label(label));
+            for text in &mut scene.texts {
+                slide.text_position(&mut text.left, &mut text.top, &mut text.bounds);
+                for seg in &mut std::rc::Rc::make_mut(&mut text.row).segments {
+                    slide.buffer(&mut seg.buffer, ctx.font_system);
+                }
+            }
+        } else {
+            self.quads.extend(scene.quads);
+        }
+        self.shapes.chrome.extend(scene.shapes);
+        self.agent_panel_labels = scene.labels;
+        self.agent_panel_rect = Some(slide.rect(view.rect));
+        self.agent_panel_texts = scene.texts;
+    }
+
     pub fn add_attention(&mut self, ctx: &DrawContext, rects: &[Rect]) {
         self.quads
             .extend(super::sidebar::attention_quads(ctx, rects));
@@ -873,6 +931,21 @@ impl Frame {
             }
         }
         runs.extend(self.review_labels.iter().map(ui_run));
+        if let Some(hole) = self.agent_panel_rect {
+            runs = clip_runs(runs, hole);
+        }
+        for text in &self.agent_panel_texts {
+            for seg in &text.row.segments {
+                runs.push(TextRun {
+                    buffer: &seg.buffer,
+                    left: text.left + seg.seg_x,
+                    top: text.top,
+                    bounds: text.bounds,
+                    color: fg,
+                });
+            }
+        }
+        runs.extend(self.agent_panel_labels.iter().map(ui_run));
         for &hole in &self.composer_clips {
             runs = clip_runs(runs, hole);
         }

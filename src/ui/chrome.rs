@@ -89,6 +89,8 @@ pub struct WindowLayout {
     pub top_bar: Rect,
     /// The code review panel, when open (set by the window, not by `new`).
     pub review: Option<Rect>,
+    /// The docked Agent side panel, when open (set by the window, not by `new`).
+    pub agent_panel: Option<Rect>,
 }
 
 impl WindowLayout {
@@ -143,6 +145,7 @@ impl WindowLayout {
             language: UiLanguage::English,
             top_bar: Rect::new(0.0, 0.0, width, top),
             review: None,
+            agent_panel: None,
         }
     }
 

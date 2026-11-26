@@ -50,6 +50,10 @@ pub enum AppEvent {
     Projects(u64, Vec<crate::projects::ProjectItem>),
     /// Result of a non-interactive built-in AI CLI request.
     AiComplete(u64, crate::ai::AiResult),
+    /// Event emitted by the agent engine thread (`twitty_ai::engine::model`).
+    Agent(twitty_ai::engine::model::AgentEvent),
+    /// Assembled `ContextBundle` returned off-thread from `twitty_ai::context::assemble`.
+    AgentContext(u64, twitty_ai::engine::model::ContextBundle),
     /// Project memory snapshot loaded off the UI thread for the Memory screen.
     MemorySnapshot(u64, twitty_store::ProjectMemorySnapshot),
 }
@@ -149,18 +153,19 @@ impl App {
             self.record_project_cwd(&cwd);
             self.maybe_refresh_project_env(&cwd);
         }
-        if let Some(block) = finished_block {
+        if let Some(block) = &finished_block {
             crate::history::record_finished_block_with_excludes(
                 &self.store,
                 self.config.record_history,
                 &self.config.memory_exclude,
-                &block,
+                block,
                 finished_cwd.as_deref(),
                 is_local,
                 self.shell_name.as_deref(),
             );
         }
         if command_ended {
+            self.agent_panel_command_ended(id, finished_block.as_ref());
             self.review_command_ended(id);
         }
         self.window.request_redraw();

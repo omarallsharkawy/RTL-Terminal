@@ -1,0 +1,377 @@
+//! Window-free state, constants, keyring helpers, and layout model for Settings → AI
+//! (`docs/design/AGENT.md` §1.6).
+//!
+//! Only UI state + config keys + `SecretStore` integration live here; provider HTTP/CLI
+//! validation belongs to lane s10.
+
+use twitty_store::{SecretStore, SecretValue};
+
+use crate::config::TwittyConfig;
+use crate::layout::Rect;
+use crate::ui::chrome::UiLanguage;
+
+/// Default local Ollama server URL (AGENT.md §1.6).
+pub const DEFAULT_OLLAMA_URL: &str = "http://127.0.0.1:11434";
+
+/// API providers with keyring-backed keys in Settings → AI.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ApiProviderSpec {
+    pub id: &'static str,
+    pub label: &'static str,
+    /// Keyring account name under service `"twitty"`.
+    pub keyring_account: &'static str,
+}
+
+pub const API_PROVIDERS: [ApiProviderSpec; 3] = [
+    ApiProviderSpec {
+        id: "anthropic",
+        label: "Anthropic (Claude)",
+        keyring_account: "ai.api_key.anthropic",
+    },
+    ApiProviderSpec {
+        id: "openai",
+        label: "OpenAI",
+        keyring_account: "ai.api_key.openai",
+    },
+    ApiProviderSpec {
+        id: "gemini",
+        label: "Google Gemini",
+        keyring_account: "ai.api_key.gemini",
+    },
+];
+
+/// Default provider selector choices.
+pub const DEFAULT_PROVIDER_CHOICES: [(&str, &str, &str); 6] = [
+    ("", "Auto", "تلقائي"),
+    ("cli", "CLI", "CLI"),
+    ("anthropic", "Anthropic", "Anthropic"),
+    ("openai", "OpenAI", "OpenAI"),
+    ("gemini", "Gemini", "Gemini"),
+    ("ollama", "Ollama", "Ollama"),
+];
+
+/// Read-only hard-deny list displayed in Settings → AI (AGENT.md §1.6 & §2.2).
+pub const HARD_DENY_SUMMARY: [(&str, &str); 8] = [
+    (
+        "sudo / doas / pkexec / su",
+        "sudo / doas / pkexec / su (رفع الصلاحيات)",
+    ),
+    (
+        "curl | sh, wget | bash (network pipe to shell)",
+        "curl | sh, wget | bash (تمرير الشبكة إلى الشيل)",
+    ),
+    (
+        "rm -rf outside project root, /, ~, $HOME, ..",
+        "rm -rf خارج مجلد المشروع أو / أو ~ أو ..",
+    ),
+    (
+        "chmod -R / chown -R outside project root",
+        "chmod -R / chown -R خارج مجلد المشروع",
+    ),
+    (
+        "dd of=/dev/…, mkfs, fork bombs",
+        "dd of=/dev/… و mkfs وقنابل العمليات",
+    ),
+    (
+        "Writes to shell rc, ~/.ssh, ~/.gnupg, ~/.config/twitty, git hooks, /etc",
+        "الكتابة في ملفات الشيل و ~/.ssh و ~/.gnupg وإعدادات twitty و /etc",
+    ),
+    (
+        "Reads from ~/.ssh, ~/.gnupg, ~/.aws, ~/.config/gh, .netrc, keyrings",
+        "قراءة ~/.ssh و ~/.gnupg و ~/.aws و ~/.config/gh و .netrc ومخازن المفاتيح",
+    ),
+    (
+        "git push / --force / config --global, package installs (pip, npm -g, cargo install, apt, pacman, brew)",
+        "git push وتعديل git العام وتثبيت الحزم (pip و npm -g و cargo install و apt و pacman و brew)",
+    ),
+];
+
+/// Active text input inside Settings → AI.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AiTextField {
+    OllamaUrl,
+    CostCap,
+    AllowListAdd,
+    ApiKey(usize),
+}
+
+/// Window-free UI state for Settings → AI.
+#[derive(Clone, Debug, Default)]
+pub struct AiSettingsState {
+    /// Coding agent CLIs detected on PATH when Settings opened.
+    pub detected_cli_agents: Vec<String>,
+    /// Active project root for per-project allow-list & rules file approvals.
+    pub active_project_root: Option<String>,
+    /// Presence flags for API keys in the system keyring (never stores actual keys).
+    pub saved_keys: [bool; 3],
+    /// Currently active text input inside Settings → AI.
+    pub active_field: Option<AiTextField>,
+    /// Temporary masked buffer while typing an API key (scrubbed immediately on save/cancel).
+    pub key_draft: String,
+    /// Draft text for monthly cost cap in USD (blank = off).
+    pub cost_cap_draft: String,
+    /// Draft argv prefix for adding to the per-project allow-list.
+    pub allow_list_draft: String,
+    /// Inline status/feedback banner `(is_error, message)`.
+    pub notice: Option<(bool, String)>,
+    /// Confirmation state for "Clear agent history".
+    pub history_cleared: bool,
+}
+
+impl AiSettingsState {
+    /// Refresh keyring presence flags for all API providers without exposing or caching secrets.
+    pub fn refresh_key_flags(&mut self, store: &dyn SecretStore) {
+        for (i, spec) in API_PROVIDERS.iter().enumerate() {
+            self.saved_keys[i] =
+                matches!(store.get(spec.keyring_account), Ok(Some(v)) if !v.is_empty());
+        }
+    }
+
+    /// Initialize drafts from `config`.
+    pub fn sync_from_config(&mut self, config: &TwittyConfig) {
+        self.cost_cap_draft = config
+            .ai_monthly_cost_cap_usd
+            .map(|v| format!("{v:.2}"))
+            .unwrap_or_default();
+    }
+
+    /// Scrub and clear the temporary API key draft buffer.
+    pub fn clear_key_draft(&mut self) {
+        let mut raw = std::mem::take(&mut self.key_draft).into_bytes();
+        raw.fill(0);
+        std::hint::black_box(&raw);
+        if matches!(self.active_field, Some(AiTextField::ApiKey(_))) {
+            self.active_field = None;
+        }
+    }
+
+    /// Take the key draft as a [`SecretValue`] ready to be passed to [`SecretStore::set`].
+    pub fn take_key_secret(&mut self, provider_idx: usize) -> Option<(String, SecretValue)> {
+        let spec = API_PROVIDERS.get(provider_idx)?;
+        let trimmed = self.key_draft.trim().to_owned();
+        self.clear_key_draft();
+        if trimmed.is_empty() {
+            return None;
+        }
+        Some((spec.keyring_account.to_owned(), SecretValue::new(trimmed)))
+    }
+
+    /// Store `secret` for `account` directly into `store` (used by app & tests).
+    pub fn apply_save_secret(
+        &mut self,
+        store: &dyn SecretStore,
+        account: &str,
+        secret: &SecretValue,
+        language: UiLanguage,
+    ) {
+        match store.set(account, secret.expose()) {
+            Ok(()) => {
+                self.refresh_key_flags(store);
+                self.notice = Some((
+                    false,
+                    language
+                        .text(
+                            "API key saved to system keyring.",
+                            "تم حفظ مفتاح API في مخزن المفاتيح بالنظام.",
+                        )
+                        .to_owned(),
+                ));
+            }
+            Err(err) => {
+                self.notice = Some((true, format!("{err}")));
+            }
+        }
+    }
+
+    /// Delete the stored API key for `account` from `store`.
+    pub fn apply_delete_secret(
+        &mut self,
+        store: &dyn SecretStore,
+        account: &str,
+        language: UiLanguage,
+    ) {
+        match store.delete(account) {
+            Ok(_) => {
+                self.refresh_key_flags(store);
+                self.notice = Some((
+                    false,
+                    language
+                        .text(
+                            "API key removed from keyring.",
+                            "تم حذف مفتاح API من مخزن المفاتيح.",
+                        )
+                        .to_owned(),
+                ));
+            }
+            Err(err) => {
+                self.notice = Some((true, format!("{err}")));
+            }
+        }
+    }
+
+    /// Validate and parse `cost_cap_draft` into `config.ai_monthly_cost_cap_usd`.
+    pub fn commit_cost_cap(&mut self, config: &mut TwittyConfig, language: UiLanguage) -> bool {
+        let trimmed = self.cost_cap_draft.trim();
+        if trimmed.is_empty() {
+            if config.ai_monthly_cost_cap_usd.take().is_some() {
+                self.notice = None;
+                return true;
+            }
+            return false;
+        }
+        match trimmed.parse::<f64>() {
+            Ok(v) if v.is_finite() && v > 0.0 => {
+                let clamped = (v * 100.0).round() / 100.0;
+                config.ai_monthly_cost_cap_usd = Some(clamped);
+                self.cost_cap_draft = format!("{clamped:.2}");
+                self.notice = None;
+                true
+            }
+            _ => {
+                self.notice = Some((
+                    true,
+                    language
+                        .text(
+                            "Cost cap must be a positive USD number (or blank for off).",
+                            "يجب أن يكون سقف التكلفة رقماً موجباً بالدولار (أو فارغاً للتعطيل).",
+                        )
+                        .to_owned(),
+                ));
+                false
+            }
+        }
+    }
+
+    /// Project key used for per-project allow-list and rules approvals.
+    pub fn project_key(&self) -> &str {
+        self.active_project_root.as_deref().unwrap_or("default")
+    }
+
+    /// Add `allow_list_draft` to the current project's allow-list, rejecting shell metacharacters
+    /// per AGENT.md §2.2.
+    pub fn add_allow_list_entry(
+        &mut self,
+        config: &mut TwittyConfig,
+        language: UiLanguage,
+    ) -> bool {
+        let trimmed = self.allow_list_draft.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+        if contains_shell_metachar(trimmed) {
+            self.notice = Some((
+                true,
+                language
+                    .text(
+                        "Allow-list prefixes cannot contain shell metacharacters (;, &&, ||, |, $, >, <).",
+                        "لا يُسمح برموز الشيل الخاصة (;, &&, ||, |, $, >, <) في قائمة السماح.",
+                    )
+                    .to_owned(),
+            ));
+            return false;
+        }
+        let key = self.project_key().to_owned();
+        let entry = trimmed.to_owned();
+        let list = config.ai_project_allow_list.entry(key).or_default();
+        if !list.iter().any(|existing| existing == &entry) {
+            list.push(entry);
+            self.allow_list_draft.clear();
+            self.notice = None;
+            return true;
+        }
+        self.allow_list_draft.clear();
+        false
+    }
+
+    pub fn remove_allow_list_entry(&mut self, index: usize, config: &mut TwittyConfig) -> bool {
+        let key = self.project_key().to_owned();
+        if let Some(list) = config.ai_project_allow_list.get_mut(&key) {
+            if index < list.len() {
+                list.remove(index);
+                if list.is_empty() {
+                    config.ai_project_allow_list.remove(&key);
+                }
+                return true;
+            }
+        }
+        false
+    }
+}
+
+/// Detect installed coding-agent CLIs on `$PATH` (non-blocking, bounded).
+pub fn detect_cli_agents_on_path() -> Vec<String> {
+    let candidates = ["claude", "codex", "gemini", "opencode"];
+    let Some(path_var) = std::env::var_os("PATH") else {
+        return Vec::new();
+    };
+    let dirs: Vec<_> = std::env::split_paths(&path_var).collect();
+    let mut found = Vec::new();
+    for name in candidates {
+        let present = dirs.iter().any(|dir| {
+            let candidate = dir.join(name);
+            candidate.is_file()
+        });
+        if present {
+            found.push(name.to_owned());
+        }
+    }
+    found
+}
+
+fn contains_shell_metachar(s: &str) -> bool {
+    s.contains(';')
+        || s.contains("&&")
+        || s.contains("||")
+        || s.contains('|')
+        || s.contains('`')
+        || s.contains("$(")
+        || s.contains('>')
+        || s.contains('<')
+        || s.contains('\n')
+        || s.contains('\r')
+}
+
+/// Physical-pixel layout of the Settings → AI section.
+#[derive(Clone, Debug)]
+pub struct AiSectionLayout {
+    pub default_provider_buttons: Vec<(usize, Rect)>,
+    pub cli_section: Rect,
+    pub api_rows: Vec<AiApiRowLayout>,
+    pub ollama_input: Rect,
+    pub cost_cap_input: Rect,
+    pub allow_input: Rect,
+    pub allow_add_button: Rect,
+    pub allow_entries: Vec<(usize, Rect, Rect)>,
+    pub deny_box: Rect,
+    pub clear_history_button: Rect,
+    pub notice_rect: Option<Rect>,
+}
+
+impl Default for AiSectionLayout {
+    fn default() -> Self {
+        let zero = Rect::new(0.0, 0.0, 0.0, 0.0);
+        Self {
+            default_provider_buttons: Vec::new(),
+            cli_section: zero,
+            api_rows: Vec::new(),
+            ollama_input: zero,
+            cost_cap_input: zero,
+            allow_input: zero,
+            allow_add_button: zero,
+            allow_entries: Vec::new(),
+            deny_box: zero,
+            clear_history_button: zero,
+            notice_rect: None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct AiApiRowLayout {
+    pub index: usize,
+    pub row: Rect,
+    pub set_key_button: Rect,
+    pub clear_key_button: Option<Rect>,
+    pub key_input: Option<Rect>,
+    pub key_save_button: Option<Rect>,
+}

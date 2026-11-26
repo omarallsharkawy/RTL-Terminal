@@ -1,5 +1,6 @@
 //! Building the frame on the CPU: every quad and text run, before any GPU work.
 
+pub mod agent;
 pub mod ai;
 pub mod blocks;
 pub mod chrome;

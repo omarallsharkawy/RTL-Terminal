@@ -706,6 +706,14 @@ pub struct SettingsOutcome {
     pub preview_theme: Option<Option<String>>,
     /// Text to copy to the clipboard (About -> Copy config path).
     pub copy_text: Option<String>,
+    /// AI section config keys changed and should be saved (`config.save()`).
+    pub ai_config_changed: bool,
+    /// Save an API key `(account, secret)` into the system keyring (never `config.json`).
+    pub save_secret: Option<(String, twitty_store::SecretValue)>,
+    /// Delete an API key `account` from the system keyring.
+    pub delete_secret: Option<String>,
+    /// Clear in-memory agent panel session history.
+    pub clear_agent_history: bool,
     /// Open the Project Memory overlay (Settings -> AI -> Project memory).
     pub open_memory: bool,
 }
@@ -769,6 +777,8 @@ pub struct SettingsPanelState {
     pub hover: Option<SettingsHit>,
     /// Cached built-in commands for the `Keys` section.
     commands: Vec<Command>,
+    /// State for the Settings → AI section (AGENT.md §1.6).
+    pub ai: crate::ui::settings_ai::AiSettingsState,
 }
 
 impl Default for SettingsPanelState {
@@ -805,6 +815,7 @@ impl SettingsPanelState {
             env_language: language,
             hover: None,
             commands: commands::all(),
+            ai: crate::ui::settings_ai::AiSettingsState::default(),
         }
     }
 
@@ -959,6 +970,9 @@ impl SettingsPanelState {
         if self.section == SettingsSection::Keys {
             return true;
         }
+        if self.section == SettingsSection::Ai {
+            return self.ai.active_field.is_some();
+        }
         matches!(self.focused_setting(), Some(SettingId::AgentCommand))
     }
 
@@ -974,10 +988,15 @@ impl SettingsPanelState {
             outcome.redraw = true;
         }
         if self.section != section {
+            self.ai.clear_key_draft();
+            self.ai.active_field = None;
             self.section = section;
             self.selected = 0;
             self.scroll_y = 0.0;
             self.copied_config_path = false;
+            if section == SettingsSection::Ai {
+                self.ai.sync_from_config(config);
+            }
             outcome.redraw = true;
         }
         outcome
@@ -1118,6 +1137,32 @@ impl SettingsPanelState {
                 self.selected = 0;
                 self.keys_scroll = 0;
                 outcome.redraw = true;
+            }
+            return outcome;
+        }
+        if self.section == SettingsSection::Ai {
+            use crate::ui::settings_ai::AiTextField;
+            match self.ai.active_field {
+                Some(AiTextField::OllamaUrl) => {
+                    if push_bounded(&mut config.ai_ollama_url, text) {
+                        outcome.ai_config_changed = true;
+                        outcome.redraw = true;
+                    }
+                }
+                Some(AiTextField::CostCap) => {
+                    if push_bounded(&mut self.ai.cost_cap_draft, text) {
+                        outcome.redraw = true;
+                    }
+                }
+                Some(AiTextField::AllowListAdd) => {
+                    if push_bounded(&mut self.ai.allow_list_draft, text) {
+                        outcome.redraw = true;
+                    }
+                }
+                Some(AiTextField::ApiKey(_)) if push_bounded(&mut self.ai.key_draft, text) => {
+                    outcome.redraw = true;
+                }
+                Some(AiTextField::ApiKey(_)) | None => {}
             }
             return outcome;
         }
@@ -1295,7 +1340,93 @@ impl SettingsPanelState {
             }
         }
 
-        // 5. Keys section content: searchable, editable shortcut list.
+        // 5. AI section content: text fields for Ollama URL, cost cap, allow-list, and keyring key entry.
+        if self.section == SettingsSection::Ai {
+            use crate::ui::settings_ai::AiTextField;
+            if let Some(field) = self.ai.active_field {
+                match key {
+                    Key::Named(NamedKey::Escape) => {
+                        if matches!(field, AiTextField::ApiKey(_)) {
+                            self.ai.clear_key_draft();
+                        } else {
+                            self.ai.active_field = None;
+                        }
+                        outcome.redraw = true;
+                        return outcome;
+                    }
+                    Key::Named(NamedKey::Enter) => {
+                        match field {
+                            AiTextField::ApiKey(idx) => {
+                                if let Some(pair) = self.ai.take_key_secret(idx) {
+                                    outcome.save_secret = Some(pair);
+                                }
+                            }
+                            AiTextField::CostCap => {
+                                if self.ai.commit_cost_cap(config, self.language) {
+                                    outcome.ai_config_changed = true;
+                                }
+                                self.ai.active_field = None;
+                            }
+                            AiTextField::AllowListAdd => {
+                                if self.ai.add_allow_list_entry(config, self.language) {
+                                    outcome.ai_config_changed = true;
+                                }
+                            }
+                            AiTextField::OllamaUrl => {
+                                if config.ai_ollama_url.trim().is_empty() {
+                                    config.ai_ollama_url =
+                                        crate::ui::settings_ai::DEFAULT_OLLAMA_URL.to_owned();
+                                }
+                                outcome.ai_config_changed = true;
+                                self.ai.active_field = None;
+                            }
+                        }
+                        outcome.redraw = true;
+                        return outcome;
+                    }
+                    Key::Named(NamedKey::Backspace) => {
+                        let word = modifiers.control_key() || modifiers.alt_key();
+                        match field {
+                            AiTextField::OllamaUrl => {
+                                if backspace_text(&mut config.ai_ollama_url, word) {
+                                    outcome.ai_config_changed = true;
+                                    outcome.redraw = true;
+                                }
+                            }
+                            AiTextField::CostCap => {
+                                if backspace_text(&mut self.ai.cost_cap_draft, word) {
+                                    outcome.redraw = true;
+                                }
+                            }
+                            AiTextField::AllowListAdd => {
+                                if backspace_text(&mut self.ai.allow_list_draft, word) {
+                                    outcome.redraw = true;
+                                }
+                            }
+                            AiTextField::ApiKey(_) => {
+                                if backspace_text(&mut self.ai.key_draft, word) {
+                                    outcome.redraw = true;
+                                }
+                            }
+                        }
+                        return outcome;
+                    }
+                    _ => {
+                        if !modifiers.control_key() && !modifiers.alt_key() {
+                            if let Some(t) = text.or(match key {
+                                Key::Character(c) => Some(c.as_str()),
+                                _ => None,
+                            }) {
+                                return self.on_text(t, config);
+                            }
+                        }
+                        return outcome;
+                    }
+                }
+            }
+        }
+
+        // 5b. Keys section content: searchable, editable shortcut list.
         if self.section == SettingsSection::Keys {
             let count = self.filtered_commands().len();
             let visible = SettingsLayout::build(surface, scale, self, config)
@@ -1557,7 +1688,10 @@ impl SettingsPanelState {
 
     fn ensure_focused_visible(&mut self, config: &TwittyConfig, surface: (f32, f32), scale: f32) {
         if self.focus != FocusZone::Content
-            || matches!(self.section, SettingsSection::Keys | SettingsSection::About)
+            || matches!(
+                self.section,
+                SettingsSection::Ai | SettingsSection::Keys | SettingsSection::About
+            )
         {
             return;
         }
@@ -1926,6 +2060,88 @@ impl SettingsPanelState {
                     outcome.redraw = true;
                 }
             }
+            SettingsHit::AiDefaultProvider(idx) => {
+                self.focus = FocusZone::Content;
+                self.ai.active_field = None;
+                if let Some(&(id, _, _)) = crate::ui::settings_ai::DEFAULT_PROVIDER_CHOICES.get(idx)
+                {
+                    let next = (!id.is_empty()).then(|| id.to_owned());
+                    if config.ai_default_provider != next {
+                        config.ai_default_provider = next;
+                        outcome.ai_config_changed = true;
+                    }
+                    outcome.redraw = true;
+                }
+            }
+            SettingsHit::AiSetKey(idx) => {
+                use crate::ui::settings_ai::AiTextField;
+                self.focus = FocusZone::Content;
+                if self.ai.active_field == Some(AiTextField::ApiKey(idx)) {
+                    self.ai.clear_key_draft();
+                } else {
+                    self.ai.clear_key_draft();
+                    self.ai.active_field = Some(AiTextField::ApiKey(idx));
+                }
+                outcome.redraw = true;
+            }
+            SettingsHit::AiSaveKey(idx) => {
+                self.focus = FocusZone::Content;
+                if let Some(pair) = self.ai.take_key_secret(idx) {
+                    outcome.save_secret = Some(pair);
+                }
+                outcome.redraw = true;
+            }
+            SettingsHit::AiClearKey(idx) => {
+                self.focus = FocusZone::Content;
+                self.ai.clear_key_draft();
+                if let Some(spec) = crate::ui::settings_ai::API_PROVIDERS.get(idx) {
+                    outcome.delete_secret = Some(spec.keyring_account.to_owned());
+                }
+                outcome.redraw = true;
+            }
+            SettingsHit::AiKeyInput(idx) => {
+                self.focus = FocusZone::Content;
+                self.ai.active_field = Some(crate::ui::settings_ai::AiTextField::ApiKey(idx));
+                outcome.redraw = true;
+            }
+            SettingsHit::AiOllamaInput => {
+                self.focus = FocusZone::Content;
+                self.ai.clear_key_draft();
+                self.ai.active_field = Some(crate::ui::settings_ai::AiTextField::OllamaUrl);
+                outcome.redraw = true;
+            }
+            SettingsHit::AiCostCapInput => {
+                self.focus = FocusZone::Content;
+                self.ai.clear_key_draft();
+                self.ai.active_field = Some(crate::ui::settings_ai::AiTextField::CostCap);
+                outcome.redraw = true;
+            }
+            SettingsHit::AiAllowInput => {
+                self.focus = FocusZone::Content;
+                self.ai.clear_key_draft();
+                self.ai.active_field = Some(crate::ui::settings_ai::AiTextField::AllowListAdd);
+                outcome.redraw = true;
+            }
+            SettingsHit::AiAllowAdd => {
+                self.focus = FocusZone::Content;
+                if self.ai.add_allow_list_entry(config, self.language) {
+                    outcome.ai_config_changed = true;
+                }
+                outcome.redraw = true;
+            }
+            SettingsHit::AiAllowRemove(idx) => {
+                self.focus = FocusZone::Content;
+                if self.ai.remove_allow_list_entry(idx, config) {
+                    outcome.ai_config_changed = true;
+                }
+                outcome.redraw = true;
+            }
+            SettingsHit::AiClearHistory => {
+                self.focus = FocusZone::Content;
+                self.ai.history_cleared = true;
+                outcome.clear_agent_history = true;
+                outcome.redraw = true;
+            }
             SettingsHit::OpenMemory => {
                 self.focus_setting(SettingId::ProjectMemory);
                 outcome.open_memory = true;
@@ -2266,6 +2482,17 @@ pub enum SettingsHit {
     KeyChange(usize),
     KeyReset(usize),
     CopyConfigPath,
+    AiDefaultProvider(usize),
+    AiSetKey(usize),
+    AiSaveKey(usize),
+    AiClearKey(usize),
+    AiKeyInput(usize),
+    AiOllamaInput,
+    AiCostCapInput,
+    AiAllowInput,
+    AiAllowAdd,
+    AiAllowRemove(usize),
+    AiClearHistory,
     OpenMemory,
 }
 
@@ -2279,7 +2506,13 @@ impl SettingsHit {
     pub fn is_text_input(self) -> bool {
         matches!(
             self,
-            Self::TextField(_) | Self::PickerSearch(_) | Self::KeysSearch
+            Self::TextField(_)
+                | Self::PickerSearch(_)
+                | Self::KeysSearch
+                | Self::AiKeyInput(_)
+                | Self::AiOllamaInput
+                | Self::AiCostCapInput
+                | Self::AiAllowInput
         )
     }
 }
@@ -2355,6 +2588,7 @@ pub struct SettingsLayout {
     pub viewport: Rect,
     pub sections: [(SettingsSection, Rect); 5],
     pub rows: Vec<ControlRowLayout>,
+    pub ai: Option<crate::ui::settings_ai::AiSectionLayout>,
     pub keys_search: Option<Rect>,
     pub keys_reset_all: Option<Rect>,
     pub keys_banner: Option<Rect>,
@@ -2486,6 +2720,7 @@ impl SettingsLayout {
             viewport,
             sections,
             rows: Vec::new(),
+            ai: None,
             keys_search: None,
             keys_reset_all: None,
             keys_banner: None,
@@ -2501,8 +2736,11 @@ impl SettingsLayout {
         };
 
         match state.section {
-            SettingsSection::Appearance | SettingsSection::Behaviour | SettingsSection::Ai => {
+            SettingsSection::Appearance | SettingsSection::Behaviour => {
                 layout.build_control_rows(scale, state, config);
+            }
+            SettingsSection::Ai => {
+                layout.build_ai_layout(scale, state, config);
             }
             SettingsSection::Keys => {
                 layout.build_keys_layout(scale, state, config);
@@ -2788,6 +3026,265 @@ impl SettingsLayout {
         }
     }
 
+    fn build_ai_layout(&mut self, scale: f32, state: &SettingsPanelState, config: &TwittyConfig) {
+        use crate::ui::settings_ai::{
+            AiApiRowLayout, AiSectionLayout, AiTextField, API_PROVIDERS, DEFAULT_PROVIDER_CHOICES,
+            HARD_DENY_SUMMARY,
+        };
+        let px = |l: f32| l * scale;
+        let vp = self.viewport;
+        let gap = px(8.0).round();
+        let allow_count = config
+            .ai_project_allow_list
+            .get(state.ai.project_key())
+            .map_or(0, Vec::len);
+        let key_open_extra = if matches!(state.ai.active_field, Some(AiTextField::ApiKey(_))) {
+            px(34.0)
+        } else {
+            0.0
+        };
+        let notice_h = if state.ai.notice.is_some() {
+            px(30.0) + gap
+        } else {
+            0.0
+        };
+        let mem_row_h = px(48.0).round();
+        let deny_h = px(26.0) + HARD_DENY_SUMMARY.len() as f32 * px(18.0) + px(12.0);
+        let total_h = notice_h
+            + mem_row_h
+            + gap
+            + px(56.0) // default provider
+            + gap
+            + px(44.0) // cli agents
+            + gap
+            + API_PROVIDERS.len() as f32 * (px(36.0) + px(4.0))
+            + key_open_extra
+            + gap
+            + px(38.0) // ollama url
+            + gap
+            + px(38.0) // cost cap
+            + gap
+            + px(68.0) // allow list header + add input
+            + allow_count as f32 * px(28.0)
+            + gap
+            + deny_h
+            + gap
+            + px(36.0); // clear history
+
+        self.max_scroll = ((total_h - vp.h).max(0.0)) / scale;
+        let scroll_px = (state.scroll_y.clamp(0.0, self.max_scroll) * scale).round();
+        let mut y = vp.y - scroll_px;
+
+        let mut ai = AiSectionLayout::default();
+        if state.ai.notice.is_some() {
+            ai.notice_rect = Some(Rect::new(vp.x, y, vp.w, px(30.0)));
+            y += px(30.0) + gap;
+        }
+
+        // Top row: n21 Project Memory entry (rules-file SHA-256 approvals, facts, commands, env, exclusions).
+        {
+            let rect = Rect::new(vp.x, y, vp.w, mem_row_h);
+            let inner_pad = px(10.0);
+            let inner = Rect::new(
+                rect.x + inner_pad,
+                rect.y,
+                (rect.w - 2.0 * inner_pad).max(0.0),
+                rect.h,
+            );
+            let widget_w = px(130.0).min(inner.w * 0.45);
+            let row_gap = px(12.0);
+            let (label, widget) = if self.mirrored {
+                let w_rect = Rect::new(inner.x, inner.y, widget_w, inner.h);
+                let l_x = w_rect.right() + row_gap;
+                let l_rect = Rect::new(l_x, inner.y, (inner.right() - l_x).max(0.0), inner.h);
+                (l_rect, w_rect)
+            } else {
+                let w_rect = Rect::new(inner.right() - widget_w, inner.y, widget_w, inner.h);
+                let l_rect = Rect::new(
+                    inner.x,
+                    inner.y,
+                    (w_rect.x - row_gap - inner.x).max(0.0),
+                    inner.h,
+                );
+                (l_rect, w_rect)
+            };
+            let geometry = build_control_geometry(
+                SettingId::ProjectMemory.descriptor().kind,
+                widget,
+                scale,
+                self.mirrored,
+            );
+            self.rows.push(ControlRowLayout {
+                id: SettingId::ProjectMemory,
+                rect,
+                label,
+                widget,
+                geometry,
+                picker: None,
+            });
+            y += mem_row_h + gap;
+        }
+
+        // Default provider buttons.
+        y += px(22.0);
+        let n_prov = DEFAULT_PROVIDER_CHOICES.len() as f32;
+        let p_gap = px(4.0);
+        let p_w = ((vp.w - p_gap * (n_prov - 1.0)) / n_prov).max(px(36.0));
+        for i in 0..DEFAULT_PROVIDER_CHOICES.len() {
+            let vis = if self.mirrored {
+                DEFAULT_PROVIDER_CHOICES.len() - 1 - i
+            } else {
+                i
+            };
+            ai.default_provider_buttons.push((
+                i,
+                Rect::new(vp.x + vis as f32 * (p_w + p_gap), y, p_w, px(26.0)),
+            ));
+        }
+        y += px(34.0) + gap;
+
+        // CLI agents box.
+        ai.cli_section = Rect::new(vp.x, y, vp.w, px(44.0));
+        y += px(44.0) + gap;
+
+        // API providers with Set key… / Clear + inline masked input.
+        for (i, _) in API_PROVIDERS.iter().enumerate() {
+            let row = Rect::new(vp.x, y, vp.w, px(36.0));
+            let btn_w = px(88.0).min(vp.w * 0.28);
+            let clear_w = px(56.0);
+            let by = row.y + (row.h - px(24.0)) * 0.5;
+            let (set_btn, clear_btn) = if self.mirrored {
+                let set = Rect::new(row.x + px(8.0), by, btn_w, px(24.0));
+                let clr = state.ai.saved_keys[i]
+                    .then(|| Rect::new(set.right() + px(6.0), by, clear_w, px(24.0)));
+                (set, clr)
+            } else {
+                let set = Rect::new(row.right() - px(8.0) - btn_w, by, btn_w, px(24.0));
+                let clr = state.ai.saved_keys[i]
+                    .then(|| Rect::new(set.x - px(6.0) - clear_w, by, clear_w, px(24.0)));
+                (set, clr)
+            };
+            y += px(36.0) + px(4.0);
+
+            let (key_input, key_save_button) =
+                if state.ai.active_field == Some(AiTextField::ApiKey(i)) {
+                    let save_w = px(66.0);
+                    let in_r = if self.mirrored {
+                        let sv = Rect::new(vp.x + px(8.0), y, save_w, px(26.0));
+                        let inp = Rect::new(
+                            sv.right() + px(6.0),
+                            y,
+                            (vp.right() - px(8.0) - (sv.right() + px(6.0))).max(0.0),
+                            px(26.0),
+                        );
+                        (Some(inp), Some(sv))
+                    } else {
+                        let sv = Rect::new(vp.right() - px(8.0) - save_w, y, save_w, px(26.0));
+                        let inp = Rect::new(
+                            vp.x + px(8.0),
+                            y,
+                            (sv.x - px(6.0) - (vp.x + px(8.0))).max(0.0),
+                            px(26.0),
+                        );
+                        (Some(inp), Some(sv))
+                    };
+                    y += px(34.0);
+                    in_r
+                } else {
+                    (None, None)
+                };
+
+            ai.api_rows.push(AiApiRowLayout {
+                index: i,
+                row,
+                set_key_button: set_btn,
+                clear_key_button: clear_btn,
+                key_input,
+                key_save_button,
+            });
+        }
+        y += gap;
+
+        // Ollama URL row.
+        let field_w = px(240.0).min(vp.w * 0.54);
+        ai.ollama_input = if self.mirrored {
+            Rect::new(vp.x, y + px(5.0), field_w, px(28.0))
+        } else {
+            Rect::new(vp.right() - field_w, y + px(5.0), field_w, px(28.0))
+        };
+        y += px(38.0) + gap;
+
+        // Monthly cost cap row.
+        ai.cost_cap_input = if self.mirrored {
+            Rect::new(vp.x, y + px(5.0), px(140.0).min(vp.w * 0.4), px(28.0))
+        } else {
+            let w = px(140.0).min(vp.w * 0.4);
+            Rect::new(vp.right() - w, y + px(5.0), w, px(28.0))
+        };
+        y += px(38.0) + gap;
+
+        // Per-project allow-list editor.
+        y += px(24.0);
+        let add_w = px(64.0);
+        if self.mirrored {
+            ai.allow_add_button = Rect::new(vp.x, y, add_w, px(28.0));
+            ai.allow_input = Rect::new(
+                ai.allow_add_button.right() + px(6.0),
+                y,
+                (vp.right() - (ai.allow_add_button.right() + px(6.0))).max(0.0),
+                px(28.0),
+            );
+        } else {
+            ai.allow_add_button = Rect::new(vp.right() - add_w, y, add_w, px(28.0));
+            ai.allow_input = Rect::new(
+                vp.x,
+                y,
+                (ai.allow_add_button.x - px(6.0) - vp.x).max(0.0),
+                px(28.0),
+            );
+        }
+        y += px(34.0);
+        for idx in 0..allow_count {
+            let row = Rect::new(vp.x, y, vp.w, px(24.0));
+            let rm_w = px(24.0);
+            let rm = if self.mirrored {
+                Rect::new(row.x + px(4.0), row.y, rm_w, row.h)
+            } else {
+                Rect::new(row.right() - px(4.0) - rm_w, row.y, rm_w, row.h)
+            };
+            ai.allow_entries.push((idx, row, rm));
+            y += px(28.0);
+        }
+        y += gap;
+
+        // Read-only deny-list view.
+        ai.deny_box = Rect::new(vp.x, y, vp.w, deny_h);
+        y += deny_h + gap;
+
+        // Clear agent history button.
+        let clr_w = px(156.0).min(vp.w);
+        ai.clear_history_button = if self.mirrored {
+            Rect::new(vp.right() - clr_w, y, clr_w, px(28.0))
+        } else {
+            Rect::new(vp.x, y, clr_w, px(28.0))
+        };
+
+        if self.max_scroll > 0.0 && vp.h > 0.0 {
+            let thumb_h = (vp.h * (vp.h / total_h)).clamp(px(24.0), vp.h);
+            let ratio =
+                (state.scroll_y.clamp(0.0, self.max_scroll) / self.max_scroll).clamp(0.0, 1.0);
+            let thumb_y = vp.y + ratio * (vp.h - thumb_h);
+            let track_x = if self.mirrored {
+                self.content.x + px(4.0)
+            } else {
+                self.content.right() - px(10.0)
+            };
+            self.scrollbar = Some(Rect::new(track_x, thumb_y, px(4.0), thumb_h));
+        }
+
+        self.ai = Some(ai);
+    }
+
     /// Hit-test physical pixel `(x, y)` against the settings overlay.
     pub fn hit(&self, x: f64, y: f64) -> SettingsHit {
         if !self.panel.contains(x, y) {
@@ -2825,6 +3322,49 @@ impl SettingsLayout {
         if let Some(copy_btn) = self.copy_button {
             if copy_btn.contains(x, y) {
                 return SettingsHit::CopyConfigPath;
+            }
+        }
+        if let Some(ai) = &self.ai {
+            if self.viewport.contains(x, y) {
+                for &(idx, r) in &ai.default_provider_buttons {
+                    if r.contains(x, y) {
+                        return SettingsHit::AiDefaultProvider(idx);
+                    }
+                }
+                for row in &ai.api_rows {
+                    if row.set_key_button.contains(x, y) {
+                        return SettingsHit::AiSetKey(row.index);
+                    }
+                    if row.clear_key_button.is_some_and(|r| r.contains(x, y)) {
+                        return SettingsHit::AiClearKey(row.index);
+                    }
+                    if row.key_save_button.is_some_and(|r| r.contains(x, y)) {
+                        return SettingsHit::AiSaveKey(row.index);
+                    }
+                    if row.key_input.is_some_and(|r| r.contains(x, y)) {
+                        return SettingsHit::AiKeyInput(row.index);
+                    }
+                }
+                if ai.ollama_input.contains(x, y) {
+                    return SettingsHit::AiOllamaInput;
+                }
+                if ai.cost_cap_input.contains(x, y) {
+                    return SettingsHit::AiCostCapInput;
+                }
+                if ai.allow_add_button.contains(x, y) {
+                    return SettingsHit::AiAllowAdd;
+                }
+                if ai.allow_input.contains(x, y) {
+                    return SettingsHit::AiAllowInput;
+                }
+                for &(idx, _, rm) in &ai.allow_entries {
+                    if rm.contains(x, y) {
+                        return SettingsHit::AiAllowRemove(idx);
+                    }
+                }
+                if ai.clear_history_button.contains(x, y) {
+                    return SettingsHit::AiClearHistory;
+                }
             }
         }
         if self.viewport.contains(x, y) {

@@ -74,6 +74,7 @@ commands! {
     "ai.explain-error", "Explain error", "اشرح الخطأ", None => InputAction::ExplainBlockError;
     "ai.suggest-fix", "Suggest a fix", "اقترح حل", None => InputAction::SuggestBlockFix;
     "agent.ask", "Ask an agent about this output", "اسأل وكيل عن الناتج ده", Some("Ctrl+Shift+A") => InputAction::AskAgent;
+    "agent.panel", "Agent panel", "لوحة الوكيل", Some("Ctrl+Shift+.") => InputAction::ToggleAgentPanel;
     "review.toggle", "Review changes", "راجع التغييرات", Some("Ctrl+Shift+R") => InputAction::ToggleReview;
     "edit.copy", "Copy", "نسخ", Some("Ctrl+Shift+C") => InputAction::Copy;
     "edit.paste", "Paste", "لصق", Some("Ctrl+Shift+V") => InputAction::Paste;

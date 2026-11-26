@@ -109,7 +109,6 @@ impl App {
 
     /// Store a user-approved fact from the agent panel (`AgentEvent::RememberFact`), honoring
     /// `config.memory_exclude`.
-    #[allow(dead_code)]
     pub(crate) fn remember_fact(&self, project_root: Option<&Path>, text: &str) -> bool {
         crate::memory::remember_fact_with_excludes(
             &self.store,

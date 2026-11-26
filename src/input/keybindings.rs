@@ -778,6 +778,7 @@ pub fn default_chords_for(command_name: &str) -> Vec<Chord> {
         "block.next" => vec![cs(ArrowDown)],
         "block.copy-output" => vec![cs(KeyY)],
         "agent.ask" => vec![cs(KeyA)],
+        "agent.panel" => vec![cs(Period)],
         "review.toggle" => vec![cs(KeyR)],
         "edit.copy" => vec![cs(KeyC)],
         "edit.paste" => vec![cs(KeyV)],

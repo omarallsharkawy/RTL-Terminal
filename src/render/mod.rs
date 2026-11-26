@@ -124,6 +124,8 @@ pub(crate) struct Renderer {
     /// The code review panel, while it is open.
     review_view: AnimatedView<crate::review::panel::View>,
     review_labels: scene::review::ReviewCache,
+    /// The docked Agent side panel, while it is open.
+    agent_panel_view: AnimatedView<crate::ui::agent_panel::AgentPanelView>,
     /// Render OSC 133 command blocks as rounded cards with a hover toolbar.
     block_cards: bool,
     /// Block card (and optional toolbar button) currently hovered by the pointer.
@@ -186,6 +188,7 @@ impl Renderer {
             welcome_view: None,
             review_view: AnimatedView::default(),
             review_labels: Default::default(),
+            agent_panel_view: AnimatedView::default(),
             block_cards: true,
             block_hover: None,
             block_fades: BlockFades::default(),
@@ -358,6 +361,7 @@ impl Renderer {
     pub(crate) fn next_motion_frame(&self, now: Instant) -> Option<Instant> {
         [
             self.review_view.next_frame(now),
+            self.agent_panel_view.next_frame(now),
             self.composer_view.next_frame(now),
             self.palette_view.next_frame(now),
             self.block_fades.cards.next_frame(now),
@@ -444,6 +448,12 @@ impl Renderer {
     /// Show the code review panel (`Some`) or hide it.
     pub(crate) fn set_review(&mut self, view: Option<crate::review::panel::View>) {
         self.review_view
+            .set(view, Instant::now(), self.reduce_motion);
+    }
+
+    /// Show the Agent side panel (`Some`) or hide it.
+    pub(crate) fn set_agent_panel(&mut self, view: Option<crate::ui::agent_panel::AgentPanelView>) {
+        self.agent_panel_view
             .set(view, Instant::now(), self.reduce_motion);
     }
 
@@ -597,6 +607,9 @@ impl Renderer {
             );
         } else {
             self.review_labels.clear();
+        }
+        if let Some((view, opacity, _)) = self.agent_panel_view.sample(motion.now) {
+            frame.add_agent_panel_motion(&mut ctx, view, style, &self.ui_font, opacity);
         }
         if let Some((view, opacity, open)) = self.composer_view.sample(motion.now) {
             frame.add_composer_motion(&mut ctx, style, &self.ui_font, view, opacity, open);

@@ -32,6 +32,9 @@ impl App {
             self.close_review();
             return;
         }
+        if self.agent_panel.state.is_open() {
+            self.close_agent_panel();
+        }
         self.reset_pointer_gesture();
         self.review.open();
         self.window.set_review_open(true);
@@ -39,7 +42,7 @@ impl App {
         self.refresh_review();
     }
 
-    fn close_review(&mut self) {
+    pub(super) fn close_review(&mut self) {
         self.review.close();
         self.window.set_review_open(false);
         self.apply_layout();

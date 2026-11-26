@@ -107,6 +107,7 @@ fn render(
             agent: false,
             focused,
             attention: false,
+            needs_input: false,
             zoomed: false,
             flash: 0.0,
         });

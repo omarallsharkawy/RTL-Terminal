@@ -67,6 +67,8 @@ struct LayoutKey {
     sidebar: (SidebarPosition, f32),
     top_bar: bool,
     review_open: bool,
+    agent_panel_open: bool,
+    agent_panel_width_tenths: Option<u32>,
     language: UiLanguage,
 }
 
@@ -99,6 +101,10 @@ pub(super) struct Window {
     ports: HashMap<PaneId, Vec<u16>>,
     /// The code review panel is open (it takes the right part of the pane area).
     review_open: bool,
+    /// The docked Agent side panel is open.
+    agent_panel_open: bool,
+    /// Optional user-dragged logical width for the Agent side panel.
+    agent_panel_width: Option<f32>,
 }
 
 impl Window {
@@ -129,6 +135,8 @@ impl Window {
             notifications: crate::notify::DesktopNotifier::default(),
             ports: HashMap::new(),
             review_open: false,
+            agent_panel_open: false,
+            agent_panel_width: None,
         }
     }
 
@@ -227,6 +235,8 @@ impl Window {
             sidebar: (self.sidebar.position, self.sidebar_width),
             top_bar: self.top_bar,
             review_open: self.review_open,
+            agent_panel_open: self.agent_panel_open,
+            agent_panel_width_tenths: self.agent_panel_width.map(|w| (w * 10.0).round() as u32),
             language: self.language,
         };
         let mut cached = self.layout_cache.borrow_mut();
@@ -250,6 +260,15 @@ impl Window {
             );
             layout.content = content;
             layout.review = review;
+        } else if key.agent_panel_open {
+            let (content, agent) = crate::ui::agent_panel::split_agent_content(
+                layout.content,
+                key.metrics.scale,
+                self.agent_panel_width,
+                key.language,
+            );
+            layout.content = content;
+            layout.agent_panel = agent;
         }
         let layout = Rc::new(layout);
         *cached = Some((key, Rc::clone(&layout)));
@@ -273,6 +292,43 @@ impl Window {
     pub(super) fn set_review(&mut self, view: Option<crate::review::panel::View>) {
         if let Some(ref mut r) = self.renderer {
             r.set_review(view);
+        }
+    }
+
+    /// Open or close the docked Agent side panel area.
+    pub(super) fn set_agent_panel_open(&mut self, open: bool, width: Option<f32>) {
+        self.agent_panel_open = open;
+        self.agent_panel_width = width;
+        if !open {
+            self.set_agent_panel(None);
+        }
+    }
+
+    /// Where the Agent side panel is drawn, while open and fitting.
+    pub(super) fn agent_panel_rect(&self, ws: &Workspace) -> Option<Rect> {
+        self.layout(ws.tabs().len())?.agent_panel
+    }
+
+    /// Full tab content rectangle (terminal panes + agent panel combined) for divider dragging.
+    pub(super) fn agent_panel_tab_content_rect(&self, ws: &Workspace) -> Option<Rect> {
+        let layout = self.layout(ws.tabs().len())?;
+        let Some(panel) = layout.agent_panel else {
+            return Some(layout.content);
+        };
+        let left = layout.content.x.min(panel.x);
+        let right = layout.content.right().max(panel.right());
+        Some(Rect::new(
+            left,
+            layout.content.y,
+            (right - left).max(0.0),
+            layout.content.h,
+        ))
+    }
+
+    /// Hand the Agent panel view to the renderer (`None` hides it).
+    pub(super) fn set_agent_panel(&mut self, view: Option<crate::ui::agent_panel::AgentPanelView>) {
+        if let Some(ref mut r) = self.renderer {
+            r.set_agent_panel(view);
         }
     }
 
@@ -730,8 +786,10 @@ impl Window {
         let Some(layout) = self.layout(n) else {
             return Hit::Nothing;
         };
-        if layout.review.is_some_and(|area| area.contains(x, y)) {
-            // The review panel handles its own pointer input (`App::review_mouse_press`).
+        if layout.review.is_some_and(|area| area.contains(x, y))
+            || layout.agent_panel.is_some_and(|area| area.contains(x, y))
+        {
+            // Docked side panels handle their own pointer input.
             return Hit::Nothing;
         }
         if let Some(hit) = TopBarLayout::new(layout.top_bar, r.metrics().scale, self.diff(ws))
@@ -921,6 +979,7 @@ impl Window {
                     agent,
                     focused,
                     attention,
+                    needs_input: pane.meta.waiting_for_input(),
                     zoomed,
                     flash,
                 })
@@ -1124,6 +1183,8 @@ impl App {
         self.sync_branch_watch();
         let review = self.review_view();
         self.window.set_review(review);
+        let agent_panel = self.agent_panel_view();
+        self.window.set_agent_panel(agent_panel);
         let composer = self.composer_view();
         self.window.set_composer(composer);
         let block_ai = self.block_ai_view();

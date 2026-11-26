@@ -90,6 +90,8 @@ pub enum InputAction {
     SuggestBlockFix,
     /// Show or hide the code review panel (the focused repository's uncommitted changes).
     ToggleReview,
+    /// Show or hide the docked Agent side panel.
+    ToggleAgentPanel,
     /// Open or close the command composer docked at the bottom of the focused pane.
     ToggleComposer,
     /// Open the settings panel.
