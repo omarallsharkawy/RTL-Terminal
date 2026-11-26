@@ -1,7 +1,8 @@
 //! The workspace card list and its pointer geometry, in physical pixels.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use unicode_bidi::{bidi_class, BidiClass};
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::{AgentState, Entry};
@@ -9,6 +10,7 @@ use crate::layout::{Rect, SidebarPosition};
 use crate::render::ui_style::{SPACE_12, SPACE_16, SPACE_4, SPACE_8};
 use crate::ui::chrome::{ChromeAction, UiLanguage};
 use crate::ui::hit::Hit;
+use crate::ui::motion::Reorder;
 
 pub const DOT_INTERVAL: Duration = Duration::from_millis(240);
 const TITLE_HEIGHT: f32 = 20.0;
@@ -116,9 +118,43 @@ impl CardLayout {
             _ => 24.0,
         };
         let badge_w = (badge_w * scale).min(inner.w / 5.0);
-        let unread = title_row(inner.w - close_w - gap - badge_w, badge_w);
-        let reserved = close_w + gap + if badge_w > 0.0 { badge_w + gap } else { 0.0 };
-        let title = title_row(0.0, (inner.w - reserved).max(0.0));
+        let body_x = if mirrored {
+            close.right() + gap
+        } else {
+            inner.x
+        };
+        let body_w = (inner.w - close_w - gap).max(0.0);
+        let badge_w = badge_w.min(body_w);
+        let badge_slot = if badge_w > 0.0 {
+            (badge_w + gap).min(body_w)
+        } else {
+            0.0
+        };
+        let title = card.entry.title.trim();
+        let rtl = if title.is_empty() || matches!(title, "…" | "...") {
+            language == UiLanguage::Arabic
+        } else {
+            title
+                .chars()
+                .find_map(|ch| match bidi_class(ch) {
+                    BidiClass::R | BidiClass::AL => Some(true),
+                    BidiClass::L => Some(false),
+                    _ => None,
+                })
+                .unwrap_or(false)
+        };
+        let unread_x = if rtl {
+            body_x
+        } else {
+            body_x + body_w - badge_w
+        };
+        let unread = Rect::new(unread_x, inner.y, badge_w, inner.h);
+        let title = Rect::new(
+            if rtl { body_x + badge_slot } else { body_x },
+            inner.y,
+            body_w - badge_slot,
+            inner.h,
+        );
 
         let details_h = if card.has_details() {
             DETAIL_HEIGHT * scale
@@ -203,12 +239,64 @@ pub struct View {
     pub close_hover: bool,
     pub new_tab_hover: bool,
     pub dot_phase: usize,
+    pub(crate) dot_progress: Option<f32>,
+    pub(crate) reordering: bool,
+    pub(crate) highlights: Option<Vec<(f32, f32)>>,
+    pub(crate) close_mixes: Vec<f32>,
+    pub(crate) new_tab_mix: Option<f32>,
+    first_y: f32,
     pub drop_target: Option<usize>,
     card_count: usize,
     content_height: f32,
 }
 
 impl View {
+    /// Move every affected card from its previous slot, clipping against the sidebar viewport.
+    pub(crate) fn apply_reorder(
+        &mut self,
+        cards: &[Card],
+        ids: &[u64],
+        active: usize,
+        reorder: &mut Reorder,
+        now: Instant,
+        reduced: bool,
+    ) {
+        let mut y = self.first_y;
+        let slots = cards
+            .iter()
+            .zip(ids)
+            .map(|(card, &id)| {
+                let h = CardLayout::height(card, self.scale);
+                let rect = Rect::new(self.new_tab.x, y, self.new_tab.w, h);
+                y += h + SPACE_4 * self.scale;
+                (id, rect)
+            })
+            .collect::<Vec<_>>();
+        reorder.update(
+            ids,
+            slots.iter().map(|&(id, rect)| (id, rect.y)).collect(),
+            now,
+            reduced,
+        );
+        self.reordering = reorder.next_frame(now).is_some();
+        if self.reordering {
+            self.items.clear();
+            for (index, ((id, mut rect), card)) in slots.into_iter().zip(cards).enumerate() {
+                rect.y += reorder.offset(id, now);
+                if rect.bottom() > self.area.y && rect.y < self.area.bottom() {
+                    self.items.push(Item {
+                        index,
+                        rect,
+                        active: index == active,
+                        card: card.clone(),
+                    });
+                }
+            }
+            // The moved card travels in front of the cards making room for it.
+            self.items.sort_by_key(|item| item.active);
+        }
+    }
+
     pub fn matches(&self, area: Rect, card_count: usize) -> bool {
         self.area == area && self.card_count == card_count
     }
@@ -219,6 +307,7 @@ impl View {
         }
         self.items
             .iter()
+            .rev()
             .find(|i| i.rect.contains(x, y))
             .map(|i| i.index)
     }
@@ -230,7 +319,12 @@ impl View {
         if self.new_tab.contains(x, y) {
             return Some(Hit::Chrome(ChromeAction::NewTab));
         }
-        let Some(item) = self.items.iter().find(|item| item.rect.contains(x, y)) else {
+        let Some(item) = self
+            .items
+            .iter()
+            .rev()
+            .find(|item| item.rect.contains(x, y))
+        else {
             return Some(Hit::TabBar);
         };
         let close = item.layout(self).close;
@@ -331,7 +425,8 @@ impl ScrollState {
 
         let x = area.x + margin.min(area.w / 2.0);
         let w = CardLayout::card_width(area, scale);
-        let mut y = area.y + margin - self.offset;
+        let first_y = area.y + margin - self.offset;
+        let mut y = first_y;
         let mut items = Vec::new();
         for (index, card) in cards.iter().enumerate() {
             let rect = Rect::new(x, y, w, CardLayout::height(card, scale));
@@ -357,6 +452,12 @@ impl ScrollState {
             close_hover: false,
             new_tab_hover: false,
             dot_phase: 0,
+            dot_progress: None,
+            reordering: false,
+            highlights: None,
+            close_mixes: Vec::new(),
+            new_tab_mix: None,
+            first_y,
             drop_target: None,
             card_count: cards.len(),
             content_height,

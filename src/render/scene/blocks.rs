@@ -6,6 +6,7 @@
 //!   pane's leading edge, a tint over the selected block, and a badge at the end of its first line.
 
 use cosmic_text::Buffer;
+use std::time::Instant;
 
 use super::context::DrawContext;
 use crate::blocks::cards::{layout_cards, visible_rows, BlockButton, BlockHover};
@@ -19,6 +20,7 @@ use crate::render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiW
 use crate::render::ui_style::{UiStyle, RADIUS_6, SPACE_12, SPACE_16, SPACE_4};
 use crate::render::PaneFrame;
 use crate::ui::chrome::UiLanguage;
+use crate::ui::motion::Highlights;
 
 /// A badge's shaped text and where it goes (legacy mode).
 pub struct Badge {
@@ -71,6 +73,44 @@ fn button_icon(button: BlockButton) -> Icon {
     }
 }
 
+/// Paint state shared by all visible command blocks in one frame.
+pub(crate) struct BlockPaint<'a> {
+    pub hover: Option<BlockHover>,
+    pub fades: Option<(&'a BlockFades, Instant)>,
+}
+
+#[derive(Default)]
+pub(crate) struct BlockFades {
+    pub cards: Highlights<BlockHover>,
+    pub buttons: Highlights<BlockHover>,
+}
+
+impl BlockPaint<'_> {
+    fn emphasis(
+        &self,
+        pane: PaneId,
+        block: u64,
+        button: Option<BlockButton>,
+        hovered: bool,
+    ) -> f32 {
+        self.fades.map_or(f32::from(hovered), |(fades, now)| {
+            let tracks = if button.is_some() {
+                &fades.buttons
+            } else {
+                &fades.cards
+            };
+            tracks.value(
+                BlockHover {
+                    pane,
+                    block,
+                    button,
+                },
+                now,
+            )
+        })
+    }
+}
+
 /// Draw command block cards into `shapes.underlay` (backgrounds and leading status strips) and
 /// floating toolbars into `shapes.chrome`, returning the dim labels and clip rects for row text.
 #[allow(clippy::too_many_arguments)]
@@ -80,7 +120,7 @@ pub(crate) fn draw_cards(
     font: &UiFont,
     pane: &PaneFrame,
     hidden_row: Option<usize>,
-    hover: Option<BlockHover>,
+    paint: &BlockPaint<'_>,
     shapes: &mut ShapeLayers,
     language: UiLanguage,
 ) -> CardScene {
@@ -88,7 +128,7 @@ pub(crate) fn draw_cards(
         return CardScene::default();
     }
 
-    let pane_hover = hover.filter(|h| h.pane == pane.id);
+    let pane_hover = paint.hover.filter(|h| h.pane == pane.id);
     let hovered_block = pane_hover.map(|h| h.block);
 
     // Only the hovered command needs a measured label for toolbar geometry.
@@ -119,10 +159,9 @@ pub(crate) fn draw_cards(
         let decor = pane.blocks.iter().find(|d| d.id == card.id);
         let fill = if card.selected {
             style.bg2.mix(style.accent, 0.08)
-        } else if card.hovered {
-            style.bg2
         } else {
-            style.bg1
+            let hover = paint.emphasis(pane.id, card.id, None, card.hovered);
+            style.bg1.mix(style.bg2, hover)
         };
         shapes.underlay.push(Shape::RoundedRect {
             rect: card.card,
@@ -192,20 +231,22 @@ pub(crate) fn draw_cards(
                 .filter(|h| h.block == card.id)
                 .and_then(|h| h.button);
             for (btn, rect, enabled) in tb.buttons {
-                let is_hover = enabled && hovered_btn == Some(btn);
-                if is_hover {
+                let hover = if enabled {
+                    paint.emphasis(pane.id, card.id, Some(btn), hovered_btn == Some(btn))
+                } else {
+                    0.0
+                };
+                if hover > 0.0 {
                     shapes.chrome.push(Shape::rounded(
                         rect,
                         style.px(RADIUS_6),
-                        ctx.color(style.bg3.mix(style.text, 0.08)),
+                        ctx.color(style.bg3.mix(style.text, 0.08 * hover)),
                     ));
                 }
-                let color = if !enabled {
-                    style.text_faint
-                } else if is_hover {
-                    style.text
+                let color = if enabled {
+                    style.text_dim.mix(style.text, hover)
                 } else {
-                    style.text_dim
+                    style.text_faint
                 };
                 let side = style.px(SPACE_12).min(rect.w).min(rect.h);
                 let icon_rect = Rect::new(

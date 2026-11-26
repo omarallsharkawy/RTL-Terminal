@@ -110,6 +110,12 @@ fn every_icon_stays_in_its_box() {
         Icon::CopyCommand,
         Icon::Rerun,
         Icon::Zoom,
+        Icon::Composer,
+        Icon::Project,
+        Icon::Layout,
+        Icon::Broadcast,
+        Icon::ChevronRight,
+        Icon::ChevronDown,
     ] {
         for scale in [1.0, 1.25, 1.5, 2.0] {
             for size in [12.0, 16.0, 20.0] {
@@ -201,6 +207,12 @@ fn proportional_ui_text_scales_and_arabic_starts_on_the_right() {
     db.load_font_data(include_bytes!("../assets/fonts/NotoNaskhArabic-Regular.ttf").to_vec());
     let mut fonts = cosmic_text::FontSystem::new_with_locale_and_db("en-US".into(), db);
     let font = UiFont::new(&mut fonts, Some("Noto Sans Mono"));
+    let latin = font.shape(&mut fonts, UiSize::Body, UiWeight::Regular, 1.0, "Text");
+    let glyph = &latin.layout_runs().next().unwrap().glyphs[0];
+    assert_eq!(
+        fonts.db().face(glyph.font_id).unwrap().families[0].0,
+        "Noto Sans Mono"
+    );
     let buffer = font.shape(&mut fonts, UiSize::Body, UiWeight::Semibold, 1.0, "عربي");
     let arabic = buffer.layout_runs().next().unwrap();
     assert!(!arabic.glyphs.is_empty());
@@ -212,7 +224,7 @@ fn proportional_ui_text_scales_and_arabic_starts_on_the_right() {
                 .unwrap()
                 .families
                 .iter()
-                .any(|(family, _)| family == "Noto Naskh Arabic")
+                .any(|(family, _)| family == "Twitty Arabic UI")
     }));
 }
 
@@ -531,4 +543,36 @@ fn git_numstat_handles_binary_files_renames_and_bounds() {
         }
     );
     assert_eq!(capped.label(), "+999999+ −999999+");
+}
+
+#[test]
+fn bundled_ui_faces_leave_terminal_fallback_ids_intact() {
+    use cosmic_text::fontdb::Weight;
+    use twitty::render::text::fonts::{installed_family, ui_font_system};
+
+    let terminal = new_font_system();
+    let mut chrome = ui_font_system(&terminal);
+    let font = UiFont::new(&mut chrome, None);
+    for face in terminal.db().faces() {
+        assert_eq!(
+            chrome.db().face(face.id).unwrap().post_script_name,
+            face.post_script_name
+        );
+    }
+    for (sample, family) in [("Text", "Twitty Latin UI"), ("عربي", "Twitty Arabic UI")] {
+        assert!(installed_family(&terminal, family).is_none());
+        for (ui_weight, expected) in [
+            (UiWeight::Regular, Weight::NORMAL),
+            (UiWeight::Semibold, Weight::SEMIBOLD),
+        ] {
+            let label = font.shape(&mut chrome, UiSize::Body, ui_weight, 1.0, sample);
+            let glyphs = label.layout_runs().next().unwrap().glyphs;
+            assert!(!glyphs.is_empty());
+            for glyph in glyphs {
+                let face = chrome.db().face(glyph.font_id).unwrap();
+                assert_eq!(face.weight, expected);
+                assert!(face.families.iter().any(|(name, _)| name == family));
+            }
+        }
+    }
 }

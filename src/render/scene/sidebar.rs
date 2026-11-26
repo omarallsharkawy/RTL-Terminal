@@ -7,6 +7,7 @@ use glyphon::TextBounds;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::context::DrawContext;
+use super::frame::bounds_around;
 use crate::color::Rgba;
 use crate::layout::{Rect, SidebarPosition};
 use crate::render::icons::Icon;
@@ -19,8 +20,10 @@ use crate::render::CellMetrics;
 use crate::sidebar::cards::{fit_title, Card, Item, View, STATE_ICON_WIDTH, STATE_LABEL_PAD};
 use crate::sidebar::{display_path, AgentState, Entry};
 use crate::ui::chrome::{count_badge, UiLanguage};
+use crate::ui::motion::working_dot;
 use crate::ui::text::fit_text;
 
+#[derive(Clone)]
 pub struct Label {
     pub buffer: Rc<Buffer>,
     pub left: f32,
@@ -322,15 +325,40 @@ struct Cards<'a, 'b> {
 impl Cards<'_, '_> {
     fn card(&mut self, item: &Item, home: Option<&Path>) {
         let s = self.style;
-        let hovered = self.view.hover == Some(item.index);
-        let bg = if item.active { s.bg3 } else { s.bg2 };
+        let (hovered, selected) = self
+            .view
+            .highlights
+            .as_ref()
+            .and_then(|mix| mix.get(item.index))
+            .copied()
+            .unwrap_or((
+                f32::from(self.view.hover == Some(item.index)),
+                f32::from(item.active),
+            ));
         let drop = self.view.drop_target == Some(item.index);
-        if (item.active || hovered || drop) && intersect(item.rect, self.view.area).w > 0.0 {
-            let fill = if item.active && hovered {
-                bg.mix(s.text, 0.025)
-            } else {
-                bg
-            };
+        if self.view.reordering {
+            let clip = intersect(item.rect, self.view.area);
+            self.scene.labels = self
+                .scene
+                .labels
+                .drain(..)
+                .flat_map(|label| {
+                    bounds_around(label.bounds, clip)
+                        .into_iter()
+                        .map(move |bounds| Label {
+                            bounds,
+                            ..label.clone()
+                        })
+                })
+                .collect();
+        }
+        if (selected > 0.0 || hovered > 0.0 || drop || self.view.reordering)
+            && intersect(item.rect, self.view.area).w > 0.0
+        {
+            let fill = s
+                .bg1
+                .mix(s.bg2, if drop { 1.0 } else { hovered })
+                .mix(s.bg3.mix(s.text, 0.025 * hovered), selected);
             self.panel(item.rect, RADIUS_8, fill);
             if drop {
                 if let Some(Shape::RoundedRect { border, .. }) = self.scene.shapes.last_mut() {
@@ -343,8 +371,7 @@ impl Cards<'_, '_> {
         }
         let entry = &item.card.entry;
         let parts = item.layout(self.view);
-        let align = self.leading_align();
-        if item.active {
+        if selected > 0.0 {
             let w = s.px(2.0).round().min(item.rect.w);
             let inset = s.px(SPACE_4);
             let x = if self.view.mirrored {
@@ -353,7 +380,9 @@ impl Cards<'_, '_> {
                 item.rect.x + inset
             };
             let marker = Rect::new(x, parts.title.y, w, parts.title.h);
-            self.panel(center_height(marker, s.px(SPACE_12)), RADIUS_6, s.accent);
+            let mut accent = s.accent;
+            accent.a *= selected;
+            self.panel(center_height(marker, s.px(SPACE_12)), RADIUS_6, accent);
         }
         let title = entry.title.trim();
         let title = if title.is_empty() || matches!(title, "…" | "...") {
@@ -361,32 +390,60 @@ impl Cards<'_, '_> {
         } else {
             title
         };
-        self.label(parts.title, Kind::Title, title, align, s.text);
-        if let Some(count) = count_badge(entry.attention_count) {
-            let badge = center_height(parts.unread, s.px(SPACE_16));
-            self.panel(badge, RADIUS_6, s.bg1.mix(s.accent, 0.16));
-            self.label(badge, Kind::Small, &count, UiAlign::Center, s.text);
-        }
+        self.title(parts.title, parts.unread, title, entry.attention_count);
         self.footer(parts.footer, entry, home, s.text_dim);
         if let Some(state) = entry.display_state() {
             self.state(parts.state, parts.state_has_label, state);
         }
-        if hovered
+        if hovered > 0.0
             && parts.close.y >= self.view.area.y
             && parts.close.bottom() <= self.view.area.bottom()
         {
-            if self.view.close_hover {
-                self.panel(center_height(parts.close, parts.close.w), RADIUS_6, s.bg3);
+            let close = self
+                .view
+                .close_mixes
+                .get(item.index)
+                .copied()
+                .unwrap_or(f32::from(self.view.close_hover));
+            if close > 0.0 {
+                let mut fill = s.bg3;
+                fill.a *= close * hovered;
+                self.panel(center_height(parts.close, parts.close.w), RADIUS_6, fill);
             }
-            let color = if self.view.close_hover {
-                s.text
-            } else {
-                s.text_dim
-            };
+            let mut color = s.text_dim.mix(s.text, close);
+            color.a *= hovered;
             self.icon(parts.close, Icon::Close, s.px(SPACE_12), color);
         }
         if let Some(message) = &item.card.message {
-            self.label(parts.message, Kind::Message, message, align, s.text_dim);
+            self.label(
+                parts.message,
+                Kind::Message,
+                message,
+                UiAlign::Start,
+                s.text_dim,
+            );
+        }
+    }
+
+    fn title(&mut self, row: Rect, badge: Rect, title: &str, unread: usize) {
+        let s = self.style;
+        let buffer = self
+            .cache
+            .get(self.ctx, self.font, Kind::Title, title, row.w);
+        let rtl = buffer.layout_runs().next().is_some_and(|run| run.rtl);
+        let text_width = label_width(&buffer).min(row.w);
+        self.placed_label(row, buffer, UiAlign::Start, s.text);
+        if let Some(count) = count_badge(unread).filter(|_| badge.w > 0.0) {
+            let gap = s.px(SPACE_4);
+            // Move the reserved badge toward the measured title, on its visual trailing side.
+            let x = if rtl {
+                (row.right() - text_width - gap - badge.w).max(badge.x)
+            } else {
+                (row.x + text_width + gap).min(badge.x)
+            };
+            let badge = center_height(Rect { x, ..badge }, s.px(SPACE_16));
+            self.panel(badge, RADIUS_6, s.bg1.mix(s.accent, 0.16));
+            self.label(badge, Kind::Small, &count, UiAlign::Center, s.text);
         }
     }
 
@@ -408,7 +465,11 @@ impl Cards<'_, '_> {
             self.icon(glyph, icon, s.px(SPACE_12), ink);
         } else if glyph.y >= self.view.area.y && glyph.bottom() <= self.view.area.bottom() {
             for i in 0..3 {
-                let diameter = s.px(if i == self.view.dot_phase { 3.0 } else { 2.0 });
+                let strength = working_dot(
+                    self.view.dot_progress.unwrap_or(self.view.dot_phase as f32),
+                    i,
+                );
+                let diameter = s.px(2.0 + strength);
                 let offset = s.px(2.0 + SPACE_4 * i as f32);
                 let x = if mirror {
                     glyph.right() - offset
@@ -417,11 +478,7 @@ impl Cards<'_, '_> {
                 };
                 let y = glyph.y + glyph.h / 2.0;
                 let dot = Rect::new(x - diameter / 2.0, y - diameter / 2.0, diameter, diameter);
-                let color = if i == self.view.dot_phase {
-                    ink
-                } else {
-                    s.text_faint
-                };
+                let color = s.text_faint.mix(ink, strength);
                 self.panel(dot, RADIUS_6, color);
             }
         }
@@ -450,6 +507,7 @@ impl Cards<'_, '_> {
     }
 
     fn footer(&mut self, rect: Rect, entry: &Entry, home: Option<&Path>, color: Rgba) {
+        let align = self.leading_align();
         if rect.w <= 0.0
             || rect.h <= 0.0
             || rect.bottom() <= self.view.area.y
@@ -484,7 +542,6 @@ impl Cards<'_, '_> {
             rest = take_side(remainder, gap, !mirror).1;
             port_rect = Some(port);
         }
-        let align = self.leading_align();
         let mut branch_rect = None;
         let mut dot_rect = None;
         if let Some(branch) = &entry.branch {
@@ -557,20 +614,16 @@ impl Cards<'_, '_> {
     fn new_tab(&mut self) {
         let s = self.style;
         let rect = self.view.new_tab;
-        let fill = if self.view.new_tab_hover {
-            s.bg3
-        } else {
-            s.bg2
-        };
+        let hover = self
+            .view
+            .new_tab_mix
+            .unwrap_or(f32::from(self.view.new_tab_hover));
+        let fill = s.bg2.mix(s.bg3, hover);
         self.panel(rect, RADIUS_8, fill);
         let mirror = self.view.mirrored;
         let (_, inner) = take_side(rect, s.px(SPACE_12), mirror);
         let (icon, rest) = take_side(inner, s.px(SPACE_12), mirror);
-        let ink = if self.view.new_tab_hover {
-            s.text
-        } else {
-            s.text_dim
-        };
+        let ink = s.text_dim.mix(s.text, hover);
         self.icon(icon, Icon::Plus, s.px(SPACE_12), ink);
         let (_, title) = take_side(rest, s.px(SPACE_4), mirror);
         let (_, title) = take_side(title, s.px(SPACE_12), !mirror);
@@ -618,11 +671,18 @@ impl Cards<'_, '_> {
     }
 
     fn label(&mut self, row: Rect, kind: Kind, text: &str, align: UiAlign, color: Rgba) {
-        let clip = intersect(row, self.view.area);
-        if clip.w <= 0.0 || clip.h <= 0.0 || text.is_empty() {
+        if text.is_empty() {
             return;
         }
         let buffer = self.cache.get(self.ctx, self.font, kind, text, row.w);
+        self.placed_label(row, buffer, align, color);
+    }
+
+    fn placed_label(&mut self, row: Rect, buffer: Rc<Buffer>, align: UiAlign, color: Rgba) {
+        let clip = intersect(row, self.view.area);
+        if clip.w <= 0.0 || clip.h <= 0.0 {
+            return;
+        }
         let width = label_width(&buffer);
         if width <= 0.0 {
             return;

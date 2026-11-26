@@ -67,7 +67,7 @@ selection and attention. The terminal grid stays logical while drawing handles b
   and status colors come from the active ANSI palette.
 - Use the 4 px spacing grid (4, 8, 12, 16, 24 px) and 6, 8 or 12 px radii. Thin rules,
   strokes and status markers are sized separately. Chrome dimensions and type scale with DPI.
-- UI text is proportional sans with the bundled Noto Naskh Arabic fallback. Paths, branches
+- UI text uses bundled Inter for Latin and IBM Plex Sans Arabic for Arabic. Paths, branches
   and terminal content use the terminal mono stack. Use the existing 11, 12, 13 and 15 px
   type sizes and SDF glyphs for controls.
 - **Twitty Dark** uses warm graphite, pale neutral text and a muted copper accent.
@@ -75,6 +75,8 @@ selection and attention. The terminal grid stays logical while drawing handles b
   retain contrast for Arabic letterforms and diacritics. Set `theme` to `twitty-dark` or
   `twitty-light`. An unset theme defaults to `twitty-dark`. Named built-in themes share
   the same chrome derivation.
+- Hover fades take 120 ms. Panel slides, tab selection and sidebar reorder settle in 160 ms.
+  `reduce_motion` skips chrome animation and holds the working indicator steady.
 
 Build with `render::ui_style::UiStyle`, `render::shapes::{Shape, ShapeLayers}`,
 `render::icons::Icon` and `render::text::ui::{UiFont, UiLabel, UiSize, UiWeight}`.
@@ -86,4 +88,4 @@ text after quads and shapes. Clip runs behind chrome overlays using
 
 Run `TWITTY_SHOWCASE_DIR=/tmp/twitty-showcase cargo test --test showcase_tests` to export both
 themes as 1280×800 at 1× (English) and 951×1002 at 1.5× (Arabic). The test uses the production
-frame builder without a window. The output is for visual review and has no pixel assertions.
+frame builder without a window. A fifth PNG samples the palette entrance. The output is for visual review and has no pixel assertions.

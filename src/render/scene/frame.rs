@@ -5,14 +5,15 @@ use alacritty_terminal::vte::ansi::CursorShape;
 use cosmic_text::Buffer;
 use glyphon::TextBounds;
 
-use super::blocks::{self, Badge};
+use super::blocks::{self, Badge, BlockPaint};
 use super::chrome;
 use super::context::DrawContext;
 use super::cursor::{
     cursor_cell_width, cursor_left, cursor_quads, effective_cursor_shape,
     geometry_under_block_cursor,
 };
-use super::palette::{palette_overlay, PaletteView};
+use super::motion::Slide;
+use super::palette::{palette_overlay, PaletteIcons, PaletteView};
 use super::preedit::{bounds_outside, ImeArea, PreeditState};
 use super::settings::{settings_overlay, SettingsView};
 use super::window_chrome::{self, ChromeView};
@@ -27,6 +28,7 @@ use crate::render::text::ui::{UiFont, UiLabel};
 use crate::render::ui_style::UiStyle;
 use crate::render::{PaneFrame, TabLabel};
 use crate::ui::chrome::UiLanguage;
+use crate::ui::motion::ChromeMotion;
 
 /// Renderer state a frame depends on besides what it is drawn with.
 pub struct FrameOptions<'a> {
@@ -169,7 +171,7 @@ pub fn build_frame(
     panes: &[PaneFrame],
     dividers: &[Rect],
 ) -> Frame {
-    build_frame_inner(ctx, opts, cache, ime, tabs, panes, dividers, true)
+    build_frame_base(ctx, opts, cache, ime, tabs, panes, dividers, true)
 }
 
 /// Like [`build_frame`], rendering command blocks as rounded SDF cards with floating hover
@@ -188,13 +190,13 @@ pub fn build_frame_with_cards(
     block_hover: Option<BlockHover>,
     language: UiLanguage,
 ) -> Frame {
-    let mut frame = build_frame_inner(ctx, opts, cache, ime, tabs, panes, dividers, false);
+    let mut frame = build_frame_base(ctx, opts, cache, ime, tabs, panes, dividers, false);
     frame.add_block_cards(ctx, style, font, panes, block_hover, language);
     frame
 }
 
 #[allow(clippy::too_many_arguments)]
-fn build_frame_inner(
+pub(crate) fn build_frame_base(
     ctx: &mut DrawContext,
     opts: &FrameOptions,
     cache: &mut RowCache,
@@ -356,6 +358,22 @@ impl Frame {
         block_hover: Option<BlockHover>,
         language: UiLanguage,
     ) {
+        let paint = BlockPaint {
+            hover: block_hover,
+            fades: None,
+        };
+        self.add_block_paint(ctx, style, font, panes, &paint, language);
+    }
+
+    pub(crate) fn add_block_paint(
+        &mut self,
+        ctx: &mut DrawContext,
+        style: UiStyle,
+        font: &UiFont,
+        panes: &[PaneFrame],
+        paint: &BlockPaint<'_>,
+        language: UiLanguage,
+    ) {
         for pane in panes {
             let status_row = pane.status.as_ref().and(pane.lines.len().checked_sub(1));
             let scene = blocks::draw_cards(
@@ -364,7 +382,7 @@ impl Frame {
                 font,
                 pane,
                 status_row,
-                block_hover,
+                paint,
                 &mut self.shapes,
                 language,
             );
@@ -381,7 +399,19 @@ impl Frame {
         font: &UiFont,
         view: &ChromeView,
     ) {
-        self.chrome_labels = window_chrome::draw(ctx, style, font, view, &mut self.shapes.chrome);
+        self.add_chrome_motion(ctx, style, font, view, None);
+    }
+
+    pub(crate) fn add_chrome_motion(
+        &mut self,
+        ctx: &mut DrawContext,
+        style: UiStyle,
+        font: &UiFont,
+        view: &ChromeView,
+        motion: Option<&ChromeMotion<'_>>,
+    ) {
+        self.chrome_labels =
+            window_chrome::draw(ctx, style, font, view, &mut self.shapes.chrome, motion);
         self.pane_clips.extend(view.panes.iter().filter_map(|pane| {
             let edge = if pane.flash > 0.0 {
                 style.px(2.0 + 2.0 * pane.flash.clamp(0.0, 1.0)).ceil()
@@ -410,14 +440,44 @@ impl Frame {
         font: &UiFont,
         view: &super::composer::ComposerView,
     ) {
-        let scene = super::composer::build(ctx, style, font, view);
+        self.add_composer_motion(ctx, style, font, view, 1.0, true);
+    }
+
+    pub(crate) fn add_composer_motion(
+        &mut self,
+        ctx: &mut DrawContext,
+        style: UiStyle,
+        font: &UiFont,
+        view: &super::composer::ComposerView,
+        opacity: f32,
+        open: bool,
+    ) {
+        if opacity <= 0.0 {
+            return;
+        }
+        let mut scene = super::composer::build(ctx, style, font, view);
+        let slide = Slide::new(opacity, [0.0, style.px(10.0)]);
+        if opacity < 1.0 {
+            scene.shapes.iter_mut().for_each(|shape| slide.shape(shape));
+            scene.labels.iter_mut().for_each(|label| slide.label(label));
+            scene
+                .clips
+                .iter_mut()
+                .for_each(|rect| *rect = slide.rect(*rect));
+            for text in &mut scene.texts {
+                slide.text_position(&mut text.left, &mut text.top, &mut text.bounds);
+                for seg in &mut text.row.segments {
+                    slide.buffer(&mut seg.buffer, ctx.font_system);
+                }
+            }
+        }
         self.shapes.chrome.extend(scene.shapes);
         self.composer_texts = scene.texts;
         self.composer_labels = scene.labels;
         self.composer_clips = scene.clips;
-        if view.focused {
-            if let Some(area) = scene.ime_area {
-                self.ime_area = Some(area);
+        if open && view.focused {
+            if let Some((x, y, w, h)) = scene.ime_area {
+                self.ime_area = Some((x + slide.x as i32, y + slide.y as i32, w, h));
             }
         }
     }
@@ -430,16 +490,41 @@ impl Frame {
         font: &UiFont,
         view: &PaletteView,
     ) {
-        let (outer, texts) = palette_overlay(
+        self.add_palette_motion(ctx, style, font, view, &PaletteIcons::default(), 1.0);
+    }
+
+    /// Draw at a sampled transition opacity, including the translated text clip.
+    pub fn add_palette_motion(
+        &mut self,
+        ctx: &mut DrawContext,
+        style: UiStyle,
+        font: &UiFont,
+        view: &PaletteView,
+        icons: &PaletteIcons,
+        opacity: f32,
+    ) {
+        if opacity <= 0.0 {
+            return;
+        }
+        let start = self.shapes.overlay.len();
+        let (outer, mut texts) = palette_overlay(
             ctx,
             style,
             font,
             view,
+            icons,
             self.surface,
             &mut self.shapes.overlay,
         );
+        let slide = Slide::new(opacity, [0.0, -style.px(10.0)]);
+        if opacity < 1.0 {
+            self.shapes.overlay[start..]
+                .iter_mut()
+                .for_each(|shape| slide.shape(shape));
+            texts.iter_mut().for_each(|label| slide.label(label));
+        }
         self.overlay.extend(texts);
-        self.overlay_rect = outer;
+        self.overlay_rect = outer.map(|rect| slide.rect(rect));
     }
 
     /// Draw the settings panel above everything else, clipping underlying text behind it.
@@ -488,11 +573,49 @@ impl Frame {
         font: &UiFont,
         language: UiLanguage,
     ) {
-        let scene = super::review::build(ctx, view, cache, style, font, language);
-        self.quads.extend(scene.quads);
+        self.add_review_motion(ctx, view, cache, style, font, language, 1.0);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn add_review_motion(
+        &mut self,
+        ctx: &mut DrawContext,
+        view: &crate::review::panel::View,
+        cache: &mut super::review::ReviewCache,
+        style: UiStyle,
+        font: &UiFont,
+        language: UiLanguage,
+        opacity: f32,
+    ) {
+        if opacity <= 0.0 {
+            return;
+        }
+        let mut scene = super::review::build(ctx, view, cache, style, font, language);
+        let slide = Slide::new(opacity, [style.px(14.0), 0.0]);
+        if opacity < 1.0 {
+            // Put the moving panel above the expanded panes and their chrome on exit.
+            self.shapes
+                .chrome
+                .extend(scene.quads.into_iter().map(|(x, y, w, h, fill)| {
+                    let mut shape =
+                        crate::render::shapes::Shape::rounded(Rect::new(x, y, w, h), 0.0, fill);
+                    slide.shape(&mut shape);
+                    shape
+                }));
+            scene.shapes.iter_mut().for_each(|shape| slide.shape(shape));
+            scene.labels.iter_mut().for_each(|label| slide.label(label));
+            for text in &mut scene.texts {
+                slide.text_position(&mut text.left, &mut text.top, &mut text.bounds);
+                for seg in &mut std::rc::Rc::make_mut(&mut text.row).segments {
+                    slide.buffer(&mut seg.buffer, ctx.font_system);
+                }
+            }
+        } else {
+            self.quads.extend(scene.quads);
+        }
         self.shapes.chrome.extend(scene.shapes);
         self.review_labels = scene.labels;
-        self.review_rect = Some(view.rect);
+        self.review_rect = Some(slide.rect(view.rect));
         self.review_texts = scene.texts;
     }
 
@@ -636,7 +759,7 @@ impl Frame {
             }
         }
         // Glyphon draws after these surfaces. Keep pane labels and preedit behind them.
-        for hole in [self.sidebar_rect, self.review_rect].into_iter().flatten() {
+        if let Some(hole) = self.sidebar_rect {
             runs = clip_runs(runs, hole);
         }
         for label in &self.sidebar_labels {
@@ -647,6 +770,11 @@ impl Frame {
                 bounds: label.bounds,
                 color: label.color,
             });
+        }
+        runs.extend(self.block_labels.iter().map(ui_run));
+        runs.extend(self.chrome_labels.iter().map(ui_run));
+        if let Some(hole) = self.review_rect {
+            runs = clip_runs(runs, hole);
         }
         for text in &self.review_texts {
             for seg in &text.row.segments {
@@ -660,8 +788,6 @@ impl Frame {
             }
         }
         runs.extend(self.review_labels.iter().map(ui_run));
-        runs.extend(self.block_labels.iter().map(ui_run));
-        runs.extend(self.chrome_labels.iter().map(ui_run));
         for &hole in &self.composer_clips {
             runs = clip_runs(runs, hole);
         }

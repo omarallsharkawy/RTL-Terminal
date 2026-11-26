@@ -1,12 +1,14 @@
-//! Offscreen window previews for design review. Set TWITTY_SHOWCASE_DIR to write four PNGs.
+//! Offscreen window previews for design review. Set TWITTY_SHOWCASE_DIR to write static previews and one transition sample.
 use std::path::Path;
 
 use twitty::blocks::{BlockDecor, BlockStatus};
 use twitty::color::Palette;
 use twitty::layout::{self, Node, PaneId, Rect, SidebarPosition, SplitDir};
 use twitty::render::gpu::offscreen::Offscreen;
+use twitty::render::icons::Icon;
 use twitty::render::scene::context::DrawContext;
 use twitty::render::scene::frame::{build_frame_with_cards, FrameOptions};
+use twitty::render::scene::palette::{PaletteIcons, PaletteItem, PaletteView};
 use twitty::render::scene::preedit::PreeditState;
 use twitty::render::scene::sidebar::LabelCache;
 use twitty::render::scene::window_chrome::{ChromeView, PaneHeaderView};
@@ -18,6 +20,7 @@ use twitty::sidebar::{AgentState, AgentStatus, Entry, Notice};
 use twitty::terminal::Terminal;
 use twitty::ui::chrome::{PaneHeaderLayout, TopBarLayout, UiLanguage, WindowLayout};
 use twitty::ui::git_diff::DiffStat;
+use twitty::ui::motion::{Tween, PANEL};
 
 #[test]
 fn render_window_showcase() {
@@ -34,9 +37,18 @@ fn render_window_showcase() {
             (951, 1002, 1.5, UiLanguage::Arabic),
         ] {
             let path = dir.join(format!("{theme}-{width}x{height}.png"));
-            render(&path, width, height, scale, language, &palette);
+            render(&path, width, height, scale, language, &palette, false);
         }
     }
+    render(
+        &dir.join("twitty-dark-palette-opening-1280x800.png"),
+        1280,
+        800,
+        1.0,
+        UiLanguage::English,
+        &Palette::named("twitty-dark").unwrap(),
+        true,
+    );
 }
 
 fn render(
@@ -46,9 +58,10 @@ fn render(
     scale: f32,
     language: UiLanguage,
     palette: &Palette,
+    in_motion: bool,
 ) {
     let mut fonts = new_font_system();
-    let font = UiFont::new(&mut fonts, None);
+    let font = UiFont::default();
     let metrics = CellMetrics::measure(&mut fonts, None, 14.0, scale);
     let style = UiStyle::new(palette, None, scale);
     let surface = (width as f32, height as f32);
@@ -143,6 +156,48 @@ fn render(
     );
     frame.add_sidebar(&mut ctx, &sidebar, &mut labels, style, &font);
     frame.add_chrome(&mut ctx, style, &font, &chrome);
+    if in_motion {
+        let start = std::time::Instant::now();
+        let mut transition = Tween::default();
+        transition.set(1.0, start, PANEL);
+        let commands = [
+            "composer.open",
+            "project.open",
+            "layout.save",
+            "input.broadcast",
+        ];
+        let rows: Vec<_> = twitty::commands::all()
+            .into_iter()
+            .filter(|command| commands.contains(&command.name))
+            .collect();
+        let icons = PaletteIcons {
+            leading: Icon::Search,
+            rows: rows
+                .iter()
+                .map(|command| Icon::for_command(command.name))
+                .collect(),
+        };
+        let view = PaletteView {
+            items: rows
+                .into_iter()
+                .map(|command| PaletteItem {
+                    title_en: command.title_en.into(),
+                    title_ar: command.title_ar.into(),
+                    shortcut: command.shortcut.map(str::to_owned),
+                    dimmed: false,
+                })
+                .collect(),
+            ..PaletteView::default()
+        };
+        frame.add_palette_motion(
+            &mut ctx,
+            style,
+            &font,
+            &view,
+            &icons,
+            transition.value(start + PANEL / 3),
+        );
+    }
 
     let pixels = Offscreen::new(width, height)
         .expect("allocate offscreen showcase target")

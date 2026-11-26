@@ -3,6 +3,7 @@
 
 use cosmic_text::{fontdb, Attrs, Buffer, Family, FontSystem, Metrics, Shaping, Weight, Wrap};
 use glyphon::TextBounds;
+use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::fonts::{installed_family, is_arabic_script};
@@ -37,6 +38,31 @@ pub enum UiWeight {
     Semibold,
 }
 
+const LATIN_UI: &str = "Twitty Latin UI";
+const ARABIC_UI: &str = "Twitty Arabic UI";
+const UI_FONTS: &[&[u8]] = &[
+    include_bytes!("../../../assets/fonts/TwittyLatinUI-Regular.ttf"),
+    include_bytes!("../../../assets/fonts/TwittyLatinUI-SemiBold.ttf"),
+    include_bytes!("../../../assets/fonts/TwittyArabicUI-Regular.ttf"),
+    include_bytes!("../../../assets/fonts/TwittyArabicUI-SemiBold.ttf"),
+];
+
+fn load_ui_fonts(fonts: &mut FontSystem) {
+    if fonts
+        .db()
+        .query(&fontdb::Query {
+            families: &[Family::Name(LATIN_UI)],
+            ..Default::default()
+        })
+        .is_none()
+    {
+        let db = fonts.db_mut();
+        for &font in UI_FONTS {
+            db.load_font_source(fontdb::Source::Binary(Arc::new(font)));
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct UiFont {
     family: Option<String>,
@@ -44,21 +70,21 @@ pub struct UiFont {
 }
 
 impl UiFont {
-    /// Resolve once at window startup. On Linux, ask fontconfig for the user's system sans.
+    /// Load the UI faces and resolve a configured override once at window startup.
     pub fn new(fonts: &mut FontSystem, configured: Option<&str>) -> Self {
+        load_ui_fonts(fonts);
         let configured = configured.map(str::trim).filter(|s| !s.is_empty());
         let family = configured.and_then(|name| {
             let installed = installed_family(fonts, name);
             if installed.is_none() {
                 crate::config::warn(format!(
-                    "twitty: ui_font_family {name:?} is not installed, using system sans"
+                    "twitty: ui_font_family {name:?} is not installed, using bundled UI fonts"
                 ));
             }
             installed
         });
-        let family = family.or_else(|| system_sans(fonts));
         let mut ui = Self {
-            family,
+            family: Some(family.unwrap_or_else(|| LATIN_UI.to_owned())),
             covers_arabic: false,
         };
         let query = fontdb::Query {
@@ -76,10 +102,10 @@ impl UiFont {
     fn family(&self) -> Family<'_> {
         self.family
             .as_deref()
-            .map_or(Family::SansSerif, Family::Name)
+            .map_or(Family::Name(LATIN_UI), Family::Name)
     }
 
-    /// Shape one line at the selected size. Arabic ranges use bundled Noto Naskh if the
+    /// Shape one line at the selected size. Arabic ranges use the bundled Arabic sans if the
     /// primary face does not cover Arabic. Bidi resolution still sees the entire line.
     pub fn shape(
         &self,
@@ -89,6 +115,9 @@ impl UiFont {
         scale: f32,
         text: &str,
     ) -> Buffer {
+        if self.family.is_none() {
+            load_ui_fonts(fonts);
+        }
         let mut text: String = text
             .chars()
             .filter(|&c| !crate::terminal::is_bidi_control(c))
@@ -102,7 +131,7 @@ impl UiFont {
             UiWeight::Semibold => Weight::SEMIBOLD,
         });
         if !self.covers_arabic && text.chars().any(is_arabic_script) {
-            let arabic = attrs.clone().family(Family::Name("Noto Naskh Arabic"));
+            let arabic = attrs.clone().family(Family::Name(ARABIC_UI));
             let mut spans = Vec::new();
             let mut start = 0;
             let mut rtl = false;
@@ -184,30 +213,6 @@ impl UiFont {
         }
         best
     }
-}
-
-fn system_sans(fonts: &FontSystem) -> Option<String> {
-    #[cfg(target_os = "linux")]
-    if let Some(name) = std::process::Command::new("fc-match")
-        .args(["--format=%{family[0]}", "sans-serif"])
-        .output()
-        .ok()
-        .filter(|out| out.status.success())
-        .and_then(|out| String::from_utf8(out.stdout).ok())
-        .and_then(|name| installed_family(fonts, name.trim()))
-    {
-        return Some(name);
-    }
-    [
-        "Segoe UI",
-        "Helvetica Neue",
-        "Open Sans",
-        "DejaVu Sans",
-        "Liberation Sans",
-        "Arial",
-    ]
-    .into_iter()
-    .find_map(|name| installed_family(fonts, name))
 }
 
 pub fn label_width(buffer: &Buffer) -> f32 {

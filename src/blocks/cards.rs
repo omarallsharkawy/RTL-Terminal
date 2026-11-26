@@ -9,7 +9,7 @@ use crate::render::ui_style::{RADIUS_6, SPACE_4};
 use crate::ui::chrome::UiLanguage;
 
 /// Action button in a block card's floating top-right toolbar.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub enum BlockButton {
     CopyCommand,
     CopyOutput,
@@ -18,7 +18,7 @@ pub enum BlockButton {
 }
 
 /// Which block card (and optionally which toolbar button) the pointer hovers in one pane.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct BlockHover {
     pub pane: PaneId,
     pub block: u64,
