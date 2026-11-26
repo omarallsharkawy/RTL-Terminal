@@ -24,6 +24,7 @@ impl App {
             return;
         }
         self.close_palette();
+        self.close_welcome();
         self.reset_pointer_gesture();
         let (mono, all) = self.window.font_families();
         let config_path = TwittyConfig::config_path().map(|p| p.display().to_string());

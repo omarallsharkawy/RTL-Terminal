@@ -23,7 +23,7 @@ use crate::ui::hit::Hit;
 impl App {
     pub(super) fn on_modifiers(&mut self, modifiers: ModifiersState) {
         self.modifiers = modifiers;
-        if self.palette_open() || self.settings_open() {
+        if self.palette_open() || self.settings_open() || self.welcome_open() {
             return;
         }
         let (x, y) = self.pointer.pos;
@@ -37,6 +37,10 @@ impl App {
         self.window.update_sidebar_drag();
         if let Some(icon) = self.ai_consent_cursor(x, y) {
             self.window.set_cursor_icon(icon);
+            return;
+        }
+        if self.welcome_open() {
+            self.on_welcome_cursor_moved(x, y);
             return;
         }
         if self.settings_open() {
@@ -143,6 +147,9 @@ impl App {
     }
 
     pub(super) fn on_cursor_left(&mut self) {
+        if self.welcome_open() {
+            self.on_welcome_cursor_left();
+        }
         if self.settings_open() {
             self.on_settings_cursor_left();
         }
@@ -164,6 +171,10 @@ impl App {
             if pressed {
                 self.ai_consent_mouse_press(button);
             }
+            return false;
+        }
+        if self.welcome_open() {
+            self.on_welcome_mouse(button, pressed);
             return false;
         }
         if self.settings_open() {
@@ -287,7 +298,7 @@ impl App {
     }
 
     pub(super) fn on_wheel(&mut self, delta: MouseScrollDelta) {
-        if self.ai_consent_open() {
+        if self.ai_consent_open() || self.welcome_open() {
             return;
         }
         if self.settings_open() {
@@ -454,6 +465,7 @@ impl App {
     pub(super) fn refresh_pointer_hover(&mut self) {
         if self.palette_open()
             || self.settings_open()
+            || self.welcome_open()
             || self.pointer.capture.is_some()
             || self.pointer.drag.is_some()
         {

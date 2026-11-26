@@ -171,6 +171,7 @@ impl Window {
         self.sidebar_width = config.sidebar_width;
         self.top_bar = config.top_bar;
         self.pane_headers = config.pane_headers;
+        self.language = config.effective_ui_language();
         self.renderer = Some(renderer);
         true
     }
@@ -287,6 +288,13 @@ impl Window {
 
     pub(super) fn ui_language(&self) -> UiLanguage {
         self.language
+    }
+
+    pub(super) fn set_ui_language(&mut self, language: UiLanguage) {
+        if self.language != language {
+            self.language = language;
+            self.request_redraw();
+        }
     }
 
     pub(super) fn pane_headers_enabled(&self) -> bool {
@@ -521,6 +529,12 @@ impl Window {
     ) {
         if let Some(ref mut r) = self.renderer {
             r.set_settings_panel(view);
+        }
+    }
+
+    pub(super) fn set_welcome(&mut self, view: Option<crate::render::scene::welcome::WelcomeView>) {
+        if let Some(ref mut r) = self.renderer {
+            r.set_welcome(view);
         }
     }
 
@@ -993,8 +1007,8 @@ fn sidebar_entries(
         .collect()
 }
 
-pub(super) fn sidebar_title(ws: &Workspace, index: usize) -> String {
-    localized_sidebar_title(ws, index, UiLanguage::from_environment())
+pub(super) fn sidebar_title(ws: &Workspace, index: usize, language: UiLanguage) -> String {
+    localized_sidebar_title(ws, index, language)
 }
 
 fn localized_sidebar_title(ws: &Workspace, index: usize, language: UiLanguage) -> String {
@@ -1031,7 +1045,11 @@ impl App {
     /// Draw the active tab.
     pub(super) fn redraw(&mut self) {
         self.window.needs_redraw = false;
-        if self.modifiers.control_key() && !self.palette_open() && !self.settings_open() {
+        if self.modifiers.control_key()
+            && !self.palette_open()
+            && !self.settings_open()
+            && !self.welcome_open()
+        {
             self.refresh_pointer_hover();
         }
         // A notification counts as seen once its pane is on screen, focused, in a focused window.

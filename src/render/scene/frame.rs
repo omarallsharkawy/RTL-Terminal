@@ -16,6 +16,7 @@ use super::motion::Slide;
 use super::palette::{palette_overlay, PaletteIcons, PaletteView};
 use super::preedit::{bounds_outside, ImeArea, PreeditState};
 use super::settings::{settings_overlay, SettingsView};
+use super::welcome::{welcome_overlay, WelcomeView};
 use super::window_chrome::{self, ChromeView};
 use crate::blocks::cards::BlockHover;
 use crate::layout::{PaneId, Rect};
@@ -586,6 +587,26 @@ impl Frame {
         view: &SettingsView,
     ) {
         let (outer, texts) = settings_overlay(
+            ctx,
+            style,
+            font,
+            view,
+            self.surface,
+            &mut self.shapes.overlay,
+        );
+        self.overlay.extend(texts);
+        self.overlay_rect = outer;
+    }
+
+    /// Draw the first-run welcome wizard above everything else, clipping underlying text behind it.
+    pub fn add_welcome(
+        &mut self,
+        ctx: &mut DrawContext,
+        style: UiStyle,
+        font: &UiFont,
+        view: &WelcomeView,
+    ) {
+        let (outer, texts) = welcome_overlay(
             ctx,
             style,
             font,

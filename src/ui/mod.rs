@@ -13,3 +13,4 @@ pub mod selection;
 pub mod settings;
 pub mod settings_panel;
 pub(crate) mod text;
+pub mod welcome;

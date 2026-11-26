@@ -48,6 +48,7 @@ use scene::palette::{PaletteIcons, PaletteLayout, PaletteView};
 use scene::preedit::PreeditState;
 use scene::settings::SettingsView;
 use scene::sidebar::LabelCache;
+use scene::welcome::WelcomeView;
 use scene::window_chrome::ChromeView;
 use std::time::{Duration, Instant};
 use text::fonts::{
@@ -119,6 +120,8 @@ pub(crate) struct Renderer {
     ai_consent_view: Option<scene::ai::ConsentOverlayView>,
     /// The settings panel, while it is open.
     settings_view: Option<SettingsView>,
+    /// The first-run welcome wizard, while it is open.
+    welcome_view: Option<WelcomeView>,
     /// The code review panel, while it is open.
     review_view: AnimatedView<crate::review::panel::View>,
     review_labels: scene::review::ReviewCache,
@@ -170,6 +173,7 @@ impl Renderer {
             block_ai_view: None,
             ai_consent_view: None,
             settings_view: None,
+            welcome_view: None,
             review_view: AnimatedView::default(),
             review_labels: Default::default(),
             block_cards: true,
@@ -372,6 +376,11 @@ impl Renderer {
         self.settings_view = view;
     }
 
+    /// Show the first-run welcome wizard (`Some`) or hide it.
+    pub(crate) fn set_welcome(&mut self, view: Option<WelcomeView>) {
+        self.welcome_view = view;
+    }
+
     /// Show the failed-block AI explanation/fix popover (`Some`) or hide it.
     pub(crate) fn set_block_ai(&mut self, view: Option<scene::ai::BlockAiView>) {
         self.block_ai_view = view;
@@ -569,7 +578,9 @@ impl Renderer {
         if let Some(view) = &self.block_ai_view {
             frame.add_block_ai(&mut ctx, style, &self.ui_font, view);
         }
-        if let Some(((view, icons), opacity, _)) = self.palette_view.sample(motion.now) {
+        if let Some(view) = &self.welcome_view {
+            frame.add_welcome(&mut ctx, style, &self.ui_font, view);
+        } else if let Some(((view, icons), opacity, _)) = self.palette_view.sample(motion.now) {
             frame.add_palette_motion(&mut ctx, style, &self.ui_font, view, icons, opacity);
         } else if let Some(view) = &self.settings_view {
             frame.add_settings(&mut ctx, style, &self.ui_font, view);

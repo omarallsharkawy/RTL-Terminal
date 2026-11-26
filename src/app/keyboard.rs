@@ -27,6 +27,9 @@ impl App {
         if self.handle_ai_consent_key(event) {
             return false;
         }
+        if self.welcome_open() {
+            return self.handle_welcome_key(event);
+        }
         if self.settings_open() {
             return self.handle_settings_key(event);
         }
@@ -137,6 +140,10 @@ impl App {
                 }
             }
             Ime::Commit(text) => {
+                if self.welcome_open() {
+                    self.update_preedit(None);
+                    return;
+                }
                 if self.settings_open() {
                     self.update_preedit(None);
                     self.settings_text(&text);
@@ -269,6 +276,7 @@ impl App {
             InputAction::ToggleReview => self.toggle_review(),
             InputAction::ToggleComposer => self.toggle_composer(),
             InputAction::Settings => self.open_settings(),
+            InputAction::Welcome => self.open_welcome(),
             InputAction::PrevBlock => self.navigate_blocks(id, BlockList::select_prev),
             InputAction::NextBlock => self.navigate_blocks(id, BlockList::select_next),
             InputAction::CopyBlockOutput => self.copy_block_output(id),
