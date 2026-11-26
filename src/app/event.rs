@@ -33,6 +33,8 @@ pub enum AppEvent {
         Result<crate::review::Snapshot, crate::review::LoadError>,
     ),
     GitDiff(u64, Option<crate::ui::git_diff::DiffStat>),
+    /// Project directories (MRU + scanned git repos) resolved off the UI thread.
+    Projects(u64, Vec<crate::projects::ProjectItem>),
 }
 
 /// Longest title kept from a program, in characters.
@@ -119,9 +121,16 @@ impl App {
         };
         pane.blocks.on_event(&event, &pane.terminal, Instant::now());
         let command_ended = matches!(event.signal, Signal::Mark(MarkKind::CommandEnd { .. }));
+        let is_local = pane.remote.is_none();
+        let mut recorded_cwd = None;
         let meta = &mut pane.meta;
         match event.signal {
-            Signal::Cwd(path) => meta.cwd = Some(path),
+            Signal::Cwd(path) => {
+                if is_local {
+                    recorded_cwd = Some(path.clone());
+                }
+                meta.cwd = Some(path);
+            }
             Signal::Notify { title, body } => {
                 self.notify(id, title, body);
                 return;
@@ -136,6 +145,9 @@ impl App {
                 }
                 MarkKind::PromptStart | MarkKind::CommandStart => {}
             },
+        }
+        if let Some(cwd) = recorded_cwd {
+            self.record_project_cwd(&cwd);
         }
         if command_ended {
             self.review_command_ended(id);

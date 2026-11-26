@@ -18,10 +18,12 @@ mod control;
 mod event;
 mod git_diff;
 mod keyboard;
+mod layouts;
 mod mouse;
 mod palette;
 mod panes;
 mod ports;
+mod projects;
 mod review;
 mod selection;
 mod ssh;
@@ -93,6 +95,14 @@ pub struct App {
     /// The code review panel.
     review: crate::review::ReviewPanel,
     git_diff: git_diff::GitDiffWatch,
+    /// Project switcher MRU and off-thread git repo scan state.
+    projects: projects::ProjectState,
+    /// Persistent store of named tab layouts.
+    layouts: crate::layouts::LayoutStore,
+    /// Bounded stack of recently closed tabs for reopening.
+    closed_tabs: crate::session::closed::ClosedTabs,
+    /// Per-tab broadcast input toggle and Esc-Esc state.
+    broadcast: crate::input::broadcast::BroadcastState,
 }
 
 impl App {
@@ -128,6 +138,10 @@ impl App {
             branches: branches::BranchWatch::default(),
             review: Default::default(),
             git_diff: git_diff::GitDiffWatch::default(),
+            projects: projects::ProjectState::load(),
+            layouts: crate::layouts::LayoutStore::default(),
+            closed_tabs: crate::session::closed::ClosedTabs::new(),
+            broadcast: crate::input::broadcast::BroadcastState::new(),
         }
     }
 
@@ -220,6 +234,7 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::Branches(branches) => self.on_branches(branches),
             AppEvent::Review(generation, result) => self.on_review_loaded(generation, result),
             AppEvent::GitDiff(generation, stat) => self.on_git_diff(generation, stat),
+            AppEvent::Projects(generation, items) => self.on_projects_loaded(generation, items),
         }
     }
 
@@ -265,6 +280,7 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.finish_projects();
         self.session.finish(&self.ws, self.window.sidebar_visible());
         self.control = None;
         if self.config_dirty {

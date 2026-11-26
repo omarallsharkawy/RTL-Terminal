@@ -61,6 +61,9 @@ pub struct TwittyConfig {
     /// Command run by "Ask an agent", e.g. "claude" or "codex". Unset: the first one installed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_command: Option<String>,
+    /// Directories scanned (1-2 levels deep) for git repositories in the project switcher.
+    #[serde(default = "crate::projects::scan::default_project_roots")]
+    pub project_roots: Vec<String>,
     /// Custom commands ("workflows") listed in the command palette (always trusted).
     #[serde(
         default,
@@ -100,6 +103,7 @@ impl Default for TwittyConfig {
             shell_integration: true,
             restore_session: true,
             agent_command: None,
+            project_roots: crate::projects::scan::default_project_roots(),
             commands: Vec::new(),
             extra: serde_json::Map::new(),
             keep_file: false,

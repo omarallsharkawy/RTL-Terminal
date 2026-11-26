@@ -56,6 +56,17 @@ impl App {
         {
             return false;
         }
+        // Double-Esc turns broadcast input off cleanly without sending the second Esc.
+        if !search_open && is_plain_escape(event, self.modifiers) && !event.repeat {
+            if let Some(tab) = self.ws.active_tab() {
+                if self.broadcast.on_plain_escape(tab.id, Instant::now()) {
+                    self.window.request_redraw();
+                    return false;
+                }
+            }
+        } else if event.state.is_pressed() {
+            self.broadcast.cancel_escape();
+        }
         // Esc clears a selected block instead of reaching the shell.
         if !search_open && is_plain_escape(event, self.modifiers) && self.clear_block_selection(id)
         {
@@ -69,6 +80,7 @@ impl App {
                     InputAction::TogglePaneZoom
                         | InputAction::CloseOtherPanes
                         | InputAction::JumpUnread
+                        | InputAction::ToggleBroadcast
                 )
             )
         {
@@ -77,6 +89,20 @@ impl App {
         match route_key(action, search_open) {
             KeyRoute::SearchBar => {
                 self.handle_search_key(id, event);
+                false
+            }
+            KeyRoute::Action(InputAction::Bytes(bytes)) if self.active_tab_broadcast() => {
+                let targets = self.broadcast_targets(id);
+                for target in targets {
+                    let out = if target == id {
+                        bytes.clone()
+                    } else {
+                        terminal_key(event, self.modifiers, self.mode_of(target))
+                            .unwrap_or_else(|| bytes.clone())
+                    };
+                    self.send_input(target, &out);
+                }
+                self.cursor_blink.reset(Instant::now());
                 false
             }
             KeyRoute::Action(action) => self.run_action(id, action),
@@ -112,13 +138,46 @@ impl App {
                     }
                     return;
                 }
-                self.send_input(id, text.as_bytes());
+                self.broadcast.cancel_escape();
+                self.send_user_input(id, text.as_bytes());
                 self.cursor_blink.reset(Instant::now());
             }
         }
     }
 
-    /// Typed input for the shell: it drops the selection and snaps the view to the live screen.
+    /// Whether broadcast input is currently enabled for the active tab.
+    pub(super) fn active_tab_broadcast(&self) -> bool {
+        self.ws
+            .active_tab()
+            .is_some_and(|tab| self.broadcast.is_active(tab.id))
+    }
+
+    /// Panes that should receive user keystrokes/pastes aimed at `id`.
+    pub(super) fn broadcast_targets(&self, id: PaneId) -> Vec<PaneId> {
+        let Some(tab) = self.ws.tabs().iter().find(|t| t.root.contains(id)) else {
+            return vec![id];
+        };
+        let leaves = tab.root.leaves();
+        self.broadcast.target_panes(tab.id, id, &leaves)
+    }
+
+    /// Toggle broadcast input for the active tab.
+    fn toggle_broadcast(&mut self) {
+        if let Some(tab) = self.ws.active_tab() {
+            let tab_id = tab.id;
+            self.broadcast.toggle(tab_id);
+            self.window.request_redraw();
+        }
+    }
+
+    /// Interactive user input: routes to every pane of the tab when broadcast is enabled.
+    fn send_user_input(&mut self, id: PaneId, bytes: &[u8]) {
+        for target in self.broadcast_targets(id) {
+            self.send_input(target, bytes);
+        }
+    }
+
+    /// Typed input for one shell: drops the selection and snaps the view to the live screen.
     pub(super) fn send_input(&mut self, id: PaneId, bytes: &[u8]) {
         self.clear_selection(id);
         self.clear_block_selection(id);
@@ -130,7 +189,7 @@ impl App {
     pub(super) fn run_action(&mut self, id: PaneId, action: InputAction) -> bool {
         match action {
             InputAction::Bytes(bytes) => {
-                self.send_input(id, &bytes);
+                self.send_user_input(id, &bytes);
                 self.cursor_blink.reset(Instant::now());
             }
             InputAction::ZoomIn => self.zoom_by(1),
@@ -150,6 +209,14 @@ impl App {
             InputAction::JumpUnread => self.focus_newest_attention(),
             InputAction::NextTab => self.cycle_tab(1),
             InputAction::PrevTab => self.cycle_tab(-1),
+            InputAction::MoveTabLeft => self.move_active_tab_by(-1),
+            InputAction::MoveTabRight => self.move_active_tab_by(1),
+            InputAction::ReopenClosedTab => self.reopen_closed_tab(),
+            InputAction::OpenProject => self.open_palette(PaletteMode::Projects),
+            InputAction::SaveLayout => self.open_palette(PaletteMode::SaveLayout),
+            InputAction::OpenLayout => self.open_palette(PaletteMode::OpenLayout),
+            InputAction::DeleteLayout => self.open_palette(PaletteMode::DeleteLayout),
+            InputAction::ToggleBroadcast => self.toggle_broadcast(),
             InputAction::SplitRight => {
                 let _ = self.split_focused(SplitDir::Horizontal);
             }

@@ -160,6 +160,7 @@ impl App {
                         | InputAction::NextTab
                         | InputAction::PrevTab
                         | InputAction::NewTab
+                        | InputAction::ReopenClosedTab
                         | InputAction::SplitRight
                         | InputAction::SplitDown
                         | InputAction::ClosePane

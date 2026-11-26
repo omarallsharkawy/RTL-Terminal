@@ -91,6 +91,14 @@ impl App {
         } else {
             (WorkflowSet::default(), Vec::new())
         };
+        if mode == PaletteMode::Projects {
+            self.start_project_scan();
+        } else if matches!(
+            mode,
+            PaletteMode::SaveLayout | PaletteMode::OpenLayout | PaletteMode::DeleteLayout
+        ) {
+            self.reload_layouts();
+        }
         self.palette = Some(OpenPalette {
             state: PaletteState {
                 mode,
@@ -140,6 +148,13 @@ impl App {
         self.palette
             .as_ref()
             .is_some_and(|p| p.state.mode == PaletteMode::Notifications)
+    }
+
+    /// The project switcher is on screen (refreshed when the background scan finishes).
+    pub(super) fn projects_palette_open(&self) -> bool {
+        self.palette
+            .as_ref()
+            .is_some_and(|p| p.state.mode == PaletteMode::Projects)
     }
 
     fn palette_capacity(&self) -> usize {
@@ -223,17 +238,94 @@ impl App {
                 open.search.rows(&state.query),
                 Some(PLACEHOLDER.to_string()),
             ),
+            PaletteMode::Projects => {
+                let items = self.projects.items();
+                let rows = matches(items, &state.query)
+                    .into_iter()
+                    .map(|i| items[i].to_palette_item())
+                    .collect();
+                (rows, Some(crate::projects::PROJECTS_PLACEHOLDER.into()))
+            }
+            PaletteMode::SaveLayout => {
+                let cleaned = crate::layouts::clean_layout_name(&state.query);
+                let exists = cleaned
+                    .as_deref()
+                    .is_some_and(|name| self.layouts.get(name).is_some());
+                let (title_en, title_ar) = match cleaned {
+                    Some(name) if exists => (
+                        format!("Overwrite layout \"{name}\""),
+                        format!("استبدل التخطيط \"{name}\""),
+                    ),
+                    Some(name) => (
+                        format!("Save layout \"{name}\""),
+                        format!("احفظ التخطيط \"{name}\""),
+                    ),
+                    None => (
+                        "Type a name for the current tab layout".into(),
+                        "اكتب اسماً لتخطيط التاب الحالي".into(),
+                    ),
+                };
+                (
+                    vec![PaletteItem {
+                        title_en,
+                        title_ar,
+                        shortcut: None,
+                        dimmed: state.query.trim().is_empty(),
+                    }],
+                    Some(crate::layouts::SAVE_LAYOUT_PLACEHOLDER.into()),
+                )
+            }
+            PaletteMode::OpenLayout => {
+                let list = self.layouts.layouts();
+                let rows = matches(list, &state.query)
+                    .into_iter()
+                    .map(|i| list[i].to_palette_item())
+                    .collect();
+                (rows, Some(crate::layouts::OPEN_LAYOUT_PLACEHOLDER.into()))
+            }
+            PaletteMode::DeleteLayout => {
+                let list = self.layouts.layouts();
+                let rows = matches(list, &state.query)
+                    .into_iter()
+                    .map(|i| list[i].to_palette_item())
+                    .collect();
+                (rows, Some(crate::layouts::DELETE_LAYOUT_PLACEHOLDER.into()))
+            }
         };
         let shown = visible_window_in(rows.len(), state.selected, self.palette_capacity());
         let selected = state.selected.min(rows.len().saturating_sub(1)) - shown.start;
         let mut items: Vec<PaletteItem> = rows[shown].to_vec();
-        if items.is_empty() && state.mode == PaletteMode::Notifications && state.query.is_empty() {
-            items.push(PaletteItem {
-                title_en: "No notifications yet".into(),
-                title_ar: "مفيش إشعارات لسه".into(),
-                shortcut: None,
-                dimmed: true,
-            });
+        if items.is_empty() && state.query.is_empty() {
+            match state.mode {
+                PaletteMode::Notifications => items.push(PaletteItem {
+                    title_en: "No notifications yet".into(),
+                    title_ar: "مفيش إشعارات لسه".into(),
+                    shortcut: None,
+                    dimmed: true,
+                }),
+                PaletteMode::Projects => items.push(if self.projects.is_scanning() {
+                    PaletteItem {
+                        title_en: "Scanning projects…".into(),
+                        title_ar: "جاري البحث عن المشاريع…".into(),
+                        shortcut: None,
+                        dimmed: true,
+                    }
+                } else {
+                    PaletteItem {
+                        title_en: "No projects found".into(),
+                        title_ar: "مفيش مشاريع".into(),
+                        shortcut: None,
+                        dimmed: true,
+                    }
+                }),
+                PaletteMode::OpenLayout | PaletteMode::DeleteLayout => items.push(PaletteItem {
+                    title_en: "No saved layouts yet".into(),
+                    title_ar: "مفيش تخطيطات محفوظة لسه".into(),
+                    shortcut: None,
+                    dimmed: true,
+                }),
+                _ => {}
+            }
         }
         let view = PaletteView {
             query: state.query.clone(),
@@ -267,6 +359,10 @@ impl App {
             }
             Some(InputAction::RenameTab) => {
                 self.toggle_palette_mode(PaletteMode::RenameTab);
+                return false;
+            }
+            Some(InputAction::OpenProject) => {
+                self.toggle_palette_mode(PaletteMode::Projects);
                 return false;
             }
             _ => {}
@@ -338,6 +434,54 @@ impl App {
                 }
             }
             PaletteMode::Search => {}
+            PaletteMode::Projects => {
+                let items = self.projects.items();
+                match open.state.key_in(items, key, text, modifiers) {
+                    PaletteCmd::Choose(i) => {
+                        if let Some(path) = items.get(i).map(|p| p.path.clone()) {
+                            self.close_palette();
+                            self.open_project(path, modifiers.alt_key());
+                        }
+                    }
+                    PaletteCmd::Close => self.close_palette(),
+                    PaletteCmd::None | PaletteCmd::Run(_) => self.sync_palette(),
+                }
+            }
+            PaletteMode::SaveLayout => match open.state.rename_key(key, text, modifiers) {
+                RenameCmd::Edit => self.sync_palette(),
+                RenameCmd::Cancel => self.close_palette(),
+                RenameCmd::Save(Some(name)) => {
+                    self.close_palette();
+                    self.save_named_layout(&name);
+                }
+                RenameCmd::Save(None) => self.sync_palette(),
+            },
+            PaletteMode::OpenLayout => {
+                let list = self.layouts.layouts();
+                match open.state.key_in(list, key, text, modifiers) {
+                    PaletteCmd::Choose(i) => {
+                        if let Some(name) = list.get(i).map(|l| l.name.clone()) {
+                            self.close_palette();
+                            self.open_named_layout(&name);
+                        }
+                    }
+                    PaletteCmd::Close => self.close_palette(),
+                    PaletteCmd::None | PaletteCmd::Run(_) => self.sync_palette(),
+                }
+            }
+            PaletteMode::DeleteLayout => {
+                let list = self.layouts.layouts();
+                match open.state.key_in(list, key, text, modifiers) {
+                    PaletteCmd::Choose(i) => {
+                        if let Some(name) = list.get(i).map(|l| l.name.clone()) {
+                            self.close_palette();
+                            self.delete_named_layout(&name);
+                        }
+                    }
+                    PaletteCmd::Close => self.close_palette(),
+                    PaletteCmd::None | PaletteCmd::Run(_) => self.sync_palette(),
+                }
+            }
         }
         false
     }
@@ -408,6 +552,59 @@ impl App {
                 let shown = visible_window_in(hits.len(), state.selected, self.palette_capacity());
                 let hit = hits.get(shown.start + row).cloned();
                 self.jump_to_hit(hit);
+                false
+            }
+            PaletteMode::Projects => {
+                let items = self.projects.items();
+                let results = matches(items, &state.query);
+                let shown =
+                    visible_window_in(results.len(), state.selected, self.palette_capacity());
+                if let Some(path) = results
+                    .get(shown.start + row)
+                    .and_then(|&i| items.get(i))
+                    .map(|p| p.path.clone())
+                {
+                    let split = self.modifiers.alt_key();
+                    self.close_palette();
+                    self.open_project(path, split);
+                }
+                false
+            }
+            PaletteMode::SaveLayout => {
+                if let Some(name) = open.state.tab_title() {
+                    self.close_palette();
+                    self.save_named_layout(&name);
+                }
+                false
+            }
+            PaletteMode::OpenLayout => {
+                let list = self.layouts.layouts();
+                let results = matches(list, &state.query);
+                let shown =
+                    visible_window_in(results.len(), state.selected, self.palette_capacity());
+                if let Some(name) = results
+                    .get(shown.start + row)
+                    .and_then(|&i| list.get(i))
+                    .map(|l| l.name.clone())
+                {
+                    self.close_palette();
+                    self.open_named_layout(&name);
+                }
+                false
+            }
+            PaletteMode::DeleteLayout => {
+                let list = self.layouts.layouts();
+                let results = matches(list, &state.query);
+                let shown =
+                    visible_window_in(results.len(), state.selected, self.palette_capacity());
+                if let Some(name) = results
+                    .get(shown.start + row)
+                    .and_then(|&i| list.get(i))
+                    .map(|l| l.name.clone())
+                {
+                    self.close_palette();
+                    self.delete_named_layout(&name);
+                }
                 false
             }
         }
