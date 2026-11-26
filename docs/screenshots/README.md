@@ -8,7 +8,7 @@ This directory holds the release screenshots referenced by the root [README.md](
 | --- | --- |
 | `twitty-dark.png` | Twitty Dark workspace with Arabic/English output, command blocks, sidebar, and top bar |
 | `twitty-light.png` | Twitty Light theme showing theme-derived chrome and clear Arabic letterforms |
-| `arabic-rtl.png` | Arabic UI layout (1.5× HiDPI) with right-to-left mixed text, harakat, and box-drawn tables |
+| `arabic-rtl.png` | Arabic UI layout with right-to-left mixed text, harakat, and box-drawn tables |
 | `review-and-composer.png` | Side-by-side Git review panel and multi-line command composer with completions |
 
 ## Generating offscreen captures
