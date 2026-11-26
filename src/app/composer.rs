@@ -711,7 +711,12 @@ impl App {
         let hctx =
             HighlightContext::with_defaults(self.composer.path_commands.as_ref(), &path_exists);
         let highlights = highlight_command(text, &hctx);
-        let lints = lint_command(text, &hctx);
+        // A `/query` picking from the slash menu is not a shell command yet.
+        let lints = if self.composer.state.slash_menu_open() {
+            Vec::new()
+        } else {
+            lint_command(text, &hctx)
+        };
         (highlights, lints)
     }
 

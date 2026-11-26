@@ -305,6 +305,13 @@ fn typing_slash_opens_the_menu_and_enter_runs_or_inserts() {
 
     type_text(&mut state, "/");
     assert!(state.popup.is_some(), "the menu opens on `/`");
+    // `/` also looks like a path, so a directory listing arrives later; it must not replace
+    // the slash menu with (empty) path completions.
+    assert!(state.refresh_popup_if_open(&[], &[], Some((Path::new("/"), &[])), None));
+    assert!(
+        state.slash_menu_open(),
+        "late path results keep the slash menu"
+    );
     for c in ["s", "e", "t", "t", "i", "n", "g", "s", ".", "o"] {
         type_text(&mut state, c);
     }

@@ -386,6 +386,11 @@ impl ComposerState {
         self.open_slash_menu(workflows);
     }
 
+    /// True while the slash menu is open (the buffer is a `/query`, not a shell command).
+    pub fn slash_menu_open(&self) -> bool {
+        self.slash_popup && self.popup.is_some()
+    }
+
     /// Open the slash menu while the buffer is `/query` (see [`slash::slash_query`]).
     pub fn open_slash_menu(&mut self, workflows: &[Workflow]) {
         if self.ai_reviewing || self.editor.preedit().is_some() {
@@ -447,6 +452,13 @@ impl ComposerState {
     ) -> bool {
         if self.popup.is_none() {
             return false;
+        }
+        if self.slash_popup {
+            // Late directory or generator results are for path completion, not the slash menu.
+            self.popup = None;
+            self.slash_popup = false;
+            self.open_slash_menu(workflows);
+            return true;
         }
         let items =
             self.build_completions(history, workflows, dir_cache, cwd, generated, path_commands);

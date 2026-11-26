@@ -153,6 +153,10 @@ fn match_score(candidate: &str, query: &str) -> Option<usize> {
     if cand.contains(query) {
         return Some(300 + cand.len().min(99));
     }
+    // Scattered letters only count once the query is specific enough.
+    if query.chars().count() < 3 {
+        return None;
+    }
     let mut chars = cand.chars();
     query
         .chars()
