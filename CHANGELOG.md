@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 4.0.0 - 2026-11-26
+
 ### Arabic text
 
 - Right-to-left Arabic phrases now read right-to-left even after a shell prompt (`❯ مرحبا hello` shows `hello` left of `مرحبا`), while English sentences containing an Arabic word keep reading left-to-right.

@@ -1,6 +1,6 @@
 pkgbase = twitty-git
 	pkgdesc = Native GPU-rendered terminal built for Arabic and bidirectional text (git)
-	pkgver = 3.0.0
+	pkgver = 4.0.0
 	pkgrel = 1
 	url = https://github.com/omarallsharkawy/RTL-Terminal
 	arch = x86_64

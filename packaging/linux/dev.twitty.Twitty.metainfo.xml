@@ -50,6 +50,12 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.0.0" date="2026-11-26">
+      <url type="details">https://github.com/omarallsharkawy/RTL-Terminal/releases/tag/v4.0.0</url>
+      <description>
+        <p>Twitty 4.0.0 release. See CHANGELOG.md for the full list of changes.</p>
+      </description>
+    </release>
     <release version="3.0.0" date="2026-10-11">
       <description>
         <p>Initial native Rust/wgpu release of Twitty with bidirectional Arabic rendering, split panes, tabs, scrollback, IME support, and Linux/Windows binaries.</p>

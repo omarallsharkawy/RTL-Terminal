@@ -1,6 +1,6 @@
 # Maintainer: Omar Sharkawy <https://github.com/omarallsharkawy>
 pkgname=twitty-git
-pkgver=3.0.0
+pkgver=4.0.0
 pkgrel=1
 pkgdesc='Native GPU-rendered terminal built for Arabic and bidirectional text (git)'
 arch=('x86_64' 'aarch64')
