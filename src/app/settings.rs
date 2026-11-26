@@ -30,8 +30,12 @@ impl App {
         self.reset_pointer_gesture();
         let (mono, all) = self.window.font_families();
         let config_path = TwittyConfig::config_path().map(|p| p.display().to_string());
+        let env_language = crate::ui::chrome::UiLanguage::from_environment();
         let language = self.window.ui_language();
-        self.settings = Some(SettingsPanelState::new(mono, all, config_path, language));
+        self.settings = Some(
+            SettingsPanelState::new(mono, all, config_path, language)
+                .with_env_language(env_language),
+        );
         self.sync_settings();
     }
 
@@ -244,6 +248,15 @@ impl App {
                     SettingId::UiFontFamily => {
                         self.window
                             .set_ui_font_family(self.config.ui_font_family.as_deref());
+                    }
+                    SettingId::UiLanguage => {
+                        let lang = self
+                            .settings
+                            .as_ref()
+                            .map(|s| s.language)
+                            .unwrap_or_else(|| self.config.effective_ui_language());
+                        self.window.set_ui_language(lang);
+                        needs_layout = true;
                     }
                     SettingId::UiAccent => {
                         self.window.set_ui_accent(self.config.ui_accent_color());

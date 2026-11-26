@@ -15,7 +15,7 @@ use crate::input::keybindings::{
 };
 use crate::input::shortcut_key_code;
 use crate::layout::{clamp_sidebar_width, Rect, SidebarPosition};
-use crate::ui::chrome::UiLanguage;
+use crate::ui::chrome::{UiLanguage, UiLanguagePref};
 use crate::ui::palette::{fold, matches};
 use crate::ui::settings::{clamp_font_size, MAX_FONT_SIZE, MIN_FONT_SIZE, MIN_OPACITY};
 
@@ -82,6 +82,7 @@ pub enum SettingId {
     FontFamily,
     FontSize,
     UiFontFamily,
+    UiLanguage,
     UiAccent,
     BackgroundOpacity,
     CursorStyle,
@@ -104,11 +105,12 @@ pub enum SettingId {
 }
 
 impl SettingId {
-    pub const APPEARANCE: [Self; 13] = [
+    pub const APPEARANCE: [Self; 14] = [
         Self::Theme,
         Self::FontFamily,
         Self::FontSize,
         Self::UiFontFamily,
+        Self::UiLanguage,
         Self::UiAccent,
         Self::BackgroundOpacity,
         Self::CursorStyle,
@@ -133,11 +135,12 @@ impl SettingId {
     pub const ABOUT: [Self; 1] = [Self::CopyConfigPath];
 
     /// All config-backed settings (Appearance + Behaviour).
-    pub const CONFIG_SETTINGS: [Self; 20] = [
+    pub const CONFIG_SETTINGS: [Self; 21] = [
         Self::Theme,
         Self::FontFamily,
         Self::FontSize,
         Self::UiFontFamily,
+        Self::UiLanguage,
         Self::UiAccent,
         Self::BackgroundOpacity,
         Self::CursorStyle,
@@ -162,6 +165,7 @@ impl SettingId {
             | Self::FontFamily
             | Self::FontSize
             | Self::UiFontFamily
+            | Self::UiLanguage
             | Self::UiAccent
             | Self::BackgroundOpacity
             | Self::CursorStyle
@@ -189,6 +193,7 @@ impl SettingId {
             Self::FontFamily => "font_family",
             Self::FontSize => "font_size",
             Self::UiFontFamily => "ui_font_family",
+            Self::UiLanguage => "ui_language",
             Self::UiAccent => "ui_accent",
             Self::BackgroundOpacity => "background_opacity",
             Self::CursorStyle => "cursor_style",
@@ -247,6 +252,14 @@ impl SettingId {
                 note_en: None,
                 note_ar: None,
                 kind: ControlKind::ListPicker { searchable: true },
+            },
+            Self::UiLanguage => SettingDescriptor {
+                id: self,
+                label_en: "Interface language",
+                label_ar: "لغة الواجهة",
+                note_en: None,
+                note_ar: None,
+                kind: ControlKind::Segmented(UI_LANGUAGE_OPTIONS),
             },
             Self::UiAccent => SettingDescriptor {
                 id: self,
@@ -437,6 +450,24 @@ impl SegmentedOption {
         language.text(self.label_en, self.label_ar)
     }
 }
+
+pub const UI_LANGUAGE_OPTIONS: &[SegmentedOption] = &[
+    SegmentedOption {
+        value: "auto",
+        label_en: "Auto",
+        label_ar: "تلقائي",
+    },
+    SegmentedOption {
+        value: "en",
+        label_en: "English",
+        label_ar: "English",
+    },
+    SegmentedOption {
+        value: "ar",
+        label_en: "العربية",
+        label_ar: "العربية",
+    },
+];
 
 pub const CURSOR_STYLE_OPTIONS: &[SegmentedOption] = &[
     SegmentedOption {
@@ -692,6 +723,8 @@ pub struct SettingsPanelState {
     pub config_path: Option<String>,
     /// UI language (English = LTR, Arabic = RTL mirrored).
     pub language: UiLanguage,
+    /// System locale fallback used when `config.ui_language == "auto"`.
+    pub env_language: UiLanguage,
     /// Currently hovered hit target (for hover fills and cursor icon).
     pub hover: Option<SettingsHit>,
     /// Cached built-in commands for the `Keys` section.
@@ -729,8 +762,28 @@ impl SettingsPanelState {
             ui_fonts,
             config_path,
             language,
+            env_language: language,
             hover: None,
             commands: commands::all(),
+        }
+    }
+
+    /// Override the system locale fallback used when `config.ui_language == "auto"`.
+    pub fn with_env_language(mut self, env_language: UiLanguage) -> Self {
+        self.env_language = env_language;
+        self
+    }
+
+    /// Update the panel's effective language and RTL direction from `config`.
+    /// Returns `true` when the effective language changed.
+    pub fn sync_language(&mut self, config: &TwittyConfig) -> bool {
+        let next = config.resolve_ui_language(self.env_language);
+        if self.language != next {
+            self.language = next;
+            self.hover = None;
+            true
+        } else {
+            false
         }
     }
 
@@ -1507,6 +1560,9 @@ impl SettingsPanelState {
                 let next =
                     (current as i32 + logical_delta).rem_euclid(options.len() as i32) as usize;
                 if write_segmented_index(setting, next, config) {
+                    if setting == SettingId::UiLanguage {
+                        self.sync_language(config);
+                    }
                     outcome.changed.push(setting);
                     outcome.redraw = true;
                 }
@@ -1558,6 +1614,9 @@ impl SettingsPanelState {
             ControlKind::Segmented(options) => {
                 let next = (read_segmented_index(setting, config) + 1) % options.len();
                 if write_segmented_index(setting, next, config) {
+                    if setting == SettingId::UiLanguage {
+                        self.sync_language(config);
+                    }
                     outcome.changed.push(setting);
                     outcome.redraw = true;
                 }
@@ -1695,6 +1754,9 @@ impl SettingsPanelState {
                 self.focus_setting(setting);
                 self.cancel_picker_into(config, &mut outcome);
                 if write_segmented_index(setting, index, config) {
+                    if setting == SettingId::UiLanguage {
+                        self.sync_language(config);
+                    }
                     outcome.changed.push(setting);
                 }
                 outcome.redraw = true;
@@ -1966,6 +2028,11 @@ pub fn write_bool(setting: SettingId, value: bool, config: &mut TwittyConfig) ->
 
 pub fn read_segmented_index(setting: SettingId, config: &TwittyConfig) -> usize {
     match setting {
+        SettingId::UiLanguage => match config.ui_language_pref() {
+            UiLanguagePref::Auto => 0,
+            UiLanguagePref::English => 1,
+            UiLanguagePref::Arabic => 2,
+        },
         SettingId::CursorStyle => match config.cursor_style.as_str() {
             "beam" | "bar" => 1,
             "underline" => 2,
@@ -1992,6 +2059,10 @@ pub fn write_segmented_index(setting: SettingId, index: usize, config: &mut Twit
         return false;
     };
     match setting {
+        SettingId::UiLanguage if config.ui_language != opt.value => {
+            config.ui_language = opt.value.to_owned();
+            true
+        }
         SettingId::CursorStyle if config.cursor_style != opt.value => {
             config.cursor_style = opt.value.to_owned();
             true

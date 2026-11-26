@@ -23,7 +23,7 @@ use twitty::ui::palette::{matches, PaletteEntry, PaletteId};
 use twitty::ui::settings_panel::{
     current_picker_value, read_bool, read_segmented_index, read_slider_value, read_swatch_index,
     ControlGeometry, FocusZone, SettingId, SettingsHit, SettingsLayout, SettingsPanelState,
-    SettingsSection, ACCENT_SWATCHES,
+    SettingsSection, ACCENT_SWATCHES, UI_LANGUAGE_OPTIONS,
 };
 use winit::event::ElementState::Pressed;
 use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, SmolStr};
@@ -153,7 +153,7 @@ fn model_sections_labels_and_every_control_round_trips_through_save_and_load() {
         assert!(desc.note_en.is_some() && desc.note_ar.is_some(), "{id:?}");
     }
 
-    // Mutate EVERY SINGLE one of the 20 config settings via SettingsPanelState interactions.
+    // Mutate EVERY SINGLE one of the 21 config settings via SettingsPanelState interactions.
     let mut state = sample_panel(UiLanguage::English);
     let none = ModifiersState::empty();
 
@@ -274,7 +274,28 @@ fn model_sections_labels_and_every_control_round_trips_through_save_and_load() {
     assert_eq!(res.changed, vec![SettingId::UiFontFamily]);
     assert_eq!(cfg.ui_font_family.as_deref(), Some("Inter"));
 
-    // 5. UiAccent -> ArrowRight picks swatch 1 (#7aa2f7)
+    // 5. UiLanguage -> ArrowRight -> "en" (keeps LTR so subsequent horizontal steps stay LTR)
+    state.on_key(
+        &Key::Named(NamedKey::ArrowDown),
+        None,
+        none,
+        &mut cfg,
+        SURFACE,
+        1.0,
+    );
+    assert_eq!(state.focused_setting(), Some(SettingId::UiLanguage));
+    let res = state.on_key(
+        &Key::Named(NamedKey::ArrowRight),
+        None,
+        none,
+        &mut cfg,
+        SURFACE,
+        1.0,
+    );
+    assert_eq!(res.changed, vec![SettingId::UiLanguage]);
+    assert_eq!(cfg.ui_language, "en");
+
+    // 6. UiAccent -> ArrowRight picks swatch 1 (#7aa2f7)
     state.on_key(
         &Key::Named(NamedKey::ArrowDown),
         None,
@@ -486,6 +507,7 @@ fn model_sections_labels_and_every_control_round_trips_through_save_and_load() {
     assert_eq!(loaded.font_family, cfg.font_family);
     assert!((loaded.font_size - cfg.font_size).abs() < 1e-4);
     assert_eq!(loaded.ui_font_family, cfg.ui_font_family);
+    assert_eq!(loaded.ui_language, cfg.ui_language);
     assert_eq!(loaded.ui_accent, cfg.ui_accent);
     assert!((loaded.background_opacity - cfg.background_opacity).abs() < 1e-4);
     assert_eq!(loaded.cursor_style, cfg.cursor_style);
@@ -504,6 +526,7 @@ fn model_sections_labels_and_every_control_round_trips_through_save_and_load() {
     assert_eq!(loaded.agent_command, cfg.agent_command);
 
     // Accessor sanity checks on loaded config.
+    assert_eq!(read_segmented_index(SettingId::UiLanguage, &loaded), 1);
     assert_eq!(read_segmented_index(SettingId::CursorStyle, &loaded), 1);
     assert_eq!(read_segmented_index(SettingId::SidebarPosition, &loaded), 0);
     assert_eq!(read_swatch_index(&loaded), Some(1));
@@ -1060,5 +1083,356 @@ fn overlay_renders_and_clips_underlying_terminal_text_in_dark_light_en_ar() {
             let sec_runs = f.text_runs(&panes, &cache, &ime);
             assert!(!sec_runs.is_empty());
         }
+    }
+}
+
+#[test]
+fn interface_language_choices_labels_and_auto_resolution() {
+    assert!(SettingId::APPEARANCE.contains(&SettingId::UiLanguage));
+    assert!(SettingId::CONFIG_SETTINGS.contains(&SettingId::UiLanguage));
+    assert_eq!(SettingId::UiLanguage.section(), SettingsSection::Appearance);
+    assert_eq!(SettingId::UiLanguage.config_key(), Some("ui_language"));
+
+    let desc = SettingId::UiLanguage.descriptor();
+    assert_eq!(desc.label(UiLanguage::English), "Interface language");
+    assert_eq!(desc.label(UiLanguage::Arabic), "لغة الواجهة");
+    assert!(desc.note_en.is_none());
+    assert!(desc.note_ar.is_none());
+
+    assert_eq!(UI_LANGUAGE_OPTIONS.len(), 3);
+    assert_eq!(UI_LANGUAGE_OPTIONS[0].value, "auto");
+    assert_eq!(UI_LANGUAGE_OPTIONS[0].label(UiLanguage::English), "Auto");
+    assert_eq!(UI_LANGUAGE_OPTIONS[0].label(UiLanguage::Arabic), "تلقائي");
+    assert_eq!(UI_LANGUAGE_OPTIONS[1].value, "en");
+    assert_eq!(UI_LANGUAGE_OPTIONS[1].label(UiLanguage::English), "English");
+    assert_eq!(UI_LANGUAGE_OPTIONS[1].label(UiLanguage::Arabic), "English");
+    assert_eq!(UI_LANGUAGE_OPTIONS[2].value, "ar");
+    assert_eq!(UI_LANGUAGE_OPTIONS[2].label(UiLanguage::English), "العربية");
+    assert_eq!(UI_LANGUAGE_OPTIONS[2].label(UiLanguage::Arabic), "العربية");
+
+    let mut cfg = TwittyConfig::default();
+    assert_eq!(cfg.ui_language, "auto");
+    assert_eq!(read_segmented_index(SettingId::UiLanguage, &cfg), 0);
+
+    cfg.ui_language = "en".into();
+    assert_eq!(read_segmented_index(SettingId::UiLanguage, &cfg), 1);
+
+    cfg.ui_language = "ar".into();
+    assert_eq!(read_segmented_index(SettingId::UiLanguage, &cfg), 2);
+
+    // Invalid value safely maps to Auto (index 0).
+    cfg.ui_language = "invalid".into();
+    assert_eq!(read_segmented_index(SettingId::UiLanguage, &cfg), 0);
+
+    // Auto resolves using env_language (both English and Arabic environments).
+    cfg.ui_language = "en".into();
+    let mut ar_env_panel = sample_panel(UiLanguage::English).with_env_language(UiLanguage::Arabic);
+    ar_env_panel.selected = SettingId::APPEARANCE
+        .iter()
+        .position(|&id| id == SettingId::UiLanguage)
+        .unwrap();
+    let res = ar_env_panel.on_key(
+        &Key::Named(NamedKey::ArrowLeft),
+        None,
+        ModifiersState::empty(),
+        &mut cfg,
+        SURFACE,
+        1.0,
+    );
+    assert_eq!(res.changed, vec![SettingId::UiLanguage]);
+    assert_eq!(cfg.ui_language, "auto");
+    assert_eq!(ar_env_panel.language, UiLanguage::Arabic);
+    assert!(ar_env_panel.mirrored());
+}
+
+#[test]
+fn interface_language_live_apply_flips_panel_direction_via_mouse_and_keyboard() {
+    let mut cfg = TwittyConfig::default();
+    let mut state = sample_panel(UiLanguage::English).with_env_language(UiLanguage::English);
+    let none = ModifiersState::empty();
+
+    // Initial LTR layout: sidebar on left, label on left, segments ordered Auto | English | العربية.
+    let en_layout = SettingsLayout::build(SURFACE, 1.0, &state, &cfg);
+    assert!(!en_layout.mirrored);
+    assert!(en_layout.sidebar.right() <= en_layout.content.x);
+    let en_row = en_layout
+        .rows
+        .iter()
+        .find(|r| r.id == SettingId::UiLanguage)
+        .expect("UiLanguage row must exist in Appearance");
+    assert!(en_row.label.right() <= en_row.widget.x);
+    let en_segments = match &en_row.geometry {
+        ControlGeometry::Segmented { segments, .. } => segments.clone(),
+        other => panic!("expected segmented control for UiLanguage, got {other:?}"),
+    };
+    assert_eq!(en_segments.len(), 3);
+    assert!(en_segments[0].x < en_segments[1].x && en_segments[1].x < en_segments[2].x);
+
+    // Click "العربية" (index 2): updates config, flips panel language and RTL direction live.
+    let (ax, ay) = center(en_segments[2]);
+    assert_eq!(
+        en_layout.hit(ax, ay),
+        SettingsHit::Segment(SettingId::UiLanguage, 2)
+    );
+    state.hover = Some(SettingsHit::Segment(SettingId::UiLanguage, 2));
+    let res = state.on_mouse_down(ax, ay, &mut cfg, SURFACE, 1.0);
+    assert_eq!(res.changed, vec![SettingId::UiLanguage]);
+    assert!(res.redraw);
+    assert_eq!(cfg.ui_language, "ar");
+    assert_eq!(state.language, UiLanguage::Arabic);
+    assert!(state.mirrored());
+    assert_eq!(state.hover, None, "hover clears when panel flips direction");
+
+    // Rebuilt layout is mirrored: sidebar on right, close button on left, label on right,
+    // segments reversed (Auto at right reading start, العربية at left).
+    let ar_layout = SettingsLayout::build(SURFACE, 1.0, &state, &cfg);
+    assert!(ar_layout.mirrored);
+    assert!(ar_layout.content.right() <= ar_layout.sidebar.x);
+    assert!(ar_layout.close_button.right() <= ar_layout.header_title.x);
+    let ar_row = ar_layout
+        .rows
+        .iter()
+        .find(|r| r.id == SettingId::UiLanguage)
+        .unwrap();
+    assert!(ar_row.widget.right() <= ar_row.label.x);
+    let ar_segments = match &ar_row.geometry {
+        ControlGeometry::Segmented { segments, .. } => segments.clone(),
+        other => panic!("expected segmented control for UiLanguage, got {other:?}"),
+    };
+    assert!(ar_segments[0].x > ar_segments[1].x && ar_segments[1].x > ar_segments[2].x);
+
+    // Clicking the already-active "العربية" segment is a no-op (no spurious save).
+    let (ar_x, ar_y) = center(ar_segments[2]);
+    let noop = state.on_mouse_down(ar_x, ar_y, &mut cfg, SURFACE, 1.0);
+    assert!(noop.changed.is_empty());
+    assert_eq!(cfg.ui_language, "ar");
+
+    // Click "English" (index 1) in the mirrored layout -> flips immediately back to LTR.
+    let (en_x, en_y) = center(ar_segments[1]);
+    let res = state.on_mouse_down(en_x, en_y, &mut cfg, SURFACE, 1.0);
+    assert_eq!(res.changed, vec![SettingId::UiLanguage]);
+    assert_eq!(cfg.ui_language, "en");
+    assert_eq!(state.language, UiLanguage::English);
+    assert!(!state.mirrored());
+
+    // Keyboard Space cycles en -> ar (flips to Arabic), then Space again cycles ar -> auto (flips to env English).
+    let res = state.on_key(
+        &Key::Named(NamedKey::Space),
+        None,
+        none,
+        &mut cfg,
+        SURFACE,
+        1.0,
+    );
+    assert_eq!(res.changed, vec![SettingId::UiLanguage]);
+    assert_eq!(cfg.ui_language, "ar");
+    assert_eq!(state.language, UiLanguage::Arabic);
+
+    let res = state.on_key(
+        &Key::Named(NamedKey::Space),
+        None,
+        none,
+        &mut cfg,
+        SURFACE,
+        1.0,
+    );
+    assert_eq!(res.changed, vec![SettingId::UiLanguage]);
+    assert_eq!(cfg.ui_language, "auto");
+    assert_eq!(state.language, UiLanguage::English);
+
+    // Keyboard ArrowLeft in LTR wraps auto -> ar (Arabic); then ArrowRight in mirrored RTL steps backwards ar -> en (English).
+    let res = state.on_key(
+        &Key::Named(NamedKey::ArrowLeft),
+        None,
+        none,
+        &mut cfg,
+        SURFACE,
+        1.0,
+    );
+    assert_eq!(res.changed, vec![SettingId::UiLanguage]);
+    assert_eq!(cfg.ui_language, "ar");
+    assert_eq!(state.language, UiLanguage::Arabic);
+
+    let res = state.on_key(
+        &Key::Named(NamedKey::ArrowRight),
+        None,
+        none,
+        &mut cfg,
+        SURFACE,
+        1.0,
+    );
+    assert_eq!(res.changed, vec![SettingId::UiLanguage]);
+    assert_eq!(cfg.ui_language, "en");
+    assert_eq!(state.language, UiLanguage::English);
+}
+
+#[test]
+fn interface_language_persists_preserving_unknown_keys_and_pretty_json() {
+    let path = temp_config_path("ui-language-preserve");
+    std::fs::write(
+        &path,
+        r#"{
+  "ui_language": "en",
+  "future_flag": true,
+  "custom_nested": { "k": 7 }
+}"#,
+    )
+    .unwrap();
+
+    let mut cfg = TwittyConfig::load_from(&path);
+    assert_eq!(cfg.ui_language, "en");
+    let mut state = sample_panel(UiLanguage::English);
+    state.selected = SettingId::APPEARANCE
+        .iter()
+        .position(|&id| id == SettingId::UiLanguage)
+        .unwrap();
+
+    let res = state.on_key(
+        &Key::Named(NamedKey::ArrowRight),
+        None,
+        ModifiersState::empty(),
+        &mut cfg,
+        SURFACE,
+        1.0,
+    );
+    assert_eq!(res.changed, vec![SettingId::UiLanguage]);
+    assert_eq!(cfg.ui_language, "ar");
+    assert_eq!(state.language, UiLanguage::Arabic);
+
+    cfg.save_to(&path).expect("save_to should succeed");
+    let raw = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        raw.contains('\n'),
+        "saved config should stay pretty-printed"
+    );
+    assert!(raw.contains("\"ui_language\": \"ar\""));
+    assert!(raw.contains("\"future_flag\": true"));
+
+    let reloaded = TwittyConfig::load_from(&path);
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(reloaded.ui_language, "ar");
+    assert_eq!(
+        reloaded.extra.get("future_flag"),
+        Some(&serde_json::json!(true))
+    );
+    assert_eq!(
+        reloaded.extra.get("custom_nested"),
+        Some(&serde_json::json!({ "k": 7 }))
+    );
+}
+
+#[test]
+fn interface_language_overlay_renders_bilingual_labels_and_flips_live() {
+    let mut font_system = FontSystem::new();
+    let font = UiFont::default();
+    let metrics = CellMetrics {
+        font_size: 14.5,
+        scale: 1.0,
+        char_width: 9.0,
+        line_height: 22.0,
+        padding_left: 8.0,
+        padding_top: 6.0,
+    };
+    let surface = (1024.0, 720.0);
+    let palette = Palette::default();
+    let mut ctx = DrawContext {
+        font_system: &mut font_system,
+        family: None,
+        palette: &palette,
+        metrics,
+        is_srgb: false,
+    };
+    let opts = FrameOptions {
+        window_focused: true,
+        cursor_style: "block",
+        cursor_blink_on: true,
+        surface,
+    };
+    let mut term = Terminal::new(80, 24, |_| {});
+    term.process_bytes(b"hello terminal\r\n");
+    let (lines, cursor) = term.snapshot();
+    let panes = vec![PaneFrame {
+        id: PaneId(1),
+        rect: Rect::new(0.0, 0.0, surface.0, surface.1),
+        lines,
+        cursor,
+        focused: true,
+        status: None,
+        blocks: Vec::new(),
+    }];
+    let mut cache = RowCache::default();
+    let mut ime = PreeditState::default();
+    let style = UiStyle::new(&palette, None, metrics.scale);
+
+    let mut cfg = TwittyConfig::default();
+    cfg.ui_language = "en".into();
+    let mut state = sample_panel(UiLanguage::English);
+
+    // 1. Render in English.
+    let mut frame_en = build_frame(&mut ctx, &opts, &mut cache, &mut ime, &[], &panes, &[]);
+    frame_en.add_settings(
+        &mut ctx,
+        style,
+        &font,
+        &SettingsView {
+            state: state.clone(),
+            config: cfg.clone(),
+        },
+    );
+    let en_texts: Vec<String> = frame_en
+        .text_runs(&panes, &cache, &ime)
+        .iter()
+        .map(|r| r.buffer.lines[0].text().to_owned())
+        .collect();
+    for expected in [
+        "Settings",
+        "Interface language",
+        "Auto",
+        "English",
+        "العربية",
+    ] {
+        assert!(
+            en_texts.iter().any(|t| t == expected),
+            "English render missing {expected:?} in {en_texts:?}"
+        );
+    }
+
+    // 2. Switch live to Arabic via SettingsPanelState and re-render.
+    state.selected = SettingId::APPEARANCE
+        .iter()
+        .position(|&id| id == SettingId::UiLanguage)
+        .unwrap();
+    let res = state.on_key(
+        &Key::Named(NamedKey::ArrowRight),
+        None,
+        ModifiersState::empty(),
+        &mut cfg,
+        surface,
+        1.0,
+    );
+    assert_eq!(res.changed, vec![SettingId::UiLanguage]);
+    assert_eq!(state.language, UiLanguage::Arabic);
+
+    let mut frame_ar = build_frame(&mut ctx, &opts, &mut cache, &mut ime, &[], &panes, &[]);
+    frame_ar.add_settings(
+        &mut ctx,
+        style,
+        &font,
+        &SettingsView {
+            state: state.clone(),
+            config: cfg.clone(),
+        },
+    );
+    let ar_texts: Vec<String> = frame_ar
+        .text_runs(&panes, &cache, &ime)
+        .iter()
+        .map(|r| r.buffer.lines[0].text().to_owned())
+        .collect();
+    for expected in ["الإعدادات", "لغة الواجهة", "تلقائي", "English", "العربية"]
+    {
+        assert!(
+            ar_texts.iter().any(|t| t == expected),
+            "Arabic render missing {expected:?} in {ar_texts:?}"
+        );
     }
 }
