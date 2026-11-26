@@ -724,15 +724,22 @@ fn consent_store_persists_reloads_and_fails_closed() {
         AiConsentStore::path_from(Some(OsStr::new("relative/dir")), None),
         None
     );
+    // Platform-absolute bases (a Unix-style "/tmp/..." is not absolute on Windows).
+    let xdg = std::env::temp_dir().join("xdg-state");
+    let alice = std::env::temp_dir().join("home-alice");
     assert_eq!(
-        AiConsentStore::path_from(Some(OsStr::new("/tmp/xdg-state")), None),
-        Some(PathBuf::from("/tmp/xdg-state/twitty/ai-consent.json"))
+        AiConsentStore::path_from(Some(xdg.as_os_str()), None),
+        Some(xdg.join("twitty").join("ai-consent.json"))
     );
     assert_eq!(
-        AiConsentStore::path_from(None, Some(OsStr::new("/home/alice"))),
-        Some(PathBuf::from(
-            "/home/alice/.local/state/twitty/ai-consent.json"
-        ))
+        AiConsentStore::path_from(None, Some(alice.as_os_str())),
+        Some(
+            alice
+                .join(".local")
+                .join("state")
+                .join("twitty")
+                .join("ai-consent.json")
+        )
     );
 
     // Missing file => not accepted.

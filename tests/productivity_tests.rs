@@ -143,22 +143,27 @@ fn mru_persists_atomically_with_0600_and_enforces_bounds() {
 
 #[test]
 fn mru_path_lives_next_to_session_in_state_dir() {
+    // Platform-absolute bases (a Unix-style "/var/state" is not absolute on Windows).
+    let base = std::env::temp_dir();
+    let state = base.join("var-state");
+    let home = base.join("home-u");
+    let in_home = home
+        .join(".local")
+        .join("state")
+        .join("twitty")
+        .join("recent_projects.json");
     assert_eq!(
-        ProjectMru::path_from(Some(OsStr::new("/var/state")), Some(OsStr::new("/home/u"))),
-        Some(PathBuf::from("/var/state/twitty/recent_projects.json"))
+        ProjectMru::path_from(Some(state.as_os_str()), Some(home.as_os_str())),
+        Some(state.join("twitty").join("recent_projects.json"))
     );
     assert_eq!(
-        ProjectMru::path_from(None, Some(OsStr::new("/home/u"))),
-        Some(PathBuf::from(
-            "/home/u/.local/state/twitty/recent_projects.json"
-        ))
+        ProjectMru::path_from(None, Some(home.as_os_str())),
+        Some(in_home.clone())
     );
     // Relative XDG_STATE_HOME is ignored.
     assert_eq!(
-        ProjectMru::path_from(Some(OsStr::new("relative")), Some(OsStr::new("/home/u"))),
-        Some(PathBuf::from(
-            "/home/u/.local/state/twitty/recent_projects.json"
-        ))
+        ProjectMru::path_from(Some(OsStr::new("relative")), Some(home.as_os_str())),
+        Some(in_home)
     );
     assert_eq!(ProjectMru::path_from(None, None), None);
 }
@@ -299,15 +304,16 @@ fn project_roots_config_and_switcher_merge_and_tab_match() {
         serde_json::from_str(r#"{"project_roots": ["/work/repos", "~/oss"]}"#).unwrap();
     assert_eq!(custom_cfg.project_roots, vec!["/work/repos", "~/oss"]);
 
-    let home = Path::new("/home/tester");
+    let home_buf = std::env::temp_dir().join("home-tester");
+    let home = home_buf.as_path();
     assert_eq!(
         expand_root("~/Projects", Some(home)),
-        Some(PathBuf::from("/home/tester/Projects"))
+        Some(home.join("Projects"))
     );
     assert_eq!(expand_root("relative/dir", Some(home)), None);
     assert_eq!(
-        abbreviate_home(Path::new("/home/tester/Projects/twitty"), Some(home)),
-        "~/Projects/twitty"
+        abbreviate_home(&home.join("Projects").join("twitty"), Some(home)),
+        format!("~/{}", Path::new("Projects").join("twitty").display())
     );
 
     let tmp = TempDir::new("merge");
