@@ -3,18 +3,17 @@
 //! on the left and the Arabic title on the right, each shaped on its own so neither language
 //! reorders the other. Titles are shortened at grapheme boundaries when space is tight.
 
-use unicode_segmentation::UnicodeSegmentation;
-
 use super::context::DrawContext;
 use crate::layout::Rect;
 use crate::render::icons::Icon;
 use crate::render::shapes::{Border, Shadow, Shape};
-use crate::render::text::ui::{UiAlign, UiFont, UiLabel, UiSize, UiWeight};
+use crate::render::text::ui::{UiAlign, UiLabel, UiSize, UiWeight};
 use crate::render::ui_style::{
     UiStyle, OVERLAY_BLUR, OVERLAY_OFFSET, OVERLAY_SHADOW, RADIUS_12, RADIUS_6, RADIUS_8,
 };
 
-pub use crate::render::text::ui::label_width;
+use crate::render::text::labels::UiLabels;
+pub use crate::render::text::ui::{fit_query_tail, label_width};
 
 /// What the palette shows; built by the app from `ui::palette`.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -125,50 +124,11 @@ impl PaletteLayout {
     }
 }
 
-/// Fit `query` into `width` physical pixels, keeping the tail prefixed with `…` when it overflows
-/// so what the user is typing stays visible.
-pub fn fit_query_tail(
-    font: &UiFont,
-    font_system: &mut cosmic_text::FontSystem,
-    scale: f32,
-    query: &str,
-    width: f32,
-) -> (String, cosmic_text::Buffer) {
-    let mut shape =
-        |text: &str| font.shape(font_system, UiSize::Title, UiWeight::Regular, scale, text);
-    let full = shape(query);
-    if label_width(&full) <= width {
-        return (query.to_owned(), full);
-    }
-    let cuts: Vec<_> = query.grapheme_indices(true).map(|(i, _)| i).collect();
-    let ellipsis = shape("…");
-    if label_width(&ellipsis) > width {
-        return (String::new(), shape(""));
-    }
-    let mut best_text = "…".to_owned();
-    let mut best = ellipsis;
-    let (mut low, mut high) = (0, cuts.len().saturating_sub(1));
-    while low < high {
-        let keep = (low + high).div_ceil(2);
-        let start = cuts[cuts.len() - keep];
-        let text = format!("…{}", &query[start..]);
-        let candidate = shape(&text);
-        if label_width(&candidate) <= width {
-            best_text = text;
-            best = candidate;
-            low = keep;
-        } else {
-            high = keep - 1;
-        }
-    }
-    (best_text, best)
-}
-
 /// Panel shapes and labels, with the area to clip out of previously laid-out text.
 pub(crate) fn palette_overlay(
     ctx: &mut DrawContext,
     style: UiStyle,
-    font: &UiFont,
+    mut font: UiLabels<'_>,
     view: &PaletteView,
     icons: &PaletteIcons,
     surface: (f32, f32),
@@ -234,8 +194,7 @@ pub(crate) fn palette_overlay(
                 style.text_dim,
             )
         } else {
-            let (_, buffer) =
-                fit_query_tail(font, ctx.font_system, style.scale, &view.query, text.w);
+            let buffer = font.fit_tail(ctx.font_system, style.scale, &view.query, text.w);
             (buffer, style.text)
         };
         texts.push(UiLabel::new(buffer, text, UiAlign::Start, color));

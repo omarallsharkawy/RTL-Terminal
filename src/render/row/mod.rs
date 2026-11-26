@@ -41,9 +41,20 @@ impl CachedRow {
         quads: Vec<Quad>,
         char_width: f32,
     ) -> Self {
+        let visual = visual_cell_extents(line, &segments, char_width);
+        Self::with_extents(hash, line, segments, quads, visual)
+    }
+
+    pub(crate) fn with_extents(
+        hash: u64,
+        line: &LineData,
+        segments: Vec<CachedSegment>,
+        quads: Vec<Quad>,
+        visual: Vec<Option<(f32, f32)>>,
+    ) -> Self {
         CachedRow {
             hash,
-            visual: visual_cell_extents(line, &segments, char_width),
+            visual,
             rtl_cells: line.cells.iter().map(|c| is_rtl_char(c.c)).collect(),
             blank_cells: line.cells.iter().map(CellData::is_blank).collect(),
             segments,

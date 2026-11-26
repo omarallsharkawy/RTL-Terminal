@@ -2,6 +2,7 @@
 
 pub mod bidi;
 pub mod fonts;
+pub mod labels;
 pub mod segment;
 pub mod shaper;
 

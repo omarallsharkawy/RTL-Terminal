@@ -54,6 +54,7 @@ use std::time::{Duration, Instant};
 use text::fonts::{
     all_families, installed_family, monospace_families, new_font_system, ui_font_system,
 };
+use text::labels::{LabelCache as UiLabelCache, UiLabels};
 use text::ui::UiFont;
 use ui_style::UiStyle;
 
@@ -107,6 +108,7 @@ pub(crate) struct Renderer {
     /// Shaped rows of every pane, so a pane that did not change is not reshaped.
     row_cache: RowCache,
     sidebar_labels: LabelCache,
+    ui_labels: UiLabelCache,
     /// Input-method composition drawn at the cursor.
     ime: PreeditState,
     reduce_motion: bool,
@@ -133,13 +135,22 @@ pub(crate) struct Renderer {
 }
 
 impl Renderer {
-    pub async fn new(window: Arc<Window>, initial_font_size: f32) -> anyhow::Result<Self> {
+    pub async fn new(
+        window: Arc<Window>,
+        initial_font_size: f32,
+        perf: Option<&mut crate::perf::Perf>,
+    ) -> anyhow::Result<Self> {
+        let gpu_start = perf.as_ref().map(|_| Instant::now());
         let (gpu, config) = Gpu::new(window.clone()).await?;
         let is_srgb = config.format.is_srgb();
 
         let scale = window.scale_factor() as f32;
+        let font_start = gpu_start.map(|_| Instant::now());
         let font_system = new_font_system();
         let ui_font_system = ui_font_system(&font_system);
+        if let Some((perf, (gpu_start, font_start))) = perf.zip(gpu_start.zip(font_start)) {
+            perf.startup_phases(font_start - gpu_start, font_start.elapsed());
+        }
         let mut renderer = Self {
             window,
             config,
@@ -166,6 +177,7 @@ impl Renderer {
             cursor_blink_on: true,
             row_cache: RowCache::default(),
             sidebar_labels: LabelCache::default(),
+            ui_labels: UiLabelCache::default(),
             ime: Default::default(),
             reduce_motion: false,
             palette_view: AnimatedView::default(),
@@ -227,12 +239,14 @@ impl Renderer {
 
     pub(crate) fn set_ui_style(&mut self, family: Option<&str>, accent: Option<Rgba>) {
         self.ui_font = UiFont::new(&mut self.ui_font_system, family);
+        self.ui_labels = UiLabelCache::default();
         self.ui_accent = accent;
         self.sidebar_labels.clear();
     }
 
     pub(crate) fn set_ui_font_family(&mut self, family: Option<&str>) {
         self.ui_font = UiFont::new(&mut self.ui_font_system, family);
+        self.ui_labels = UiLabelCache::default();
         self.sidebar_labels.clear();
     }
 
@@ -500,10 +514,13 @@ impl Renderer {
         panes: &[PaneFrame],
         dividers: &[Rect],
         sidebar: Option<&crate::sidebar::cards::View>,
+        perf: Option<(&mut crate::perf::Perf, Instant)>,
     ) -> anyhow::Result<()> {
+        let acquire_start = perf.as_ref().map(|_| Instant::now());
         let Some(surface_texture) = self.gpu.acquire(&self.config, &self.window) else {
             return Ok(());
         };
+        let acquire = acquire_start.map(|start| start.elapsed());
 
         let opts = FrameOptions {
             window_focused: self.focused,
@@ -558,7 +575,13 @@ impl Renderer {
         } else {
             self.sidebar_labels.clear();
         }
-        frame.add_chrome_motion(&mut ctx, style, &self.ui_font, chrome, Some(motion));
+        frame.add_chrome_motion(
+            &mut ctx,
+            style,
+            UiLabels::cached(&self.ui_font, &mut self.ui_labels),
+            chrome,
+            Some(motion),
+        );
         if let Some((view, opacity, _)) = self.review_view.sample(motion.now) {
             frame.add_review_motion(
                 &mut ctx,
@@ -581,7 +604,14 @@ impl Renderer {
         if let Some(view) = &self.welcome_view {
             frame.add_welcome(&mut ctx, style, &self.ui_font, view);
         } else if let Some(((view, icons), opacity, _)) = self.palette_view.sample(motion.now) {
-            frame.add_palette_motion(&mut ctx, style, &self.ui_font, view, icons, opacity);
+            frame.add_palette_motion(
+                &mut ctx,
+                style,
+                UiLabels::cached(&self.ui_font, &mut self.ui_labels),
+                view,
+                icons,
+                opacity,
+            );
         } else if let Some(view) = &self.settings_view {
             frame.add_settings(&mut ctx, style, &self.ui_font, view);
         }
@@ -595,6 +625,7 @@ impl Renderer {
             );
         }
         let runs = frame.text_runs(panes, &self.row_cache, &self.ime);
+        let draw_start = acquire.map(|_| Instant::now());
         self.gpu.draw(
             surface_texture,
             (&frame.quads, &frame.shapes),
@@ -602,6 +633,13 @@ impl Renderer {
             &mut self.ui_font_system,
             frame.background,
             self.opacity,
-        )
+        )?;
+        if let Some(((perf, start), (acquire, draw_start))) = perf.zip(acquire.zip(draw_start)) {
+            perf.record_frame(
+                (draw_start - start).saturating_sub(acquire),
+                acquire + draw_start.elapsed(),
+            );
+        }
+        Ok(())
     }
 }

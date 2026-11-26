@@ -8,7 +8,7 @@ use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::{Dimensions, Row, Scroll};
 use alacritty_terminal::index::{Boundary, Column, Direction, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionRange, SelectionType};
-use alacritty_terminal::term::cell::{Cell, Flags as CellFlags};
+use alacritty_terminal::term::cell::{Cell, Flags as CellFlags, LineLength};
 use alacritty_terminal::term::color::Colors;
 use alacritty_terminal::term::search::{Match, RegexIter, RegexSearch};
 use alacritty_terminal::term::test::TermSize;
@@ -93,10 +93,6 @@ impl CellData {
     /// Text this cell contributes to a shaped run (empty for spacers).
     pub fn push_text(&self, out: &mut String) {
         out.extend(self.shaped_chars());
-    }
-
-    pub(crate) fn text_len(&self) -> usize {
-        self.shaped_chars().map(char::len_utf8).sum()
     }
 }
 
@@ -1104,7 +1100,14 @@ impl Terminal {
             chars.clear();
             for line in start..=end {
                 let row = &grid[Line(line)];
-                for c in 0..self.cols {
+                // Only the last physical row can lose padding; inside a wrapped line those
+                // columns preserve the logical spacing.
+                let cols = if line == end {
+                    row.line_length().0
+                } else {
+                    self.cols
+                };
+                for c in 0..cols {
                     let cell = &row[Column(c)];
                     if cell.flags.intersects(spacer) {
                         continue;

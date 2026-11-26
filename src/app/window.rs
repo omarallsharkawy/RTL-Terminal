@@ -2,8 +2,10 @@
 
 use alacritty_terminal::index::Side;
 use alacritty_terminal::vte::ansi::{Color as AnsiColor, Rgb};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 use winit::event_loop::ActiveEventLoop;
@@ -57,10 +59,23 @@ impl GridGeometry for Window {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
+struct LayoutKey {
+    metrics: crate::render::CellMetrics,
+    surface: (f32, f32),
+    tab_count: usize,
+    sidebar: (SidebarPosition, f32),
+    top_bar: bool,
+    review_open: bool,
+    language: UiLanguage,
+}
+
 /// The window, once it is open: its renderer, the pending-redraw flag and the cursor icon.
 pub(super) struct Window {
     renderer: Option<Renderer>,
+    perf: Option<crate::perf::Perf>,
     needs_redraw: bool,
+    layout_cache: RefCell<Option<(LayoutKey, Rc<WindowLayout>)>>,
     cursor_icon: CursorIcon,
     sidebar: Placement,
     sidebar_width: f32,
@@ -87,10 +102,12 @@ pub(super) struct Window {
 }
 
 impl Window {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(perf: Option<crate::perf::Perf>) -> Self {
         Self {
             renderer: None,
+            perf,
             needs_redraw: false,
+            layout_cache: RefCell::default(),
             cursor_icon: CursorIcon::Default,
             sidebar: Placement::new(SidebarPosition::Right),
             sidebar_width: crate::layout::DEFAULT_SIDEBAR_WIDTH,
@@ -150,14 +167,15 @@ impl Window {
         window.set_ime_allowed(true);
         window.set_ime_purpose(winit::window::ImePurpose::Terminal);
 
-        let mut renderer = match pollster::block_on(Renderer::new(window, config.font_size)) {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::error!("failed to initialize renderer: {e:?}");
-                event_loop.exit();
-                return false;
-            }
-        };
+        let mut renderer =
+            match pollster::block_on(Renderer::new(window, config.font_size, self.perf.as_mut())) {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::error!("failed to initialize renderer: {e:?}");
+                    event_loop.exit();
+                    return false;
+                }
+            };
 
         self.motion = ChromeAnimations::new(config.reduce_motion);
         renderer.set_reduce_motion(config.reduce_motion);
@@ -200,26 +218,41 @@ impl Window {
         self.renderer.as_ref().map(|_| self)
     }
 
-    fn layout(&self, tab_count: usize) -> Option<WindowLayout> {
+    fn layout(&self, tab_count: usize) -> Option<Rc<WindowLayout>> {
         let r = self.renderer.as_ref()?;
-        let mut layout = WindowLayout::new(
-            r.metrics(),
-            r.surface_size(),
+        let key = LayoutKey {
+            metrics: r.metrics(),
+            surface: r.surface_size(),
             tab_count,
-            (self.sidebar.position, self.sidebar_width),
-            self.top_bar,
+            sidebar: (self.sidebar.position, self.sidebar_width),
+            top_bar: self.top_bar,
+            review_open: self.review_open,
+            language: self.language,
+        };
+        let mut cached = self.layout_cache.borrow_mut();
+        if let Some((_, layout)) = cached.as_ref().filter(|(old, _)| *old == key) {
+            return Some(Rc::clone(layout));
+        }
+        let mut layout = WindowLayout::new(
+            key.metrics,
+            key.surface,
+            key.tab_count,
+            key.sidebar,
+            key.top_bar,
         )
-        .with_language(self.language);
-        if self.review_open {
+        .with_language(key.language);
+        if key.review_open {
             // The review panel takes the right part of what the sidebar leaves to the panes.
             let (content, review) = crate::review::layout::split_content(
                 layout.content,
-                r.surface_size().0,
-                r.metrics().scale,
+                key.surface.0,
+                key.metrics.scale,
             );
             layout.content = content;
             layout.review = review;
         }
+        let layout = Rc::new(layout);
+        *cached = Some((key, Rc::clone(&layout)));
         Some(layout)
     }
 
@@ -310,19 +343,24 @@ impl Window {
         .with_language(self.language)
     }
 
-    pub(super) fn diff_visible(&self) -> bool {
+    pub(super) fn diff_visible(&self, tab_count: usize) -> bool {
         let Some(r) = self.renderer.as_ref() else {
             return false;
         };
-        let Some(layout) = self.layout(0) else {
+        let Some(layout) = self.layout(tab_count) else {
             return false;
         };
         !self.occluded && TopBarLayout::can_show_diff(layout.top_bar, r.metrics().scale)
     }
 
+    pub(super) fn is_occluded(&self) -> bool {
+        self.occluded
+    }
+
     pub(super) fn set_occluded(&mut self, occluded: bool) {
         self.occluded = occluded;
         if occluded {
+            self.needs_redraw = false;
             self.motion_frame = None;
             self.motion.suspend();
         } else {
@@ -468,8 +506,15 @@ impl Window {
         self.motion_frame
     }
 
+    pub(super) fn poll_perf(&mut self, now: Instant) -> Option<Instant> {
+        self.perf.as_mut().map(|perf| perf.poll(now))
+    }
+
     /// Ask for one redraw; repeated requests before it happens are merged.
     pub(super) fn request_redraw(&mut self) {
+        if self.occluded {
+            return;
+        }
         if let Some(ref r) = self.renderer {
             if !self.needs_redraw {
                 self.needs_redraw = true;
@@ -785,6 +830,7 @@ impl Window {
         broadcast: bool,
         history: &NotificationHistory,
         pointer: (f64, f64),
+        frame_start: Option<Instant>,
     ) {
         let Some(metrics) = self.metrics() else {
             return;
@@ -900,6 +946,7 @@ impl Window {
                 panes,
                 dividers,
                 self.sidebar_view.as_ref(),
+                self.perf.as_mut().zip(frame_start),
             );
             self.motion_frame = if self.occluded || self.motion.reduced() {
                 None
@@ -1045,6 +1092,10 @@ impl App {
     /// Draw the active tab.
     pub(super) fn redraw(&mut self) {
         self.window.needs_redraw = false;
+        if self.window.is_occluded() {
+            return;
+        }
+        let frame_start = self.window.perf.as_ref().map(|_| Instant::now());
         if self.modifiers.control_key()
             && !self.palette_open()
             && !self.settings_open()
@@ -1085,6 +1136,7 @@ impl App {
             } else {
                 (f64::NEG_INFINITY, f64::NEG_INFINITY)
             },
+            frame_start,
         );
     }
 
@@ -1303,13 +1355,13 @@ mod tests {
 
     #[test]
     fn closed_window_layout_returns_none_without_panicking() {
-        let win = Window::new();
+        let win = Window::new(None);
         let ws = Workspace::new();
         assert!(win.layout(0).is_none());
         assert!(win.layout(2).is_none());
         assert_eq!(win.content_rect(1), Rect::new(0.0, 0.0, 0.0, 0.0));
         assert!(win.review_rect(&ws).is_none());
-        assert!(!win.diff_visible());
+        assert!(!win.diff_visible(0));
         assert!(!win.sidebar_shown(&ws));
         assert!(!win.sidebar_contains(&ws, 0.0, 0.0));
         assert_eq!(win.hit_test(&ws, 0.0, 0.0), Hit::Nothing);

@@ -11,7 +11,7 @@ use crate::color::Rgba;
 use crate::layout::Rect;
 use crate::ui::text::fit_text;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum UiSize {
     Small,
     Caption,
@@ -31,7 +31,7 @@ impl UiSize {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum UiWeight {
     #[default]
     Regular,
@@ -215,6 +215,45 @@ impl UiFont {
     }
 }
 
+/// Fit `query` into `width` physical pixels, keeping the tail prefixed with `…` when it overflows
+/// so what the user is typing stays visible.
+pub fn fit_query_tail(
+    font: &UiFont,
+    font_system: &mut FontSystem,
+    scale: f32,
+    query: &str,
+    width: f32,
+) -> (String, Buffer) {
+    let mut shape =
+        |text: &str| font.shape(font_system, UiSize::Title, UiWeight::Regular, scale, text);
+    let full = shape(query);
+    if label_width(&full) <= width {
+        return (query.to_owned(), full);
+    }
+    let cuts: Vec<_> = query.grapheme_indices(true).map(|(i, _)| i).collect();
+    let ellipsis = shape("…");
+    if label_width(&ellipsis) > width {
+        return (String::new(), shape(""));
+    }
+    let mut best_text = "…".to_owned();
+    let mut best = ellipsis;
+    let (mut low, mut high) = (0, cuts.len().saturating_sub(1));
+    while low < high {
+        let keep = (low + high).div_ceil(2);
+        let start = cuts[cuts.len() - keep];
+        let text = format!("…{}", &query[start..]);
+        let candidate = shape(&text);
+        if label_width(&candidate) <= width {
+            best_text = text;
+            best = candidate;
+            low = keep;
+        } else {
+            high = keep - 1;
+        }
+    }
+    (best_text, best)
+}
+
 pub fn label_width(buffer: &Buffer) -> f32 {
     buffer
         .layout_runs()
@@ -232,7 +271,7 @@ pub enum UiAlign {
 
 /// A shaped label aligned within a physical rectangle, clipped to that rectangle.
 pub struct UiLabel {
-    pub buffer: Buffer,
+    pub buffer: Arc<Buffer>,
     pub left: f32,
     pub top: f32,
     pub bounds: TextBounds,
@@ -240,7 +279,8 @@ pub struct UiLabel {
 }
 
 impl UiLabel {
-    pub fn new(buffer: Buffer, rect: Rect, align: UiAlign, color: Rgba) -> Self {
+    pub fn new(buffer: impl Into<Arc<Buffer>>, rect: Rect, align: UiAlign, color: Rgba) -> Self {
+        let buffer = buffer.into();
         let room = (rect.w - label_width(&buffer)).max(0.0);
         let rtl = buffer.layout_runs().next().is_some_and(|run| run.rtl);
         let x = match align {

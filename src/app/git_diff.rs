@@ -57,7 +57,7 @@ impl App {
     pub(super) fn poll_git_diff(&mut self, now: Instant) -> Option<Instant> {
         let target = self
             .window
-            .diff_visible()
+            .diff_visible(self.ws.tabs().len())
             .then(|| target(&self.ws))
             .flatten();
         let watch = &mut self.git_diff;
@@ -98,7 +98,7 @@ impl App {
         let watch = &mut self.git_diff;
         watch.in_flight = false;
         if generation == watch.generation
-            && self.window.diff_visible()
+            && self.window.diff_visible(self.ws.tabs().len())
             && watch.target == target(&self.ws)
         {
             let stat = watch.target.clone().zip(stat);

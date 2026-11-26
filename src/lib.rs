@@ -15,6 +15,7 @@ pub mod layout;
 pub mod layouts;
 pub mod links;
 pub mod notify;
+mod perf;
 pub mod ports;
 pub mod projects;
 pub mod pty;

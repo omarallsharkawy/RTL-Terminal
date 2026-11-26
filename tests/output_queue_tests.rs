@@ -1,7 +1,9 @@
 //! The queue between a PTY reader thread and the UI: batching, the size limit and closing.
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use twitty::layout::PaneId;
+use twitty::pty::schedule::{OutputSchedule, CHUNK_BYTES};
 use twitty::pty::OutputQueue;
 
 #[test]
@@ -40,4 +42,69 @@ fn closing_releases_a_waiting_reader() {
     q.close();
     assert!(!reader.join().unwrap());
     assert!(q.take().is_empty());
+}
+
+#[test]
+fn partial_drains_keep_fifo_order_and_need_no_extra_wake() {
+    let q = OutputQueue::default();
+    assert!(q.push(b"abcdefgh"));
+    let mut chunk = Vec::new();
+
+    assert!(q.take_into(&mut chunk, 5));
+    assert_eq!(chunk, b"abcde");
+    assert!(!q.push(b"ijkl"));
+
+    assert!(q.take_into(&mut chunk, 4));
+    assert_eq!(chunk, b"fghi");
+    assert!(!q.take_into(&mut chunk, 4));
+    assert_eq!(chunk, b"jkl");
+    assert!(q.push(b"m"));
+    assert_eq!(q.take(), b"m");
+}
+
+#[test]
+fn a_full_queue_can_drain_in_one_budget() {
+    let q = OutputQueue::default();
+    assert!(q.push(&vec![b'x'; OutputQueue::LIMIT]));
+    let pane = PaneId(1);
+    let mut schedule = OutputSchedule::default();
+    schedule.queue(pane);
+    let mut now = Instant::now();
+    let mut chunk = Vec::new();
+    let mut drained = 0;
+
+    while let Some(id) = schedule.next_pane(|| now) {
+        assert_eq!(id, pane);
+        let more = q.take_into(&mut chunk, CHUNK_BYTES);
+        drained += chunk.len();
+        schedule.chunk_drained(id, more);
+        now += Duration::from_micros(100);
+    }
+
+    assert_eq!(drained, OutputQueue::LIMIT);
+    assert_eq!(schedule.end_turn(now), None);
+}
+
+#[test]
+fn a_busy_turn_yields_then_resumes_immediately_in_round_robin_order() {
+    let mut schedule = OutputSchedule::default();
+    let busy = PaneId(1);
+    let other = PaneId(2);
+    schedule.queue(busy);
+    schedule.queue(busy);
+    schedule.queue(other);
+    assert!(schedule.defer_exit(busy, Some(7)));
+
+    let start = Instant::now();
+    assert_eq!(schedule.next_pane(|| start), Some(busy));
+    assert_eq!(schedule.chunk_drained(busy, true), None);
+
+    let end = start + Duration::from_millis(12);
+    assert_eq!(schedule.next_pane(|| end), None);
+    assert_eq!(schedule.end_turn(end), Some(end));
+    assert_eq!(schedule.next_pane(|| end), Some(other));
+    assert_eq!(schedule.chunk_drained(other, false), None);
+    assert_eq!(schedule.next_pane(|| end), Some(busy));
+    assert_eq!(schedule.chunk_drained(busy, false), Some(Some(7)));
+    assert_eq!(schedule.end_turn(end), None);
 }

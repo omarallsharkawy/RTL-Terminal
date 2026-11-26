@@ -178,24 +178,31 @@ impl PaneScan {
         let needle_len = query.folded.len();
         let hits = &mut self.hits;
         let mut folded = String::new();
-        // For each byte of `folded`, the index in the line's chars of the cell it came from.
-        let mut owner: Vec<u32> = Vec::new();
         let mut lines = 0;
         let mut out_of_time = false;
         let scan = term.for_each_text_line(from, self.rows_left, |pos, chars| {
             folded.clear();
-            owner.clear();
-            let mut base = 0;
-            for (i, t) in chars.iter().enumerate() {
-                if !t.mark {
-                    base = i as u32;
-                }
+            for t in chars {
                 push_folded(t.c, &mut folded);
-                owner.resize(folded.len(), base);
             }
             if let Some(at) = query.finder.find(folded.as_bytes()) {
-                let start = owner[at] as usize;
-                let mut end = owner[at + needle_len - 1] as usize + 1;
+                // Most lines do not match. Map folded bytes back to cells only on a hit.
+                folded.clear();
+                let (mut base, mut start, mut end) = (0, 0, 0);
+                for (i, t) in chars.iter().enumerate() {
+                    if !t.mark {
+                        base = i;
+                    }
+                    let before = folded.len();
+                    push_folded(t.c, &mut folded);
+                    if before <= at && at < folded.len() {
+                        start = base;
+                    }
+                    if folded.len() >= at + needle_len {
+                        end = base + 1;
+                        break;
+                    }
+                }
                 while chars.get(end).is_some_and(|t| t.mark) {
                     end += 1;
                 }

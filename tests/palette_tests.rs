@@ -315,3 +315,72 @@ fn no_pane_text_is_drawn_under_the_palette() {
     }
     assert!(overlay.iter().all(|r| r.top >= panel.y));
 }
+
+#[test]
+fn palette_reuses_bilingual_buffers_at_the_same_scale_and_width() {
+    use twitty::render::scene::palette::PaletteIcons;
+    use twitty::render::text::labels::{LabelCache, UiLabels};
+
+    let mut fonts = FontSystem::new();
+    let mut metrics = CellMetrics::measure(&mut fonts, None, 14.0, 1.0);
+    let palette = Palette::default();
+    let font = UiFont::default();
+    let mut labels = LabelCache::default();
+    let view = PaletteView {
+        query: "مُرَاجَعَة".into(),
+        items: vec![PaletteItem {
+            title_en: "Review uncommitted changes in this workspace".into(),
+            title_ar: "مراجعة التغييرات في مساحة العمل الحالية".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let mut rows = RowCache::default();
+    let mut ime = PreeditState::default();
+    let mut build = |width, scale| {
+        metrics.scale = scale;
+        let mut ctx = DrawContext {
+            font_system: &mut fonts,
+            family: None,
+            palette: &palette,
+            metrics,
+            is_srgb: false,
+        };
+        let opts = FrameOptions {
+            window_focused: true,
+            cursor_style: "block",
+            cursor_blink_on: true,
+            surface: (width, 600.0),
+        };
+        let mut frame = build_frame(&mut ctx, &opts, &mut rows, &mut ime, &[], &[], &[]);
+        frame.add_palette_motion(
+            &mut ctx,
+            UiStyle::new(&palette, None, scale),
+            UiLabels::cached(&font, &mut labels),
+            &view,
+            &PaletteIcons::default(),
+            1.0,
+        );
+        frame
+    };
+    let wide = build(900.0, 1.0);
+    let repeat = build(900.0, 1.0);
+    let narrow = build(350.0, 1.0);
+    let scaled = build(900.0, 1.5);
+
+    let wide = wide.text_runs(&[], &rows, &ime);
+    let repeat = repeat.text_runs(&[], &rows, &ime);
+    let narrow = narrow.text_runs(&[], &rows, &ime);
+    let scaled = scaled.text_runs(&[], &rows, &ime);
+    assert_eq!(wide.len(), 3);
+    for ((first, again), resized) in wide.iter().zip(&repeat).zip(&scaled) {
+        assert!(std::ptr::eq(first.buffer, again.buffer));
+        assert_eq!(first.bounds, again.bounds);
+        assert_eq!(
+            resized.buffer.metrics().font_size,
+            first.buffer.metrics().font_size * 1.5
+        );
+    }
+    assert!(!std::ptr::eq(wide[2].buffer, narrow[2].buffer));
+    assert!(label_width(narrow[2].buffer) < label_width(wide[2].buffer));
+}

@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::env;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -7,6 +8,8 @@ use std::thread;
 
 use anyhow::{Context, Result};
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
+
+pub mod schedule;
 
 /// Maximum queued input chunks per pane before writes fail fast instead of growing without bound.
 const WRITE_QUEUE_CAPACITY: usize = 256;
@@ -86,7 +89,7 @@ pub struct OutputQueue(Arc<(Mutex<QueueState>, Condvar)>);
 
 #[derive(Default)]
 struct QueueState {
-    data: Vec<u8>,
+    data: VecDeque<u8>,
     /// The UI went away: drop output instead of waiting for room.
     closed: bool,
 }
@@ -102,7 +105,10 @@ impl OutputQueue {
         let Ok(mut state) = lock.lock() else {
             return false;
         };
-        while state.data.len() >= Self::LIMIT && !state.closed {
+        while !state.closed
+            && !state.data.is_empty()
+            && state.data.len().saturating_add(bytes.len()) > Self::LIMIT
+        {
             state = match room.wait(state) {
                 Ok(s) => s,
                 Err(_) => return false,
@@ -112,7 +118,7 @@ impl OutputQueue {
             return false;
         }
         let was_empty = state.data.is_empty();
-        state.data.extend_from_slice(bytes);
+        state.data.extend(bytes);
         was_empty
     }
 
@@ -121,10 +127,33 @@ impl OutputQueue {
         let (lock, room) = &*self.0;
         let data = lock
             .lock()
-            .map(|mut s| std::mem::take(&mut s.data))
+            .map(|mut s| Vec::from(std::mem::take(&mut s.data)))
             .unwrap_or_default();
         room.notify_all();
         data
+    }
+
+    /// Take at most `limit` bytes into the UI's reusable buffer. Returns whether the queue
+    /// still has bytes. A partial drain stays armed without another reader wake-up.
+    pub fn take_into(&self, buffer: &mut Vec<u8>, limit: usize) -> bool {
+        let (lock, room) = &*self.0;
+        buffer.clear();
+        let Ok(mut state) = lock.lock() else {
+            return false;
+        };
+        let len = state.data.len().min(limit);
+        let (first, second) = state.data.as_slices();
+        let first_len = first.len().min(len);
+        buffer.extend_from_slice(&first[..first_len]);
+        buffer.extend_from_slice(&second[..len - first_len]);
+        state.data.drain(..len);
+        let more = !state.data.is_empty();
+        if !more && state.data.capacity() > 256 * 1024 {
+            state.data = VecDeque::new();
+        }
+        drop(state);
+        room.notify_one();
+        more
     }
 
     /// Stop queueing (the pane is gone); a waiting reader is released.
@@ -132,7 +161,7 @@ impl OutputQueue {
         let (lock, room) = &*self.0;
         if let Ok(mut s) = lock.lock() {
             s.closed = true;
-            s.data = Vec::new();
+            s.data = VecDeque::new();
         }
         room.notify_all();
     }
@@ -420,9 +449,9 @@ impl Pty {
         }
     }
 
-    /// Output read from the shell since the last call.
-    pub(crate) fn take_output(&self) -> Vec<u8> {
-        self.output.take()
+    /// Drain up to one parsing chunk of output.
+    pub(crate) fn take_output(&self, buffer: &mut Vec<u8>, limit: usize) -> bool {
+        self.output.take_into(buffer, limit)
     }
 
     pub fn write(&self, data: &[u8]) -> Result<()> {

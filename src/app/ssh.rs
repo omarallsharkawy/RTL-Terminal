@@ -21,7 +21,6 @@ impl App {
         if !matches!(code, Some(SSH_DISCONNECTED | BOOTSTRAP_FAILED)) {
             return false;
         }
-        self.on_pty_output(id);
         let Some(pane) = self.ws.pane_mut(id) else {
             return false;
         };

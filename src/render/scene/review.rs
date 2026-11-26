@@ -70,9 +70,7 @@ impl ReviewCache {
         let key = (text.to_owned(), [rgb.r, rgb.g, rgb.b]);
         let (row, used) = self.rows.entry(key).or_insert_with(|| {
             let line = text_line(text, rgb);
-            let segments = ctx.shaper().build_row(&line, None);
-            let quads = ctx.row_quads(&line, &segments);
-            let row = CachedRow::new(line.hash, &line, segments, quads, ctx.metrics.char_width);
+            let row = ctx.build_row(line.hash, &line, None);
             (Rc::new(row), true)
         });
         *used = true;
