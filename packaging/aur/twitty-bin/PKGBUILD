@@ -36,7 +36,7 @@ conflicts=('twitty' 'twitty-git')
 options=('!strip' '!debug')
 source_x86_64=("${pkgname}-${pkgver}-x86_64.tar.gz::${url}/releases/download/v${pkgver}/twitty-${pkgver}-linux-x86_64.tar.gz")
 # Replace with the release SHA-256 from SHA256SUMS.txt before publishing to the AUR.
-sha256sums_x86_64=('SKIP')
+sha256sums_x86_64=('d41f028aa54f9ba0caf414e971fb4fd82fbb4c13f7a73236ae983ed69537d4e9')
 
 package() {
   cd "${srcdir}/twitty-${pkgver}-linux-x86_64"

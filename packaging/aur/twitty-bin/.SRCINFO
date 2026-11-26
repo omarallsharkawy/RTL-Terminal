@@ -26,6 +26,6 @@ pkgbase = twitty-bin
 	options = !strip
 	options = !debug
 	source_x86_64 = twitty-bin-4.0.0-x86_64.tar.gz::https://github.com/omarallsharkawy/RTL-Terminal/releases/download/v4.0.0/twitty-4.0.0-linux-x86_64.tar.gz
-	sha256sums_x86_64 = SKIP
+	sha256sums_x86_64 = d41f028aa54f9ba0caf414e971fb4fd82fbb4c13f7a73236ae983ed69537d4e9
 
 pkgname = twitty-bin
