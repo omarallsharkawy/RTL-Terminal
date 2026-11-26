@@ -21,7 +21,7 @@ use crate::sidebar::cards::{fit_title, Card, Item, View, STATE_ICON_WIDTH, STATE
 use crate::sidebar::{display_path, AgentState, Entry};
 use crate::ui::chrome::{count_badge, UiLanguage};
 use crate::ui::motion::working_dot;
-use crate::ui::text::fit_text;
+use twitty_render::text::fit_text;
 
 #[derive(Clone)]
 pub struct Label {

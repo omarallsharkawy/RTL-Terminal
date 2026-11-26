@@ -1,45 +1,91 @@
 [package]
 name = "twitty"
 default-run = "twitty"
+description = "Twitty - Native Bidirectional RTL Terminal Emulator"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.package]
 version = "4.0.0"
 edition = "2021"
 rust-version = "1.90"
 authors = ["Omar Sharkawy"]
-description = "Twitty - Native Bidirectional RTL Terminal Emulator"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/omarallsharkawy/RTL-Terminal"
 
-[dependencies]
-portable-pty = "0.9.0"
+[workspace.dependencies]
+twitty-ai = { path = "crates/twitty-ai" }
+twitty-control = { path = "crates/twitty-control" }
+twitty-core = { path = "crates/twitty-core" }
+twitty-render = { path = "crates/twitty-render" }
+
 alacritty_terminal = "0.26.0"
-cosmic_text = { package = "cosmic-text", version = "0.19.0" }
-winit = { version = "0.30.12", features = ["rwh_06"] }
-wgpu = "30.0.0"
-glyphon = "0.12.0"
-pollster = "0.4.0"
-unicode-bidi = "0.3.17"
-unicode-width = "0.2.0"
-unicode-normalization = "0.1"
-unicode-segmentation = "1.13"
 anyhow = "1.0.95"
-memchr = "2.7"
-tracing = "0.1.41"
-tracing-subscriber = "0.3.19"
-bytemuck = { version = "1.21.0", features = ["derive"] }
 arboard = { version = "3.6.1", features = ["wayland-data-control"] }
+bytemuck = { version = "1.21.0", features = ["derive"] }
+cosmic_text = { package = "cosmic-text", version = "0.19.0" }
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+glyphon = "0.12.0"
+libc = "0.2"
+memchr = "2.7"
+png = "0.18.1"
+pollster = "0.4.0"
+portable-pty = "0.9.0"
+proptest = { version = "1", default-features = false, features = ["std"] }
+rustix = { version = "1.1.6", features = ["event", "fs", "param", "process", "termios"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+tracing = "0.1.41"
+tracing-subscriber = "0.3.19"
+unicode-bidi = "0.3.17"
+unicode-normalization = "0.1"
+unicode-segmentation = "1.13"
+unicode-width = "0.2.0"
+wgpu = "30.0.0"
+winit = { version = "0.30.12", features = ["rwh_06"] }
+
+[dependencies]
+alacritty_terminal.workspace = true
+anyhow.workspace = true
+arboard.workspace = true
+cosmic_text.workspace = true
+glyphon.workspace = true
+memchr.workspace = true
+pollster.workspace = true
+portable-pty.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+twitty-ai.workspace = true
+twitty-control.workspace = true
+twitty-core.workspace = true
+twitty-render.workspace = true
+unicode-bidi.workspace = true
+unicode-normalization.workspace = true
+unicode-segmentation.workspace = true
+unicode-width.workspace = true
+wgpu.workspace = true
+winit.workspace = true
 
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+libc.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-rustix = { version = "1.1.6", features = ["event", "fs", "param", "process", "termios"] }
+rustix.workspace = true
 
 [dev-dependencies]
-png = "0.18.1"
-proptest = { version = "1", default-features = false, features = ["std"] }
-criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+criterion.workspace = true
+png.workspace = true
+proptest.workspace = true
 
 [[bench]]
 name = "perf"

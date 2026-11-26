@@ -19,9 +19,9 @@ platform; tests run without a GPU.
 ## Before you open a pull request
 
 ```bash
-cargo fmt
-cargo clippy --all-targets -- -D warnings
-cargo test --release
+cargo fmt --all
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
 ```
 
 CI runs the same on Linux and Windows, checks the minimum Rust version, and checks
@@ -55,7 +55,7 @@ dependency licenses and advisories.
 
 ## Manual checklist for rendering and input changes
 
-Some things only show up in the real window. When you touch `render/`, `app/` or `input/`, run
+Some things only show up in the real window. When you change rendering, window code, or input, run
 `cargo run --release` and check:
 
 - [ ] `printf 'مرحبا بالعالم 7abaf40 2026 ✓\n'` reads right to left, the hash and numbers whole.

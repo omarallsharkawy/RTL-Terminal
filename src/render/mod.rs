@@ -8,15 +8,9 @@
 //!
 //! `Renderer` ties them together for the app.
 
-pub mod gpu;
-pub mod icons;
-pub mod metrics;
-pub mod row;
 pub mod scene;
-pub mod shapes;
-pub mod style;
-pub mod text;
-pub mod ui_style;
+
+pub use twitty_render::{gpu, icons, metrics, row, shapes, style, text, ui_style};
 
 pub use gpu::text_pipeline::text_color_mode;
 pub use metrics::CellMetrics;

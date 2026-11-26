@@ -2782,7 +2782,6 @@ dependencies = [
  "alacritty_terminal",
  "anyhow",
  "arboard",
- "bytemuck",
  "cosmic-text",
  "criterion",
  "glyphon",
@@ -2797,10 +2796,68 @@ dependencies = [
  "serde_json",
  "tracing",
  "tracing-subscriber",
+ "twitty-ai",
+ "twitty-control",
+ "twitty-core",
+ "twitty-render",
  "unicode-bidi",
  "unicode-normalization",
  "unicode-segmentation",
  "unicode-width",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
+name = "twitty-ai"
+version = "4.0.0"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+ "tracing",
+ "twitty-control",
+ "twitty-core",
+]
+
+[[package]]
+name = "twitty-control"
+version = "4.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tracing",
+ "twitty-core",
+]
+
+[[package]]
+name = "twitty-core"
+version = "4.0.0"
+dependencies = [
+ "alacritty_terminal",
+ "anyhow",
+ "cosmic-text",
+ "memchr",
+ "portable-pty",
+ "tracing",
+ "unicode-bidi",
+ "unicode-normalization",
+ "unicode-segmentation",
+ "unicode-width",
+]
+
+[[package]]
+name = "twitty-render"
+version = "4.0.0"
+dependencies = [
+ "alacritty_terminal",
+ "anyhow",
+ "bytemuck",
+ "cosmic-text",
+ "glyphon",
+ "pollster",
+ "twitty-core",
+ "unicode-segmentation",
  "wgpu",
  "winit",
 ]

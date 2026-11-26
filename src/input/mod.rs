@@ -12,3 +12,4 @@ pub mod pointer;
 pub mod route;
 
 pub use keys::*;
+pub use twitty_core::paste::encode_paste;

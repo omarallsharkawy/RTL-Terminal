@@ -35,7 +35,7 @@ fn cargo_version() -> String {
     for line in toml.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with('[') {
-            in_package = trimmed == "[package]";
+            in_package = trimmed == "[workspace.package]";
             continue;
         }
         if in_package {
@@ -46,7 +46,7 @@ fn cargo_version() -> String {
             }
         }
     }
-    panic!("version not found in Cargo.toml [package]");
+    panic!("version not found in Cargo.toml [workspace.package]");
 }
 
 fn parse_desktop_entry(content: &str) -> BTreeMap<String, String> {
@@ -570,18 +570,35 @@ mod script_tests {
     /// every real release bumps the live version and empties Unreleased.
     const FIXTURE_VERSION: &str = "3.0.0";
 
-    fn current_version() -> String {
-        let cargo = fs::read_to_string(repo_root().join("Cargo.toml")).expect("read Cargo.toml");
-        cargo
-            .lines()
-            .find_map(|l| l.strip_prefix("version = \""))
-            .and_then(|rest| rest.strip_suffix('"'))
-            .expect("Cargo.toml package version")
-            .to_string()
+    fn member_manifests() -> impl Iterator<Item = String> {
+        fs::read_dir(repo_root().join("crates"))
+            .expect("read workspace crate directories")
+            .map(|entry| {
+                let entry = entry.expect("read workspace directory entry");
+                let name = entry
+                    .file_name()
+                    .into_string()
+                    .expect("UTF-8 crate directory");
+                format!("crates/{name}/Cargo.toml")
+            })
+            .filter(|rel| repo_root().join(rel).is_file())
+    }
+
+    fn workspace_package_names() -> impl Iterator<Item = String> {
+        std::iter::once("Cargo.toml".to_owned())
+            .chain(member_manifests())
+            .map(|rel| {
+                read_text(&rel)
+                    .lines()
+                    .find_map(|line| line.strip_prefix("name = \""))
+                    .and_then(|name| name.strip_suffix('"'))
+                    .expect("workspace package name")
+                    .to_owned()
+            })
     }
 
     fn pin_fixture_version(src_rel: &str, dst: &Path) {
-        let current = current_version();
+        let current = cargo_version();
         let text = fs::read_to_string(dst).expect("read copied fixture");
         let pinned = match src_rel {
             "Cargo.toml" => text.replacen(
@@ -589,11 +606,13 @@ mod script_tests {
                 &format!("version = \"{FIXTURE_VERSION}\""),
                 1,
             ),
-            "Cargo.lock" => text.replacen(
-                &format!("name = \"twitty\"\nversion = \"{current}\""),
-                &format!("name = \"twitty\"\nversion = \"{FIXTURE_VERSION}\""),
-                1,
-            ),
+            "Cargo.lock" => workspace_package_names().fold(text, |lock, name| {
+                lock.replacen(
+                    &format!("name = \"{name}\"\nversion = \"{current}\""),
+                    &format!("name = \"{name}\"\nversion = \"{FIXTURE_VERSION}\""),
+                    1,
+                )
+            }),
             p if p.starts_with("packaging/aur/") => text.replace(&current, FIXTURE_VERSION),
             p if p.ends_with(".metainfo.xml") && current != FIXTURE_VERSION => {
                 // Drop the live release entry newer than the fixture version.
@@ -653,6 +672,9 @@ mod script_tests {
             "packaging/aur/twitty-git/.SRCINFO",
         ] {
             copy_file(rel, tmp.path());
+        }
+        for rel in member_manifests() {
+            copy_file(&rel, tmp.path());
         }
         run_git(tmp.path(), &["init", "-q"]);
         run_git(tmp.path(), &["config", "user.name", "Test User"]);
@@ -906,7 +928,9 @@ mod script_tests {
         assert!(new_cargo.contains("portable-pty = \"0.9.0\""));
 
         let new_lock = fs::read_to_string(tmp.path().join("Cargo.lock")).unwrap();
-        assert!(new_lock.contains("name = \"twitty\"\nversion = \"3.1.0\""));
+        for name in workspace_package_names() {
+            assert!(new_lock.contains(&format!("name = \"{name}\"\nversion = \"3.1.0\"")));
+        }
 
         for pkg in ["packaging/aur/twitty-bin", "packaging/aur/twitty-git"] {
             let pb = fs::read_to_string(tmp.path().join(pkg).join("PKGBUILD")).unwrap();
