@@ -55,6 +55,16 @@
 - In-app bilingual Settings overlay (`Ctrl+,`) covering Appearance, Behaviour, Keys, and About with live theme and font pickers, search, and atomic `config.json` saving.
 - Invalid configuration entries display visible warnings at startup without overwriting hand-edited `config.json` files; `font_family` matches case-insensitively and out-of-range values are clamped.
 
+- Customizable keyboard shortcuts: remap or unbind any command under `keybindings` in `config.json` or live in **Settings → Keys**, with warnings for unknown commands, invalid chords, and conflicts; the palette and Settings always show the effective chord, and shortcuts keep working on Arabic keyboard layouts.
+- Interface language choice (`ui_language`: `"auto"`, `"en"`, `"ar"`) in **Settings → Appearance**, applied live to the whole interface.
+- First-run welcome screen with language selection and a short tour, shown once on a fresh install and reopenable from the command palette.
+
+### Performance
+
+- Shaped UI labels are cached across frames (tab bar and sidebar label building ~60× cheaper), a four-pane frame builds ~34% faster, and search across all panes is ~18% faster.
+- Heavy output is parsed in bounded slices shared fairly across busy panes, so input and redraws stay responsive without slowing large floods; hidden windows skip painting and cursor-blink wake-ups.
+- `TWITTY_PERF=1` prints startup phases, frame build/render p50/p95, and memory use.
+
 ### SSH
 
 - Persistent Linux SSH tabs via `twitty ssh` and `tab.new-ssh` that verify and upload `twitty-remote` automatically over OpenSSH.
