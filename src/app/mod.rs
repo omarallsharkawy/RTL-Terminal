@@ -30,6 +30,7 @@ mod review;
 mod selection;
 mod settings;
 mod ssh;
+mod welcome;
 mod window;
 
 pub use event::{accept_osc52_clipboard, clean_title, AppEvent, MAX_OSC52_CLIPBOARD_BYTES};
@@ -89,6 +90,8 @@ pub struct App {
     palette: Option<palette::OpenPalette>,
     /// The settings overlay, while it is open (keys, IME text and pointer input go to it).
     settings: Option<crate::ui::settings_panel::SettingsPanelState>,
+    /// The first-run welcome wizard, while it is open.
+    welcome: Option<crate::ui::welcome::WelcomeState>,
     /// Local control socket server (`twitty ctl`), when enabled.
     control: Option<ControlServer>,
     /// The last notifications of this window, for the palette's notifications mode.
@@ -142,6 +145,7 @@ impl App {
             window_focused: false,
             palette: None,
             settings: None,
+            welcome: None,
             control: None,
             notification_history: Default::default(),
             ports: ports::PortWatch::default(),
@@ -222,6 +226,7 @@ impl ApplicationHandler<AppEvent> for App {
                 self.term(id, |t| t.process_bytes(text.as_bytes()));
             }
         }
+        self.maybe_open_first_run_welcome();
         self.window.request_redraw_now();
     }
 
@@ -322,12 +327,14 @@ impl ApplicationHandler<AppEvent> for App {
                 self.window.resize(size.width, size.height);
                 self.sync_palette();
                 self.sync_settings();
+                self.sync_welcome();
                 self.apply_layout();
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 self.window.set_scale_factor(scale_factor as f32);
                 self.sync_palette();
                 self.sync_settings();
+                self.sync_welcome();
                 self.apply_layout();
             }
             WindowEvent::Occluded(occluded) => self.window.set_occluded(occluded),

@@ -93,6 +93,8 @@ pub enum InputAction {
     ToggleComposer,
     /// Open the settings panel.
     Settings,
+    /// Open the first-run welcome wizard.
+    Welcome,
 }
 
 /// One key event with everything the encoders look at. Window-free, so the `*_raw` entry

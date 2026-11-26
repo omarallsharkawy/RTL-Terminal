@@ -28,6 +28,9 @@ pub struct TwittyConfig {
     /// Proportional chrome font. Unset uses the bundled Latin and Arabic UI fonts.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ui_font_family: Option<String>,
+    /// Interface language: "auto" (follow system locale), "en" (English), or "ar" (Arabic).
+    #[serde(deserialize_with = "deserialize_ui_language")]
+    pub ui_language: String,
     /// Chrome accent as `#rgb` or `#rrggbb`. Unset uses the theme cursor color.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ui_accent: Option<String>,
@@ -102,6 +105,7 @@ impl Default for TwittyConfig {
             colors: None,
             font_family: None,
             ui_font_family: None,
+            ui_language: crate::ui::chrome::UiLanguagePref::Auto.as_str().into(),
             ui_accent: None,
             top_bar: true,
             pane_headers: true,
@@ -187,6 +191,15 @@ fn deserialize_composer<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String
     Ok(crate::composer::ComposerMode::OnDemand.as_str().to_owned())
 }
 
+fn deserialize_ui_language<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let value = serde_json::Value::deserialize(d)?;
+    if let serde_json::Value::String(value) = value {
+        return Ok(value);
+    }
+    warn("twitty: invalid ui_language value, using auto".into());
+    Ok(crate::ui::chrome::UiLanguagePref::Auto.as_str().to_owned())
+}
+
 /// Parses a color value from the config, warning on stderr and returning `None` if invalid.
 fn parse_config_color(value: &str, key: &str) -> Option<Rgba> {
     let color = parse_hex(value);
@@ -202,6 +215,24 @@ impl TwittyConfig {
     /// Parsed command composer policy (`off`, `on-demand`, `always`).
     pub fn composer_mode(&self) -> crate::composer::ComposerMode {
         self.composer.parse().unwrap_or_default()
+    }
+
+    /// Parsed interface language preference (`auto`, `en`, `ar`).
+    pub fn ui_language_pref(&self) -> crate::ui::chrome::UiLanguagePref {
+        self.ui_language.parse().unwrap_or_default()
+    }
+
+    /// Effective interface language, falling back to `env_fallback` when set to `"auto"`.
+    pub fn resolve_ui_language(
+        &self,
+        env_fallback: crate::ui::chrome::UiLanguage,
+    ) -> crate::ui::chrome::UiLanguage {
+        self.ui_language_pref().resolve_with(env_fallback)
+    }
+
+    /// Effective interface language using the current process locale environment for `"auto"`.
+    pub fn effective_ui_language(&self) -> crate::ui::chrome::UiLanguage {
+        self.ui_language_pref().resolve()
     }
 
     pub(crate) fn ui_accent_color(&self) -> Option<Rgba> {
@@ -404,6 +435,19 @@ impl TwittyConfig {
                 self.composer
             ));
             self.composer = defaults.composer;
+        }
+        match self
+            .ui_language
+            .parse::<crate::ui::chrome::UiLanguagePref>()
+        {
+            Ok(pref) => self.ui_language = pref.as_str().to_owned(),
+            Err(()) => {
+                warn(format!(
+                    "twitty: invalid ui_language {:?}, using auto",
+                    self.ui_language
+                ));
+                self.ui_language = defaults.ui_language;
+            }
         }
         self.ai_timeout_secs = if self.ai_timeout_secs == 0 {
             defaults.ai_timeout_secs

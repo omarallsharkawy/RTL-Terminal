@@ -122,7 +122,11 @@ impl App {
             self.window.request_redraw();
         }
         // The output may have replaced the link under a Ctrl-hovering pointer.
-        if self.modifiers.control_key() && !self.palette_open() && !self.settings_open() {
+        if self.modifiers.control_key()
+            && !self.palette_open()
+            && !self.settings_open()
+            && !self.welcome_open()
+        {
             self.update_link_hover(id);
         }
         for event in events {
@@ -176,6 +180,7 @@ impl App {
         }
         if let Some(kind) = mark_kind {
             self.on_composer_shell_mark(id, kind);
+            self.on_welcome_shell_mark();
         }
         if let Some(cwd) = recorded_cwd {
             self.record_project_cwd(&cwd);
@@ -221,13 +226,14 @@ impl App {
             at: std::time::SystemTime::now(),
         });
         if send_desktop {
+            let language = self.window.ui_language();
             self.window
                 .notify(self.config.desktop_notifications, id, &notice, || {
                     self.ws
                         .tabs()
                         .iter()
                         .position(|t| t.root.contains(id))
-                        .map(|i| super::window::sidebar_title(&self.ws, i))
+                        .map(|i| super::window::sidebar_title(&self.ws, i, language))
                         .unwrap_or_default()
                 });
         }

@@ -84,6 +84,7 @@ impl App {
             return;
         }
         self.close_settings();
+        self.close_welcome();
         self.reset_pointer_gesture();
         let (workflows, entries) = if mode == PaletteMode::Commands {
             let cwd = self.focused_id().and_then(|id| self.pane_cwd(id));
@@ -817,8 +818,9 @@ impl App {
             return;
         };
         let mut panes = Vec::new();
+        let language = self.window.ui_language();
         for (tab, t) in self.ws.tabs().iter().enumerate() {
-            let tab_title = super::window::sidebar_title(&self.ws, tab);
+            let tab_title = super::window::sidebar_title(&self.ws, tab, language);
             let leaves = t.root.leaves();
             let split = leaves.len() > 1;
             for id in leaves {
@@ -890,7 +892,7 @@ impl App {
             return;
         };
         let seen = self.window_focused && self.focused_id() == Some(id);
-        let tab_title = super::window::sidebar_title(&self.ws, tab);
+        let tab_title = super::window::sidebar_title(&self.ws, tab, self.window.ui_language());
         let recorded =
             self.notification_history
                 .push(id, title, body, &tab_title, SystemTime::now(), seen);
