@@ -38,6 +38,7 @@ macro_rules! commands {
 
 commands! {
     "palette.open", "Command palette", "لوحة الأوامر", Some("Ctrl+Shift+P") => InputAction::CommandPalette;
+    "composer.open", "Compose command", "اكتب أمر", Some("Ctrl+Shift+Space") => InputAction::ToggleComposer;
     "tab.new", "New tab", "تاب جديد", Some("Ctrl+Shift+T") => InputAction::NewTab;
     "tab.next", "Next tab", "التاب التالي", Some("Ctrl+Tab") => InputAction::NextTab;
     "tab.prev", "Previous tab", "التاب السابق", Some("Ctrl+Shift+Tab") => InputAction::PrevTab;

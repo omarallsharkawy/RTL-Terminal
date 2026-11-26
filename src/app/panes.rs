@@ -150,6 +150,7 @@ impl App {
             return;
         }
         self.close_palette();
+        self.on_composer_focus_changed();
         if self.window_focused {
             if let Some(pane) = self.ws.pane_mut(new) {
                 pane.meta.attention = None;

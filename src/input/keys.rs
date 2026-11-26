@@ -69,6 +69,8 @@ pub enum InputAction {
     AskAgent,
     /// Show or hide the code review panel (the focused repository's uncommitted changes).
     ToggleReview,
+    /// Open or close the command composer docked at the bottom of the focused pane.
+    ToggleComposer,
 }
 
 /// One key event with everything the encoders look at. Window-free, so the `*_raw` entry
@@ -271,8 +273,9 @@ fn key_letter(key_code: KeyCode) -> Option<u8> {
 }
 
 /// Named keys that shortcuts can be bound to, and the physical key each stands for.
-const SHORTCUT_NAMED_KEYS: [(NamedKey, KeyCode); 7] = [
+const SHORTCUT_NAMED_KEYS: [(NamedKey, KeyCode); 8] = [
     (NamedKey::Tab, KeyCode::Tab),
+    (NamedKey::Space, KeyCode::Space),
     (NamedKey::PageUp, KeyCode::PageUp),
     (NamedKey::PageDown, KeyCode::PageDown),
     (NamedKey::ArrowLeft, KeyCode::ArrowLeft),
@@ -342,6 +345,7 @@ fn ctrl_shift_shortcut(key_code: KeyCode) -> Option<InputAction> {
         KeyCode::KeyY => InputAction::CopyBlockOutput,
         KeyCode::KeyA => InputAction::AskAgent,
         KeyCode::KeyR => InputAction::ToggleReview,
+        KeyCode::Space => InputAction::ToggleComposer,
         KeyCode::ArrowUp => InputAction::PrevBlock,
         KeyCode::ArrowDown => InputAction::NextBlock,
         KeyCode::Digit1 => InputAction::SelectTab(0),

@@ -55,6 +55,8 @@ pub(crate) struct PaneMeta {
     pub attention: Option<Notification>,
     /// A command is running: OSC 133 C seen, D not yet.
     pub running: bool,
+    /// Prompt lifecycle from OSC 133 marks (used by the command composer's `always` mode).
+    pub prompt_state: crate::composer::PromptState,
     /// Exit status of the last finished command (OSC 133 D).
     pub last_exit: Option<i32>,
     /// Last command line the shell reported (OSC 633 E).

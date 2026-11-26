@@ -5,6 +5,7 @@ pub mod blink;
 pub mod blocks;
 pub mod color;
 pub mod commands;
+pub mod composer;
 pub mod config;
 pub mod control;
 pub mod ime;

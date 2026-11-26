@@ -27,6 +27,9 @@ impl App {
         if self.palette_open() {
             return self.handle_palette_key(event);
         }
+        if let Some(close) = self.handle_composer_key(event) {
+            return close;
+        }
         if let Some(close) = self.handle_review_key(event) {
             return close;
         }
@@ -87,14 +90,26 @@ impl App {
     pub(super) fn on_ime(&mut self, ime: Ime) {
         match ime {
             Ime::Enabled => {}
-            Ime::Disabled => self.update_preedit(None),
+            Ime::Disabled => {
+                if !self.composer_ime_preedit(None) {
+                    self.update_preedit(None);
+                }
+            }
             Ime::Preedit(text, cursor) => {
-                self.update_preedit(crate::ime::normalize_preedit(text, cursor))
+                let norm = crate::ime::normalize_preedit(text, cursor);
+                if !self.composer_ime_preedit(norm.clone()) {
+                    self.update_preedit(norm);
+                }
             }
             Ime::Commit(text) => {
-                self.update_preedit(None);
+                if !self.composer_ime_preedit(None) {
+                    self.update_preedit(None);
+                }
                 if self.palette_open() {
                     self.palette_text(&text);
+                    return;
+                }
+                if self.composer_ime_commit(&text) {
                     return;
                 }
                 if self.review_text(&text) {
@@ -165,6 +180,7 @@ impl App {
             InputAction::SearchAll => self.open_palette(PaletteMode::Search),
             InputAction::AskAgent => self.ask_agent(id),
             InputAction::ToggleReview => self.toggle_review(),
+            InputAction::ToggleComposer => self.toggle_composer(),
             InputAction::PrevBlock => self.navigate_blocks(id, BlockList::select_prev),
             InputAction::NextBlock => self.navigate_blocks(id, BlockList::select_next),
             InputAction::CopyBlockOutput => self.copy_block_output(id),

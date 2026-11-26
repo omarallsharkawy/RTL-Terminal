@@ -89,6 +89,10 @@ pub struct Frame {
     /// Area the overlay covers: other text is clipped out of it, since all text is drawn
     /// after all quads and would otherwise show through the overlay's background.
     overlay_rect: Option<Rect>,
+    /// Command composer shaped lines, chrome labels, and clip rects (drawn below the palette).
+    composer_texts: Vec<super::composer::ComposerText>,
+    composer_labels: Vec<UiLabel>,
+    composer_clips: Vec<Rect>,
 }
 
 /// The parts of `bounds` outside `hole`: up to four strips (above, below, left, right).
@@ -333,6 +337,9 @@ fn build_frame_inner(
         surface: opts.surface,
         overlay: Vec::new(),
         overlay_rect: None,
+        composer_texts: Vec::new(),
+        composer_labels: Vec::new(),
+        composer_clips: Vec::new(),
     }
 }
 
@@ -390,6 +397,26 @@ impl Frame {
             );
             Some((pane.id, rect_bounds(clip)))
         }));
+    }
+
+    /// Draw the docked command composer above terminal content and below overlays.
+    pub fn add_composer(
+        &mut self,
+        ctx: &mut DrawContext,
+        style: UiStyle,
+        font: &UiFont,
+        view: &super::composer::ComposerView,
+    ) {
+        let scene = super::composer::build(ctx, style, font, view);
+        self.shapes.chrome.extend(scene.shapes);
+        self.composer_texts = scene.texts;
+        self.composer_labels = scene.labels;
+        self.composer_clips = scene.clips;
+        if view.focused {
+            if let Some(area) = scene.ime_area {
+                self.ime_area = Some(area);
+            }
+        }
     }
 
     /// Draw the command palette above everything else.
@@ -606,6 +633,21 @@ impl Frame {
         runs.extend(self.review_labels.iter().map(ui_run));
         runs.extend(self.block_labels.iter().map(ui_run));
         runs.extend(self.chrome_labels.iter().map(ui_run));
+        for &hole in &self.composer_clips {
+            runs = clip_runs(runs, hole);
+        }
+        for text in &self.composer_texts {
+            for seg in &text.row.segments {
+                runs.push(TextRun {
+                    buffer: &seg.buffer,
+                    left: text.left + seg.seg_x,
+                    top: text.top,
+                    bounds: text.bounds,
+                    color: fg,
+                });
+            }
+        }
+        runs.extend(self.composer_labels.iter().map(ui_run));
         if let Some(hole) = self.overlay_rect {
             runs = clip_runs(runs, hole);
         }

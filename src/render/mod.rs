@@ -101,6 +101,8 @@ pub(crate) struct Renderer {
     ime: PreeditState,
     /// The command palette, while it is open.
     palette_view: Option<PaletteView>,
+    /// The docked command composer, while it is visible.
+    composer_view: Option<scene::composer::ComposerView>,
     /// The code review panel, while it is open.
     review_view: Option<crate::review::panel::View>,
     review_labels: scene::review::ReviewCache,
@@ -142,6 +144,7 @@ impl Renderer {
             sidebar_labels: LabelCache::default(),
             ime: Default::default(),
             palette_view: None,
+            composer_view: None,
             review_view: None,
             review_labels: Default::default(),
             block_cards: true,
@@ -266,6 +269,11 @@ impl Renderer {
     /// Show the command palette (`Some`) or hide it.
     pub(crate) fn set_command_palette(&mut self, view: Option<PaletteView>) {
         self.palette_view = view;
+    }
+
+    /// Show the command composer (`Some`) or hide it.
+    pub(crate) fn set_composer(&mut self, view: Option<scene::composer::ComposerView>) {
+        self.composer_view = view;
     }
 
     /// Show the code review panel (`Some`) or hide it.
@@ -409,6 +417,9 @@ impl Renderer {
             self.review_labels.clear();
         }
         frame.add_chrome(&mut ctx, style, &self.ui_font, chrome);
+        if let Some(view) = &self.composer_view {
+            frame.add_composer(&mut ctx, style, &self.ui_font, view);
+        }
         if let Some(view) = &self.palette_view {
             frame.add_palette(&mut ctx, style, &self.ui_font, view);
         }
