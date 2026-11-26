@@ -3,7 +3,7 @@
 //! selection, else the visible screen).
 //!
 //! The agent is a program on the user's machine (`claude`, `codex`, `gemini`, `opencode`,
-//! `grok`, or `config.agent_command`). It is started directly with an argument vector, never
+//! `grok`, `agy`, or `config.agent_command`). It is started directly with an argument vector, never
 //! through a shell, and the terminal text is passed as one argument, so nothing in the output
 //! can become a command. The text is still untrusted input to the agent (it may try to
 //! instruct it); agents ask before acting, and the prompt says the text is terminal output.
@@ -17,7 +17,7 @@
 use std::path::{Path, PathBuf};
 
 /// Agents tried in order when `agent_command` is not set.
-pub const KNOWN_AGENTS: &[&str] = &["claude", "codex", "gemini", "opencode", "grok"];
+pub const KNOWN_AGENTS: &[&str] = &["claude", "codex", "gemini", "opencode", "grok", "agy"];
 
 /// Most terminal text put into a prompt, in bytes (the tail is kept). Linux limits one
 /// argument to 128 KiB.
@@ -37,7 +37,7 @@ pub fn agent_argv(agent: &[String], prompt: &str) -> Vec<String> {
         .unwrap_or_default();
     match program.as_str() {
         // Without -i / --prompt these run the prompt once and exit.
-        "gemini" => argv.push("-i".into()),
+        "gemini" | "agy" => argv.push("-i".into()),
         "opencode" => argv.push("--prompt".into()),
         _ => {}
     }

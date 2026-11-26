@@ -1216,7 +1216,7 @@ fn golden_memory_screen_ar_light() {
 /// commands, with English or Arabic details.
 fn check_slash_menu_golden(name: &str, palette_name: &str, lang: twitty::ui::chrome::UiLanguage) {
     use twitty::composer::slash::{
-        suggestions, Agent, SlashCatalog, SlashInputs, SlashItem, SlashSource,
+        suggestions, Agent, Foreground, SlashCatalog, SlashInputs, SlashItem, SlashSource,
     };
     use twitty::render::scene::composer::{ComposerPopupItem, ComposerPopupView, ComposerView};
     use twitty::render::text::ui::UiFont;
@@ -1269,7 +1269,7 @@ fn check_slash_menu_golden(name: &str, palette_name: &str, lang: twitty::ui::chr
     let inputs = SlashInputs {
         catalog: &catalog,
         workflows: &[],
-        foreground: None,
+        foreground: Foreground::Shell,
     };
     let query = "re";
     let items = suggestions(query, 1 + query.len(), &inputs);

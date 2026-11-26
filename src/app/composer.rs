@@ -21,7 +21,7 @@ use crate::composer::highlight::{
 };
 use crate::composer::history::{load_shell_history_default, HistoryStore};
 use crate::composer::lint::lint_command;
-use crate::composer::slash::{self, Agent};
+use crate::composer::slash::{self, Foreground};
 use crate::composer::{
     encode_submit, should_show_composer, ComposerAction, ComposerMode, ComposerState,
 };
@@ -244,12 +244,12 @@ impl App {
         self.maybe_request_composer_dir(cwd.as_deref());
         self.maybe_request_composer_generators(cwd.as_deref());
         self.maybe_request_composer_path_stats(cwd.as_deref());
-        self.composer.state.slash_foreground = self
+        let argv = self
             .focused_id()
             .and_then(|id| self.ws.pane(id))
             .and_then(|pane| pane.pty.as_ref())
-            .and_then(Pty::foreground_argv)
-            .and_then(|argv| Agent::from_argv(&argv));
+            .and_then(Pty::foreground_argv);
+        self.composer.state.slash_foreground = Foreground::from_argv(argv.as_deref());
         self.maybe_request_slash_catalog(cwd.as_deref());
     }
 
@@ -679,7 +679,13 @@ impl App {
                     self.composer.focused = false;
                 }
                 if let Some(id) = self.focused_id() {
-                    let bracketed = self.mode_of(id).contains(TermMode::BRACKETED_PASTE);
+                    // An agent reads `/command` as a command only when it is typed: pasted
+                    // text is plain prompt text to Claude Code, Antigravity and others.
+                    let typed_command =
+                        matches!(self.composer.state.slash_foreground, Foreground::Agent(_))
+                            && crate::composer::is_typed_slash_command(&cmd);
+                    let bracketed =
+                        self.mode_of(id).contains(TermMode::BRACKETED_PASTE) && !typed_command;
                     let bytes = encode_submit(&cmd, bracketed);
                     self.send_input(id, &bytes);
                     self.cursor_blink.reset(Instant::now());

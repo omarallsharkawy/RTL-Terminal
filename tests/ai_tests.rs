@@ -97,7 +97,7 @@ fn write_executable(path: &Path, script: &str) {
 
 #[test]
 fn non_interactive_argv_table_for_all_supported_agents() {
-    assert_eq!(NON_INTERACTIVE_AGENTS.len(), 4);
+    assert_eq!(NON_INTERACTIVE_AGENTS.len(), 5);
     let prompt = "list files; $(rm -rf /)";
 
     // Standard per-agent table entries include read-only flags.
@@ -131,6 +131,25 @@ fn non_interactive_argv_table_for_all_supported_agents() {
     assert_eq!(
         non_interactive_argv(&v(&["opencode"]), prompt),
         v(&["opencode", "run", prompt])
+    );
+    assert_eq!(
+        non_interactive_argv(&v(&["agy"]), prompt),
+        v(&["agy", "--mode", "plan", "--sandbox", "-p", prompt])
+    );
+    // Permission bypasses are stripped; a prompt never starts as a slash command.
+    assert_eq!(
+        non_interactive_argv(
+            &v(&["agy", "--mode", "auto", "--dangerously-skip-permissions"]),
+            "/deploy now"
+        ),
+        v(&[
+            "agy",
+            "--mode",
+            "plan",
+            "--sandbox",
+            "-p",
+            "Text: /deploy now"
+        ])
     );
 
     // Full paths and Windows .exe extensions normalize cleanly.

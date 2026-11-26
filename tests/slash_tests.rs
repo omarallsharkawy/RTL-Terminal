@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use twitty::composer::complete::CompletionKind;
 use twitty::composer::slash::{
-    discover, slash_query, suggestions, Agent, SlashCatalog, SlashInputs, SlashSource,
+    discover, slash_query, suggestions, Agent, Foreground, SlashCatalog, SlashInputs, SlashSource,
 };
 use twitty::composer::{ComposerAction, ComposerState};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
@@ -139,7 +139,20 @@ fn agent_is_recognized_from_the_foreground_command_line() {
         Agent::from_argv(&argv(&["gemini", "-i"])),
         Some(Agent::Gemini)
     );
+    assert_eq!(
+        Agent::from_argv(&argv(&["/home/u/.local/bin/agy"])),
+        Some(Agent::Antigravity)
+    );
     assert_eq!(Agent::from_argv(&argv(&["vim", "claude"])), None);
+    assert_eq!(Foreground::from_argv(None), Foreground::Shell);
+    assert_eq!(
+        Foreground::from_argv(Some(&argv(&["agy"]))),
+        Foreground::Agent(Agent::Antigravity)
+    );
+    assert_eq!(
+        Foreground::from_argv(Some(&argv(&["vim", "notes.md"]))),
+        Foreground::Other
+    );
     assert_eq!(Agent::from_argv(&[]), None);
 }
 
@@ -207,7 +220,7 @@ fn at_a_shell_prompt_claude_items_start_claude_and_twitty_commands_run() {
     let inputs = SlashInputs {
         catalog: &catalog,
         workflows: &[],
-        foreground: None,
+        foreground: Foreground::Shell,
     };
 
     let imp = suggestions("imp", 4, &inputs);
@@ -239,7 +252,7 @@ fn over_a_running_agent_its_items_are_inserted_for_the_agent() {
     let codex = SlashInputs {
         catalog: &catalog,
         workflows: &[],
-        foreground: Some(Agent::Codex),
+        foreground: Foreground::Agent(Agent::Codex),
     };
     let fix = suggestions("fix", 4, &codex);
     assert_eq!(fix[0].label, "/prompts:fix");
@@ -257,7 +270,7 @@ fn over_a_running_agent_its_items_are_inserted_for_the_agent() {
     let claude = SlashInputs {
         catalog: &catalog,
         workflows: &[],
-        foreground: Some(Agent::Claude),
+        foreground: Foreground::Agent(Agent::Claude),
     };
     let compact = suggestions("comp", 5, &claude);
     assert_eq!(compact[0].label, "/compact");
@@ -341,4 +354,99 @@ fn typing_slash_opens_the_menu_and_enter_runs_or_inserts() {
     assert!(state.popup.is_none());
     let _ = fs::remove_dir_all(home);
     let _ = fs::remove_dir_all(project);
+}
+
+#[test]
+fn antigravity_gets_its_own_skills_mcp_and_built_ins_never_other_agents_shell_commands() {
+    let home = temp_dir("agy-home");
+    let project = temp_dir("agy-project");
+    write(
+        &home.join(".gemini/config/skills/obsidian/SKILL.md"),
+        "---\nname: obsidian\ndescription: Work with the vault\n---\n",
+    );
+    write(
+        &home.join(".gemini/config/config.json"),
+        r#"{"plugins": {"fast": {"enabled": true}, "off": {"enabled": false}}}"#,
+    );
+    write(
+        &home.join(".gemini/config/plugins/fast/skills/speedy/SKILL.md"),
+        "---\nname: speedy\ndescription: Fast mode\n---\n",
+    );
+    write(
+        &home.join(".gemini/config/plugins/off/skills/hidden/SKILL.md"),
+        "---\nname: hidden\n---\n",
+    );
+    write(
+        &home.join(".gemini/config/mcp_config.json"),
+        r#"{"mcpServers": {"sqlite": {"command": "/usr/bin/sqlite-mcp"}}}"#,
+    );
+    write(
+        &project.join(".agents/skills/deploy-app/SKILL.md"),
+        "---\nname: deploy-app\ndescription: Ship it\n---\n",
+    );
+    // Claude has an MCP server too: it must never be offered inside agy.
+    write(
+        &home.join(".claude.json"),
+        r#"{"mcpServers": {"rea": {"command": "rea"}}}"#,
+    );
+    let catalog = discover(&home, Some(&project), &[Agent::Claude, Agent::Antigravity]);
+    let skills = names(&catalog, SlashSource::Skill(Agent::Antigravity));
+    assert!(skills.contains(&"obsidian".to_owned()), "{skills:?}");
+    assert!(skills.contains(&"speedy".to_owned()));
+    assert!(skills.contains(&"deploy-app".to_owned()));
+    assert!(!skills.contains(&"hidden".to_owned()), "disabled plugin");
+
+    let agy = SlashInputs {
+        catalog: &catalog,
+        workflows: &[],
+        foreground: Foreground::Agent(Agent::Antigravity),
+    };
+    let dep = suggestions("dep", 4, &agy);
+    assert_eq!(dep[0].label, "/deploy-app");
+    assert_eq!(dep[0].replacement, "/deploy-app ");
+    let ctx = suggestions("context", 8, &agy);
+    assert_eq!(ctx[0].replacement, "/context ");
+    let rea = suggestions("rea", 4, &agy);
+    assert!(
+        rea.iter().all(|i| !i.replacement.contains("claude")),
+        "inside agy nothing inserts a claude command: {rea:?}"
+    );
+    let sqlite = suggestions("sqlite", 7, &agy);
+    assert_eq!(sqlite[0].replacement, "/mcp");
+
+    // At the shell an agy skill starts agy with it.
+    let shell = SlashInputs {
+        catalog: &catalog,
+        workflows: &[],
+        foreground: Foreground::Shell,
+    };
+    let obs = suggestions("obsid", 6, &shell);
+    assert_eq!(obs[0].replacement, "agy -i \"/obsidian\"");
+    let _ = fs::remove_dir_all(home);
+    let _ = fs::remove_dir_all(project);
+}
+
+#[test]
+fn an_unknown_program_in_the_pane_gets_no_slash_menu() {
+    let (home, project) = fixture();
+    let catalog = discover(&home, Some(&project), &[Agent::Claude]);
+    let other = SlashInputs {
+        catalog: &catalog,
+        workflows: &[],
+        foreground: Foreground::Other,
+    };
+    assert!(suggestions("", 1, &other).is_empty());
+    assert!(suggestions("settings", 9, &other).is_empty());
+    let _ = fs::remove_dir_all(home);
+    let _ = fs::remove_dir_all(project);
+}
+
+#[test]
+fn slash_commands_for_an_agent_are_typed_not_pasted() {
+    use twitty::composer::is_typed_slash_command;
+    assert!(is_typed_slash_command("/compact"));
+    assert!(is_typed_slash_command("/deploy-app staging"));
+    assert!(!is_typed_slash_command("/"));
+    assert!(!is_typed_slash_command("fix the /tmp path"));
+    assert!(!is_typed_slash_command("/review\nmore"));
 }

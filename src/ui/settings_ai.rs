@@ -300,13 +300,13 @@ impl AiSettingsState {
 
 /// Detect installed coding-agent CLIs on `$PATH` (non-blocking, bounded).
 pub fn detect_cli_agents_on_path() -> Vec<String> {
-    let candidates = ["claude", "codex", "gemini", "opencode"];
+    let candidates = twitty_ai::ai::AI_KNOWN_AGENTS;
     let Some(path_var) = std::env::var_os("PATH") else {
         return Vec::new();
     };
     let dirs: Vec<_> = std::env::split_paths(&path_var).collect();
     let mut found = Vec::new();
-    for name in candidates {
+    for &name in candidates {
         let present = dirs.iter().any(|dir| {
             let candidate = dir.join(name);
             candidate.is_file()

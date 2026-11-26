@@ -7,6 +7,7 @@
 //! - `codex exec --sandbox read-only --skip-git-repo-check <prompt>`
 //! - `gemini --approval-mode default -p <prompt>`
 //! - `opencode run <prompt>` (isolated in an empty temporary directory)
+//! - `agy --mode plan --sandbox -p <prompt>` (Google Antigravity)
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -83,10 +84,21 @@ pub const NON_INTERACTIVE_AGENTS: &[NonInteractiveAgentSpec] = &[
         dangerous_flags: &["--auto"],
         dangerous_flag_values: &[],
     },
+    NonInteractiveAgentSpec {
+        program: "agy",
+        flags: &["-p"],
+        already_non_interactive: &["-p", "--print", "--prompt"],
+        // Plan mode makes no edits and the sandbox restricts its terminal. Not
+        // `--disable-slash-commands`: agy ignores `--mode plan` when it is set. Twitty's
+        // prompts never start with `/`, so nothing expands into a command anyway.
+        read_only: &["--mode", "plan", "--sandbox"],
+        dangerous_flags: &["--dangerously-skip-permissions"],
+        dangerous_flag_values: &[("--mode", &["accept-edits", "auto"])],
+    },
 ];
 
 /// Agents probed on `PATH` (in order) when neither `ai_agent` nor `agent_command` is configured.
-pub const AI_KNOWN_AGENTS: &[&str] = &["claude", "codex", "gemini", "opencode"];
+pub const AI_KNOWN_AGENTS: &[&str] = &["claude", "codex", "gemini", "opencode", "agy"];
 
 /// Why no coding agent could be resolved for a built-in AI request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -146,7 +158,13 @@ pub fn non_interactive_argv(agent: &[String], prompt: &str) -> Vec<String> {
 
         ensure_read_only_flags(&mut argv, spec, is_subcommand);
     }
-    argv.push(prompt.to_string());
+    // Agents expand a prompt that starts with `/` into a slash command or skill. Built-in AI
+    // prompts are plain text, so never let one start that way.
+    if prompt.trim_start().starts_with('/') {
+        argv.push(format!("Text: {prompt}"));
+    } else {
+        argv.push(prompt.to_string());
+    }
     argv
 }
 

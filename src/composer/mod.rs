@@ -141,6 +141,11 @@ pub fn encode_submit(text: &str, bracketed: bool) -> Vec<u8> {
     bytes
 }
 
+/// A one-line `/command [args]` that should reach an agent as typed keys, not as a paste.
+pub fn is_typed_slash_command(text: &str) -> bool {
+    text.starts_with('/') && text.len() > 1 && !text.chars().any(|c| c.is_control())
+}
+
 /// Active completion popup list.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PopupState {
@@ -237,7 +242,7 @@ pub struct ComposerState {
     /// Agent slash items found for the pane's project (filled off the UI thread).
     pub slash: std::sync::Arc<slash::SlashCatalog>,
     /// The coding agent running in the pane, if any (decides what a slash pick inserts).
-    pub slash_foreground: Option<slash::Agent>,
+    pub slash_foreground: slash::Foreground,
     /// The open popup is the slash menu (picks of Twitty commands run instead of inserting).
     slash_popup: bool,
 }
@@ -254,7 +259,7 @@ impl Default for ComposerState {
             ai_loading: false,
             ai_reviewing: false,
             slash: Default::default(),
-            slash_foreground: None,
+            slash_foreground: slash::Foreground::Shell,
             slash_popup: false,
         }
     }

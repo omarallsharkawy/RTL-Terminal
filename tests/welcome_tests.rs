@@ -361,7 +361,7 @@ fn step_3_shell_detection_marks_and_toggle() {
 #[test]
 fn step_4_ai_agent_detection_priority_override_and_toggle() {
     let empty = AgentsInfo::detect(None, None, None);
-    assert_eq!(empty.agents.len(), 4);
+    assert_eq!(empty.agents.len(), 5);
     assert_eq!(empty.installed_count(), 0);
     assert_eq!(empty.selected, None);
 

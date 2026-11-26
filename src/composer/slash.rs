@@ -33,16 +33,24 @@ pub enum Agent {
     Claude,
     Codex,
     Gemini,
+    /// Google Antigravity's CLI (`agy`).
+    Antigravity,
 }
 
 impl Agent {
-    pub const ALL: [Agent; 3] = [Agent::Claude, Agent::Codex, Agent::Gemini];
+    pub const ALL: [Agent; 4] = [
+        Agent::Claude,
+        Agent::Codex,
+        Agent::Gemini,
+        Agent::Antigravity,
+    ];
 
     pub fn program(self) -> &'static str {
         match self {
             Agent::Claude => "claude",
             Agent::Codex => "codex",
             Agent::Gemini => "gemini",
+            Agent::Antigravity => "agy",
         }
     }
 
@@ -51,6 +59,7 @@ impl Agent {
             Agent::Claude => "Claude",
             Agent::Codex => "Codex",
             Agent::Gemini => "Gemini",
+            Agent::Antigravity => "Antigravity",
         }
     }
 
@@ -75,6 +84,36 @@ impl Agent {
         };
         let name = name.strip_suffix(".js").unwrap_or(&name);
         Agent::ALL.into_iter().find(|a| a.program() == name)
+    }
+}
+
+/// What runs in the pane, as far as the slash menu cares.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Foreground {
+    /// The shell prompt (nothing else in the foreground).
+    #[default]
+    Shell,
+    /// A coding agent whose slash commands Twitty knows.
+    Agent(Agent),
+    /// Some other program (an editor, a pager, an agent Twitty does not know): `/` is its
+    /// business, so the slash menu stays closed and inserts nothing.
+    Other,
+}
+
+impl Foreground {
+    /// From the pane's foreground command line (`None`: the shell itself).
+    pub fn from_argv(argv: Option<&[String]>) -> Self {
+        match argv {
+            None => Foreground::Shell,
+            Some(argv) => Agent::from_argv(argv).map_or(Foreground::Other, Foreground::Agent),
+        }
+    }
+
+    pub fn agent(self) -> Option<Agent> {
+        match self {
+            Foreground::Agent(agent) => Some(agent),
+            Foreground::Shell | Foreground::Other => None,
+        }
     }
 }
 
@@ -195,12 +234,16 @@ fn truncate(text: &str) -> String {
 pub struct SlashInputs<'a> {
     pub catalog: &'a SlashCatalog,
     pub workflows: &'a [Workflow],
-    /// The agent running in the pane, if any; `None` means a shell prompt.
-    pub foreground: Option<Agent>,
+    /// What runs in the pane.
+    pub foreground: Foreground,
 }
 
 /// Popup items for `/query` (the whole composer buffer, `text_len` bytes long).
 pub fn suggestions(query: &str, text_len: usize, inputs: &SlashInputs<'_>) -> Vec<CompletionItem> {
+    if inputs.foreground == Foreground::Other {
+        return Vec::new();
+    }
+    let foreground = inputs.foreground.agent();
     let q = fold(query);
     let range = (0, text_len);
     let mut out: Vec<CompletionItem> = Vec::new();
@@ -209,23 +252,27 @@ pub fn suggestions(query: &str, text_len: usize, inputs: &SlashInputs<'_>) -> Ve
     // (that is what the user is talking to), then Twitty's, then agents started from the shell.
     // Match class (hundreds), then source band, then shorter names.
     let rank = |quality: usize, band: usize| (quality / 100) * 1_000 + band * 100 + quality % 100;
-    let agent_band = if inputs.foreground.is_some() { 0 } else { 2 };
+    let agent_band = if foreground.is_some() { 0 } else { 2 };
     let mut seen = HashSet::new();
     for item in &inputs.catalog.items {
         let agent = item.source.agent();
-        let (replacement, label) = match (&item.source, inputs.foreground) {
+        let (replacement, label) = match (&item.source, foreground) {
             (SlashSource::Mcp(_), Some(fg)) if fg == agent => {
                 ("/mcp".to_owned(), item.name.clone())
             }
             (_, Some(fg)) if fg == agent => (format!("/{} ", item.name), format!("/{}", item.name)),
-            // At a shell prompt only Claude items can start a session with the command.
+            // At a shell prompt, Claude and Antigravity skills start a session with the command.
             (SlashSource::Skill(Agent::Claude) | SlashSource::Command(Agent::Claude), None) => (
                 format!("claude \"/{}\"", item.name),
                 format!("/{}", item.name),
             ),
+            (SlashSource::Skill(Agent::Antigravity), None) => (
+                format!("agy -i \"/{}\"", item.name),
+                format!("/{}", item.name),
+            ),
             (SlashSource::Mcp(a), None) => (
                 match a {
-                    Agent::Gemini => "gemini mcp list".to_owned(),
+                    Agent::Gemini | Agent::Antigravity => format!("{} mcp list", a.program()),
                     _ => format!("{} mcp get {}", a.program(), item.name),
                 },
                 item.name.clone(),
@@ -600,6 +647,28 @@ fn claude_plugins(home: &Path) -> Vec<(String, PathBuf)> {
     out
 }
 
+/// Enabled Antigravity plugins (`~/.gemini/config/config.json` → `plugins.<name>.enabled`).
+fn agy_plugins(config_dir: &Path) -> Vec<String> {
+    let Some(v) = read_json(&config_dir.join("config.json"), 1 << 20) else {
+        return Vec::new();
+    };
+    let Some(plugins) = v.get("plugins").and_then(|p| p.as_object()) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = plugins
+        .iter()
+        .filter(|(name, entry)| {
+            entry.get("enabled").and_then(|e| e.as_bool()) != Some(false)
+                && !name.contains(['/', '\\'])
+                && name.as_str() != ".."
+        })
+        .map(|(name, _)| name.clone())
+        .take(MAX_FILES_PER_DIR)
+        .collect();
+    names.sort();
+    names
+}
+
 fn builtins(agent: Agent) -> &'static [(&'static str, &'static str, &'static str)] {
     match agent {
         Agent::Claude => &[
@@ -652,6 +721,30 @@ fn builtins(agent: Agent) -> &'static [(&'static str, &'static str, &'static str
             ("status", "Show session status", "حالة الجلسة"),
             ("mcp", "List MCP tools", "أدوات MCP"),
             ("quit", "Exit Codex", "اخرج"),
+        ],
+        Agent::Antigravity => &[
+            ("help", "Show help", "المساعدة"),
+            ("clear", "Clear the conversation", "امسح المحادثة"),
+            ("compact", "Summarize the conversation", "لخّص المحادثة"),
+            ("context", "Show context usage", "اعرض استهلاك السياق"),
+            ("model", "Choose the model", "اختار الموديل"),
+            ("effort", "Choose reasoning effort", "اختار مستوى التفكير"),
+            ("skills", "List skills", "المهارات"),
+            ("mcp", "Manage MCP servers", "إدارة خوادم MCP"),
+            ("agents", "Manage agents", "إدارة الوكلاء"),
+            ("plugin", "Manage plugins", "إدارة الإضافات"),
+            ("permissions", "View or change permissions", "الصلاحيات"),
+            ("resume", "Resume a conversation", "كمّل محادثة قديمة"),
+            (
+                "rewind",
+                "Go back to an earlier point",
+                "ارجع لنقطة قبل كده",
+            ),
+            ("diff", "Show the changes", "اعرض التغييرات"),
+            ("plan", "Plan before acting", "خطّط قبل التنفيذ"),
+            ("usage", "Show usage", "الاستهلاك"),
+            ("settings", "Open settings", "الإعدادات"),
+            ("quit", "Exit Antigravity", "اخرج"),
         ],
         Agent::Gemini => &[
             ("help", "Show help", "المساعدة"),
@@ -732,6 +825,36 @@ pub fn discover(home: &Path, project_root: Option<&Path>, installed: &[Agent]) -
     gemini_commands_in(&home.join(".gemini/commands"), &mut items);
     if let Some(v) = read_json(&home.join(".gemini/settings.json"), 1 << 20) {
         mcp_from_json(Agent::Gemini, &v, &mut items);
+    }
+
+    // Antigravity (`agy`): project `.agents/skills` (or `.agent`, `_agents`, `_agent`), global
+    // `~/.gemini/config/skills`, enabled plugins; MCP servers in `mcp_config.json`.
+    if let Some(root) = project_root {
+        for dir in [".agents", ".agent", "_agents", "_agent"] {
+            skills_in(
+                &root.join(dir).join("skills"),
+                Agent::Antigravity,
+                "",
+                &mut items,
+            );
+        }
+    }
+    let agy_config = home.join(".gemini/config");
+    skills_in(
+        &agy_config.join("skills"),
+        Agent::Antigravity,
+        "",
+        &mut items,
+    );
+    if let Some(v) = read_json(&agy_config.join("mcp_config.json"), 1 << 20) {
+        mcp_from_json(Agent::Antigravity, &v, &mut items);
+    }
+    for plugin in agy_plugins(&agy_config) {
+        let path = agy_config.join("plugins").join(&plugin);
+        skills_in(&path.join("skills"), Agent::Antigravity, "", &mut items);
+        if let Some(v) = read_json(&path.join("mcp_config.json"), 1 << 20) {
+            mcp_from_json(Agent::Antigravity, &v, &mut items);
+        }
     }
 
     for agent in installed {
