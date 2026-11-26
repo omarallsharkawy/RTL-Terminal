@@ -37,6 +37,16 @@ pub enum AppEvent {
     ComposerHistory(Vec<String>),
     /// Directory entries loaded off the UI thread for composer path completion.
     ComposerDir(PathBuf, Vec<crate::composer::complete::DirEntryInfo>),
+    /// Dynamic completion generator results produced off the UI thread.
+    ComposerGenerator(
+        crate::composer::generators::GeneratorKey,
+        Vec<crate::composer::generators::GeneratedItem>,
+    ),
+    /// `$PATH` executables and/or local path-existence checks resolved off the UI thread.
+    ComposerPathInfo {
+        commands: Option<std::collections::HashSet<String>>,
+        existing: Vec<(PathBuf, bool)>,
+    },
     /// Project directories (MRU + scanned git repos) resolved off the UI thread.
     Projects(u64, Vec<crate::projects::ProjectItem>),
 }

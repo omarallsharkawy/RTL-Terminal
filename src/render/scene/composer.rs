@@ -1,9 +1,10 @@
 //! Command composer CPU-side layout and rendering.
 //!
 //! Draws a rounded Warp-style card docked at the bottom of the focused pane using `UiStyle`
-//! tokens, with multi-line text shaped by `RowShaper` (the exact same bidi rules as the terminal
-//! grid), visual caret placement, RTL-accurate selection highlights, inline IME preedit, faint
-//! ghost suggestion, and an optional completion popup above the box.
+//! tokens, with multi-line syntax-highlighted text shaped by `RowShaper` (the exact same bidi
+//! rules as the terminal grid), visual caret placement, RTL-accurate selection highlights,
+//! wavy lint underlines and a bilingual diagnostic tooltip line, inline IME preedit, faint ghost
+//! suggestion, and an optional completion popup above the box.
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -18,6 +19,8 @@ use super::context::DrawContext;
 use super::preedit::ImeArea;
 use crate::color::Rgba;
 use crate::composer::complete::CompletionKind;
+use crate::composer::highlight::{line_highlight_spans, HighlightSpan, TokenKind};
+use crate::composer::lint::{active_lint_for_caret, LintMark, LintSeverity};
 use crate::layout::Rect;
 use crate::render::icons::Icon;
 use crate::render::metrics::CellMetrics;
@@ -33,6 +36,8 @@ use crate::ui::chrome::UiLanguage;
 
 /// Maximum editor lines shown simultaneously before scrolling inside the composer box.
 pub const MAX_VISIBLE_LINES: usize = 6;
+/// Cap wavy underline segments per lint mark to avoid excessive shape geometry on huge lines.
+const MAX_WAVE_SEGMENTS: usize = 120;
 
 /// One item in the composer's completion popup.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -64,13 +69,17 @@ pub struct ComposerView {
     pub preedit: Option<(String, Option<(usize, usize)>)>,
     /// Faint inline ghost suffix rendered after the caret line when at end of buffer.
     pub ghost: Option<String>,
+    /// Syntax highlight spans covering byte offsets in the full buffer (`lines.join("\n")`).
+    pub highlights: Vec<HighlightSpan>,
+    /// Pre-run lint marks covering byte offsets in the full buffer.
+    pub lints: Vec<LintMark>,
     /// Whether the composer owns keyboard focus.
     pub focused: bool,
     /// Cursor blink phase.
     pub cursor_blink_on: bool,
     /// Optional completion popup above the box.
     pub popup: Option<ComposerPopupView>,
-    /// System UI language for chrome hints and placeholders.
+    /// System UI language for chrome hints, descriptions, and lint tooltips.
     pub language: UiLanguage,
 }
 
@@ -90,6 +99,8 @@ pub struct ComposerLayout {
     pub card: Rect,
     pub header: Rect,
     pub input: Rect,
+    /// Optional diagnostic tooltip strip below `input` when pre-run lint marks exist.
+    pub lint_bar: Option<Rect>,
     pub popup: Option<Rect>,
     pub popup_row_height: f32,
     pub popup_rows: usize,
@@ -106,6 +117,26 @@ impl ComposerLayout {
         line_count: usize,
         caret_line: usize,
         popup_items: usize,
+    ) -> Self {
+        Self::with_lint(
+            pane_rect,
+            metrics,
+            scale,
+            line_count,
+            caret_line,
+            popup_items,
+            false,
+        )
+    }
+
+    pub fn with_lint(
+        pane_rect: Rect,
+        metrics: CellMetrics,
+        scale: f32,
+        line_count: usize,
+        caret_line: usize,
+        popup_items: usize,
+        has_lint: bool,
     ) -> Self {
         let margin = (SPACE_8 * scale)
             .min(pane_rect.w / 8.0)
@@ -125,10 +156,21 @@ impl ComposerLayout {
         } else {
             0.0
         };
+        let show_lint = has_lint && pane_rect.h >= line_height * 4.5;
+        let lint_gap = if show_lint {
+            (SPACE_4 * scale).round()
+        } else {
+            0.0
+        };
+        let lint_h = if show_lint {
+            (18.0 * scale).round()
+        } else {
+            0.0
+        };
 
         let max_card_h = (pane_rect.h * 0.45).max(line_height + 2.0 * pad_y);
         let max_card_h = max_card_h.min((pane_rect.h - 2.0 * margin).max(0.0));
-        let chrome_h = header_h + header_gap + 2.0 * pad_y;
+        let chrome_h = header_h + header_gap + lint_gap + lint_h + 2.0 * pad_y;
         let max_lines = (((max_card_h - chrome_h).max(line_height)) / line_height)
             .floor()
             .clamp(1.0, MAX_VISIBLE_LINES as f32) as usize;
@@ -150,12 +192,25 @@ impl ComposerLayout {
         } else {
             card.y + pad_y
         };
+        let input_bottom_limit = if show_lint {
+            (card.bottom() - pad_y - lint_h - lint_gap).max(input_y)
+        } else {
+            card.bottom()
+        };
         let input = Rect::new(
             card.x + pad_x,
             input_y,
             inner_w,
-            input_h.min((card.bottom() - input_y).max(0.0)),
+            input_h.min((input_bottom_limit - input_y).max(0.0)),
         );
+        let lint_bar = show_lint.then(|| {
+            Rect::new(
+                card.x + pad_x,
+                (input.bottom() + lint_gap).min(card.bottom() - lint_h),
+                inner_w,
+                lint_h,
+            )
+        });
 
         let scroll_line = if caret_line >= visible_lines {
             caret_line + 1 - visible_lines
@@ -182,6 +237,7 @@ impl ComposerLayout {
             card,
             header,
             input,
+            lint_bar,
             popup,
             popup_row_height,
             popup_rows,
@@ -269,7 +325,26 @@ pub fn shape_composer_line(
     preedit: Option<(&str, Option<(usize, usize)>)>,
     ghost: Option<(&str, Rgba)>,
 ) -> ShapedComposerLine {
-    let fg_color = AnsiColor::Spec(rgb8(fg));
+    let style = UiStyle::new(ctx.palette, None, ctx.metrics.scale);
+    shape_composer_line_highlighted(ctx, line_text, caret_byte, fg, &[], style, preedit, ghost)
+}
+
+/// Shape one logical composer line with per-token syntax highlighting spans.
+///
+/// Adjacent characters with identical [`TokenKind`] receive identical `fg` and flags so `RowShaper`
+/// merges them into a single shaping span and preserves Arabic joining and bidi order.
+#[allow(clippy::too_many_arguments)]
+pub fn shape_composer_line_highlighted(
+    ctx: &mut DrawContext,
+    line_text: &str,
+    caret_byte: Option<usize>,
+    fg: Rgba,
+    line_spans: &[HighlightSpan],
+    style: UiStyle,
+    preedit: Option<(&str, Option<(usize, usize)>)>,
+    ghost: Option<(&str, Rgba)>,
+) -> ShapedComposerLine {
+    let default_fg = AnsiColor::Spec(rgb8(fg));
     let mut cells: Vec<CellData> = Vec::with_capacity(line_text.len() + 16);
     let mut has_rtl = false;
     let mut byte_to_cell = vec![0usize; line_text.len() + 1];
@@ -330,6 +405,7 @@ pub fn shape_composer_line(
 
     let caret_pos = caret_byte.map(|b| b.min(line_text.len()));
     let mut spliced_preedit = false;
+    let mut span_idx = 0usize;
 
     for (byte_idx, c) in line_text.char_indices() {
         if !spliced_preedit && caret_pos == Some(byte_idx) {
@@ -339,7 +415,7 @@ pub fn shape_composer_line(
                 let pre_byte = clamp_char_boundary(pre_text, pre_byte);
                 push_text(
                     &pre_text[..pre_byte],
-                    fg_color,
+                    default_fg,
                     CellFlags::UNDERLINE,
                     &mut cells,
                     &mut has_rtl,
@@ -347,7 +423,7 @@ pub fn shape_composer_line(
                 preedit_caret_cell = Some(cells.len());
                 push_text(
                     &pre_text[pre_byte..],
-                    fg_color,
+                    default_fg,
                     CellFlags::UNDERLINE,
                     &mut cells,
                     &mut has_rtl,
@@ -356,13 +432,28 @@ pub fn shape_composer_line(
                 spliced_preedit = true;
             }
         }
+        while span_idx < line_spans.len() && line_spans[span_idx].end <= byte_idx {
+            span_idx += 1;
+        }
+        let (char_color, char_flags) = match line_spans.get(span_idx) {
+            Some(span) if byte_idx >= span.start && byte_idx < span.end => {
+                let col = AnsiColor::Spec(rgb8(span.kind.color(ctx.palette, style)));
+                let mut fl = CellFlags::empty();
+                if span.kind.italic() {
+                    fl |= CellFlags::ITALIC;
+                }
+                (col, fl)
+            }
+            _ => (default_fg, CellFlags::empty()),
+        };
+
         let cell_start = cells.len();
         for slot in &mut byte_to_cell[byte_idx..byte_idx + c.len_utf8()] {
             *slot = cell_start;
         }
         let mut buf = [0u8; 4];
         let s = c.encode_utf8(&mut buf);
-        push_text(s, fg_color, CellFlags::empty(), &mut cells, &mut has_rtl);
+        push_text(s, char_color, char_flags, &mut cells, &mut has_rtl);
     }
 
     let end_cell_before_preedit = cells.len();
@@ -375,7 +466,7 @@ pub fn shape_composer_line(
             let pre_byte = clamp_char_boundary(pre_text, pre_byte);
             push_text(
                 &pre_text[..pre_byte],
-                fg_color,
+                default_fg,
                 CellFlags::UNDERLINE,
                 &mut cells,
                 &mut has_rtl,
@@ -383,7 +474,7 @@ pub fn shape_composer_line(
             preedit_caret_cell = Some(cells.len());
             push_text(
                 &pre_text[pre_byte..],
-                fg_color,
+                default_fg,
                 CellFlags::UNDERLINE,
                 &mut cells,
                 &mut has_rtl,
@@ -408,6 +499,11 @@ pub fn shape_composer_line(
     let mut hasher = DefaultHasher::new();
     line_text.hash(&mut hasher);
     caret_cell.hash(&mut hasher);
+    for sp in line_spans {
+        sp.start.hash(&mut hasher);
+        sp.end.hash(&mut hasher);
+        (sp.kind as u8).hash(&mut hasher);
+    }
     let line_data = LineData {
         cells: cells.into(),
         has_rtl,
@@ -472,8 +568,42 @@ pub fn cell_range_spans(
     merged
 }
 
-/// Build the full CPU-side scene for the composer card, text lines, caret, selection, preedit,
-/// ghost suggestion, and optional completion popup.
+/// Emit crisp DPI-scaled wavy underline capsules across `[x0, x1]` near `y_base`.
+fn push_wavy_underline(
+    x0: f32,
+    x1: f32,
+    y_base: f32,
+    scale: f32,
+    color: [f32; 4],
+    out: &mut Vec<Shape>,
+) {
+    if x1 <= x0 {
+        return;
+    }
+    let half_wave = (3.0 * scale).max(2.0);
+    let amp = (1.25 * scale).max(1.0);
+    let stroke = (1.25 * scale).max(1.0);
+    let mut x = x0;
+    let mut up = true;
+    let mut count = 0usize;
+    while x < x1 && count < MAX_WAVE_SEGMENTS {
+        let next_x = (x + half_wave).min(x1);
+        let y0 = if up { y_base + amp } else { y_base - amp };
+        let y1 = if up { y_base - amp } else { y_base + amp };
+        out.push(Shape::Capsule {
+            from: [x, y0],
+            to: [next_x, y1],
+            width: stroke,
+            color,
+        });
+        x = next_x;
+        up = !up;
+        count += 1;
+    }
+}
+
+/// Build the full CPU-side scene for the composer card, syntax-highlighted text lines, caret,
+/// selection, lint underlines + tooltip line, preedit, ghost suggestion, and completion popup.
 pub fn build(
     ctx: &mut DrawContext,
     style: UiStyle,
@@ -481,13 +611,15 @@ pub fn build(
     view: &ComposerView,
 ) -> ComposerScene {
     let popup_count = view.popup.as_ref().map_or(0, |p| p.items.len());
-    let layout = ComposerLayout::new(
+    let has_lint = !view.lints.is_empty();
+    let layout = ComposerLayout::with_lint(
         view.pane_rect,
         ctx.metrics,
         style.scale,
         view.lines.len(),
         view.caret.0,
         popup_count,
+        has_lint,
     );
     let mut scene = ComposerScene {
         shapes: Vec::new(),
@@ -615,7 +747,21 @@ pub fn build(
         }
     }
 
-    // 4. Editor lines (shaped with RowShaper), selection highlights, IME preedit underline, caret.
+    // Precompute byte offsets of every line in the joined buffer (for highlights, lints, caret).
+    let mut line_starts = Vec::with_capacity(view.lines.len());
+    let mut acc = 0usize;
+    for line in &view.lines {
+        line_starts.push(acc);
+        acc += line.len() + 1;
+    }
+    let caret_global_byte = line_starts
+        .get(view.caret.0)
+        .copied()
+        .unwrap_or(0)
+        .saturating_add(view.caret.1);
+
+    // 4. Editor lines (shaped with RowShaper), syntax highlights, path underlines, lint waves,
+    //    selection highlights, IME preedit underline, and caret.
     let all_empty = view.lines.len() == 1 && view.lines[0].is_empty() && view.preedit.is_none();
     let input_bounds = TextBounds {
         left: layout.input.x.floor() as i32,
@@ -655,6 +801,10 @@ pub fn build(
     let visible_end = (layout.scroll_line + layout.visible_lines).min(view.lines.len());
     for (vis_idx, line_idx) in (layout.scroll_line..visible_end).enumerate() {
         let line_text = &view.lines[line_idx];
+        let line_start = line_starts[line_idx];
+        let line_end = line_start + line_text.len();
+        let line_spans = line_highlight_spans(&view.highlights, line_start, line_end);
+
         let y = layout.input.y + vis_idx as f32 * layout.line_height;
         let is_caret_line = line_idx == view.caret.0;
         let line_caret = is_caret_line.then_some(view.caret.1);
@@ -665,11 +815,13 @@ pub fn build(
             .then(|| view.ghost.as_deref().map(|g| (g, style.text_faint)))
             .flatten();
 
-        let shaped = shape_composer_line(
+        let shaped = shape_composer_line_highlighted(
             ctx,
             line_text,
             line_caret,
             style.text,
+            &line_spans,
+            style,
             line_preedit,
             line_ghost,
         );
@@ -711,6 +863,57 @@ pub fn build(
                         ));
                     }
                 }
+            }
+        }
+
+        // Subtle underline for existing filesystem paths.
+        let path_ul_stroke = style.hairline();
+        let path_ul_color = ctx.color(TokenKind::ExistingPath.color(ctx.palette, style));
+        for span in &line_spans {
+            if !span.kind.underline() {
+                continue;
+            }
+            let sc = shaped.byte_to_cell[span.start.min(line_text.len())];
+            let ec = shaped.byte_to_cell[span.end.min(line_text.len())];
+            for (l, r) in cell_range_spans(&shaped.row, sc, ec, ctx.metrics.char_width) {
+                let x0 = (origin_x + l).max(layout.input.x);
+                let x1 = (origin_x + r).min(layout.input.right());
+                if x1 > x0 {
+                    scene.shapes.push(Shape::rounded(
+                        Rect::new(
+                            x0,
+                            y + layout.line_height - path_ul_stroke - style.px(1.0),
+                            x1 - x0,
+                            path_ul_stroke,
+                        ),
+                        0.0,
+                        path_ul_color,
+                    ));
+                }
+            }
+        }
+
+        // Wavy underlines for pre-run lint marks overlapping this line.
+        let wave_y = y + layout.line_height - style.px(2.0);
+        for mark in &view.lints {
+            if mark.end <= line_start || mark.start > line_end {
+                continue;
+            }
+            if mark.start == line_end && mark.end == line_end {
+                continue;
+            }
+            let rel_s = mark.start.saturating_sub(line_start).min(line_text.len());
+            let rel_e = mark.end.saturating_sub(line_start).min(line_text.len());
+            let sc = shaped.byte_to_cell[rel_s];
+            let ec = shaped.byte_to_cell[rel_e].max(sc + 1);
+            let color = ctx.color(match mark.severity {
+                LintSeverity::Error => style.danger,
+                LintSeverity::Warning => style.warn,
+            });
+            for (l, r) in cell_range_spans(&shaped.row, sc, ec, ctx.metrics.char_width) {
+                let x0 = (origin_x + l).max(layout.input.x);
+                let x1 = (origin_x + r).min(layout.input.right());
+                push_wavy_underline(x0, x1, wave_y, style.scale, color, &mut scene.shapes);
             }
         }
 
@@ -780,6 +983,53 @@ pub fn build(
         }
     }
 
+    // 4b. Pre-run diagnostic tooltip line below the input box.
+    if let (Some(bar), Some(mark)) = (
+        layout.lint_bar,
+        active_lint_for_caret(&view.lints, caret_global_byte),
+    ) {
+        let color = match mark.severity {
+            LintSeverity::Error => style.danger,
+            LintSeverity::Warning => style.warn,
+        };
+        let icon_side = style.px(12.0).min(bar.h);
+        let gap = style.px(6.0);
+        let (icon_rect, text_rect, align) = match view.language {
+            UiLanguage::Arabic => {
+                let ix = (bar.right() - icon_side).max(bar.x);
+                let ir = Rect::new(ix, bar.y + (bar.h - icon_side) / 2.0, icon_side, icon_side);
+                let tr = Rect::new(bar.x, bar.y, (ix - gap - bar.x).max(0.0), bar.h);
+                (ir, tr, UiAlign::Right)
+            }
+            UiLanguage::English => {
+                let ir = Rect::new(
+                    bar.x,
+                    bar.y + (bar.h - icon_side) / 2.0,
+                    icon_side,
+                    icon_side,
+                );
+                let tx = ir.right() + gap;
+                let tr = Rect::new(tx, bar.y, (bar.right() - tx).max(0.0), bar.h);
+                (ir, tr, UiAlign::Left)
+            }
+        };
+        Icon::Warning.draw(icon_rect, ctx.color(color), &mut scene.shapes);
+        if text_rect.w > 0.0 {
+            let msg = mark.message(view.language);
+            let buf = font.fit(
+                ctx.font_system,
+                UiSize::Small,
+                UiWeight::Regular,
+                style.scale,
+                &msg,
+                text_rect.w,
+            );
+            scene
+                .labels
+                .push(UiLabel::new(buf, text_rect, align, color));
+        }
+    }
+
     // 5. Optional completion popup above the composer card.
     if let (Some(popup_rect), Some(popup_view)) = (layout.popup, &view.popup) {
         scene.clips.push(popup_rect);
@@ -834,7 +1084,8 @@ pub fn build(
                 badge_w,
                 badge_h,
             );
-            if badge_w + style.px(40.0) < inner.w {
+            let show_badge = badge_w + style.px(40.0) < inner.w;
+            if show_badge {
                 scene.shapes.push(Shape::rounded(
                     badge_rect,
                     style.px(RADIUS_6),
@@ -848,30 +1099,93 @@ pub fn build(
                 ));
             }
 
-            let label_w = (inner.w - badge_w - style.px(SPACE_8)).max(0.0);
-            let display = match &item.detail {
-                Some(detail) if !detail.is_empty() => format!("{}  —  {detail}", item.label),
-                _ => item.label.clone(),
+            let content_w = if show_badge {
+                (inner.w - badge_w - style.px(SPACE_8)).max(0.0)
+            } else {
+                inner.w
             };
-            let label_buf = font.fit(
-                ctx.font_system,
-                UiSize::Caption,
-                if selected {
-                    UiWeight::Semibold
+            let detail = item.detail.as_deref().filter(|d| !d.is_empty());
+            if let Some(desc) = detail {
+                // Render primary item label and dimmer short description side by side.
+                let full_label_buf = font.shape(
+                    ctx.font_system,
+                    UiSize::Caption,
+                    if selected {
+                        UiWeight::Semibold
+                    } else {
+                        UiWeight::Regular
+                    },
+                    style.scale,
+                    &item.label,
+                );
+                let natural_w = label_width(&full_label_buf).ceil() + style.px(4.0);
+                let gap = style.px(SPACE_12);
+                let max_label_w = (content_w * 0.55).max(style.px(48.0)).min(content_w);
+                let used_label_w = natural_w.min(max_label_w);
+                let label_buf = if natural_w <= max_label_w {
+                    full_label_buf
                 } else {
-                    UiWeight::Regular
-                },
-                style.scale,
-                &display,
-                label_w,
-            );
-            let label_rect = Rect::new(inner.x, inner.y, label_w, inner.h);
-            scene.labels.push(UiLabel::new(
-                label_buf,
-                label_rect,
-                UiAlign::Start,
-                if selected { style.text } else { style.text_dim },
-            ));
+                    font.fit(
+                        ctx.font_system,
+                        UiSize::Caption,
+                        if selected {
+                            UiWeight::Semibold
+                        } else {
+                            UiWeight::Regular
+                        },
+                        style.scale,
+                        &item.label,
+                        used_label_w,
+                    )
+                };
+                scene.labels.push(UiLabel::new(
+                    label_buf,
+                    Rect::new(inner.x, inner.y, used_label_w, inner.h),
+                    UiAlign::Start,
+                    if selected { style.text } else { style.text_dim },
+                ));
+                let desc_x = inner.x + used_label_w + gap;
+                let desc_w = (inner.x + content_w - desc_x).max(0.0);
+                if desc_w >= style.px(32.0) {
+                    let desc_buf = font.fit(
+                        ctx.font_system,
+                        UiSize::Small,
+                        UiWeight::Regular,
+                        style.scale,
+                        desc,
+                        desc_w,
+                    );
+                    scene.labels.push(UiLabel::new(
+                        desc_buf,
+                        Rect::new(desc_x, inner.y, desc_w, inner.h),
+                        UiAlign::Start,
+                        if selected {
+                            style.text_dim
+                        } else {
+                            style.text_faint
+                        },
+                    ));
+                }
+            } else {
+                let label_buf = font.fit(
+                    ctx.font_system,
+                    UiSize::Caption,
+                    if selected {
+                        UiWeight::Semibold
+                    } else {
+                        UiWeight::Regular
+                    },
+                    style.scale,
+                    &item.label,
+                    content_w,
+                );
+                scene.labels.push(UiLabel::new(
+                    label_buf,
+                    Rect::new(inner.x, inner.y, content_w, inner.h),
+                    UiAlign::Start,
+                    if selected { style.text } else { style.text_dim },
+                ));
+            }
         }
     }
 

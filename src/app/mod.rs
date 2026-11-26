@@ -240,6 +240,10 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::GitDiff(generation, stat) => self.on_git_diff(generation, stat),
             AppEvent::ComposerHistory(entries) => self.on_composer_history(entries),
             AppEvent::ComposerDir(dir, entries) => self.on_composer_dir(dir, entries),
+            AppEvent::ComposerGenerator(key, items) => self.on_composer_generator(key, items),
+            AppEvent::ComposerPathInfo { commands, existing } => {
+                self.on_composer_path_info(commands, existing)
+            }
             AppEvent::Projects(generation, items) => self.on_projects_loaded(generation, items),
         }
     }

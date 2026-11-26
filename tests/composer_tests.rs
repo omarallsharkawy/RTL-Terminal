@@ -770,13 +770,19 @@ fn completion_ranking_arabic_matching_ghost_and_paths() {
     );
     assert_eq!(state.editor.text(), "git status --short");
 
-    // Ranking: exact history prefix beats workflow and substring; untrusted workflow is excluded.
+    // Ranking: exact contextual prefix beats fuzzy and history; untrusted workflow is excluded.
     let items = complete("git sta", 7, &history, &workflows, None, &[]);
-    assert!(items.len() >= 3);
-    assert_eq!(items[0].kind, CompletionKind::History);
-    assert_eq!(items[0].replacement, "git status --short");
-    assert_eq!(items[1].kind, CompletionKind::History);
-    assert_eq!(items[1].replacement, "git stash pop");
+    assert!(items.len() >= 4);
+    assert_eq!(items[0].kind, CompletionKind::Subcommand);
+    assert_eq!(items[0].replacement, "status");
+    assert_eq!(items[1].kind, CompletionKind::Subcommand);
+    assert_eq!(items[1].replacement, "stash");
+    assert!(items
+        .iter()
+        .any(|i| i.kind == CompletionKind::History && i.replacement == "git status --short"));
+    assert!(items
+        .iter()
+        .any(|i| i.kind == CompletionKind::History && i.replacement == "git stash pop"));
     assert!(
         items.iter().all(|i| !i.replacement.contains("rm -rf")),
         "untrusted project workflow must not appear in completions"
@@ -846,7 +852,7 @@ fn completion_ranking_arabic_matching_ghost_and_paths() {
         None,
     );
     assert!(tab_state.popup.is_none());
-    assert_eq!(tab_state.editor.text(), "git stash pop");
+    assert_eq!(tab_state.editor.text(), "git stash");
 }
 
 // ---- 7. Bracketed send bytes ----
@@ -929,6 +935,8 @@ fn composer_scene_clips_underlying_terminal_text_and_scales_light_dark() {
                 selection: Some(((0, 0), (0, 4))),
                 preedit: None,
                 ghost: None,
+                highlights: Vec::new(),
+                lints: Vec::new(),
                 focused: true,
                 cursor_blink_on: true,
                 popup: Some(ComposerPopupView {
