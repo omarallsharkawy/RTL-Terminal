@@ -1,4 +1,4 @@
-//! Pure, window-free geometry and hit-testing for Warp-style command block cards and their
+//! Pure, window-free geometry and hit-testing for command block cards and their
 //! floating top-right action toolbars. Shared by rendering (`render::scene::blocks`) and pointer
 //! input (`app::mouse`), so drawn cards and button clicks never drift apart.
 
@@ -6,6 +6,7 @@ use crate::blocks::{BlockDecor, BlockStatus};
 use crate::layout::{PaneId, Rect};
 use crate::render::metrics::CellMetrics;
 use crate::render::ui_style::{RADIUS_6, SPACE_4};
+use crate::ui::chrome::UiLanguage;
 
 /// Action button in a block card's floating top-right toolbar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,6 +41,15 @@ pub struct CardToolbarLayout {
 }
 
 impl CardToolbarLayout {
+    pub fn with_language(mut self, language: UiLanguage, card: Rect) -> Self {
+        self.rect = language.mirror(self.rect, card);
+        self.meta = self.meta.map(|rect| language.mirror(rect, card));
+        for (_, rect, _) in &mut self.buttons {
+            *rect = language.mirror(*rect, card);
+        }
+        self
+    }
+
     /// The enabled button under `(x, y)`, if any.
     pub fn hit_button(&self, x: f64, y: f64) -> Option<BlockButton> {
         self.buttons
@@ -69,7 +79,7 @@ pub struct CardLayout {
     pub clipped_top: bool,
     /// Block continues below the viewport (partially scrolled off bottom).
     pub clipped_bottom: bool,
-    /// Floating top-right toolbar, present when the block is hovered or selected.
+    /// Floating top-right toolbar, present when the block is hovered.
     pub toolbar: Option<CardToolbarLayout>,
 }
 
@@ -95,7 +105,7 @@ pub fn layout_cards(
     blocks: &[BlockDecor],
     hovered_block: Option<u64>,
     hidden_row: Option<usize>,
-    meta_width: impl Fn(&str) -> f32,
+    mut meta_width: impl FnMut(&str) -> f32,
 ) -> Vec<CardLayout> {
     if rows == 0 || pane_rect.w <= 0.0 || pane_rect.h <= 0.0 || blocks.is_empty() {
         return Vec::new();
@@ -103,9 +113,9 @@ pub fn layout_cards(
 
     let scale = metrics.scale;
     let pad = (SPACE_4 * scale).round();
-    let margin_x = (2.0 * scale).round();
-    let margin_y = (2.0 * scale).round();
-    let half_gap = (1.0 * scale).round().max(1.0);
+    let margin_x = pad;
+    let margin_y = pad;
+    let half_gap = (pad * 0.5).round();
     let origin_y = pane_rect.y + metrics.padding_top;
 
     // Horizontal card bounds: 4 px outward from column 0 / grid right, clamped inside pane_rect.
@@ -116,7 +126,7 @@ pub fn layout_cards(
     if card_w <= 0.0 {
         return Vec::new();
     }
-    let strip_w = (3.0 * scale).round().max(2.0).min(card_w);
+    let strip_w = (2.0 * scale).round().max(1.0).min(card_w);
     let radius = (RADIUS_6 * scale).round();
 
     // Collect only visible real command blocks (skip pending waiting prompts).
@@ -163,7 +173,7 @@ pub fn layout_cards(
         let strip = Rect::new(card_x, card_top, strip_w, card_h);
 
         let hovered = hovered_block == Some(decor.id) && decor.id != 0;
-        let show_toolbar = (hovered || decor.selected) && hidden_row != Some(first);
+        let show_toolbar = hovered && hidden_row != Some(first);
         let toolbar = show_toolbar
             .then(|| {
                 layout_toolbar(
@@ -172,7 +182,7 @@ pub fn layout_cards(
                     rows_top,
                     metrics,
                     decor.has_command,
-                    decor.meta.as_deref().map(&meta_width),
+                    decor.meta.as_deref().map(&mut meta_width),
                 )
             })
             .flatten();
@@ -205,18 +215,17 @@ fn layout_toolbar(
 ) -> Option<CardToolbarLayout> {
     let scale = metrics.scale;
     let pad = (SPACE_4 * scale).round();
-    let inner_pad = (3.0 * scale).round();
-    let gap = (2.0 * scale).round();
-    let btn_w = (22.0 * scale).round();
-    let toolbar_h = (22.0 * scale).round().min(card.h);
-    let btn_h = (18.0 * scale).round().min(toolbar_h);
+    let inner_pad = pad;
+    let btn_w = (20.0 * scale).round();
+    let toolbar_h = (24.0 * scale).round().min(card.h);
+    let btn_h = btn_w.min(toolbar_h);
     if toolbar_h < (10.0 * scale) {
         return None;
     }
 
     let min_left = card.x + strip_w + pad;
     let right = card.right() - pad;
-    let buttons_w = 4.0 * btn_w + 3.0 * gap + 2.0 * inner_pad;
+    let buttons_w = 4.0 * btn_w + 2.0 * inner_pad;
     if right - buttons_w < min_left {
         return None;
     }
@@ -229,9 +238,9 @@ fn layout_toolbar(
     let btn_y = y + (toolbar_h - btn_h) * 0.5;
 
     let x_rerun = right - inner_pad - btn_w;
-    let x_agent = x_rerun - gap - btn_w;
-    let x_out = x_agent - gap - btn_w;
-    let x_cmd = x_out - gap - btn_w;
+    let x_agent = x_rerun - btn_w;
+    let x_out = x_agent - btn_w;
+    let x_cmd = x_out - btn_w;
 
     let buttons = [
         (
@@ -256,7 +265,7 @@ fn layout_toolbar(
         ),
     ];
 
-    let label_pad = (6.0 * scale).round();
+    let label_pad = pad;
     let (meta, left) = match meta_w.filter(|&w| w > 0.0) {
         Some(w) => {
             let avail = (x_cmd - label_pad - min_left - label_pad).max(0.0);
@@ -288,8 +297,8 @@ pub fn hit_test_cards(
     rows: usize,
     blocks: &[BlockDecor],
     hidden_row: Option<usize>,
-    x: f64,
-    y: f64,
+    (x, y): (f64, f64),
+    language: UiLanguage,
 ) -> Option<(u64, Option<BlockButton>)> {
     // First find which card rectangle the pointer lies inside (so its toolbar is laid out).
     let base = layout_cards(pane_rect, metrics, rows, blocks, None, hidden_row, |_| 0.0);
@@ -310,10 +319,9 @@ pub fn hit_test_cards(
         base
     };
 
-    // Check toolbars first (a selected block's toolbar is always active while visible).
     for card in &cards {
-        if let Some(tb) = &card.toolbar {
-            if let Some(button) = tb.hit_button(x, y) {
+        if let Some(tb) = card.toolbar {
+            if let Some(button) = tb.with_language(language, card.card).hit_button(x, y) {
                 return Some((card.id, Some(button)));
             }
         }

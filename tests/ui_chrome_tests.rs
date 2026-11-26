@@ -1,6 +1,6 @@
 //! Window-free coverage for the shared chrome geometry, typography, tokens and Git parsing.
 
-use twitty::color::{Palette, Rgba};
+use twitty::color::{theme_names, Palette, Rgba};
 use twitty::config::TwittyConfig;
 use twitty::layout::{Node, PaneId, Rect, SidebarPosition};
 use twitty::render::icons::Icon;
@@ -134,10 +134,11 @@ fn every_icon_stays_in_its_box() {
 
 #[test]
 fn theme_tokens_have_the_same_hierarchy_in_light_and_dark() {
-    for dark in [true, false] {
-        let palette = Palette::named(if dark { "tokyo-night" } else { "github-light" }).unwrap();
+    for name in theme_names() {
+        let palette = Palette::named(name).unwrap();
         let style = UiStyle::new(&palette, None, 1.25);
         let luminance = |r: Rgba| 0.2126 * r.r + 0.7152 * r.g + 0.0722 * r.b;
+        let dark = luminance(style.bg0) < luminance(style.text);
         for pair in [
             style.bg0,
             style.bg1,
@@ -149,7 +150,7 @@ fn theme_tokens_have_the_same_hierarchy_in_light_and_dark() {
         ]
         .windows(2)
         {
-            assert_eq!(luminance(pair[0]) < luminance(pair[1]), dark);
+            assert_eq!(luminance(pair[0]) < luminance(pair[1]), dark, "{name}");
         }
         assert_eq!(style.bg0, palette.background);
         assert_eq!(style.accent, palette.cursor);
@@ -234,8 +235,8 @@ fn grid_geometry_accounts_for_headers_and_sidebar() {
         assert_eq!(with_tabs.tabs[0].y, 40.0 * scale);
         assert_eq!(with_tabs.content.y, 68.0 * scale);
         let pane = PaneHeaderLayout::new(with_sidebar.content, scale, true);
-        assert_eq!(pane.header.h, 28.0 * scale);
-        assert_eq!(pane.grid.y, 64.0 * scale);
+        assert_eq!(pane.header.h, 24.0 * scale);
+        assert_eq!(pane.grid.y, 60.0 * scale);
         assert_eq!(pane.grid.bottom(), with_sidebar.content.bottom());
         assert_eq!(metrics.grid_size(pane.grid), (60, 26));
         let no_chrome =
@@ -292,6 +293,17 @@ fn chrome_hits_are_distinct_from_terminal_hits() {
         assert_eq!(pane.hit(id, x, y), Some(action));
     }
     assert_eq!(pane.hit(id, 0.0, f64::from(pane.grid.y)), None);
+    let arabic = UiLanguage::Arabic;
+    let rtl_pane = pane.with_language(arabic);
+    assert_eq!(rtl_pane.grid, pane.grid);
+    let (x, y) = center(rtl_pane.close);
+    assert!(x < center(rtl_pane.title).0);
+    assert_eq!(rtl_pane.hit(id, x, y), Some(ChromeAction::Close(id)));
+    let rtl_top = top.with_language(arabic);
+    let (x, y) = center(rtl_top.sidebar);
+    assert!(x > center(rtl_top.search).0);
+    assert_eq!(rtl_top.hit(x, y), Some(Hit::Chrome(ChromeAction::Sidebar)));
+
     let (x, y) = center(window.tabs[0]);
     assert_eq!(window.tab_hit(x, y), Some(Hit::Tab(0)));
     let geometry = HitGeometry {

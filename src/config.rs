@@ -179,7 +179,7 @@ impl TwittyConfig {
         let mut palette = match self.theme.as_deref() {
             None => Palette::default(),
             Some(name) => Palette::named(name).unwrap_or_else(|| {
-                warn(format!("twitty: unknown theme {name:?}, using tokyo-night"));
+                warn(format!("twitty: unknown theme {name:?}, using twitty-dark"));
                 Palette::default()
             }),
         };

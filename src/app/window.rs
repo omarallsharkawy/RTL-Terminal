@@ -67,7 +67,7 @@ pub(super) struct Window {
     occluded: bool,
     chrome_hover: Option<ChromeAction>,
     tab_hover: Option<usize>,
-    language: UiLanguage,
+    pub(super) language: UiLanguage,
     sidebar_view: Option<SidebarView>,
     sidebar_drag: Option<Drag>,
     sidebar_tick: Option<Instant>,
@@ -203,7 +203,8 @@ impl Window {
             tab_count,
             (self.sidebar.position, self.sidebar_width),
             self.top_bar,
-        );
+        )
+        .with_language(self.language);
         if self.review_open {
             // The review panel takes the right part of what the sidebar leaves to the panes.
             let (content, review) = crate::review::layout::split_content(
@@ -243,6 +244,7 @@ impl Window {
             self.metrics().map_or(1.0, |m| m.scale),
             self.pane_headers,
         )
+        .with_language(self.language)
     }
 
     pub(super) fn diff_visible(&self) -> bool {
@@ -547,8 +549,9 @@ impl Window {
             // The review panel handles its own pointer input (`App::review_mouse_press`).
             return Hit::Nothing;
         }
-        if let Some(hit) =
-            TopBarLayout::new(layout.top_bar, r.metrics().scale, self.diff(ws)).hit(x, y)
+        if let Some(hit) = TopBarLayout::new(layout.top_bar, r.metrics().scale, self.diff(ws))
+            .with_language(self.language)
+            .hit(x, y)
         {
             return hit;
         }
@@ -702,7 +705,7 @@ impl Window {
                 let pane = ws.pane(id)?;
                 let layout = self.pane_layout(rect);
                 let focused = ws.focused_id() == Some(id);
-                let attention = pane.meta.needs_attention();
+                let attention = pane.meta.needs_attention() && !(focused && self.is_focused());
                 let zoomed = zoomed_id == Some(id);
                 let flash = self.pane_flash.intensity(id, now);
                 if layout.header.h == 0.0 && !attention && flash <= 0.0 {
@@ -734,7 +737,8 @@ impl Window {
         };
         let chrome = ChromeView {
             layout: &layout,
-            top: TopBarLayout::new(layout.top_bar, metrics.scale, diff),
+            top: TopBarLayout::new(layout.top_bar, metrics.scale, diff)
+                .with_language(self.language),
             diff,
             unread: history.unseen(),
             sidebar_visible: self.sidebar_view.is_some(),
@@ -831,6 +835,10 @@ fn sidebar_entries(
             .with_agent_status(agent_status)
             .with_notification_history(&panes, &history, pending);
             entry.remote_state = remote.map(|remote| remote.state);
+            entry.last_command = focused
+                .and_then(|p| p.meta.last_command.as_deref())
+                .filter(|command| !command.trim().is_empty())
+                .map(str::to_owned);
             entry
         })
         .collect()

@@ -8,17 +8,15 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use super::context::DrawContext;
 use crate::color::Rgba;
-use crate::layout::Rect;
+use crate::layout::{Rect, SidebarPosition};
 use crate::render::icons::Icon;
 use crate::render::shapes::{Border, Shape};
 use crate::render::style::Quad;
 use crate::render::text::shaper::shape_label;
 use crate::render::text::ui::{label_width, UiAlign, UiFont, UiSize, UiWeight};
-use crate::render::ui_style::{UiStyle, RADIUS_12, RADIUS_6, RADIUS_8};
+use crate::render::ui_style::{UiStyle, RADIUS_6, RADIUS_8, SPACE_12, SPACE_16, SPACE_4};
 use crate::render::CellMetrics;
-use crate::sidebar::cards::{
-    wrap_notice, Card, CardLayout, Item, View, STATE_ICON_WIDTH, STATE_LABEL_PAD,
-};
+use crate::sidebar::cards::{fit_title, Card, Item, View, STATE_ICON_WIDTH, STATE_LABEL_PAD};
 use crate::sidebar::{display_path, AgentState, Entry};
 use crate::ui::chrome::{count_badge, UiLanguage};
 use crate::ui::text::fit_text;
@@ -71,10 +69,8 @@ struct LabelKey {
 pub struct LabelCache {
     metrics: Option<(CellMetrics, Option<&'static str>)>,
     labels: HashMap<LabelKey, (Rc<Buffer>, bool)>,
-    wrap_width: (f32, f32),
-    messages: HashMap<String, Vec<String>>,
+    state_scale: f32,
     state_widths: HashMap<&'static str, f32>,
-    title_ellipsis_width: f32,
 }
 
 impl LabelCache {
@@ -83,47 +79,18 @@ impl LabelCache {
         font: &UiFont,
         fonts: &mut FontSystem,
         entries: Vec<Entry>,
-        area: Rect,
+        _area: Rect,
         scale: f32,
     ) -> Vec<Card> {
-        let width = CardLayout::message_width(area, scale);
-        if self.wrap_width.1 != scale {
+        if self.state_scale != scale {
             self.state_widths.clear();
-            let ellipsis = font.shape(fonts, UiSize::Body, UiWeight::Semibold, scale, "…");
-            self.title_ellipsis_width = label_width(&ellipsis).ceil() + 1.0;
+            self.state_scale = scale;
         }
-        let mut previous = if self.wrap_width == (width, scale) {
-            std::mem::take(&mut self.messages)
-        } else {
-            self.messages.clear();
-            HashMap::new()
-        };
-        self.wrap_width = (width, scale);
         entries
             .into_iter()
             .map(|entry| {
-                let message = entry.display_notice().map_or_else(Vec::new, |text| {
-                    self.messages
-                        .entry(text)
-                        .or_insert_with_key(|text| {
-                            previous.remove(text).unwrap_or_else(|| {
-                                wrap_notice(text, |line| {
-                                    let buffer = font.shape(
-                                        fonts,
-                                        UiSize::Caption,
-                                        UiWeight::Regular,
-                                        scale,
-                                        line,
-                                    );
-                                    label_width(&buffer).ceil() + 1.0 <= width
-                                })
-                            })
-                        })
-                        .clone()
-                });
-                let mut card = Card::new(entry, message);
+                let mut card = Card::new(entry);
                 if let Some(state) = card.entry.display_state() {
-                    card.title_ellipsis_width = self.title_ellipsis_width;
                     card.state_label_widths =
                         [UiLanguage::English, UiLanguage::Arabic].map(|language| {
                             let text = state.label(language);
@@ -131,7 +98,7 @@ impl LabelCache {
                                 let label = font.shape(
                                     fonts,
                                     UiSize::Small,
-                                    UiWeight::Semibold,
+                                    UiWeight::Regular,
                                     scale,
                                     text,
                                 );
@@ -177,7 +144,6 @@ impl LabelCache {
 
     pub fn clear(&mut self) {
         self.labels.clear();
-        self.messages.clear();
         self.state_widths.clear();
     }
 
@@ -193,27 +159,35 @@ impl LabelCache {
 fn shape(ctx: &mut DrawContext, font: &UiFont, kind: Kind, text: &str, width: f32) -> Buffer {
     let scale = ctx.metrics.scale;
     match kind {
-        Kind::Title => font.fit_words(
-            ctx.font_system,
-            UiSize::Body,
-            UiWeight::Semibold,
-            scale,
-            text,
-            (width - 1.0).floor(),
-        ),
+        Kind::Title => {
+            let mut shape = |text: &str| {
+                font.shape(
+                    ctx.font_system,
+                    UiSize::Body,
+                    UiWeight::Semibold,
+                    scale,
+                    text,
+                )
+            };
+            let fitted = fit_title(text, |candidate| {
+                label_width(&shape(candidate)).ceil() + 1.0 <= width
+            });
+            shape(&fitted)
+        }
         Kind::State => font.shape(
             ctx.font_system,
             UiSize::Small,
-            UiWeight::Semibold,
+            UiWeight::Regular,
             scale,
             text,
         ),
-        Kind::Message => font.shape(
+        Kind::Message => font.fit_words(
             ctx.font_system,
             UiSize::Caption,
             UiWeight::Regular,
             scale,
             text,
+            (width - 1.0).floor(),
         ),
         Kind::Small => font.fit(
             ctx.font_system,
@@ -257,8 +231,8 @@ fn shape(ctx: &mut DrawContext, font: &UiFont, kind: Kind, text: &str, width: f3
                 .map(|(i, _)| i)
                 .take_while(|&i| i > 0)
                 .collect();
-            // Preserve the working-directory tail, eliding whole components when possible.
-            for cuts in [&components, &graphemes] {
+            // Keep the current directory recognizable as the width shrinks.
+            let tail = |cuts: &[usize], mono: &mut dyn FnMut(&str) -> Buffer| {
                 for keep_home in [true, false]
                     .into_iter()
                     .filter(|&keep| !keep || text.starts_with("~/"))
@@ -266,9 +240,22 @@ fn shape(ctx: &mut DrawContext, font: &UiFont, kind: Kind, text: &str, width: f3
                     let candidate = |cut| path_tail(text, cut, keep_home);
                     let n = cuts.partition_point(|&cut| fits(&mono(&candidate(cut))));
                     if n > 0 {
-                        return mono(&candidate(cuts[n - 1]));
+                        return Some(mono(&candidate(cuts[n - 1])));
                     }
                 }
+                None
+            };
+            if let Some(path) = tail(&components, &mut mono) {
+                return path;
+            }
+            if let Some((_, name)) = text.rsplit_once(['/', '\\']) {
+                let name = mono(name);
+                if fits(&name) {
+                    return name;
+                }
+            }
+            if let Some(path) = tail(&graphemes, &mut mono) {
+                return path;
             }
             ellipsis
         }
@@ -293,10 +280,19 @@ pub fn build(
 ) -> Scene {
     cache.begin_frame(ctx);
     let area = view.area;
+    let rule_w = style.hairline().min(area.w);
+    let rule_x = if view.position == SidebarPosition::Left {
+        area.right() - rule_w
+    } else {
+        area.x
+    };
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     let mut draw = Cards {
         scene: Scene {
-            quads: vec![(area.x, area.y, area.w, area.h, ctx.color(style.bg1))],
+            quads: vec![
+                (area.x, area.y, area.w, area.h, ctx.color(style.bg1)),
+                (rule_x, area.y, rule_w, area.h, ctx.color(style.border)),
+            ],
             shapes: Vec::new(),
             labels: Vec::new(),
         },
@@ -327,132 +323,129 @@ impl Cards<'_, '_> {
     fn card(&mut self, item: &Item, home: Option<&Path>) {
         let s = self.style;
         let hovered = self.view.hover == Some(item.index);
-        let bg = if item.active {
-            s.accent
-        } else if hovered {
-            s.bg3
-        } else {
-            s.bg2
-        };
-        let fg = if item.active { s.accent_text() } else { s.text };
-        let dim = if item.active {
-            fg.mix(bg, 0.17)
-        } else {
-            s.text_dim
-        };
-        let faint = if item.active {
-            fg.mix(bg, 0.24)
-        } else {
-            s.text_dim.mix(bg, 0.12)
-        };
-        self.panel(item.rect, RADIUS_8, bg);
-        if self.view.drop_target == Some(item.index) {
-            if let Some(Shape::RoundedRect { border, .. }) = self.scene.shapes.last_mut() {
-                *border = Some(Border {
-                    width: s.px(1.0),
-                    color: self.ctx.color(s.accent),
-                });
+        let bg = if item.active { s.bg3 } else { s.bg2 };
+        let drop = self.view.drop_target == Some(item.index);
+        if (item.active || hovered || drop) && intersect(item.rect, self.view.area).w > 0.0 {
+            let fill = if item.active && hovered {
+                bg.mix(s.text, 0.025)
+            } else {
+                bg
+            };
+            self.panel(item.rect, RADIUS_8, fill);
+            if drop {
+                if let Some(Shape::RoundedRect { border, .. }) = self.scene.shapes.last_mut() {
+                    *border = Some(Border {
+                        width: s.hairline(),
+                        color: self.ctx.color(s.accent),
+                    });
+                }
             }
         }
         let entry = &item.card.entry;
         let parts = item.layout(self.view);
-        let align = if self.view.mirrored {
-            UiAlign::Right
-        } else {
-            UiAlign::Start
-        };
-        self.label(parts.title, Kind::Title, &entry.title, align, fg);
-        if let Some(count) = count_badge(entry.attention_count) {
-            let badge = center_height(parts.unread, s.px(16.0));
-            let (fill, text) = if item.active {
-                (fg, bg)
+        let align = self.leading_align();
+        if item.active {
+            let w = s.px(2.0).round().min(item.rect.w);
+            let inset = s.px(SPACE_4);
+            let x = if self.view.mirrored {
+                item.rect.right() - inset - w
             } else {
-                (s.accent, s.accent_text())
+                item.rect.x + inset
             };
-            self.panel(badge, RADIUS_12, fill);
-            self.label(badge, Kind::Small, &count, UiAlign::Center, text);
+            let marker = Rect::new(x, parts.title.y, w, parts.title.h);
+            self.panel(center_height(marker, s.px(SPACE_12)), RADIUS_6, s.accent);
         }
+        let title = entry.title.trim();
+        let title = if title.is_empty() || matches!(title, "…" | "...") {
+            self.view.language.text("Tab", "تاب")
+        } else {
+            title
+        };
+        self.label(parts.title, Kind::Title, title, align, s.text);
+        if let Some(count) = count_badge(entry.attention_count) {
+            let badge = center_height(parts.unread, s.px(SPACE_16));
+            self.panel(badge, RADIUS_6, s.bg1.mix(s.accent, 0.16));
+            self.label(badge, Kind::Small, &count, UiAlign::Center, s.text);
+        }
+        self.footer(parts.footer, entry, home, s.text_dim);
         if let Some(state) = entry.display_state() {
-            self.state(parts.state, parts.state_has_label, state, bg, item.active);
+            self.state(parts.state, parts.state_has_label, state);
         }
         if hovered
             && parts.close.y >= self.view.area.y
             && parts.close.bottom() <= self.view.area.bottom()
         {
             if self.view.close_hover {
-                self.panel(
-                    center_height(parts.close, parts.close.w),
-                    RADIUS_6,
-                    bg.mix(fg, 0.14),
-                );
+                self.panel(center_height(parts.close, parts.close.w), RADIUS_6, s.bg3);
             }
-            self.icon(parts.close, Icon::Close, s.px(13.0), fg);
+            let color = if self.view.close_hover {
+                s.text
+            } else {
+                s.text_dim
+            };
+            self.icon(parts.close, Icon::Close, s.px(SPACE_12), color);
         }
-        let lines = &item.card.message;
-        for (i, line) in lines.iter().enumerate() {
-            let h = parts.message.h / lines.len() as f32;
-            let row = Rect::new(
-                parts.message.x,
-                parts.message.y + i as f32 * h,
-                parts.message.w,
-                h,
-            );
-            self.label(row, Kind::Message, line, align, dim);
+        if let Some(message) = &item.card.message {
+            self.label(parts.message, Kind::Message, message, align, s.text_dim);
         }
-        self.footer(parts.footer, entry, home, faint);
     }
 
-    fn state(&mut self, rect: Rect, with_text: bool, state: AgentState, bg: Rgba, selected: bool) {
+    fn state(&mut self, rect: Rect, with_text: bool, state: AgentState) {
         let s = self.style;
-        let (icon, semantic) = match state {
-            AgentState::Working => (None, s.text),
+        let (icon, ink) = match state {
+            AgentState::Working => (None, s.accent),
             AgentState::NeedsInput => (Some(Icon::Warning), s.warn),
             AgentState::Done => (Some(Icon::Check), s.ok),
             AgentState::Error => (Some(Icon::Close), s.danger),
         };
-        let rect = center_height(rect, s.px(16.0));
-        let surface = if selected { s.bg1 } else { bg };
-        let fill = surface.mix(semantic, 0.17);
-        let ink = semantic.mix(s.text, 0.28);
-        self.panel(rect, RADIUS_12, fill);
         let glyph_width = s.px(STATE_ICON_WIDTH);
         if rect.w < glyph_width {
             return;
         }
         let mirror = self.view.mirrored;
-        let pad = if with_text {
-            s.px(STATE_LABEL_PAD)
-        } else {
-            (rect.w - glyph_width) / 2.0
-        };
-        let (glyph, _) = take_side(rect, pad, mirror);
-        let (_, rest) = take_side(rect, glyph.w, mirror);
-        let (glyph, caption) = take_side(rest, glyph_width, mirror);
+        let (glyph, rest) = take_side(rect, glyph_width, mirror);
         if let Some(icon) = icon {
-            self.icon(glyph, icon, s.px(12.0), ink);
+            self.icon(glyph, icon, s.px(SPACE_12), ink);
         } else if glyph.y >= self.view.area.y && glyph.bottom() <= self.view.area.bottom() {
             for i in 0..3 {
-                let diameter = s.px(if i == self.view.dot_phase { 3.4 } else { 2.4 });
-                let x = glyph.x + s.px(3.0 + 5.0 * i as f32);
+                let diameter = s.px(if i == self.view.dot_phase { 3.0 } else { 2.0 });
+                let offset = s.px(2.0 + SPACE_4 * i as f32);
+                let x = if mirror {
+                    glyph.right() - offset
+                } else {
+                    glyph.x + offset
+                };
                 let y = glyph.y + glyph.h / 2.0;
                 let dot = Rect::new(x - diameter / 2.0, y - diameter / 2.0, diameter, diameter);
                 let color = if i == self.view.dot_phase {
                     ink
                 } else {
-                    ink.mix(fill, 0.50)
+                    s.text_faint
                 };
-                self.panel(dot, 4.0, color);
+                self.panel(dot, RADIUS_6, color);
             }
         }
         if with_text {
-            let (_, caption) = take_side(caption, s.px(STATE_LABEL_PAD), !mirror);
+            let (_, caption) = take_side(rest, s.px(STATE_LABEL_PAD), mirror);
             self.label(
                 caption,
                 Kind::State,
                 state.label(self.view.language),
-                UiAlign::Center,
-                ink,
+                if mirror {
+                    UiAlign::Left
+                } else {
+                    UiAlign::Right
+                },
+                s.text_dim.mix(ink, 0.24),
             );
+        }
+    }
+
+    fn leading_align(&self) -> UiAlign {
+        if self.view.mirrored {
+            UiAlign::Right
+        } else {
+            UiAlign::Start
         }
     }
 
@@ -466,7 +459,7 @@ impl Cards<'_, '_> {
         }
         let s = self.style;
         let mirror = self.view.mirrored;
-        let gap = s.px(4.0);
+        let gap = s.px(SPACE_4);
         let remote = entry.remote_state.map(|state| {
             use crate::remote::ConnectionState::*;
             match state {
@@ -485,40 +478,42 @@ impl Cards<'_, '_> {
             let w = if entry.branch.is_none() && detail.is_none() {
                 rect.w
             } else {
-                s.px(7.0 * ports.len() as f32).min(rect.w * 0.38)
+                s.px(7.0 * ports.len() as f32).min(rect.w * 0.46)
             };
             let (port, remainder) = take_side(rest, w, !mirror);
             rest = take_side(remainder, gap, !mirror).1;
             port_rect = Some(port);
         }
+        let align = self.leading_align();
+        let mut branch_rect = None;
+        let mut dot_rect = None;
         if let Some(branch) = &entry.branch {
-            let (icon, room) = take_side(rest, s.px(15.0), mirror);
-            self.icon(icon, Icon::GitBranch, s.px(12.0), color);
-            let width = if detail.is_some() {
-                s.px(7.0 * branch.chars().count() as f32).min(room.w * 0.47)
-            } else {
-                room.w
-            };
-            let (label, remainder) = take_side(room, width, mirror);
-            let align = if mirror {
-                UiAlign::Right
-            } else {
-                UiAlign::Start
-            };
-            self.label(label, Kind::Footer, branch, align, color);
-            rest = remainder;
             if detail.is_some() {
-                let (dot, remainder) = take_side(rest, s.px(12.0), mirror);
-                self.label(dot, Kind::Footer, "•", UiAlign::Center, color);
-                rest = remainder;
+                // Keep the branch visible while giving the path the larger share. Short paths and
+                // branches only take up their measured width, keeping the separator next to them.
+                let separator = s.px(SPACE_12);
+                let branch_full =
+                    self.cache
+                        .get(self.ctx, self.font, Kind::Footer, branch, f32::INFINITY);
+                let branch_w = (label_width(&branch_full).ceil() + 2.0).min(rest.w * 0.43);
+                let path = detail.as_deref().unwrap_or_default();
+                let path_full =
+                    self.cache
+                        .get(self.ctx, self.font, Kind::Path, path, f32::INFINITY);
+                let path_w = (label_width(&path_full).ceil() + 2.0)
+                    .min((rest.w - branch_w - separator).max(0.0));
+                if path_w >= s.px(SPACE_12) && branch_w >= s.px(SPACE_12) {
+                    let (_, after_path) = take_side(rest, path_w, mirror);
+                    let (dot, after_dot) = take_side(after_path, separator, mirror);
+                    branch_rect = Some(take_side(after_dot, branch_w, mirror).0);
+                    dot_rect = Some(dot);
+                    rest = take_side(rest, path_w, mirror).0;
+                }
+            } else {
+                branch_rect = Some(rest);
             }
         }
         if let Some(detail) = detail {
-            let align = if mirror {
-                UiAlign::Right
-            } else {
-                UiAlign::Start
-            };
             self.label(
                 rest,
                 if remote.is_some() {
@@ -530,6 +525,12 @@ impl Cards<'_, '_> {
                 align,
                 color,
             );
+        }
+        if let Some(dot) = dot_rect {
+            self.label(dot, Kind::Footer, "·", UiAlign::Center, color);
+        }
+        if let (Some(branch), Some(label)) = (&entry.branch, branch_rect) {
+            self.label(label, Kind::Footer, branch, align, color);
         }
         if let Some(port_rect) = port_rect {
             let align = if mirror {
@@ -559,26 +560,26 @@ impl Cards<'_, '_> {
         let fill = if self.view.new_tab_hover {
             s.bg3
         } else {
-            s.bg1
+            s.bg2
         };
         self.panel(rect, RADIUS_8, fill);
         let mirror = self.view.mirrored;
-        let (_, inner) = take_side(rect, s.px(8.0), mirror);
-        let (icon, rest) = take_side(inner, s.px(16.0), mirror);
-        self.icon(icon, Icon::Plus, s.px(14.0), s.text_dim);
-        let (_, title) = take_side(rest, s.px(4.0), mirror);
-        let (_, title) = take_side(title, s.px(8.0), !mirror);
-        let align = if mirror {
-            UiAlign::Right
+        let (_, inner) = take_side(rect, s.px(SPACE_12), mirror);
+        let (icon, rest) = take_side(inner, s.px(SPACE_12), mirror);
+        let ink = if self.view.new_tab_hover {
+            s.text
         } else {
-            UiAlign::Start
+            s.text_dim
         };
+        self.icon(icon, Icon::Plus, s.px(SPACE_12), ink);
+        let (_, title) = take_side(rest, s.px(SPACE_4), mirror);
+        let (_, title) = take_side(title, s.px(SPACE_12), !mirror);
         self.label(
             title,
             Kind::Title,
             self.view.language.text("New tab", "تاب جديد"),
-            align,
-            s.text_dim,
+            self.leading_align(),
+            ink,
         );
     }
 
@@ -622,7 +623,11 @@ impl Cards<'_, '_> {
             return;
         }
         let buffer = self.cache.get(self.ctx, self.font, kind, text, row.w);
-        let room = (row.w - label_width(&buffer)).max(0.0);
+        let width = label_width(&buffer);
+        if width <= 0.0 {
+            return;
+        }
+        let room = (row.w - width).max(0.0);
         let rtl = buffer.layout_runs().next().is_some_and(|run| run.rtl);
         let x = match align {
             UiAlign::Start if rtl => room,

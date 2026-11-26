@@ -26,16 +26,23 @@ fn every_theme_name_resolves() {
 
 #[test]
 fn theme_names_are_accepted_in_variant_spellings() {
-    assert_eq!(Palette::named("Tokyo Night"), Some(Palette::default()));
-    assert_eq!(Palette::named("tokyo_night"), Some(Palette::default()));
-    assert_eq!(Palette::named("TOKYO-NIGHT"), Some(Palette::default()));
+    assert_eq!(Palette::named("Tokyo Night"), Palette::named("tokyo-night"));
+    assert_eq!(Palette::named("tokyo_night"), Palette::named("tokyo-night"));
+    assert_eq!(Palette::named("TOKYO-NIGHT"), Palette::named("tokyo-night"));
     assert_eq!(Palette::named("Dracula"), Palette::named("dracula"));
     assert!(Palette::named("no-such-theme").is_none());
 }
 
 #[test]
 fn default_config_uses_default_palette() {
-    assert_eq!(TwittyConfig::default().palette(), Palette::default());
+    assert_eq!(
+        TwittyConfig::default().palette(),
+        Palette::named("twitty-dark").unwrap()
+    );
+    assert_eq!(
+        config(r#"{"theme":"twitty-light"}"#).palette(),
+        Palette::named("twitty-light").unwrap()
+    );
 }
 
 #[test]

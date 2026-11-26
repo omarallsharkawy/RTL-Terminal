@@ -11,6 +11,7 @@ pub const SPACE_24: f32 = 24.0;
 pub const RADIUS_6: f32 = 6.0;
 pub const RADIUS_8: f32 = 8.0;
 pub const RADIUS_12: f32 = 12.0;
+pub const HAIRLINE: f32 = 1.0;
 pub const OVERLAY_BLUR: f32 = 16.0;
 pub const OVERLAY_OFFSET: [f32; 2] = [0.0, 4.0];
 pub const OVERLAY_SHADOW: Rgba = Rgba::new(0.0, 0.0, 0.0, 0.30);
@@ -39,14 +40,14 @@ impl UiStyle {
         let tone = |amount| bg0.mix(text, amount);
         Self {
             bg0,
-            bg1: tone(0.045),
-            bg2: tone(0.08),
-            bg3: tone(0.14),
-            border: tone(0.10),
+            bg1: tone(0.035),
+            bg2: tone(0.068),
+            bg3: tone(0.12),
+            border: tone(0.14),
             accent: accent.unwrap_or(theme.cursor),
             text,
-            text_dim: tone(0.60),
-            text_faint: tone(0.40),
+            text_dim: tone(0.69),
+            text_faint: tone(0.48),
             danger: theme.ansi[1],
             warn: theme.ansi[3],
             ok: theme.ansi[2],
@@ -56,6 +57,11 @@ impl UiStyle {
 
     pub fn px(self, logical: f32) -> f32 {
         logical * self.scale
+    }
+
+    /// Snap rules to whole physical pixels so neighboring surfaces share a crisp edge.
+    pub fn hairline(self) -> f32 {
+        self.px(HAIRLINE).round().max(1.0)
     }
 
     /// A readable foreground on an accent supplied by either the theme or the user.

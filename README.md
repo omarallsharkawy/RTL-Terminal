@@ -173,11 +173,11 @@ Zoom and transparency changes are written back to this file when Twitty closes. 
 
 #### Themes
 
-Set `theme` to one of the built-in names below. Names are case-insensitive, and spaces or underscores work in place of dashes. The default is `tokyo-night`.
+Set `theme` to one of the built-in names below. Names are case-insensitive, and spaces or underscores work in place of dashes. The default is `twitty-dark`.
 
-`tokyo-night`, `catppuccin-mocha`, `gruvbox-dark`, `dracula`, `nord`, `one-dark`, `solarized-dark`, `github-light`
+`twitty-dark`, `twitty-light`, `tokyo-night`, `catppuccin-mocha`, `gruvbox-dark`, `dracula`, `nord`, `one-dark`, `solarized-dark`, `github-light`
 
-An unknown name prints a warning and falls back to `tokyo-night`.
+An unknown name prints a warning and falls back to `twitty-dark`.
 
 `colors` overrides individual parts of the theme. Every field is optional, and values are `#rgb` or `#rrggbb`. `ansi` takes up to 16 colors in palette order (black, red, green, yellow, blue, magenta, cyan, white, then the bright versions). A shorter list changes only the indices it covers. Invalid values are skipped with a warning.
 

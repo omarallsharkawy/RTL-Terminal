@@ -173,6 +173,7 @@ pub struct Entry {
     pub branch: Option<String>,
     pub running: bool,
     pub last_exit: Option<i32>,
+    pub last_command: Option<String>,
     pub attention_count: usize,
     pub notification: Option<Notice>,
     /// Listening TCP ports of the tab's processes, sorted.
@@ -199,6 +200,7 @@ impl Entry {
             branch: None,
             running,
             last_exit,
+            last_command: None,
             attention_count,
             notification,
             ports: Vec::new(),

@@ -168,7 +168,7 @@ pub(crate) fn palette_overlay(
         radii: [style.px(RADIUS_12); 4],
         fill: ctx.color(style.bg1),
         border: Some(Border {
-            width: style.px(1.0),
+            width: style.hairline(),
             color: ctx.color(style.border),
         }),
         shadow: Some(Shadow {
@@ -283,7 +283,7 @@ pub(crate) fn palette_overlay(
                     radii: [style.px(RADIUS_6); 4],
                     fill: ctx.color(style.bg2),
                     border: Some(Border {
-                        width: style.px(1.0),
+                        width: style.hairline(),
                         color: ctx.color(style.border),
                     }),
                     shadow: None,

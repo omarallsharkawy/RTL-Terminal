@@ -80,6 +80,7 @@ pub(crate) fn divider_quads<'a>(
     ctx: &DrawContext,
     dividers: &'a [Rect],
 ) -> impl Iterator<Item = Quad> + 'a {
-    let color = ctx.color(ctx.palette.background.mix(ctx.palette.foreground, 0.28));
+    let color = ctx
+        .color(crate::render::ui_style::UiStyle::new(ctx.palette, None, ctx.metrics.scale).border);
     dividers.iter().map(move |d| (d.x, d.y, d.w, d.h, color))
 }

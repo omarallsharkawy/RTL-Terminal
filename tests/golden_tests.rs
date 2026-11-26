@@ -90,7 +90,8 @@ fn env_flag(name: &str) -> bool {
 /// Draw `scene` and return its size and RGBA pixels, or `None` when no adapter is available.
 fn render(scene: &Scene) -> Option<(u32, u32, Vec<u8>)> {
     let mut font_system = font_system();
-    let palette = Palette::default();
+    // These fixtures isolate terminal rendering and retain their original palette.
+    let palette = Palette::named("tokyo-night").unwrap();
     let metrics = CellMetrics::measure(&mut font_system, None, 15.0, 1.0);
     let width = (metrics.padding_left * 2.0 + scene.cols as f32 * metrics.char_width).ceil();
     let height = (metrics.padding_top * 2.0 + scene.rows as f32 * metrics.line_height).ceil();
@@ -500,22 +501,42 @@ fn workspace_cards_draw_in_dark_and_light_themes() {
                 .all(|(&a, b)| a.abs_diff((b * 255.0).round() as u8) <= 2)
         };
         let sample = |rect: Rect| pixel((rect.x + 10.0) as usize, (rect.bottom() - 5.0) as usize);
-        assert!(near(sample(view.items[0].rect), style.accent));
-        assert!(near(sample(waiting), style.bg3));
-        assert!(near(sample(view.items[2].rect), style.bg2));
+        assert!(near(sample(view.items[0].rect), style.bg3));
+        assert!(near(sample(waiting), style.bg2));
+        assert!(near(sample(view.items[2].rect), style.bg1));
         assert!(near(pixel(area.x as usize + 1, 1), style.bg1));
         let first = view.items[0].rect;
         assert!(
             near(pixel(first.x as usize, first.y as usize), style.bg1),
             "rounded corner"
         );
-        let badge = view.items[1].layout(&view).state;
+        let title = view.items[0].layout(&view).title;
         assert!(
-            !near(
-                pixel((badge.x + 3.0) as usize, (badge.y + badge.h / 2.0) as usize),
-                style.bg3
+            near(
+                pixel(
+                    (first.right() - 5.0) as usize,
+                    (title.y + title.h / 2.0) as usize
+                ),
+                style.accent,
             ),
-            "needs-input pill"
+            "active card accent strip"
+        );
+        let state = view.items[1].layout(&view).state;
+        let warn = style
+            .warn
+            .to_array()
+            .map(|value| (value * 255.0).round() as u8);
+        assert!(
+            (state.y as usize..state.bottom() as usize).any(|y| {
+                ((state.right() - 12.0) as usize..state.right() as usize).any(|x| {
+                    // The 12 px icon's thin SDF strokes are antialiased even in the center.
+                    pixel(x, y)
+                        .iter()
+                        .zip(warn)
+                        .all(|(&actual, expected)| actual.abs_diff(expected) <= 40)
+                })
+            }),
+            "needs-input status icon"
         );
         assert!(
             (ar.top as usize..ar.bottom as usize).any(|y| {

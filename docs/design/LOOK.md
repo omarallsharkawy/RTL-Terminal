@@ -1,78 +1,89 @@
-# Twitty's look (round 4)
+# Twitty Look v2
 
-The goal: Twitty looks like a modern agent workspace, taking cmux's layout and Warp's
-polish, while staying an RTL-first terminal (Arabic UI text right-aligned, the grid logical).
-cmux-gtk code may be adapted (AGPL, see licenses/NOTICE.md); Warp is a visual reference only.
-No cmux/Warp names, logos or brand colours.
+Twitty is an Arabic-first terminal workspace. Terminal output has the strongest contrast.
+Use small changes in surface tone to group controls, and reserve the accent for focus,
+selection and attention. The terminal grid stays logical while drawing handles bidi text.
 
-## Layout
+## Window chrome
 
+- The **36 px top bar** has a flat sidebar toggle, a centered search control and trailing
+  git counts and notifications. The search field opens the command palette by click or
+  `Ctrl+Shift+P`. It shows both languages when they fit, then the UI language, and shortens
+  the placeholder on narrow windows. Show the shortcut keycap when there is room. The git
+  counts open code review. The bell opens notification history and shows its unread count.
+- **The workspace sidebar** replaces the horizontal tab strip when visible. When it is hidden,
+  the tab strip keeps a pill for each tab, a hover close control and a plus button.
+- **24 px pane headers** have a program icon, one title and split-right, split-down and close
+  controls. Idle titles are dimmed and control icons brighten on hover. The focused title
+  uses the normal foreground and a one-pixel accent rule marks the header's bottom edge.
+  Unread attention can mark the pane perimeter with a fine ring. A pane flash temporarily
+  draws a stronger perimeter highlight.
+- **Code review** uses the same surfaces and hairlines. Its header contains the branch,
+  file and line counts, refresh and close icons and the Commit action. Files have rounded
+  rows and hunk headings have quieter bars. Diff lines use terminal shaping with a dim
+  gutter, green/red tints and an accent selection outline.
+
+## Workspace cards
+
+```text
+ Terminal rendering                    1
+ /src/twitty · look-v2         · Working
+ cargo test --test bidi_layout_tests
 ```
-┌──────────────────────────── top bar (36 px) ─────────────────────────────┐
-│ [≡]       [ Search or run a command…       Ctrl+Shift+P ]     +413 −56 🔔2 │
-├───────────────┬──────────────────────────────────────────┬───────────────┤
-│ sidebar       │ ┌ pane header (28 px): icon title  ⊟ ⊞ ✕ ┐ │ review panel  │
-│ (workspace    │ │ terminal grid                         │ │ (optional,    │
-│  cards)       │ └───────────────────────────────────────┘ │  right side)  │
-└───────────────┴──────────────────────────────────────────┴───────────────┘
-```
 
-- **Top bar** (Warp): sidebar toggle; a search field that opens the command palette
-  (click or `Ctrl+Shift+P`). The placeholder shows both languages when they fit, then uses the
-  system UI language, then leaves the search icon and any shortcut keycap that fits. The right
-  side has a git line-count badge when the focused pane has additions or deletions and a bell
-  that shows a badge for unread notifications. They open the review panel and notification list.
+- Give the single-line, 13 px semibold title its own row. Keep a whole-word prefix when
+  possible and use whole graphemes for long words. A bare ellipsis is never a title.
+- Use an 11 px dim monospace metadata line. Put the working directory first and the git
+  branch after a middle dot. Keep the directory tail when abbreviating. Remote state and
+  listening ports use available room on this row.
+- Align the small status glyph and its 11 px caption to the trailing edge on the
+  metadata line. Working uses animated dots, needs input a warning, done a check and error
+  a cross. Keep the glyph by itself when space is tight.
+- Show a single optional 12 px third line for a notification, agent message or last command.
+  Titles and messages follow their text direction. The right sidebar mirrors its row layout,
+  and Arabic UI uses a right-to-left row layout on either sidebar placement.
+- Idle rows sit on the sidebar surface. Hover uses a subtly raised surface. Selection uses
+  a slightly stronger surface and a slim accent marker at the leading edge. Text retains the
+  theme foreground. Hover reveals the close control. The list scrolls and supports dragging
+  to reorder. The final row is a quiet, rounded **New tab** button.
 
-- **Sidebar** (cmux): one card per tab ("workspace"), see below. When the sidebar is shown
-  the tab strip is hidden. With the sidebar hidden, even one tab has a rounded pill, a close
-  button on hover, and a plus button beside the strip.
-- **Pane header** (cmux): every pane gets a slim header: program icon, title (command or
-  agent name), and buttons split right, split down, close. Focused pane: brighter header and a
-  1 px accent outline. A pane that needs attention (agent "needs input", unread notification)
-  gets an accent **ring** around it until focused.
-- **Review panel**: a right-side panel with the focused repo's uncommitted changes. The header
-  uses proportional UI type, a branch pill, separate file and line counts, refresh and close
-  icons, and an accent Commit button. Rounded file rows carry a chevron and a git status
-  letter. Hunk headers use quieter bars. Diff lines keep terminal monospace shaping, with a dim
-  gutter, green and red tints, an accent selection outline, and a bordered comment input.
+## Command blocks
 
-## Workspace card (sidebar)
+- Draw command blocks behind the terminal rows. Use a faint, borderless tint, a slim 2 px
+  leading status strip, 6 px corners and 4 px between adjacent blocks. The tint and spacing
+  are visual and leave row and column positions intact.
+- Place the floating action toolbar on the trailing edge on hover. Duration and exit status
+  can appear at that edge in clear space. The toolbar and status strip mirror in Arabic UI,
+  while the command and its output keep the terminal's per-row bidi behavior.
 
-```
- 2  Review and merge      Needs input  ← unread count, UI title, state pill
-    The agent is waiting for input      ← latest notification or agent message
-    ⎇ main • ~/work/twitty      :3000    ← mono footer with branch, cwd and ports
-```
-- Selected cards use the theme accent with contrasting text. Corners use an 8 px radius and
-  hovered cards use `bg3`. Hover reveals a close button. The list scrolls, clicking selects a
-  workspace, and dragging a card onto another card changes the tab order. New tab is the final
-  row of the list.
-- Agent state pill on the title line: working (animated dots), needs input (orange),
-  done (green check), error (red). A narrow card keeps the state icon.
-- Titles use semibold 13 px UI type and ellipsize at word boundaries. Messages use up to two
-  12 px lines. The single 11 px monospace footer shows the branch, abbreviated working
-  directory and listening ports when available. Card height follows the visible content.
-- Arabic titles/text right-aligned (existing per-line direction rule); the card layout mirrors
-  when the sidebar is on the right.
+## Shared tokens
 
-## Design tokens (one place: `src/render/ui_style.rs`)
+- Derive all surfaces from the terminal background. `bg0` is the terminal, `bg1` is the
+  chrome and faint block tint, `bg2` is a small lift for controls and hover, and `bg3`
+  gives selection and interactive controls slightly more definition. The steps blend 3.5%,
+  6.8% and 12% of the foreground into the background, darkening light themes and lightening
+  dark themes. Hairlines are 14% foreground, snapped from 1 logical px. The dim and faint
+  foregrounds use 69% and 48%. The accent comes from the theme cursor or `ui_accent`,
+  and status colors come from the active ANSI palette.
+- Use the 4 px spacing grid (4, 8, 12, 16, 24 px) and 6, 8 or 12 px radii. Thin rules,
+  strokes and status markers are sized separately. Chrome dimensions and type scale with DPI.
+- UI text is proportional sans with the bundled Noto Naskh Arabic fallback. Paths, branches
+  and terminal content use the terminal mono stack. Use the existing 11, 12, 13 and 15 px
+  type sizes and SDF glyphs for controls.
+- **Twitty Dark** uses warm graphite, pale neutral text and a muted copper accent.
+  **Twitty Light** uses warm paper, deep graphite text and a darker copper accent. Both
+  retain contrast for Arabic letterforms and diacritics. Set `theme` to `twitty-dark` or
+  `twitty-light`. An unset theme defaults to `twitty-dark`. Named built-in themes share
+  the same chrome derivation.
 
-- Surfaces derived from the theme background: `bg0` window, `bg1` sidebar/top bar,
-  `bg2` cards/headers, `bg3` hover, `border` (fg 10 %), `accent` (theme cursor colour, or
-  `ui_accent` config), `text`, `text_dim` (60 %), `text_faint` (40 %), `danger`, `warn`, `ok`.
-- Radii 6 / 8 / 12 px; overlay shadow 16 px blur, 30 % black; spacing scale 4/8/12/16/24.
-- Fonts: UI text in a proportional sans (config `ui_font_family`, default: system sans via
-  fontconfig, Arabic through the bundled Noto Naskh Arabic fallback); code/paths in the
-  terminal mono font. Sizes 11 / 12 / 13 / 15 px × scale.
-- Icons: drawn from SDF primitives (capsule lines, circles, rounded rects), no icon font or
-  image files: menu, search, bell, split-right, split-down, close, git-branch, folder, plus,
-  check, warning, terminal, agent (sparkle), diff, refresh, and chevrons.
+Build with `render::ui_style::UiStyle`, `render::shapes::{Shape, ShapeLayers}`,
+`render::icons::Icon` and `render::text::ui::{UiFont, UiLabel, UiSize, UiWeight}`.
+Use `UiStyle::px` for scaled dimensions and `DrawContext::color` for shapes. Glyphon draws
+text after quads and shapes. Clip runs behind chrome overlays using
+`scene::frame::bounds_around`.
 
-All chrome scales with the window's scale factor and respects light themes (tokens derive from
-the theme, never hard-coded dark).
+## Offscreen showcase
 
-The shared APIs are `render::ui_style::UiStyle`, `render::shapes::{Shape, ShapeLayers}`,
-`render::icons::Icon` and `render::text::ui::{UiFont, UiLabel, UiSize, UiWeight}`. Use
-`UiStyle::px` for logical dimensions and `DrawContext::color` for shape colors. Add UI shapes to
-`Frame::shapes.chrome` or `Frame::shapes.overlay` in paint order. Glyphon runs after both layers,
-so clip text runs behind an overlay with `scene::frame::bounds_around`.
+Run `TWITTY_SHOWCASE_DIR=/tmp/twitty-showcase cargo test --test showcase_tests` to export both
+themes as 1280×800 at 1× (English) and 951×1002 at 1.5× (Arabic). The test uses the production
+frame builder without a window. The output is for visual review and has no pixel assertions.

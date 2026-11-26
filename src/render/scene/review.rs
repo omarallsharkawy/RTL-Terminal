@@ -592,7 +592,7 @@ impl ReviewDrawing<'_, '_> {
                 radii: [self.style.px(radius); 4],
                 fill: self.ctx.color(fill),
                 border: edge.map(|color| Border {
-                    width: self.style.px(1.0),
+                    width: self.style.hairline(),
                     color: self.ctx.color(color),
                 }),
                 shadow: None,

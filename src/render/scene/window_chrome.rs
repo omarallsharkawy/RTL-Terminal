@@ -4,7 +4,7 @@ use crate::layout::{PaneId, Rect};
 use crate::render::icons::Icon;
 use crate::render::shapes::{Border, Shape};
 use crate::render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
-use crate::render::ui_style::{UiStyle, RADIUS_12, RADIUS_6};
+use crate::render::ui_style::{UiStyle, RADIUS_6, RADIUS_8, SPACE_12, SPACE_16, SPACE_4, SPACE_8};
 use crate::render::TabLabel;
 use crate::ui::chrome::{
     count_badge, ChromeAction, PaneHeaderLayout, SearchContents, SearchPlaceholder, TopBarLayout,
@@ -56,7 +56,7 @@ pub(crate) fn draw(
     chrome.top_bar(view);
     chrome.tabs(view);
     for pane in view.panes {
-        chrome.pane(pane, view.hover);
+        chrome.pane(pane, view.hover, view.language);
     }
     chrome.labels
 }
@@ -77,7 +77,7 @@ impl Chrome<'_, '_> {
         }
         let s = self.style;
         self.panel(top.area, 0.0, s.bg1);
-        self.rule(top.area);
+        self.rule(top.area, s.border);
         self.button(
             top.sidebar,
             Icon::Menu,
@@ -95,14 +95,14 @@ impl Chrome<'_, '_> {
             },
         );
         let search_icon = self.leading_icon(top.search);
-        Icon::Search.draw(search_icon, self.ctx.color(s.text_dim), self.shapes);
-        let x = search_icon.right() + s.px(6.0);
-        let room = (top.search.right() - s.px(8.0) - x).max(0.0);
-        if room > s.px(10.0) {
-            self.search_contents(
-                Rect::new(x, top.search.y, room, top.search.h),
-                view.language,
-            );
+        let search_text = self.after_icon(top.search, search_icon);
+        Icon::Search.draw(
+            view.language.mirror(search_icon, top.search),
+            self.ctx.color(s.text_dim),
+            self.shapes,
+        );
+        if search_text.w >= s.px(SPACE_12) {
+            self.search_contents(view.language.mirror(search_text, top.search), view.language);
         }
         if let (Some(rect), Some(diff)) = (top.diff, view.diff) {
             self.panel(
@@ -115,9 +115,12 @@ impl Chrome<'_, '_> {
                 },
             );
             let icon = self.leading_icon(rect);
-            Icon::Diff.draw(icon, self.ctx.color(s.text_dim), self.shapes);
-            let x = icon.right() + s.px(3.0);
-            let content = Rect::new(x, rect.y, (rect.right() - s.px(4.0) - x).max(0.0), rect.h);
+            Icon::Diff.draw(
+                view.language.mirror(icon, rect),
+                self.ctx.color(s.text_dim),
+                self.shapes,
+            );
+            let content = view.language.mirror(self.after_icon(rect, icon), rect);
             let label = diff.label();
             let counts = label
                 .split_whitespace()
@@ -138,7 +141,7 @@ impl Chrome<'_, '_> {
             let gap = s.px(4.0);
             let total = counts
                 .iter()
-                .map(|(buffer, _)| label_width(buffer))
+                .map(|(buffer, _)| label_width(buffer).ceil())
                 .sum::<f32>()
                 + gap;
             if total <= content.w {
@@ -146,8 +149,12 @@ impl Chrome<'_, '_> {
                 for (buffer, color) in counts {
                     let width = label_width(&buffer).ceil();
                     let label = Rect::new(x, content.y, width, content.h);
-                    self.labels
-                        .push(UiLabel::new(buffer, label, UiAlign::Left, color));
+                    self.labels.push(UiLabel::new(
+                        buffer,
+                        view.language.mirror(label, content),
+                        UiAlign::Left,
+                        color,
+                    ));
                     x += width + gap;
                 }
             } else {
@@ -162,20 +169,8 @@ impl Chrome<'_, '_> {
             }
         }
         let rect = top.notifications;
+        let hot = view.hover == Some(ChromeAction::Notifications);
         if let Some(count) = count_badge(view.unread) {
-            if view.hover == Some(ChromeAction::Notifications) {
-                self.panel(rect, RADIUS_6, s.bg3);
-            }
-            let icon = self.leading_icon(rect);
-            Icon::Bell.draw(icon, self.ctx.color(s.text), self.shapes);
-            let x = icon.right();
-            let h = s.px(15.0).min(rect.h);
-            let badge = Rect::new(
-                x,
-                rect.y + (rect.h - h) / 2.0,
-                (rect.right() - x - s.px(1.0)).max(0.0),
-                h,
-            );
             let buffer = self.font.shape(
                 self.ctx.font_system,
                 UiSize::Small,
@@ -183,24 +178,39 @@ impl Chrome<'_, '_> {
                 s.scale,
                 &count,
             );
-            if label_width(&buffer).ceil() <= badge.w {
-                self.panel(badge, RADIUS_12, s.accent);
-                self.labels.push(UiLabel::new(
-                    buffer,
-                    badge,
-                    UiAlign::Center,
-                    s.accent_text(),
-                ));
+            let gap = s.px(SPACE_4);
+            let side = s.px(SPACE_16).min(rect.h);
+            let text_width = label_width(&buffer).ceil();
+            let width = (text_width + gap).max(s.px(SPACE_16));
+            if side + width + gap <= rect.w {
+                if hot {
+                    self.panel(rect, RADIUS_6, s.bg3);
+                }
+                let x = rect.right() - width - side - gap;
+                let icon = Rect::new(x, rect.y + (rect.h - side) / 2.0, side, side);
+                Icon::Bell.draw(
+                    view.language.mirror(icon, rect),
+                    self.ctx.color(s.text),
+                    self.shapes,
+                );
+                let h = s.px(SPACE_16).min(rect.h);
+                let badge = Rect::new(icon.right() + gap, rect.y + (rect.h - h) / 2.0, width, h);
+                let badge = view.language.mirror(badge, rect);
+                self.panel(badge, RADIUS_6, s.bg1.mix(s.accent, 0.2));
+                self.labels
+                    .push(UiLabel::new(buffer, badge, UiAlign::Center, s.text));
+                return;
             }
-        } else {
-            self.button(
-                rect,
-                Icon::Bell,
-                view.hover == Some(ChromeAction::Notifications),
-                false,
-                false,
-            );
         }
+        let w = s.px(32.0).min(rect.w);
+        let icon_button = Rect::new(rect.right() - w, rect.y, w, rect.h);
+        self.button(
+            view.language.mirror(icon_button, rect),
+            Icon::Bell,
+            hot,
+            view.unread > 0,
+            false,
+        );
     }
 
     fn search_contents(&mut self, rect: Rect, language: UiLanguage) {
@@ -234,19 +244,20 @@ impl Chrome<'_, '_> {
             SEARCH_KEYCAP,
         );
         let width = |buffer: &cosmic_text::Buffer| label_width(buffer).ceil() + 1.0;
-        let gap = s.px(5.0);
+        let gap = s.px(SPACE_4);
         let key_w = width(&key) + 2.0 * gap;
         let bilingual = width(&en) + width(&divider) + width(&ar) + 2.0 * gap;
-        let local_w = if language == UiLanguage::Arabic {
-            width(&ar)
+        let (local, secondary) = if language == UiLanguage::Arabic {
+            (ar, en)
         } else {
-            width(&en)
+            (en, ar)
         };
-        let choice = SearchContents::fit(rect.w, bilingual, local_w, key_w + gap);
+        let choice = SearchContents::fit(rect.w, bilingual, width(&local), key_w + gap);
         let mut remaining = rect;
         if choice.keycap {
-            let h = s.px(18.0).min(rect.h);
+            let h = s.px(SPACE_16).min(rect.h);
             let key_rect = Rect::new(rect.right() - key_w, rect.y + (rect.h - h) / 2.0, key_w, h);
+            let key_rect = language.mirror(key_rect, rect);
             self.panel(key_rect, RADIUS_6, s.bg3);
             self.labels
                 .push(UiLabel::new(key, key_rect, UiAlign::Center, s.text_dim));
@@ -255,32 +266,33 @@ impl Chrome<'_, '_> {
         match choice.placeholder {
             SearchPlaceholder::Bilingual => {
                 let mut x = rect.x;
-                for buffer in [en, divider, ar] {
+                for buffer in [local, divider, secondary] {
                     let w = width(&buffer);
-                    let label = Rect::new(x, rect.y, w, rect.h);
+                    let label = language.mirror(Rect::new(x, rect.y, w, rect.h), rect);
+                    let align = if language == UiLanguage::Arabic {
+                        UiAlign::Right
+                    } else {
+                        UiAlign::Left
+                    };
                     self.labels
-                        .push(UiLabel::new(buffer, label, UiAlign::Left, s.text_dim));
+                        .push(UiLabel::new(buffer, label, align, s.text_dim));
                     x += w + gap;
                 }
             }
-            SearchPlaceholder::Local => {
-                let buffer = if language == UiLanguage::Arabic {
-                    ar
-                } else {
-                    en
-                };
-                self.labels
-                    .push(UiLabel::new(buffer, remaining, UiAlign::Start, s.text_dim));
-            }
-            SearchPlaceholder::LocalShortened => {
-                self.word_label(
-                    remaining,
-                    language.text(SEARCH_EN, SEARCH_AR),
-                    UiSize::Caption,
-                    UiWeight::Regular,
-                    s.text_dim,
-                );
-            }
+            SearchPlaceholder::Local => self.labels.push(UiLabel::new(
+                local,
+                language.mirror(remaining, rect),
+                UiAlign::Start,
+                s.text_dim,
+            )),
+            SearchPlaceholder::LocalShortened => self.word_label(
+                language.mirror(remaining, rect),
+                language.text(SEARCH_EN, SEARCH_AR),
+                UiSize::Caption,
+                UiWeight::Regular,
+                UiAlign::Start,
+                s.text_dim,
+            ),
         }
     }
 
@@ -288,33 +300,36 @@ impl Chrome<'_, '_> {
         let s = self.style;
         let layout = view.layout;
         self.panel(layout.tab_bar, 0.0, s.bg1);
-        self.rule(layout.tab_bar);
+        self.rule(layout.tab_bar, s.border);
         for (i, (&rect, tab)) in layout.tabs.iter().zip(view.tabs).enumerate() {
             let hovered = view.hover_tab == Some(i);
             self.panel(
                 rect,
-                RADIUS_12,
-                if tab.active {
-                    s.accent_tint(s.bg3)
-                } else if hovered {
-                    s.bg3
-                } else {
-                    s.bg2
-                },
+                RADIUS_8,
+                if tab.active || hovered { s.bg3 } else { s.bg2 },
             );
             let close = layout.tab_close(rect);
-            let pad = s.px(8.0).min(rect.w / 4.0);
-            let text = Rect::new(
-                rect.x + pad,
-                rect.y,
-                (close.x - rect.x - pad).max(0.0),
-                rect.h,
+            let pad = s.px(SPACE_8).min(rect.w / 4.0);
+            let canonical_close = view.language.mirror(close, rect);
+            let text = view.language.mirror(
+                Rect::new(
+                    rect.x + pad,
+                    rect.y,
+                    (canonical_close.x - rect.x - pad).max(0.0),
+                    rect.h,
+                ),
+                rect,
             );
             self.word_label(
                 text,
                 &tab.title,
                 UiSize::Body,
                 UiWeight::Semibold,
+                if view.language == UiLanguage::Arabic {
+                    UiAlign::Right
+                } else {
+                    UiAlign::Start
+                },
                 if tab.active || hovered {
                     s.text
                 } else {
@@ -335,23 +350,31 @@ impl Chrome<'_, '_> {
         );
     }
 
-    fn pane(&mut self, pane: &PaneHeaderView, hover: Option<ChromeAction>) {
+    fn pane(&mut self, pane: &PaneHeaderView, hover: Option<ChromeAction>, language: UiLanguage) {
         let s = self.style;
         let rect = pane.layout.header;
         let title = pane.layout.title;
         if rect.h > 0.0 {
-            self.panel(rect, 0.0, if pane.focused { s.bg3 } else { s.bg2 });
-            self.rule(rect);
+            self.panel(rect, 0.0, if pane.focused { s.bg2 } else { s.bg1 });
+            self.rule(
+                rect,
+                if pane.focused {
+                    s.bg2.mix(s.accent, 0.64)
+                } else {
+                    s.border
+                },
+            );
             let icon = self.leading_icon(title);
-            let rtl = pane
-                .title
-                .chars()
-                .find_map(|c| match unicode_bidi::bidi_class(c) {
-                    unicode_bidi::BidiClass::R | unicode_bidi::BidiClass::AL => Some(true),
-                    unicode_bidi::BidiClass::L => Some(false),
-                    _ => None,
-                })
-                .unwrap_or(false);
+            let rtl = language == UiLanguage::Arabic
+                || pane
+                    .title
+                    .chars()
+                    .find_map(|c| match unicode_bidi::bidi_class(c) {
+                        unicode_bidi::BidiClass::R | unicode_bidi::BidiClass::AL => Some(true),
+                        unicode_bidi::BidiClass::L => Some(false),
+                        _ => None,
+                    })
+                    .unwrap_or(false);
             let icon = if rtl {
                 Rect::new(
                     title.right() - (icon.x - title.x) - icon.w,
@@ -367,20 +390,28 @@ impl Chrome<'_, '_> {
             } else {
                 Icon::Terminal
             };
-            pictogram.draw(icon, self.ctx.color(s.text_dim), self.shapes);
-            let pad = s.px(6.0);
+            pictogram.draw(
+                icon,
+                self.ctx.color(if pane.focused {
+                    s.text_dim
+                } else {
+                    s.text_faint
+                }),
+                self.shapes,
+            );
+            let pad = s.px(SPACE_4);
             let (mut left, mut right) = if rtl {
                 (title.x + pad, icon.x - pad)
             } else {
                 (icon.right() + pad, title.right() - pad)
             };
-            if pane.zoomed && right - left > s.px(26.0) {
-                let pill_h = s.px(18.0).min((title.h - s.px(4.0)).max(0.0));
+            if pane.zoomed && right - left > s.px(24.0) {
+                let pill_h = s.px(SPACE_16).min((title.h - s.px(SPACE_4)).max(0.0));
                 let pill_y = title.y + (title.h - pill_h) * 0.5;
-                let pill_pad = s.px(5.0);
-                let icon_side = s.px(12.0).min(pill_h);
-                let full_text = "Zoom · مكبّرة";
-                let short_text = "Zoom";
+                let pill_pad = s.px(SPACE_4);
+                let icon_side = s.px(SPACE_12).min(pill_h);
+                let full_text = language.text("Zoom · مكبّرة", "مكبّرة · Zoom");
+                let short_text = language.text("Zoom", "مكبّرة");
                 let full_buf = self.font.shape(
                     self.ctx.font_system,
                     UiSize::Small,
@@ -415,7 +446,7 @@ impl Chrome<'_, '_> {
                         radii: [s.px(RADIUS_6); 4],
                         fill: self.ctx.color(s.accent_tint(s.bg2)),
                         border: Some(Border {
-                            width: s.px(1.0),
+                            width: s.hairline(),
                             color: self.ctx.color(s.accent),
                         }),
                         shadow: None,
@@ -426,13 +457,26 @@ impl Chrome<'_, '_> {
                         icon_side,
                         icon_side,
                     );
-                    Icon::Zoom.draw(z_icon, self.ctx.color(s.text), self.shapes);
+                    let direction = if rtl {
+                        UiLanguage::Arabic
+                    } else {
+                        UiLanguage::English
+                    };
+                    Icon::Zoom.draw(
+                        direction.mirror(z_icon, pill),
+                        self.ctx.color(s.text),
+                        self.shapes,
+                    );
                     if let Some(buf) = text_buf {
-                        let lx = z_icon.right() + s.px(4.0);
+                        let lx = z_icon.right() + s.px(SPACE_4);
                         let label_rect =
                             Rect::new(lx, pill.y, (pill.right() - pill_pad - lx).max(0.0), pill.h);
-                        self.labels
-                            .push(UiLabel::new(buf, label_rect, UiAlign::Left, s.text));
+                        self.labels.push(UiLabel::new(
+                            buf,
+                            direction.mirror(label_rect, pill),
+                            if rtl { UiAlign::Right } else { UiAlign::Left },
+                            s.text,
+                        ));
                     }
                     if rtl {
                         left = pill.right() + pad;
@@ -445,10 +489,10 @@ impl Chrome<'_, '_> {
             self.label(
                 label,
                 &pane.title,
-                UiSize::Body,
+                UiSize::Caption,
                 UiWeight::Semibold,
-                UiAlign::Start,
-                s.text,
+                if rtl { UiAlign::Right } else { UiAlign::Left },
+                if pane.focused { s.text } else { s.text_dim },
             );
             for (button, icon, action) in [
                 (
@@ -473,15 +517,15 @@ impl Chrome<'_, '_> {
             }
         }
         let flash = pane.flash.clamp(0.0, 1.0);
-        if (rect.h > 0.0 && pane.focused) || pane.attention || flash > 0.0 {
+        if pane.attention || flash > 0.0 {
             let outer = Rect::new(rect.x, rect.y, rect.w, pane.layout.grid.bottom() - rect.y);
-            if (rect.h > 0.0 && pane.focused) || pane.attention {
+            if pane.attention {
                 self.shapes.push(Shape::RoundedRect {
                     rect: outer,
                     radii: [0.0; 4],
                     fill: [0.0; 4],
                     border: Some(Border {
-                        width: s.px(if pane.attention { 2.0 } else { 1.0 }),
+                        width: s.hairline(),
                         color: self.ctx.color(s.accent),
                     }),
                     shadow: None,
@@ -505,7 +549,7 @@ impl Chrome<'_, '_> {
     }
 
     fn leading_icon(&self, rect: Rect) -> Rect {
-        let pad = self.style.px(7.0).min(rect.w / 4.0);
+        let pad = self.style.px(SPACE_8).min(rect.w / 4.0);
         let side = self
             .style
             .px(16.0)
@@ -514,14 +558,20 @@ impl Chrome<'_, '_> {
         Rect::new(rect.x + pad, rect.y + (rect.h - side) / 2.0, side, side)
     }
 
+    fn after_icon(&self, rect: Rect, icon: Rect) -> Rect {
+        let x = icon.right() + self.style.px(SPACE_4);
+        Rect::new(
+            x,
+            rect.y,
+            (rect.right() - self.style.px(SPACE_8) - x).max(0.0),
+            rect.h,
+        )
+    }
+
     fn button(&mut self, rect: Rect, icon: Icon, hover: bool, active: bool, danger: bool) {
         let s = self.style;
-        if hover || active {
-            self.panel(
-                rect,
-                RADIUS_6,
-                if hover { s.bg3 } else { s.accent_tint(s.bg1) },
-            );
+        if hover {
+            self.panel(rect, RADIUS_6, s.bg3);
         }
         let side = s.px(16.0).min(rect.w).min(rect.h);
         let icon_rect = Rect::new(
@@ -535,7 +585,7 @@ impl Chrome<'_, '_> {
         } else if hover || active {
             s.text
         } else {
-            s.text_dim
+            s.text_faint
         };
         icon.draw(icon_rect, self.ctx.color(color), self.shapes);
     }
@@ -550,13 +600,9 @@ impl Chrome<'_, '_> {
         }
     }
 
-    fn rule(&mut self, rect: Rect) {
-        let h = self.style.px(1.0).min(rect.h);
-        self.panel(
-            Rect::new(rect.x, rect.bottom() - h, rect.w, h),
-            0.0,
-            self.style.border,
-        );
+    fn rule(&mut self, rect: Rect, color: crate::color::Rgba) {
+        let h = self.style.hairline().min(rect.h);
+        self.panel(Rect::new(rect.x, rect.bottom() - h, rect.w, h), 0.0, color);
     }
 
     fn word_label(
@@ -565,6 +611,7 @@ impl Chrome<'_, '_> {
         text: &str,
         size: UiSize,
         weight: UiWeight,
+        align: UiAlign,
         color: crate::color::Rgba,
     ) {
         if rect.w <= 0.0 || rect.h <= 0.0 {
@@ -579,8 +626,7 @@ impl Chrome<'_, '_> {
             (rect.w - 1.0).floor(),
         );
         if label_width(&buffer) > 0.0 {
-            self.labels
-                .push(UiLabel::new(buffer, rect, UiAlign::Start, color));
+            self.labels.push(UiLabel::new(buffer, rect, align, color));
         }
     }
 

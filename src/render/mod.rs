@@ -195,6 +195,7 @@ impl Renderer {
     pub(crate) fn set_ui_style(&mut self, family: Option<&str>, accent: Option<Rgba>) {
         self.ui_font = UiFont::new(&mut self.font_system, family);
         self.ui_accent = accent;
+        self.sidebar_labels.clear();
     }
 
     pub(crate) fn palette_rows(&self, max: usize) -> usize {
@@ -373,6 +374,7 @@ impl Renderer {
                 style,
                 &self.ui_font,
                 self.block_hover,
+                chrome.language,
             )
         } else {
             build_frame(

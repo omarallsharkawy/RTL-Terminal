@@ -21,7 +21,7 @@ use twitty::render::scene::window_chrome::ChromeView;
 use twitty::render::text::ui::{label_width, UiFont, UiSize, UiWeight};
 use twitty::render::ui_style::UiStyle;
 use twitty::render::{CellMetrics, PaneFrame, RowCache, TabLabel};
-use twitty::sidebar::cards::{fit_title, wrap_notice, Card, CardLayout, Drag, ScrollState};
+use twitty::sidebar::cards::{fit_title, Card, CardLayout, Drag, ScrollState};
 use twitty::sidebar::git::{branch, BranchCache};
 use twitty::sidebar::{
     display_path, entry_title, AgentState, AgentStatus, Entry, Notice, Placement,
@@ -337,8 +337,7 @@ fn a_stationary_pointer_uses_the_current_pane_origin_for_links_and_mouse_reports
 }
 
 fn card(entry: Entry) -> Card {
-    let message = entry.display_notice().into_iter().collect();
-    Card::new(entry, message)
+    Card::new(entry)
 }
 
 fn center(r: Rect) -> (f64, f64) {
@@ -362,10 +361,10 @@ fn scrolling_clamps_hits_and_reveals_keyboard_selection() {
     };
     let first = view(&mut scroll, 0);
     assert!(first.mirrored && first.items[0].active);
-    assert_eq!(first.hit_test(610.0, 41.0), Some(0));
-    assert_eq!(first.pointer_hit(610.0, 41.0), Some(Hit::Tab(0)));
-    assert_eq!(first.hit_test(610.0, 42.0), None);
-    assert_eq!(first.hit_test(610.0, 46.0), Some(1));
+    assert_eq!(first.hit_test(610.0, 43.0), Some(0));
+    assert_eq!(first.pointer_hit(610.0, 43.0), Some(Hit::Tab(0)));
+    assert_eq!(first.hit_test(610.0, 44.0), None);
+    assert_eq!(first.hit_test(610.0, 48.0), Some(1));
     assert_eq!(first.hit_test(599.0, 20.0), None);
     assert_eq!(first.hit_test(800.0, 20.0), None);
     scroll.scroll(55.0, &first);
@@ -375,7 +374,7 @@ fn scrolling_clamps_hits_and_reveals_keyboard_selection() {
     assert_eq!(middle.hit_test(610.0, 100.0), None);
     scroll.scroll(10000.0, &middle);
     let last = view(&mut scroll, 0);
-    assert_eq!(last.hit_test(610.0, 59.0), Some(7));
+    assert_eq!(last.hit_test(610.0, 55.0), Some(7));
     let (x, y) = center(last.new_tab);
     assert_eq!(
         last.pointer_hit(x, y),
@@ -401,7 +400,7 @@ fn scrolling_clamps_hits_and_reveals_keyboard_selection() {
 
 #[test]
 fn messages_change_card_heights_and_every_part_has_a_hit() {
-    let mut card_with_notice = card(
+    let card_with_notice = card(
         Entry::new(
             "محرر",
             Some(Path::new("/tmp")),
@@ -412,16 +411,13 @@ fn messages_change_card_heights_and_every_part_has_a_hit() {
         .with_agent_status(Some(AgentStatus::new(AgentState::NeedsInput, None))),
     );
     let single_height = CardLayout::height(&card_with_notice, 1.0);
-    card_with_notice.message.push("سطر تاني".to_owned());
-    let double_height = CardLayout::height(&card_with_notice, 1.0);
-    assert_eq!(double_height - single_height, 18.0);
     assert_eq!(
         CardLayout::height(&card_with_notice, 2.0),
-        2.0 * double_height
+        2.0 * single_height
     );
     let mut no_notice = card_with_notice.clone();
-    no_notice.message.clear();
-    assert_eq!(single_height - CardLayout::height(&no_notice, 1.0), 18.0);
+    no_notice.message = None;
+    assert_eq!(single_height - CardLayout::height(&no_notice, 1.0), 20.0);
 
     let area = Rect::new(0.0, 0.0, 220.0, 280.0);
     let cards = [card_with_notice, no_notice];
@@ -429,7 +425,8 @@ fn messages_change_card_heights_and_every_part_has_a_hit() {
         let view = ScrollState::default().view(&cards, 0, area, 1.0, side, UiLanguage::Arabic);
         let item = &view.items[0];
         let layout = item.layout(&view);
-        assert_eq!(item.rect.h, double_height);
+        assert_eq!(item.rect.h, single_height);
+        assert!(layout.message.y >= layout.footer.bottom());
         assert!(view.items[1].rect.y >= item.rect.bottom());
         for rect in [
             layout.title,
@@ -452,10 +449,7 @@ fn messages_change_card_heights_and_every_part_has_a_hit() {
             view.pointer_hit(x, y),
             Some(Hit::Chrome(ChromeAction::NewTab))
         );
-        assert_eq!(
-            layout.unread.x > layout.close.x,
-            side == SidebarPosition::Right
-        );
+        assert_eq!(layout.unread.x > layout.close.x, view.mirrored);
         let start = center(layout.title);
         let drag = Drag::new(12, start.1);
         assert_eq!(drag.target(&view, 0, (start.0, start.1 + 2.0)), None);
@@ -465,7 +459,7 @@ fn messages_change_card_heights_and_every_part_has_a_hit() {
 }
 
 #[test]
-fn title_and_message_fitting_use_whole_words() {
+fn titles_prefer_whole_words() {
     let fit = |s: &str| s.chars().count() <= 13;
     assert_eq!(fit_title("Review and merge the change", fit), "Review and…");
     assert_eq!(
@@ -476,19 +470,15 @@ fn title_and_message_fitting_use_whole_words() {
         fit_title("uninterruptedverylongtitle", fit),
         "uninterrupte…"
     );
-    assert_eq!(
-        wrap_notice("Do more work and pass the tests", fit),
-        ["Do more work", "and pass the…"]
-    );
-    assert_eq!(wrap_notice("جاهز للدمج", fit), ["جاهز للدمج"]);
 }
 
 #[test]
-fn overlong_words_in_titles_and_notifications_keep_whole_graphemes() {
+fn narrow_titles_keep_whole_graphemes_and_avoid_a_bare_ellipsis() {
     let fits = |s: &str| s.graphemes(true).count() <= 4;
     assert_eq!(fit_title("سَلامٌعَلَيكُم", fits), "سَلا…");
     assert_eq!(fit_title("iwide", |s| s == "i"), "i");
-    assert_eq!(wrap_notice("hello👩‍💻world", fits), ["hell", "o👩‍💻w…"],);
+    assert_eq!(fit_title("WW", |s| s == "…" || s == "W"), "W");
+    assert_eq!(fit_title("WW", |s| s == "…"), "");
 }
 
 #[test]
@@ -790,7 +780,7 @@ fn pixel_fitting_preserves_arabic_direction_on_both_sides() {
         for width in [115.0, 145.0, 220.0] {
             let area = Rect::new(400.0, 0.0, width, 200.0);
             let cards = cache.cards(&font, ctx.font_system, vec![e.clone()], area, 1.0);
-            assert_eq!(cards[0].message.len(), 2);
+            assert!(cards[0].message.is_some());
             let view = ScrollState::default().view(&cards, 0, area, 1.0, side, UiLanguage::Arabic);
             let scene = build(&mut ctx, &view, &mut cache, style, &font);
             let title_label = &scene.labels[0];
@@ -822,6 +812,13 @@ fn pixel_fitting_preserves_arabic_direction_on_both_sides() {
                 .unwrap();
             assert_eq!(path.buffer.metrics().font_size, 11.0);
             assert!(path.buffer.lines[0].text().starts_with('…'));
+            let notice = scene
+                .labels
+                .iter()
+                .filter(|label| label.buffer.lines[0].text().starts_with("سَلَامٌ"))
+                .collect::<Vec<_>>();
+            assert_eq!(notice.len(), 1);
+            assert!(notice[0].buffer.lines[0].text().ends_with('…'));
         }
     }
 }
@@ -863,7 +860,12 @@ fn footer_fits_whole_words_then_graphemes_and_keeps_the_path_tail() {
             UiStyle::new(&palette, None, 1.0),
             &font,
         );
-        let branch_label = scene.labels[1].buffer.lines[0].text();
+        let branch_label = scene
+            .labels
+            .iter()
+            .map(|label| label.buffer.lines[0].text())
+            .find(|label| branch.starts_with(label.trim_end_matches('…')) && *label != "…")
+            .unwrap();
         let prefix = branch_label.strip_suffix('…').unwrap();
         assert!(
             !prefix.is_empty() && branch.starts_with(prefix),
@@ -969,7 +971,7 @@ fn active_and_inactive_workspace_titles_show_a_prefix_at_fractional_scale() {
 }
 
 #[test]
-fn status_pill_measures_the_whole_label_then_falls_back_to_the_icon() {
+fn status_line_measures_the_whole_label_then_falls_back_to_the_icon() {
     let mut fonts = twitty::render::text::fonts::new_font_system();
     let font = UiFont::default();
     let scale = 1.5;
@@ -990,24 +992,12 @@ fn status_pill_measures_the_whole_label_then_falls_back_to_the_icon() {
         let label = font.shape(
             ctx.font_system,
             UiSize::Small,
-            UiWeight::Semibold,
+            UiWeight::Regular,
             scale,
             name,
         );
-        let width = label_width(&label).ceil() + 1.0;
-        // Keep the full status until it would take the space needed for the title's ellipsis.
-        let ellipsis = font.shape(
-            ctx.font_system,
-            UiSize::Body,
-            UiWeight::Semibold,
-            scale,
-            "…",
-        );
-        let full_pill = width + (16.0 + 2.0 * 4.0) * scale;
-        let content = full_pill + 2.0 * 4.0 * scale + label_width(&ellipsis).ceil() + 1.0;
-        // The close target takes 18 logical pixels, capped at 20% of the inner width.
-        let threshold =
-            (content + 18.0 * scale).min(content / 0.8) + (2.0 * 8.0 + 2.0 * 6.0) * scale;
+        let full_status = label_width(&label).ceil() + 1.0 + (12.0 + 4.0) * scale;
+        let threshold = full_status + (2.0 * 12.0 + 2.0 * 8.0) * scale;
         for (area_w, expected_label) in [
             (330.0, true),
             (threshold + 1.0, true),
@@ -1045,7 +1035,7 @@ fn status_pill_measures_the_whole_label_then_falls_back_to_the_icon() {
                     label_width(&caption.buffer).ceil()
                         <= (caption.bounds.right - caption.bounds.left) as f32
                 );
-                assert!(parts.state.right() < parts.title.x);
+                assert!(parts.state.y >= parts.title.bottom());
             } else {
                 assert!(captions.is_empty());
             }
@@ -1144,7 +1134,9 @@ fn narrow_sidebar_cards_layout_without_overflow_or_overlap() {
                             }
                         }
                         assert!(parts.title.w > 0.0);
-                        assert!(parts.state.w >= 16.0 * scale);
+                        assert!(parts.state.w >= 12.0 * scale);
+                        assert!(!overlaps(parts.state, parts.footer));
+                        assert!(parts.state.y >= parts.title.bottom());
                         assert!(
                             parts.footer.x >= item.rect.x
                                 && parts.footer.right() <= item.rect.right()
@@ -1182,7 +1174,6 @@ fn narrow_toolbar_and_tab_pills_use_words_and_grapheme_fallbacks() {
     let style = UiStyle::new(&palette, None, 1.0);
     let metrics = metrics();
     let surface = (640.0, 400.0);
-    let layout = WindowLayout::new(metrics, surface, 2, (SidebarPosition::Hidden, 220.0), true);
     let unbroken = LIVE_TAB_TITLE;
     let words = "Review and merge the extraordinarily long change";
     let tabs = [
@@ -1195,11 +1186,13 @@ fn narrow_toolbar_and_tab_pills_use_words_and_grapheme_fallbacks() {
             active: false,
         },
     ];
-    let mut opts = TopBarLayout::new(layout.top_bar, 1.0, None);
     for (language, local) in [
         (UiLanguage::English, SEARCH_EN),
         (UiLanguage::Arabic, SEARCH_AR),
     ] {
+        let layout = WindowLayout::new(metrics, surface, 2, (SidebarPosition::Hidden, 220.0), true)
+            .with_language(language);
+        let mut opts = TopBarLayout::new(layout.top_bar, 1.0, None).with_language(language);
         let first = local.graphemes(true).next().unwrap();
         let short = format!("{first}…");
         let width = |fonts: &mut FontSystem, text: &str| {

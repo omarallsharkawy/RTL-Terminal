@@ -208,15 +208,29 @@ fn toolbar_hit_tests_and_meta_labels() {
     let tb = cards[0].toolbar.expect("hovered block gets toolbar");
     assert!(tb.meta.is_some(), "meta label rect fits");
 
-    // Hit-test each of the 4 buttons on block 0.
-    for (btn, rect, enabled) in tb.buttons {
-        assert!(enabled, "{btn:?} should be enabled when command is present");
-        let (x, y) = center(rect);
+    // The localized toolbar uses the same button rectangles for drawing and hits.
+    for language in [UiLanguage::English, UiLanguage::Arabic] {
+        let localized = tb.with_language(language, cards[0].card);
         assert_eq!(
-            hit_test_cards(pane_rect, m, 10, &decor, None, x, y),
-            Some((decor[0].id, Some(btn)))
+            localized.rect.x < cards[0].card.x + cards[0].card.w / 2.0,
+            language == UiLanguage::Arabic
         );
+        for (btn, rect, enabled) in localized.buttons {
+            assert!(enabled, "{btn:?} should be enabled when command is present");
+            assert_eq!(
+                hit_test_cards(pane_rect, m, 10, &decor, None, center(rect), language),
+                Some((decor[0].id, Some(btn)))
+            );
+        }
     }
+    let mut selected = decor.clone();
+    selected[0].selected = true;
+    assert!(
+        layout_cards(pane_rect, m, 10, &selected, None, None, |_| 80.0)[0]
+            .toolbar
+            .is_none(),
+        "selection keeps the toolbar hidden until hover"
+    );
 
     // Card body away from toolbar hits the block with button=None.
     let (bx, by) = (
@@ -224,13 +238,29 @@ fn toolbar_hit_tests_and_meta_labels() {
         f64::from(cards[0].card.bottom() - 4.0),
     );
     assert_eq!(
-        hit_test_cards(pane_rect, m, 10, &decor, None, bx, by),
+        hit_test_cards(
+            pane_rect,
+            m,
+            10,
+            &decor,
+            None,
+            (bx, by),
+            UiLanguage::English
+        ),
         Some((decor[0].id, None))
     );
 
     // Outside any card returns None.
     assert_eq!(
-        hit_test_cards(pane_rect, m, 10, &decor, None, 0.0, 0.0),
+        hit_test_cards(
+            pane_rect,
+            m,
+            10,
+            &decor,
+            None,
+            (0.0, 0.0),
+            UiLanguage::English
+        ),
         None
     );
 
@@ -242,7 +272,7 @@ fn toolbar_hit_tests_and_meta_labels() {
         let expected_enabled = matches!(btn, BlockButton::CopyOutput | BlockButton::AskAgent);
         assert_eq!(enabled, expected_enabled, "{btn:?}");
         assert_eq!(
-            hit_test_cards(pane_rect, m, 10, &decor, None, x, y),
+            hit_test_cards(pane_rect, m, 10, &decor, None, (x, y), UiLanguage::English),
             Some((decor[1].id, expected_enabled.then_some(btn)))
         );
     }
@@ -593,11 +623,12 @@ fn headless_render_two_block_cards_ok_and_failed_dark_and_light() {
             style,
             &ui_font,
             hover,
+            UiLanguage::English,
         );
 
         // 2 cards + 2 status strips in underlay (drawn behind quads).
         assert_eq!(frame.shapes.underlay.len(), 4, "{theme_name}");
-        // Floating toolbar + icons + ok meta pill in chrome (drawn above quads).
+        // Floating toolbar and icons in chrome (drawn above quads).
         assert!(!frame.shapes.chrome.is_empty(), "{theme_name}");
 
         // Verify ok strip has style.ok and failed strip has style.danger.
@@ -684,13 +715,13 @@ fn headless_render_two_block_cards_ok_and_failed_dark_and_light() {
         let ok_card = cards.iter().find(|c| c.id == ok_id).unwrap();
         let fail_card = cards.iter().find(|c| c.id == fail_id).unwrap();
 
-        // Card interior (away from text/toolbar) matches bg2 and differs from bg0.
+        // Card interior (away from text/toolbar) matches bg1 and differs from bg0.
         let bg_sample = pixel(ok_card.card.x + 180.0, ok_card.card.y + 10.0);
         let outside_sample = pixel(pane_rect.right() - 1.0, pane_rect.bottom() - 2.0);
         assert!(
-            close(bg_sample, style.bg2.to_array()),
-            "{theme_name}: card fill {bg_sample:?} != bg2 {:?}",
-            style.bg2.to_array()
+            close(bg_sample, style.bg1.to_array()),
+            "{theme_name}: card fill {bg_sample:?} != bg1 {:?}",
+            style.bg1.to_array()
         );
         assert!(
             close(outside_sample, style.bg0.to_array()),

@@ -167,7 +167,7 @@ pub fn build_frame(
     build_frame_inner(ctx, opts, cache, ime, tabs, panes, dividers, true)
 }
 
-/// Like [`build_frame`], rendering command blocks as rounded SDF cards with floating top-right
+/// Like [`build_frame`], rendering command blocks as rounded SDF cards with floating hover
 /// toolbars (`block_cards = true`).
 #[allow(clippy::too_many_arguments)]
 pub fn build_frame_with_cards(
@@ -181,9 +181,10 @@ pub fn build_frame_with_cards(
     style: UiStyle,
     font: &UiFont,
     block_hover: Option<BlockHover>,
+    language: UiLanguage,
 ) -> Frame {
     let mut frame = build_frame_inner(ctx, opts, cache, ime, tabs, panes, dividers, false);
-    frame.add_block_cards(ctx, style, font, panes, block_hover);
+    frame.add_block_cards(ctx, style, font, panes, block_hover, language);
     frame
 }
 
@@ -345,6 +346,7 @@ impl Frame {
         font: &UiFont,
         panes: &[PaneFrame],
         block_hover: Option<BlockHover>,
+        language: UiLanguage,
     ) {
         for pane in panes {
             let status_row = pane.status.as_ref().and(pane.lines.len().checked_sub(1));
@@ -356,6 +358,7 @@ impl Frame {
                 status_row,
                 block_hover,
                 &mut self.shapes,
+                language,
             );
             self.block_clips.extend(scene.clips);
             self.block_labels.extend(scene.labels);
@@ -372,14 +375,13 @@ impl Frame {
     ) {
         self.chrome_labels = window_chrome::draw(ctx, style, font, view, &mut self.shapes.chrome);
         self.pane_clips.extend(view.panes.iter().filter_map(|pane| {
-            let edge = if pane.attention || pane.flash > 0.0 {
-                2.0
-            } else if pane.focused && pane.layout.header.h > 0.0 {
-                1.0
+            let edge = if pane.flash > 0.0 {
+                style.px(2.0 + 2.0 * pane.flash.clamp(0.0, 1.0)).ceil()
+            } else if pane.attention {
+                style.hairline()
             } else {
                 return None;
             };
-            let edge = style.px(edge).ceil();
             let grid = pane.layout.grid;
             let top_inset = (edge - pane.layout.header.h).max(0.0);
             let clip = Rect::new(
@@ -570,13 +572,19 @@ impl Frame {
                 .or(self.ime_bounds)
                 .unwrap_or_else(|| rect_bounds(Rect::new(0.0, 0.0, width, height)));
             if let Some(buffer) = ime.buffer() {
-                runs.push(TextRun {
+                let mut preedit_runs = vec![TextRun {
                     buffer,
                     left,
                     top,
                     bounds,
                     color: fg,
-                });
+                }];
+                if let Some(pane) = panes.iter().find(|pane| pane.focused) {
+                    for &(_, hole) in self.block_clips.iter().filter(|(id, _)| *id == pane.id) {
+                        preedit_runs = clip_runs(preedit_runs, hole);
+                    }
+                }
+                runs.extend(preedit_runs);
             }
         }
         // Glyphon draws after these surfaces. Keep pane labels and preedit behind them.

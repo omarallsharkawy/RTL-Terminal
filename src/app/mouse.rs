@@ -542,7 +542,15 @@ impl App {
         let rows = pane.size.1;
         let has_status = pane.ui.search_query.is_some() || pane.ui.hover_target.is_some();
         let hidden_row = has_status.then(|| rows.checked_sub(1)).flatten();
-        hit_test_cards(rect, metrics, rows, &decor, hidden_row, x, y)
+        hit_test_cards(
+            rect,
+            metrics,
+            rows,
+            &decor,
+            hidden_row,
+            (x, y),
+            self.window.language,
+        )
     }
 
     /// Execute a floating toolbar button action for `block_id` in pane `id`.

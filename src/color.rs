@@ -73,7 +73,7 @@ pub struct Palette {
 }
 
 impl Default for Palette {
-    /// Tokyo Night: a deep dark palette (OpenCode compatible).
+    /// Twitty Dark: warm graphite with a copper cursor.
     fn default() -> Self {
         THEMES[0].palette()
     }
@@ -145,7 +145,29 @@ impl ThemeData {
 }
 
 /// Built-in themes; the first one is the default.
-const THEMES: [ThemeData; 8] = [
+const THEMES: [ThemeData; 10] = [
+    ThemeData {
+        name: "twitty-dark",
+        background: 0x18171c,
+        foreground: 0xede9e6,
+        cursor: 0xdab587,
+        selection: 0x554054,
+        ansi: [
+            0x29262e, 0xf09499, 0x9ac5a6, 0xe1ba75, 0x9eb6e7, 0xcbade0, 0x91c6c9, 0xd7d0d2,
+            0x89838f, 0xffb3b5, 0xbce0c4, 0xf4d499, 0xc1d2f4, 0xe4c6f1, 0xade1de, 0xfcf7f1,
+        ],
+    },
+    ThemeData {
+        name: "twitty-light",
+        background: 0xf9f6f1,
+        foreground: 0x29242c,
+        cursor: 0x805624,
+        selection: 0xe9d7e9,
+        ansi: [
+            0x29242c, 0xa13447, 0x316d49, 0x815516, 0x365894, 0x754a89, 0x246770, 0xe9e2e3,
+            0x726875, 0x942b42, 0x265d3d, 0x704416, 0x2b4d87, 0x6a3e81, 0x205a62, 0xfffcf7,
+        ],
+    },
     ThemeData {
         name: "tokyo-night",
         background: 0x15161e,

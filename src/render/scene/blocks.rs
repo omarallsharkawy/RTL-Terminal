@@ -1,9 +1,7 @@
 //! Command blocks drawn over a pane (`blocks::BlockDecor`):
-//! - Card mode (`block_cards = true`, default): subtle rounded `bg2` cards in `ShapeLayers::underlay`
-//!   behind each visible block's rows (with 4 px inner padding effect via the background only,
-//!   never shifting the terminal grid), a thin left status strip (`ok`/`danger`/`accent`), and on
-//!   hover or for the selected block a floating top-right toolbar in `ShapeLayers::chrome` with
-//!   icon buttons (copy command, copy output, ask agent, rerun) plus a dim duration/exit label.
+//! - Card mode (`block_cards = true`, default): a faint tint behind the terminal rows, a thin
+//!   leading status strip, and a floating action toolbar on hover.
+//!   The terminal grid stays fixed and text is clipped around overlays.
 //! - Legacy mode (`block_cards = false`): a thin separator above each prompt, a gutter strip at the
 //!   pane's leading edge, a tint over the selected block, and a badge at the end of its first line.
 
@@ -18,8 +16,9 @@ use crate::render::icons::Icon;
 use crate::render::shapes::{Border, Shadow, Shape, ShapeLayers};
 use crate::render::style::Quad;
 use crate::render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
-use crate::render::ui_style::{UiStyle, RADIUS_6, SPACE_4};
+use crate::render::ui_style::{UiStyle, RADIUS_6, SPACE_12, SPACE_16, SPACE_4};
 use crate::render::PaneFrame;
+use crate::ui::chrome::UiLanguage;
 
 /// A badge's shaped text and where it goes (legacy mode).
 pub struct Badge {
@@ -72,8 +71,9 @@ fn button_icon(button: BlockButton) -> Icon {
     }
 }
 
-/// Draw command block cards into `shapes.underlay` (backgrounds + left status strips) and
+/// Draw command block cards into `shapes.underlay` (backgrounds and leading status strips) and
 /// floating toolbars into `shapes.chrome`, returning the dim labels and clip rects for row text.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_cards(
     ctx: &mut DrawContext,
     style: UiStyle,
@@ -82,6 +82,7 @@ pub(crate) fn draw_cards(
     hidden_row: Option<usize>,
     hover: Option<BlockHover>,
     shapes: &mut ShapeLayers,
+    language: UiLanguage,
 ) -> CardScene {
     if pane.blocks.is_empty() || pane.lines.is_empty() {
         return CardScene::default();
@@ -90,21 +91,18 @@ pub(crate) fn draw_cards(
     let pane_hover = hover.filter(|h| h.pane == pane.id);
     let hovered_block = pane_hover.map(|h| h.block);
 
-    // Pre-measure any dim meta labels so `layout_cards` stays pure and we shape each once.
-    let mut meta_widths: Vec<(u64, f32)> = Vec::new();
-    for decor in &pane.blocks {
-        if let Some(meta) = decor.meta.as_deref() {
-            let buf = font.shape(
-                ctx.font_system,
-                UiSize::Small,
-                UiWeight::Regular,
-                style.scale,
-                meta,
-            );
-            meta_widths.push((decor.id, label_width(&buf)));
-        }
-    }
-
+    // Only the hovered command needs a measured label for toolbar geometry.
+    let measure = |text: &str| {
+        let text = localized_meta(text, language);
+        let buf = font.shape(
+            ctx.font_system,
+            UiSize::Small,
+            UiWeight::Regular,
+            style.scale,
+            &text,
+        );
+        label_width(&buf)
+    };
     let cards = layout_cards(
         pane.rect,
         ctx.metrics,
@@ -112,17 +110,7 @@ pub(crate) fn draw_cards(
         &pane.blocks,
         hovered_block,
         hidden_row,
-        |text| {
-            pane.blocks
-                .iter()
-                .find(|d| d.meta.as_deref() == Some(text))
-                .and_then(|d| {
-                    meta_widths
-                        .iter()
-                        .find_map(|&(id, w)| (id == d.id).then_some(w))
-                })
-                .unwrap_or(0.0)
-        },
+        measure,
     );
 
     let mut scene = CardScene::default();
@@ -130,57 +118,63 @@ pub(crate) fn draw_cards(
     for card in cards {
         let decor = pane.blocks.iter().find(|d| d.id == card.id);
         let fill = if card.selected {
-            style.bg2.mix(style.accent, 0.12)
-        } else {
-            style.bg2
-        };
-        let border_color = if card.selected {
-            style.accent.mix(style.border, 0.35)
+            style.bg2.mix(style.accent, 0.08)
         } else if card.hovered {
-            style.border.mix(style.text_dim, 0.25)
+            style.bg2
         } else {
-            style.border
+            style.bg1
         };
         shapes.underlay.push(Shape::RoundedRect {
             rect: card.card,
             radii: card.radii,
             fill: ctx.color(fill),
-            border: Some(Border {
-                width: style.px(1.0),
-                color: ctx.color(border_color),
-            }),
+            border: None,
             shadow: None,
         });
 
         if let Some(strip_color) = card_strip_color(style, card.status) {
+            let strip = language.mirror(card.strip, card.card);
+            let radii = if language == UiLanguage::Arabic {
+                [0.0, card.radii[1], card.radii[2], 0.0]
+            } else {
+                [card.radii[0], 0.0, 0.0, card.radii[3]]
+            };
             shapes.underlay.push(Shape::RoundedRect {
-                rect: card.strip,
-                radii: [card.radii[0], 0.0, 0.0, card.radii[3]],
+                rect: strip,
+                radii,
                 fill: ctx.color(strip_color),
                 border: None,
                 shadow: None,
             });
         }
 
-        let meta_text = decor.and_then(|d| d.meta.as_deref());
+        let meta_text = decor
+            .and_then(|d| d.meta.as_deref())
+            .map(|text| localized_meta(text, language));
+        let align = if language == UiLanguage::Arabic {
+            UiAlign::Left
+        } else {
+            UiAlign::Right
+        };
         if let Some(tb) = card.toolbar {
+            let tb = tb.with_language(language, card.card);
             scene.clips.push((pane.id, tb.rect));
             shapes.chrome.push(Shape::RoundedRect {
                 rect: tb.rect,
                 radii: [style.px(RADIUS_6); 4],
-                fill: ctx.color(style.bg1),
+                fill: ctx.color(style.bg3),
                 border: Some(Border {
-                    width: style.px(1.0),
+                    width: style.hairline(),
                     color: ctx.color(style.border),
                 }),
                 shadow: Some(Shadow {
-                    blur: style.px(6.0),
-                    offset: [0.0, style.px(2.0)],
+                    blur: style.px(8.0),
+                    offset: [0.0, style.px(SPACE_4)],
                     color: ctx.color(Rgba::new(0.0, 0.0, 0.0, 0.18)),
                 }),
             });
 
-            if let (Some(meta_rect), Some(text)) = (tb.meta, meta_text) {
+            if let (Some(meta_rect), Some(text)) = (tb.meta, meta_text.as_deref()) {
                 let buf = font.fit(
                     ctx.font_system,
                     UiSize::Small,
@@ -191,7 +185,7 @@ pub(crate) fn draw_cards(
                 );
                 scene
                     .labels
-                    .push(UiLabel::new(buf, meta_rect, UiAlign::Right, style.text_dim));
+                    .push(UiLabel::new(buf, meta_rect, align, style.text_dim));
             }
 
             let hovered_btn = pane_hover
@@ -200,9 +194,11 @@ pub(crate) fn draw_cards(
             for (btn, rect, enabled) in tb.buttons {
                 let is_hover = enabled && hovered_btn == Some(btn);
                 if is_hover {
-                    shapes
-                        .chrome
-                        .push(Shape::rounded(rect, style.px(4.0), ctx.color(style.bg3)));
+                    shapes.chrome.push(Shape::rounded(
+                        rect,
+                        style.px(RADIUS_6),
+                        ctx.color(style.bg3.mix(style.text, 0.08)),
+                    ));
                 }
                 let color = if !enabled {
                     style.text_faint
@@ -211,7 +207,7 @@ pub(crate) fn draw_cards(
                 } else {
                     style.text_dim
                 };
-                let side = style.px(14.0).min(rect.w).min(rect.h);
+                let side = style.px(SPACE_12).min(rect.w).min(rect.h);
                 let icon_rect = Rect::new(
                     rect.x + (rect.w - side) * 0.5,
                     rect.y + (rect.h - side) * 0.5,
@@ -220,53 +216,75 @@ pub(crate) fn draw_cards(
                 );
                 button_icon(btn).draw(icon_rect, ctx.color(color), &mut shapes.chrome);
             }
-        } else if let Some(text) = meta_text.filter(|_| hidden_row != Some(card.first_visible_row))
+        } else if let Some(text) =
+            meta_text.filter(|_| !card.clipped_top && hidden_row != Some(card.first_visible_row))
         {
-            // Compact dim status pill on finished blocks with duration or non-zero exit when not
-            // hovered/selected, so failures and long commands stay glanceable.
-            let measured = meta_widths
+            let buf = font.shape(
+                ctx.font_system,
+                UiSize::Small,
+                UiWeight::Regular,
+                style.scale,
+                &text,
+            );
+            let label_w = label_width(&buf).ceil();
+            let h = style.px(SPACE_16).min(card.card.h);
+            let w = label_w + 2.0 * pad;
+            if label_w <= 0.0 || w > card.card.w - card.strip.w - 2.0 * pad {
+                continue;
+            }
+            let first_y = pane.rect.y
+                + ctx.metrics.padding_top
+                + card.first_visible_row as f32 * ctx.metrics.line_height;
+            let y = (first_y + (ctx.metrics.line_height - h) * 0.5)
+                .clamp(card.card.y, (card.card.bottom() - h).max(card.card.y));
+            let badge = Rect::new(card.card.right() - pad - w, y, w, h);
+            let badge = language.mirror(badge, card.card);
+            // Leave a cell of breathing room around the terminal text. In a narrow pane the
+            // hover toolbar still carries this label, even when the row has no free space.
+            let mut occupied = pane.lines[card.first_visible_row]
+                .cells
                 .iter()
-                .find_map(|&(id, w)| (id == card.id).then_some(w))
-                .unwrap_or(0.0);
-            let pill_h = style.px(18.0).min(card.card.h);
-            let pill_pad = style.px(6.0).round();
-            let max_w = (card.card.w - card.strip.w - pad * 3.0).max(0.0);
-            let pill_w = (measured.ceil() + pill_pad * 2.0).min(max_w);
-            if measured > 0.0 && pill_w >= style.px(24.0) && pill_h >= style.px(10.0) {
-                let first_y = pane.rect.y
-                    + ctx.metrics.padding_top
-                    + card.first_visible_row as f32 * ctx.metrics.line_height;
-                let pill_y = (first_y + (ctx.metrics.line_height - pill_h) * 0.5)
-                    .max(card.card.y + style.px(1.0).round())
-                    .min((card.card.bottom() - pill_h).max(card.card.y));
-                let pill = Rect::new(card.card.right() - pad - pill_w, pill_y, pill_w, pill_h);
-                scene.clips.push((pane.id, pill));
-                shapes.chrome.push(Shape::rounded(
-                    pill,
-                    style.px(RADIUS_6),
-                    ctx.color(style.bg1),
-                ));
-                let text_rect = Rect::new(
-                    pill.x + pill_pad,
-                    pill.y,
-                    (pill.w - pill_pad * 2.0).max(0.0),
-                    pill.h,
-                );
-                let buf = font.fit(
-                    ctx.font_system,
-                    UiSize::Small,
-                    UiWeight::Regular,
-                    style.scale,
-                    text,
-                    text_rect.w,
-                );
+                .enumerate()
+                .filter(|(_, cell)| !cell.is_blank() || cell.selected || cell.search_match != 0);
+            let origin_x = pane.rect.x + ctx.metrics.padding_left;
+            let cell_w = ctx.metrics.char_width;
+            let fits = if language == UiLanguage::Arabic {
+                occupied
+                    .next()
+                    .is_none_or(|(col, _)| badge.right() <= origin_x + (col as f32 - 1.0) * cell_w)
+            } else {
+                occupied
+                    .next_back()
+                    .is_none_or(|(col, _)| badge.x >= origin_x + (col as f32 + 2.0) * cell_w)
+            };
+            if fits {
+                scene.clips.push((pane.id, badge));
+                let text_rect = Rect::new(badge.x + pad, badge.y, label_w, badge.h);
                 scene
                     .labels
-                    .push(UiLabel::new(buf, text_rect, UiAlign::Right, style.text_dim));
+                    .push(UiLabel::new(buf, text_rect, align, style.text_dim));
             }
         }
     }
     scene
+}
+
+fn localized_meta(text: &str, language: UiLanguage) -> std::borrow::Cow<'_, str> {
+    if language == UiLanguage::English {
+        return text.into();
+    }
+    text.split(" · ")
+        .map(|part| {
+            if let Some(exit) = part.strip_prefix("exit ") {
+                return format!("خروج {exit}");
+            }
+            part.replace('h', " س")
+                .replace('m', " د")
+                .replace('s', " ث")
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
+        .into()
 }
 
 /// The selected block's background tint, drawn under the rows (cells with a background of
