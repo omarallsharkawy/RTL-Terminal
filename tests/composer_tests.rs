@@ -1041,6 +1041,7 @@ fn empty_composer_hint_starts_after_the_beam_at_each_scale() {
                 cursor_blink_on: true,
                 popup: None,
                 language,
+                ai: Default::default(),
             };
             let hint_left = |scene: &twitty::render::scene::composer::ComposerScene| {
                 scene

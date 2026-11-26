@@ -230,6 +230,7 @@ fn render(
                 cursor_blink_on: true,
                 popup: None,
                 language,
+                ai: Default::default(),
             },
         );
     }
