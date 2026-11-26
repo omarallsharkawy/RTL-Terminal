@@ -96,9 +96,14 @@ impl App {
         let Some(text) = self.clipboard.text() else {
             return;
         };
-        let bracketed = self.mode_of(id).contains(TermMode::BRACKETED_PASTE);
-        self.write_to(id, &encode_paste(&text, bracketed));
+        self.broadcast.cancel_escape();
+        for target in self.broadcast_targets(id) {
+            let bracketed = self.mode_of(target).contains(TermMode::BRACKETED_PASTE);
+            self.clear_selection(target);
+            self.clear_block_selection(target);
+            self.write_to(target, &encode_paste(&text, bracketed));
+            self.scroll_to_bottom(target);
+        }
         self.cursor_blink.reset(Instant::now());
-        self.scroll_to_bottom(id);
     }
 }

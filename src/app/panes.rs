@@ -13,7 +13,7 @@ use crate::session::spawn::ShellFactory;
 use crate::session::workspace::{CloseOthers, SplitFailure};
 use winit::event_loop::EventLoopProxy;
 
-fn shell_factory<'a>(
+pub(super) fn make_shell_factory<'a>(
     proxy: &'a EventLoopProxy<AppEvent>,
     config: &TwittyConfig,
     socket: Option<String>,
@@ -38,7 +38,7 @@ impl App {
             if let Some(grid) = self.window.grid() {
                 let socket = self.control_socket_path();
                 let mut shells =
-                    shell_factory(&self.proxy, &self.config, socket, SpawnOptions::default());
+                    make_shell_factory(&self.proxy, &self.config, socket, SpawnOptions::default());
                 self.ws = session.rebuild(grid, &mut shells);
                 if let Some(id) = self.focused_id() {
                     self.focus_changed(None, id);
@@ -93,7 +93,7 @@ impl App {
         let r = self.window.grid()?;
         let previous = self.focused_id();
         let socket = self.control_socket_path();
-        let mut shells = shell_factory(&self.proxy, &self.config, socket, options);
+        let mut shells = make_shell_factory(&self.proxy, &self.config, socket, options);
         shells.remote = remote;
         let id = self.ws.new_tab(r, &mut shells)?;
         self.reset_pointer_gesture();
@@ -134,7 +134,7 @@ impl App {
             return Err(self.ws.split_failure_reason(r, dir));
         }
         let socket = self.control_socket_path();
-        let mut shells = shell_factory(&self.proxy, &self.config, socket, options);
+        let mut shells = make_shell_factory(&self.proxy, &self.config, socket, options);
         let Some((old, new)) = self.ws.split_focused(r, &mut shells, dir) else {
             return Err(self.ws.split_failure_reason(r, dir));
         };
@@ -145,10 +145,11 @@ impl App {
 
     /// Keyboard focus moved from `old` to `new`: close any open palette, tell the programs,
     /// reveal the active tab in the sidebar, restart the cursor blink and show the new pane's title.
-    fn focus_changed(&mut self, old: Option<PaneId>, new: PaneId) {
+    pub(super) fn focus_changed(&mut self, old: Option<PaneId>, new: PaneId) {
         if old == Some(new) {
             return;
         }
+        self.broadcast.cancel_escape();
         self.close_palette();
         self.on_composer_focus_changed();
         if self.window_focused {
@@ -231,6 +232,35 @@ impl App {
         }
     }
 
+    pub(super) fn move_active_tab_by(&mut self, delta: isize) {
+        if self.ws.move_active_tab_by(delta) {
+            self.window.reveal_active_tab();
+            self.window.request_redraw();
+        }
+    }
+
+    pub(super) fn reopen_closed_tab(&mut self) {
+        let Some(closed) = self.closed_tabs.pop() else {
+            return;
+        };
+        let Some(grid) = self.window.grid() else {
+            self.closed_tabs.push(closed);
+            return;
+        };
+        let previous = self.focused_id();
+        let socket = self.control_socket_path();
+        let mut shells =
+            make_shell_factory(&self.proxy, &self.config, socket, SpawnOptions::default());
+        let Some(id) = self.ws.reopen_closed_tab(&closed, grid, &mut shells) else {
+            self.closed_tabs.push(closed);
+            return;
+        };
+        self.reset_pointer_gesture();
+        self.apply_layout();
+        self.focus_changed(previous, id);
+        self.refresh_window_title();
+    }
+
     /// Focus the pane with the oldest unseen notification, switching tabs when needed.
     pub(super) fn focus_next_attention(&mut self) {
         if let Some((_, id)) = self.ws.oldest_attention() {
@@ -296,9 +326,16 @@ impl App {
 
     /// Close one pane. Returns true when it was the last one and the window should close.
     pub(super) fn close_pane(&mut self, id: PaneId) -> bool {
+        let closing_tab = self.ws.sole_pane_closed_tab(id);
         let Some(closed) = self.ws.close_pane(id) else {
             return false;
         };
+        if let Some((tab_id, snapshot)) = closing_tab {
+            self.broadcast.forget_tab(tab_id);
+            if closed.focused.is_some() {
+                self.closed_tabs.push(snapshot);
+            }
+        }
         self.window.forget_pane(id);
         self.pointer.forget(id);
         let Some(now) = closed.focused else {
@@ -315,9 +352,21 @@ impl App {
     /// Close all panes in tab `index`. Returns true when it was the last tab and the window
     /// should close.
     pub(super) fn close_tab(&mut self, index: usize) -> bool {
+        let closing_tab = self
+            .ws
+            .tabs()
+            .get(index)
+            .map(|t| t.id)
+            .zip(self.ws.snapshot_closed_tab(index));
         let Some((removed, closed)) = self.ws.close_tab(index) else {
             return false;
         };
+        if let Some((tab_id, snapshot)) = closing_tab {
+            self.broadcast.forget_tab(tab_id);
+            if closed.focused.is_some() {
+                self.closed_tabs.push(snapshot);
+            }
+        }
         for id in removed {
             self.window.forget_pane(id);
             self.pointer.forget(id);

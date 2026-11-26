@@ -252,6 +252,10 @@ impl Window {
         self.language
     }
 
+    pub(super) fn pane_headers_enabled(&self) -> bool {
+        self.pane_headers
+    }
+
     pub(super) fn pane_layout(&self, rect: Rect) -> PaneHeaderLayout {
         PaneHeaderLayout::new(
             rect,
@@ -658,12 +662,14 @@ impl Window {
             .is_some_and(|r| r.cursor_blink() != visible)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render(
         &mut self,
         ws: &Workspace,
         panes: &[PaneFrame],
         dividers: &[Rect],
         blink: bool,
+        broadcast: bool,
         history: &NotificationHistory,
         pointer: (f64, f64),
     ) {
@@ -721,11 +727,20 @@ impl Window {
                 let focused = ws.focused_id() == Some(id);
                 let attention = pane.meta.needs_attention() && !(focused && self.is_focused());
                 let zoomed = zoomed_id == Some(id);
-                let flash = self.pane_flash.intensity(id, now);
+                let mut flash = self.pane_flash.intensity(id, now);
+                if broadcast {
+                    flash = flash.max(0.45);
+                }
                 if layout.header.h == 0.0 && !attention && flash <= 0.0 {
                     return None;
                 }
-                let (title, agent) = pane_header_title(pane);
+                let (mut title, agent) = pane_header_title(pane);
+                if broadcast {
+                    title = crate::input::broadcast::format_broadcast_header_title(
+                        &title,
+                        self.language,
+                    );
+                }
                 Some(PaneHeaderView {
                     id,
                     layout,
@@ -915,11 +930,13 @@ impl App {
         self.window.set_composer(composer);
         let (panes, dividers) = self.frame();
         let visible = self.cursor_blink.visible();
+        let broadcast = self.active_tab_broadcast();
         self.window.render(
             &self.ws,
             &panes,
             &dividers,
             visible,
+            broadcast,
             &self.notification_history,
             if self.pointer.capture.is_none() && self.pointer.drag.is_none() {
                 self.pointer.pos
@@ -935,6 +952,7 @@ impl App {
             return (Vec::new(), Vec::new());
         };
         let focused = self.focused_id();
+        let broadcast_status = self.active_tab_broadcast() && !self.window.pane_headers_enabled();
         let panes = self
             .ws
             .active_layout(r)
@@ -947,7 +965,11 @@ impl App {
                     .search_query
                     .as_deref()
                     .map(|q| self.search_bar_text(id, q))
-                    .or_else(|| pane.ui.hover_target.as_ref().map(|t| format!("→ {t}")));
+                    .or_else(|| pane.ui.hover_target.as_ref().map(|t| format!("→ {t}")))
+                    .or_else(|| {
+                        (broadcast_status && focused == Some(id))
+                            .then(|| crate::input::broadcast::BROADCAST_STATUS_TEXT.to_owned())
+                    });
                 Some(PaneFrame {
                     id,
                     rect: self.window.pane_layout(rect).grid,

@@ -4,6 +4,7 @@
 //! search bar, a Twitty shortcut or the program; `mouse` and `pointer` are the window-free
 //! mouse state machines.
 
+pub mod broadcast;
 mod keys;
 pub mod mouse;
 pub mod pointer;

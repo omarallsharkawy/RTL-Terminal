@@ -42,7 +42,15 @@ commands! {
     "tab.new", "New tab", "تاب جديد", Some("Ctrl+Shift+T") => InputAction::NewTab;
     "tab.next", "Next tab", "التاب التالي", Some("Ctrl+Tab") => InputAction::NextTab;
     "tab.prev", "Previous tab", "التاب السابق", Some("Ctrl+Shift+Tab") => InputAction::PrevTab;
+    "tab.move-left", "Move tab left", "حرّك التاب شمال", Some("Ctrl+Shift+PageUp") => InputAction::MoveTabLeft;
+    "tab.move-right", "Move tab right", "حرّك التاب يمين", Some("Ctrl+Shift+PageDown") => InputAction::MoveTabRight;
+    "tab.reopen", "Reopen closed tab", "رجّع آخر تاب اتقفل", Some("Ctrl+Shift+Alt+T") => InputAction::ReopenClosedTab;
     "tab.rename", "Rename tab…", "غيّر اسم التاب…", Some("Ctrl+Shift+N") => InputAction::RenameTab;
+    "project.open", "Open project", "افتح مشروع", Some("Ctrl+Shift+L") => InputAction::OpenProject;
+    "layout.save", "Save layout…", "احفظ التخطيط…", None => InputAction::SaveLayout;
+    "layout.open", "Open layout…", "افتح تخطيط…", None => InputAction::OpenLayout;
+    "layout.delete", "Delete layout…", "احذف تخطيط…", None => InputAction::DeleteLayout;
+    "input.broadcast", "Type in all panes of this tab", "اكتب في كل اللوحات", None => InputAction::ToggleBroadcast;
     "pane.zoom", "Toggle pane zoom", "كبّر اللوحة أو رجّع حجمها", Some("Ctrl+Shift+Z") => InputAction::TogglePaneZoom;
     "pane.flash", "Flash focused pane", "ومّض إطار اللوحة النشطة", Some("Ctrl+Shift+H") => InputAction::FlashPane;
     "pane.close-others", "Close other panes", "اقفل باقي اللوحات", Some("Ctrl+Shift+K") => InputAction::CloseOtherPanes;

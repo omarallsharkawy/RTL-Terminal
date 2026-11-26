@@ -109,9 +109,12 @@ cargo build --release
 | Background transparency | Ctrl+Shift+wheel |
 | Open a link (OSC 8 or plain URL) | Ctrl+Click |
 | New tab / close pane (last pane closes the tab) | Ctrl+Shift+T / Ctrl+Shift+W |
+| Reopen last closed tab (restores directory and title) | Ctrl+Shift+Alt+T |
 | Switch to tab 1–9 | Ctrl+Shift+1 … Ctrl+Shift+9 |
 | Rename tab (empty clears custom title) | Ctrl+Shift+N |
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab, or Ctrl+PageDown / Ctrl+PageUp; or click the tab |
+| Move tab left / right | Ctrl+Shift+PageUp / Ctrl+Shift+PageDown |
+| Open project switcher (Enter: tab or switch, Alt+Enter: split) | Ctrl+Shift+L |
 | Split right / split down | Ctrl+Shift+E / Ctrl+Shift+O |
 | Toggle pane zoom (maximize focused pane within its tab) | Ctrl+Shift+Z |
 | Close other panes in the tab (confirms if any runs a program) | Ctrl+Shift+K |
@@ -163,6 +166,7 @@ The config file is `~/.config/twitty/config.json` (`%APPDATA%\twitty\config.json
 | `shell_integration` | `true` (default) loads Twitty's automatic bash/zsh/fish integration for OSC 133 command blocks and OSC 7 working directories. |
 | `restore_session` | `true` (default) restores tabs, splits, directories, titles, and SSH sessions saved on normal window close. |
 | `agent_command` | Command run by "Ask an agent" (`Ctrl+Shift+A`), e.g. `"claude"` or `"codex"`. Unset auto-detects the first installed agent (`claude`, `codex`, `gemini`, `opencode`, `grok`). |
+| `project_roots` | Array of directories scanned one or two levels deep for git repositories in the project switcher (`Ctrl+Shift+L`). Defaults to `["~/Projects", "~/src", "~/code"]` (only existing directories are scanned). |
 | `commands` | Array of custom workflow commands listed in the command palette (always trusted). See [Custom commands (workflows)](#custom-commands-workflows). |
 | `control_socket` | `true` (default) listens on a private Unix socket (`0600` in a `0700` dir) for `twitty ctl` and agent tools. |
 | `cmux_compat` | `true` (default) exposes cmux-compatible environment variables (`CMUX_SOCKET_PATH`, `CMUX_WORKSPACE_ID`, `CMUX_SURFACE_ID`) when `control_socket` is enabled. |
@@ -204,6 +208,15 @@ Set `"restore_session": false` in `config.json` to start with a fresh window eac
 close still saves the layout. The file is `$XDG_STATE_HOME/twitty/session.json`, with
 `~/.local/state/twitty/session.json` as the Unix fallback, or
 `%LOCALAPPDATA%\twitty\session.json` on Windows. Twitty restores up to 32 tabs and 64 panes.
+
+### Projects, named layouts, tab history, and broadcast input
+
+All workspace productivity commands are available in the command palette (`Ctrl+Shift+P`) with English and Arabic names:
+
+- **Project switcher** (`Ctrl+Shift+L`, *Open project / افتح مشروع*): Lists recent Twitty pane directories (persisted in a bounded MRU file `recent_projects.json` next to `session.json`, mode `0600`) together with git repositories discovered one or two levels under `project_roots` (default `["~/Projects", "~/src", "~/code"]`), scanned off the UI thread with symlink-loop protection and showing each repository's current branch when known. Press **Enter** to switch to an existing tab already in that directory or open a new tab; press **Alt+Enter** to open a split there.
+- **Named layouts** (*Save layout… / احفظ التخطيط…*, *Open layout… / افتح تخطيط…*, *Delete layout… / احذف تخطيط…*): Saves the active tab's split tree, ratios, pane working directories, and titles under a name in `$XDG_STATE_HOME/twitty/layouts.json` (versioned, bounded, mode `0600`), recreates it in a new tab on demand, or deletes it.
+- **Tab reordering and reopen** (*Move tab left / حرّك التاب شمال* `Ctrl+Shift+PageUp`, *Move tab right / حرّك التاب يمين* `Ctrl+Shift+PageDown`, *Reopen closed tab / رجّع آخر تاب اتقفل* `Ctrl+Shift+Alt+T`): Reorder the active tab with the keyboard and restore the working directory and title of recently closed tabs from a bounded stack.
+- **Broadcast input** (*Type in all panes of this tab / اكتب في كل اللوحات*): Off by default. When toggled on for the active tab, keystrokes, IME input, and pastes go to every pane in that tab, and every pane shows a clear header badge and coloured outline. Toggle the command again or press **Esc** twice (`Esc-Esc`) to turn it off.
 
 ### Persistent SSH tabs
 

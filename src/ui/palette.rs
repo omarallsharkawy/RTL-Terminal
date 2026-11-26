@@ -33,6 +33,14 @@ pub enum PaletteMode {
     Search,
     RenameTab,
     CloseOtherPanes,
+    /// Project switcher (recent cwds + git repositories under `project_roots`).
+    Projects,
+    /// Prompt for a name to save the active tab's layout.
+    SaveLayout,
+    /// Pick a saved layout to recreate in a new tab.
+    OpenLayout,
+    /// Pick a saved layout to delete.
+    DeleteLayout,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]

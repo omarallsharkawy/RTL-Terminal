@@ -42,6 +42,22 @@ pub enum InputAction {
     NextTab,
     /// Switch to the previous tab.
     PrevTab,
+    /// Move the active tab one slot to the left.
+    MoveTabLeft,
+    /// Move the active tab one slot to the right.
+    MoveTabRight,
+    /// Reopen the most recently closed tab.
+    ReopenClosedTab,
+    /// Open the project switcher palette mode.
+    OpenProject,
+    /// Save the active tab's split layout under a name.
+    SaveLayout,
+    /// Open a saved named layout in a new tab.
+    OpenLayout,
+    /// Delete a saved named layout.
+    DeleteLayout,
+    /// Toggle sending keystrokes and pastes to every pane of the active tab.
+    ToggleBroadcast,
     /// Split the focused pane side by side.
     SplitRight,
     /// Split the focused pane top and bottom.
@@ -313,11 +329,20 @@ fn app_shortcut(key_code: KeyCode, modifiers: ModifiersState) -> Option<InputAct
         modifiers.alt_key(),
     );
     match (ctrl, shift, alt) {
+        (true, true, true) => ctrl_shift_alt_shortcut(key_code),
         (true, true, false) => {
             ctrl_shift_shortcut(key_code).or_else(|| tab_shortcut(key_code, true))
         }
         (true, false, false) => tab_shortcut(key_code, false).or_else(|| zoom_shortcut(key_code)),
         (false, false, true) => focus_shortcut(key_code),
+        _ => None,
+    }
+}
+
+/// Ctrl+Shift+Alt+letter: secondary tab shortcuts.
+fn ctrl_shift_alt_shortcut(key_code: KeyCode) -> Option<InputAction> {
+    match key_code {
+        KeyCode::KeyT => Some(InputAction::ReopenClosedTab),
         _ => None,
     }
 }
@@ -329,6 +354,7 @@ fn ctrl_shift_shortcut(key_code: KeyCode) -> Option<InputAction> {
         KeyCode::KeyV => InputAction::Paste,
         KeyCode::KeyF => InputAction::Search,
         KeyCode::KeyG => InputAction::SearchAll,
+        KeyCode::KeyL => InputAction::OpenProject,
         KeyCode::KeyT => InputAction::NewTab,
         KeyCode::KeyW => InputAction::ClosePane,
         KeyCode::KeyK => InputAction::CloseOtherPanes,
@@ -348,6 +374,8 @@ fn ctrl_shift_shortcut(key_code: KeyCode) -> Option<InputAction> {
         KeyCode::Space => InputAction::ToggleComposer,
         KeyCode::ArrowUp => InputAction::PrevBlock,
         KeyCode::ArrowDown => InputAction::NextBlock,
+        KeyCode::PageUp => InputAction::MoveTabLeft,
+        KeyCode::PageDown => InputAction::MoveTabRight,
         KeyCode::Digit1 => InputAction::SelectTab(0),
         KeyCode::Digit2 => InputAction::SelectTab(1),
         KeyCode::Digit3 => InputAction::SelectTab(2),

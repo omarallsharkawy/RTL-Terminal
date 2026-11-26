@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use crate::layout::{dividers, layout, neighbor, Divider, FocusDir, Node, PaneId, Rect, SplitDir};
 use crate::pty::Pty;
 use crate::remote::Target;
+use crate::session::closed::ClosedTab;
 use crate::session::pane::Pane;
 
 /// A pane is only split when both halves keep at least this many columns / rows.
@@ -539,6 +540,131 @@ impl Workspace {
         true
     }
 
+    /// Move the active tab left (`delta < 0`) or right (`delta > 0`), clamping at the ends.
+    pub(crate) fn move_active_tab_by(&mut self, delta: isize) -> bool {
+        let len = self.tabs.len();
+        if len < 2 || delta == 0 {
+            return false;
+        }
+        let target = (self.active as isize + delta).clamp(0, (len - 1) as isize) as usize;
+        self.move_active_tab(target)
+    }
+
+    /// Snapshot a tab's cwd and titles before closing it so it can be reopened later.
+    pub(crate) fn snapshot_closed_tab(&self, index: usize) -> Option<ClosedTab> {
+        let tab = self.tabs.get(index)?;
+        let pane = self.panes.get(&tab.focused);
+        let cwd = pane.and_then(|p| {
+            if p.remote.is_some() {
+                None
+            } else {
+                p.pty
+                    .as_ref()
+                    .and_then(Pty::cwd)
+                    .or_else(|| p.meta.cwd.clone())
+            }
+        });
+        let pane_title = pane.and_then(|p| p.title.clone());
+        Some(ClosedTab::new(cwd, tab.title.clone(), pane_title))
+    }
+
+    /// If `id` is the sole pane of its tab, return `(tab_id, ClosedTab)` before closing it.
+    pub(crate) fn sole_pane_closed_tab(&self, id: PaneId) -> Option<(u64, ClosedTab)> {
+        let index = self
+            .tabs
+            .iter()
+            .position(|t| matches!(t.root, Node::Leaf(leaf) if leaf == id))?;
+        let tab_id = self.tabs[index].id;
+        Some((tab_id, self.snapshot_closed_tab(index)?))
+    }
+
+    /// Reopen a previously closed tab, restoring its cwd (if it still exists) and titles.
+    pub(crate) fn reopen_closed_tab(
+        &mut self,
+        closed: &ClosedTab,
+        geo: &impl GridGeometry,
+        factory: &mut impl PaneFactory,
+    ) -> Option<PaneId> {
+        let (cols, rows) = geo.grid_size(geo.content_rect(self.tabs.len() + 1));
+        let id = self.alloc_id();
+        let tab_id = self.alloc_tab_id();
+        factory.set_tab_id(tab_id);
+        let cwd = closed.existing_cwd();
+        let mut pane = factory.spawn(id, cols, rows, cwd.clone()).or_else(|| {
+            cwd.as_ref()?;
+            factory.spawn(id, cols, rows, None)
+        })?;
+        pane.title.clone_from(&closed.pane_title);
+        self.panes.insert(id, pane);
+        self.tabs.push(Tab {
+            id: tab_id,
+            title: closed.tab_title.clone(),
+            root: Node::Leaf(id),
+            focused: id,
+        });
+        self.active = self.tabs.len() - 1;
+        self.zoomed = false;
+        Some(id)
+    }
+
+    /// Open a new tab from a prepared split tree whose leaf IDs are local slots, allocating fresh
+    /// pane IDs and a fresh tab ID. Returns the focused pane ID when at least one pane started.
+    pub(crate) fn open_layout_tab<F: PaneFactory>(
+        &mut self,
+        tab_title: Option<String>,
+        slot_root: Node,
+        focused_slot: PaneId,
+        mut spawn_slot: impl FnMut(PaneId, PaneId, usize, usize, &mut F) -> Option<Pane>,
+        geo: &impl GridGeometry,
+        factory: &mut F,
+    ) -> Option<PaneId> {
+        let tab_id = self.alloc_tab_id();
+        factory.set_tab_id(tab_id);
+        let mut mapping: Vec<(PaneId, PaneId)> = Vec::new();
+        let mapped_root = map_node_ids(&slot_root, &mut |slot| {
+            let fresh = self.alloc_id();
+            mapping.push((slot, fresh));
+            fresh
+        });
+        let focused = mapping
+            .iter()
+            .find(|(slot, _)| *slot == focused_slot)
+            .map(|(_, fresh)| *fresh)
+            .unwrap_or_else(|| mapped_root.leaves()[0]);
+
+        let tab_count = self.tabs.len() + 1;
+        let panes = layout(&mapped_root, geo.content_rect(tab_count), geo.gap());
+        let mut root = Some(mapped_root);
+        for (fresh_id, rect) in panes {
+            let slot = mapping
+                .iter()
+                .find(|(_, fresh)| *fresh == fresh_id)
+                .map(|(slot, _)| *slot)
+                .expect("every mapped leaf has a slot");
+            let (cols, rows) = geo.grid_size(rect);
+            if let Some(pane) = spawn_slot(slot, fresh_id, cols, rows, factory) {
+                self.panes.insert(fresh_id, pane);
+            } else {
+                root = root.and_then(|node| node.remove(fresh_id));
+            }
+        }
+        let root = root?;
+        let focused = if root.contains(focused) {
+            focused
+        } else {
+            root.leaves()[0]
+        };
+        self.tabs.push(Tab {
+            id: tab_id,
+            title: tab_title,
+            root,
+            focused,
+        });
+        self.active = self.tabs.len() - 1;
+        self.zoomed = false;
+        Some(focused)
+    }
+
     /// The tab `step` tabs away from the active one, wrapping around; `None` with one tab.
     pub(crate) fn cycled_tab(&self, step: isize) -> Option<usize> {
         let n = self.tabs.len() as isize;
@@ -663,6 +789,18 @@ impl Workspace {
                 focused: self.focused_id(),
             },
         ))
+    }
+}
+
+fn map_node_ids(node: &Node, map: &mut impl FnMut(PaneId) -> PaneId) -> Node {
+    match node {
+        Node::Leaf(id) => Node::Leaf(map(*id)),
+        Node::Split { dir, ratio, a, b } => Node::Split {
+            dir: *dir,
+            ratio: *ratio,
+            a: Box::new(map_node_ids(a, map)),
+            b: Box::new(map_node_ids(b, map)),
+        },
     }
 }
 
@@ -1073,5 +1211,79 @@ mod tests {
         let removed = ws.close_others(plan, true).unwrap();
         assert_eq!(removed, vec![c]);
         assert!(ws.single_pane());
+    }
+
+    #[test]
+    fn move_active_tab_left_right_and_reopen_closed_tab() {
+        use crate::session::closed::ClosedTabs;
+
+        #[derive(Default)]
+        struct CwdShells {
+            cwds: Vec<(PaneId, Option<PathBuf>)>,
+        }
+        impl PaneFactory for CwdShells {
+            fn spawn(
+                &mut self,
+                id: PaneId,
+                cols: usize,
+                rows: usize,
+                cwd: Option<PathBuf>,
+            ) -> Option<Pane> {
+                self.cwds.push((id, cwd));
+                Some(Pane::new(
+                    id,
+                    Terminal::new(cols, rows, |_| {}),
+                    None,
+                    (cols, rows),
+                ))
+            }
+        }
+
+        let tmp = std::env::temp_dir().canonicalize().unwrap();
+        let mut ws = Workspace::new();
+        let mut shells = CwdShells::default();
+        let p1 = ws.new_tab(&BIG, &mut shells).unwrap();
+        ws.rename_tab(0, Some("First".into()));
+        let p2 = ws.new_tab(&BIG, &mut shells).unwrap();
+        ws.rename_tab(1, Some("Second · الثاني".into()));
+        ws.pane_mut(p2).unwrap().meta.cwd = Some(tmp.clone());
+        ws.pane_mut(p2).unwrap().title = Some("shell-2".into());
+        let p3 = ws.new_tab(&BIG, &mut shells).unwrap();
+        ws.rename_tab(2, Some("Third".into()));
+        let _ = (p1, p3);
+
+        // Active is tab 2 ("Third"). Moving right at the right edge is a no-op.
+        assert!(!ws.move_active_tab_by(1));
+        assert!(ws.move_active_tab_by(-1));
+        assert_eq!(ws.active(), 1);
+        assert_eq!(ws.tabs()[1].title.as_deref(), Some("Third"));
+        assert!(ws.move_active_tab_by(-1));
+        assert_eq!(ws.active(), 0);
+        assert_eq!(ws.tabs()[0].title.as_deref(), Some("Third"));
+        // Moving left at the left edge is a no-op.
+        assert!(!ws.move_active_tab_by(-1));
+        assert!(ws.move_active_tab_by(1));
+        assert_eq!(ws.active(), 1);
+        assert_eq!(ws.tabs()[1].title.as_deref(), Some("Third"));
+
+        // Close tab 2 ("Second · الثاني") via sole-pane close and reopen it.
+        let mut closed_tabs = ClosedTabs::new();
+        let (_, snap) = ws.sole_pane_closed_tab(p2).unwrap();
+        ws.close_pane(p2).unwrap();
+        closed_tabs.push(snap);
+        assert_eq!(ws.tabs().len(), 2);
+
+        let reopened_snap = closed_tabs.pop().unwrap();
+        let reopened_id = ws
+            .reopen_closed_tab(&reopened_snap, &BIG, &mut shells)
+            .unwrap();
+        assert_eq!(ws.tabs().len(), 3);
+        assert_eq!(ws.active(), 2);
+        assert_eq!(ws.tabs()[2].title.as_deref(), Some("Second · الثاني"));
+        assert_eq!(
+            ws.pane(reopened_id).unwrap().title.as_deref(),
+            Some("shell-2")
+        );
+        assert_eq!(shells.cwds.last().unwrap().1.as_ref(), Some(&tmp));
     }
 }

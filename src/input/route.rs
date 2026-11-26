@@ -17,6 +17,9 @@ impl InputAction {
                 | InputAction::JumpUnread
                 | InputAction::NextTab
                 | InputAction::PrevTab
+                | InputAction::MoveTabLeft
+                | InputAction::MoveTabRight
+                | InputAction::ReopenClosedTab
                 | InputAction::SplitRight
                 | InputAction::SplitDown
                 | InputAction::Focus(_)
@@ -37,7 +40,12 @@ pub(crate) fn shortcut_is_idle(
 ) -> bool {
     match shortcut {
         Some(InputAction::Focus(_)) => single_pane,
-        Some(InputAction::NextTab | InputAction::PrevTab) => tab_count < 2,
+        Some(
+            InputAction::NextTab
+            | InputAction::PrevTab
+            | InputAction::MoveTabLeft
+            | InputAction::MoveTabRight,
+        ) => tab_count < 2,
         Some(InputAction::PrevBlock | InputAction::NextBlock | InputAction::CopyBlockOutput) => {
             !blocks_navigable
         }
