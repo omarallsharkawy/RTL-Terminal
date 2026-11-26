@@ -9,12 +9,19 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use twitty_core::redact::redact;
 
+use crate::commands::{
+    compute_frequent_commands, FrequentCommand, AUTO_COMMAND_SOURCE,
+    DEFAULT_FREQUENT_COMMAND_LIMIT, DEFAULT_MIN_COMMAND_RUNS,
+};
+use crate::env::{detect_project_env, AUTO_ENV_SOURCE};
 use crate::error::StoreError;
-use crate::fts::escape_fts5_query;
+use crate::fts::{escape_fts5_or_query, escape_fts5_query};
 use crate::migrations::{
     apply_migrations, read_user_version, Migration, CURRENT_SCHEMA_VERSION, MIGRATIONS,
 };
 use crate::paths::{default_db_path, prepare_db_path, tighten_sidecar_permissions};
+use crate::project::is_path_excluded;
+use crate::rules::{inspect_rules_files_with_approvals, RulesApproval, RulesFileInfo};
 
 /// Maximum rows returned by any single query.
 const MAX_QUERY_LIMIT: usize = 1000;
@@ -123,6 +130,24 @@ pub struct DriveIndexEntry {
     pub title: String,
     pub updated_at: i64,
     pub hash: String,
+}
+
+/// Counts removed by [`Store::forget_project`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ForgetReport {
+    pub memories_deleted: usize,
+    pub rules_approvals_deleted: usize,
+    pub history_deleted: usize,
+}
+
+/// Off-thread snapshot of everything shown in the Project Memory screen for one project.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProjectMemorySnapshot {
+    pub project_root: String,
+    pub excluded: bool,
+    pub rules_files: Vec<RulesFileInfo>,
+    pub entries: Vec<MemoryEntry>,
+    pub frequent_commands: Vec<FrequentCommand>,
 }
 
 /// Local SQLite storage engine.
@@ -538,6 +563,384 @@ impl Store {
             }
         }
         Ok(out)
+    }
+
+    /// List memories for `project_root`, optionally filtered by `kind` and approval status,
+    /// newest-updated first.
+    pub fn list_memory_by_kind(
+        &self,
+        project_root: &str,
+        kind: Option<MemoryKind>,
+        approved_only: bool,
+        limit: usize,
+    ) -> Result<Vec<MemoryEntry>, StoreError> {
+        let limit = limit.min(MAX_QUERY_LIMIT);
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let mut out = Vec::new();
+        match (kind, approved_only) {
+            (Some(k), true) => {
+                let mut stmt = self.conn.prepare(
+                    "SELECT id, project_root, kind, text, source, created_at, updated_at, approved
+                       FROM memory
+                      WHERE project_root = ?1 AND kind = ?2 AND approved = 1
+                      ORDER BY updated_at DESC, id DESC
+                      LIMIT ?3",
+                )?;
+                let rows =
+                    stmt.query_map(params![project_root, k.as_str(), limit as i64], map_memory)?;
+                for row in rows {
+                    out.push(row?);
+                }
+            }
+            (Some(k), false) => {
+                let mut stmt = self.conn.prepare(
+                    "SELECT id, project_root, kind, text, source, created_at, updated_at, approved
+                       FROM memory
+                      WHERE project_root = ?1 AND kind = ?2
+                      ORDER BY approved ASC, updated_at DESC, id DESC
+                      LIMIT ?3",
+                )?;
+                let rows =
+                    stmt.query_map(params![project_root, k.as_str(), limit as i64], map_memory)?;
+                for row in rows {
+                    out.push(row?);
+                }
+            }
+            (None, approved_only) => {
+                return self.list_memory(project_root, approved_only, limit);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Full-text search over approved `memory` rows for `project_root`, optionally filtered by
+    /// `kind`, ordered deterministically by BM25 score then `updated_at DESC, id DESC`.
+    pub fn search_approved_memory(
+        &self,
+        project_root: &str,
+        query: &str,
+        kind: Option<MemoryKind>,
+        limit: usize,
+    ) -> Result<Vec<MemoryEntry>, StoreError> {
+        let limit = limit.min(MAX_QUERY_LIMIT);
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let Some(fts_query) = escape_fts5_or_query(query) else {
+            return Ok(Vec::new());
+        };
+        let mut out = Vec::new();
+        if let Some(k) = kind {
+            let mut stmt = self.conn.prepare(
+                "SELECT m.id, m.project_root, m.kind, m.text, m.source,
+                        m.created_at, m.updated_at, m.approved
+                   FROM memory_fts f
+                   JOIN memory m ON m.id = f.rowid
+                  WHERE memory_fts MATCH ?1
+                    AND m.project_root = ?2
+                    AND m.approved = 1
+                    AND m.kind = ?3
+                  ORDER BY bm25(memory_fts), m.updated_at DESC, m.id DESC
+                  LIMIT ?4",
+            )?;
+            let rows = stmt.query_map(
+                params![fts_query, project_root, k.as_str(), limit as i64],
+                map_memory,
+            )?;
+            for row in rows {
+                out.push(row?);
+            }
+        } else {
+            let mut stmt = self.conn.prepare(
+                "SELECT m.id, m.project_root, m.kind, m.text, m.source,
+                        m.created_at, m.updated_at, m.approved
+                   FROM memory_fts f
+                   JOIN memory m ON m.id = f.rowid
+                  WHERE memory_fts MATCH ?1
+                    AND m.project_root = ?2
+                    AND m.approved = 1
+                  ORDER BY bm25(memory_fts), m.updated_at DESC, m.id DESC
+                  LIMIT ?3",
+            )?;
+            let rows =
+                stmt.query_map(params![fts_query, project_root, limit as i64], map_memory)?;
+            for row in rows {
+                out.push(row?);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Delete all stored memories, rules-file approvals, and project-scoped history for
+    /// `project_root` in one transaction ("Forget this project").
+    pub fn forget_project(&self, project_root: &str) -> Result<ForgetReport, StoreError> {
+        self.with_tx(|| {
+            let memories_deleted = self.conn.execute(
+                "DELETE FROM memory WHERE project_root = ?1",
+                params![project_root],
+            )?;
+            let rules_approvals_deleted = self.conn.execute(
+                "DELETE FROM rules_file_approvals WHERE project_root = ?1",
+                params![project_root],
+            )?;
+            let history_deleted = self.conn.execute(
+                "DELETE FROM history WHERE project_root = ?1",
+                params![project_root],
+            )?;
+            Ok(ForgetReport {
+                memories_deleted,
+                rules_approvals_deleted,
+                history_deleted,
+            })
+        })
+    }
+
+    // ---- Project rules-file approvals ----
+
+    /// Record or update the user's approval of `rel_path` under `project_root` for `sha256`.
+    pub fn approve_rules_file(
+        &self,
+        project_root: &str,
+        rel_path: &str,
+        sha256: &str,
+    ) -> Result<(), StoreError> {
+        if project_root.is_empty() || rel_path.is_empty() || sha256.is_empty() {
+            return Err(StoreError::InvalidInput(
+                "rules approval requires non-empty project_root, rel_path, and sha256",
+            ));
+        }
+        let project_root = redact(project_root);
+        let rel_path = redact(rel_path);
+        let sha256 = redact(sha256);
+        let now = now_epoch_ms();
+        self.conn.execute(
+            "INSERT INTO rules_file_approvals (project_root, rel_path, sha256, approved_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(project_root, rel_path) DO UPDATE SET
+                sha256 = excluded.sha256,
+                approved_at = excluded.approved_at",
+            params![
+                project_root.as_ref(),
+                rel_path.as_ref(),
+                sha256.as_ref(),
+                now
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Revoke a previously stored rules-file approval. Returns `true` if a row was removed.
+    pub fn revoke_rules_file(
+        &self,
+        project_root: &str,
+        rel_path: &str,
+    ) -> Result<bool, StoreError> {
+        let changed = self.conn.execute(
+            "DELETE FROM rules_file_approvals WHERE project_root = ?1 AND rel_path = ?2",
+            params![project_root, rel_path],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// List all stored rules-file approvals for `project_root`.
+    pub fn list_rules_approvals(
+        &self,
+        project_root: &str,
+    ) -> Result<Vec<RulesApproval>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT project_root, rel_path, sha256, approved_at
+               FROM rules_file_approvals
+              WHERE project_root = ?1
+              ORDER BY rel_path ASC",
+        )?;
+        let rows = stmt.query_map(params![project_root], |row| {
+            Ok(RulesApproval {
+                project_root: row.get(0)?,
+                rel_path: row.get(1)?,
+                sha256: row.get(2)?,
+                approved_at: row.get(3)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// Inspect candidate rules files in `project_root` against stored SHA-256 approvals.
+    ///
+    /// Only files whose current SHA-256 matches a stored approval have `approved_content`
+    /// populated; changed files silently lapse to [`crate::RulesFileState::Changed`].
+    pub fn inspect_rules_files(
+        &self,
+        project_root: &Path,
+    ) -> Result<Vec<RulesFileInfo>, StoreError> {
+        let key = project_root.to_string_lossy();
+        let approvals = self.list_rules_approvals(&key)?;
+        Ok(inspect_rules_files_with_approvals(project_root, &approvals))
+    }
+
+    // ---- Environment notes & frequent commands ----
+
+    /// Refresh auto-detected environment notes (`kind = 'env'`, `source = 'auto:env'`) for
+    /// `project_root` while preserving user-written environment notes.
+    pub fn refresh_env_notes(&self, project_root: &Path) -> Result<Vec<MemoryEntry>, StoreError> {
+        let key = project_root.to_string_lossy().into_owned();
+        let detected = detect_project_env(project_root);
+        let existing = self.list_memory_by_kind(&key, Some(MemoryKind::Env), false, 100)?;
+        let existing_auto: Vec<&str> = existing
+            .iter()
+            .filter(|e| e.source == AUTO_ENV_SOURCE)
+            .map(|e| e.text.as_str())
+            .collect();
+        let detected_texts: Vec<&str> = detected.iter().map(|n| n.text.as_str()).collect();
+        let unchanged = existing_auto.len() == detected_texts.len()
+            && detected_texts.iter().all(|t| existing_auto.contains(t));
+        if !unchanged {
+            let project_redacted = redact(&key);
+            let now = now_epoch_ms();
+            self.with_tx(|| {
+                self.conn.execute(
+                    "DELETE FROM memory
+                      WHERE project_root = ?1 AND kind = 'env' AND source = ?2",
+                    params![project_redacted.as_ref(), AUTO_ENV_SOURCE],
+                )?;
+                for note in &detected {
+                    let text = redact(&note.text);
+                    self.conn.execute(
+                        "INSERT INTO memory
+                            (project_root, kind, text, source, created_at, updated_at, approved)
+                         VALUES (?1, 'env', ?2, ?3, ?4, ?5, 1)",
+                        params![
+                            project_redacted.as_ref(),
+                            text.as_ref(),
+                            AUTO_ENV_SOURCE,
+                            now,
+                            now,
+                        ],
+                    )?;
+                }
+                Ok(())
+            })?;
+        }
+        self.list_memory_by_kind(&key, Some(MemoryKind::Env), false, 100)
+    }
+
+    /// Compute frequent commands with success rates from `history` for `project_root`.
+    pub fn frequent_commands(
+        &self,
+        project_root: &str,
+        min_runs: usize,
+        limit: usize,
+    ) -> Result<Vec<FrequentCommand>, StoreError> {
+        let history = self.recent_history(Some(project_root), MAX_QUERY_LIMIT)?;
+        Ok(compute_frequent_commands(&history, min_runs, limit))
+    }
+
+    /// Recompute frequent commands from `history` and sync `kind = 'command'`,
+    /// `source = 'auto:history'` rows in `memory` (leaving user-authored command rows intact).
+    pub fn sync_frequent_commands(
+        &self,
+        project_root: &str,
+        min_runs: usize,
+        limit: usize,
+    ) -> Result<Vec<MemoryEntry>, StoreError> {
+        let frequent = self.frequent_commands(project_root, min_runs, limit)?;
+        let notes: Vec<String> = frequent.iter().map(FrequentCommand::format_note).collect();
+        let existing =
+            self.list_memory_by_kind(project_root, Some(MemoryKind::Command), false, 100)?;
+        let existing_auto: Vec<&str> = existing
+            .iter()
+            .filter(|e| e.source == AUTO_COMMAND_SOURCE)
+            .map(|e| e.text.as_str())
+            .collect();
+        let unchanged = existing_auto.len() == notes.len()
+            && notes.iter().all(|t| existing_auto.contains(&t.as_str()));
+        if !unchanged {
+            let project_redacted = redact(project_root);
+            let now = now_epoch_ms();
+            self.with_tx(|| {
+                self.conn.execute(
+                    "DELETE FROM memory
+                      WHERE project_root = ?1 AND kind = 'command' AND source = ?2",
+                    params![project_redacted.as_ref(), AUTO_COMMAND_SOURCE],
+                )?;
+                for text in &notes {
+                    let text = redact(text);
+                    self.conn.execute(
+                        "INSERT INTO memory
+                            (project_root, kind, text, source, created_at, updated_at, approved)
+                         VALUES (?1, 'command', ?2, ?3, ?4, ?5, 1)",
+                        params![
+                            project_redacted.as_ref(),
+                            text.as_ref(),
+                            AUTO_COMMAND_SOURCE,
+                            now,
+                            now,
+                        ],
+                    )?;
+                }
+                Ok(())
+            })?;
+        }
+        self.list_memory_by_kind(project_root, Some(MemoryKind::Command), false, 100)
+    }
+
+    /// Load a complete [`ProjectMemorySnapshot`] for the Memory screen.
+    ///
+    /// When `project_root` matches `excludes`, nothing is refreshed or returned from the store.
+    pub fn load_project_snapshot(
+        &self,
+        project_root: &Path,
+        excludes: &[String],
+    ) -> Result<ProjectMemorySnapshot, StoreError> {
+        let key = project_root.to_string_lossy().into_owned();
+        if is_path_excluded(project_root, excludes) {
+            return Ok(ProjectMemorySnapshot {
+                project_root: key,
+                excluded: true,
+                rules_files: Vec::new(),
+                entries: Vec::new(),
+                frequent_commands: Vec::new(),
+            });
+        }
+        let _ = self.refresh_env_notes(project_root);
+        let frequent_commands = self.frequent_commands(
+            &key,
+            DEFAULT_MIN_COMMAND_RUNS,
+            DEFAULT_FREQUENT_COMMAND_LIMIT,
+        )?;
+        let _ = self.sync_frequent_commands(
+            &key,
+            DEFAULT_MIN_COMMAND_RUNS,
+            DEFAULT_FREQUENT_COMMAND_LIMIT,
+        );
+        let rules_files = self.inspect_rules_files(project_root)?;
+        let entries = self.list_memory(&key, false, MAX_QUERY_LIMIT)?;
+        Ok(ProjectMemorySnapshot {
+            project_root: key,
+            excluded: false,
+            rules_files,
+            entries,
+            frequent_commands,
+        })
+    }
+
+    fn with_tx<T>(&self, f: impl FnOnce() -> Result<T, StoreError>) -> Result<T, StoreError> {
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
+        match f() {
+            Ok(val) => {
+                self.conn.execute_batch("COMMIT")?;
+                Ok(val)
+            }
+            Err(err) => {
+                let _ = self.conn.execute_batch("ROLLBACK");
+                Err(err)
+            }
+        }
     }
 
     // ---- Drive index ----

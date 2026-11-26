@@ -290,7 +290,9 @@ impl SettingsDrawer<'_, '_> {
                     | SettingsHit::PickerToggle(id)
             ) if id == row.id
         ) || (row.id == SettingId::UiAccent
-            && matches!(self.view.state.hover, Some(SettingsHit::Swatch(_))));
+            && matches!(self.view.state.hover, Some(SettingsHit::Swatch(_))))
+            || (row.id == SettingId::ProjectMemory
+                && self.view.state.hover == Some(SettingsHit::OpenMemory));
 
         if focused {
             self.shapes.push(Shape::RoundedRect {
@@ -397,6 +399,30 @@ impl SettingsDrawer<'_, '_> {
                     .as_ref()
                     .is_some_and(|e| e.setting == row.id);
                 self.draw_picker_button(row.id, *button, expanded, clip);
+            }
+            (ControlKind::ActionButton, ControlGeometry::ActionButton { button }) => {
+                let hovered = row.id == SettingId::ProjectMemory
+                    && self.view.state.hover == Some(SettingsHit::OpenMemory);
+                self.shapes.push(Shape::RoundedRect {
+                    rect: *button,
+                    radii: [s.px(RADIUS_6); 4],
+                    fill: self.ctx.color(if hovered { s.bg3 } else { s.bg0 }),
+                    border: Some(Border {
+                        width: s.px(1.0),
+                        color: self.ctx.color(if hovered { s.accent } else { s.border }),
+                    }),
+                    shadow: None,
+                });
+                let text = self.lang().text("Open…", "فتح…");
+                self.push_label(
+                    *button,
+                    text,
+                    UiSize::Caption,
+                    UiWeight::Semibold,
+                    UiAlign::Center,
+                    s.text,
+                    Some(clip),
+                );
             }
             _ => {}
         }
@@ -1712,8 +1738,10 @@ impl SettingsDrawer<'_, '_> {
 
     fn draw_ai(&mut self) {
         use crate::ui::settings_ai::{
-            AiTextField, API_PROVIDERS, DEFAULT_PROVIDER_CHOICES, HARD_DENY_SUMMARY, RULES_FILES,
+            AiTextField, API_PROVIDERS, DEFAULT_PROVIDER_CHOICES, HARD_DENY_SUMMARY,
         };
+        // Draw the top Project Memory action row (n21) first.
+        self.draw_controls();
         let Some(ai) = self.layout.ai.clone() else {
             return;
         };
@@ -2232,64 +2260,6 @@ impl SettingsDrawer<'_, '_> {
                     self.shapes,
                 );
             }
-        }
-
-        // Per-project rules file approvals.
-        if let Some(&(_, first_rule)) = ai.rules_toggles.first() {
-            let hdr = Rect::new(vp.x, first_rule.y - s.px(22.0), vp.w, s.px(18.0));
-            if in_vp(hdr) {
-                self.push_label(
-                    hdr,
-                    self.lang().text(
-                        "Approved project rules files",
-                        "ملفات قواعد المشروع المعتمدة",
-                    ),
-                    UiSize::Caption,
-                    UiWeight::Semibold,
-                    self.start_align(),
-                    s.text,
-                    Some(clip),
-                );
-            }
-        }
-        for &(idx, r) in &ai.rules_toggles {
-            if !in_vp(r) {
-                continue;
-            }
-            let file = RULES_FILES[idx];
-            let approved = state.is_rules_file_approved(file, cfg);
-            self.shapes.push(Shape::RoundedRect {
-                rect: r,
-                radii: [s.px(RADIUS_6); 4],
-                fill: self.ctx.color(if approved {
-                    s.accent_tint(s.bg2)
-                } else {
-                    s.bg2
-                }),
-                border: Some(Border {
-                    width: s.hairline(),
-                    color: self.ctx.color(if approved { s.accent } else { s.border }),
-                }),
-                shadow: None,
-            });
-            let txt = if approved {
-                format!("✓ {file}")
-            } else {
-                file.to_owned()
-            };
-            self.push_label(
-                r,
-                &txt,
-                UiSize::Small,
-                if approved {
-                    UiWeight::Semibold
-                } else {
-                    UiWeight::Regular
-                },
-                UiAlign::Center,
-                if approved { s.text } else { s.text_dim },
-                Some(clip),
-            );
         }
 
         // Read-only deny-list view.

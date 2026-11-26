@@ -12,9 +12,9 @@ use std::thread;
 use std::time::Instant;
 
 use alacritty_terminal::term::TermMode;
-use twitty_ai::engine::model::{AgentCommand, AgentEvent, SessionId, StepId};
+use twitty_ai::context::{AssembleInput, SelectedBlock, DEFAULT_BUDGET_TOKENS};
+use twitty_ai::engine::model::{AgentCommand, AgentEvent, ContextBundle, SessionId, StepId};
 use twitty_core::redact::redact;
-use twitty_store::{MemoryKind, NewMemory};
 use winit::event::{KeyEvent, MouseButton};
 use winit::keyboard::PhysicalKey;
 use winit::window::CursorIcon;
@@ -52,6 +52,7 @@ pub(super) struct AgentPanelHost {
     running_cmd: Option<RunningAgentCommand>,
     waiting_status_pane: Option<PaneId>,
     dragging_divider: bool,
+    context_generation: u64,
 }
 
 impl Default for AgentPanelHost {
@@ -69,6 +70,7 @@ impl AgentPanelHost {
             running_cmd: None,
             waiting_status_pane: None,
             dragging_divider: false,
+            context_generation: 0,
         }
     }
 }
@@ -93,6 +95,7 @@ impl App {
         self.window
             .set_agent_panel_open(true, self.agent_panel.state.custom_width);
         self.apply_layout();
+        self.refresh_agent_context();
         self.sync_agent_needs_input();
         self.cursor_blink.reset(Instant::now());
         self.window.request_redraw();
@@ -168,6 +171,121 @@ impl App {
                 self.agent_panel.cmd_tx = None;
             }
         }
+    }
+
+    /// Receive an off-thread assembled [`ContextBundle`] for the Agent panel inspector.
+    pub(super) fn on_agent_context_assembled(&mut self, generation: u64, bundle: ContextBundle) {
+        if generation != self.agent_panel.context_generation {
+            return;
+        }
+        self.agent_panel.state.set_context_bundle(bundle);
+        self.window.request_redraw();
+    }
+
+    /// Collect the focused local pane's selected block (or up to 2 recent finished blocks)
+    /// for `twitty_ai::context::assemble`.
+    fn collect_agent_selected_blocks(&self) -> Vec<SelectedBlock> {
+        let Some(id) = self.focused_id() else {
+            return Vec::new();
+        };
+        let Some(pane) = self.ws.pane(id) else {
+            return Vec::new();
+        };
+        if pane.remote.is_some() {
+            return Vec::new();
+        }
+        let ids: Vec<u64> = if let Some(sel) = pane.blocks.selected() {
+            vec![sel.id()]
+        } else {
+            pane.blocks
+                .blocks()
+                .rev()
+                .filter(|b| b.finished.is_some())
+                .take(2)
+                .map(|b| b.id())
+                .collect()
+        };
+        ids.into_iter()
+            .filter_map(|bid| pane.blocks.block_text_by_id(bid, &pane.terminal))
+            .map(|bt| SelectedBlock {
+                command: bt.command,
+                exit_code: bt.exit,
+                output: bt.output,
+            })
+            .collect()
+    }
+
+    /// Re-assemble the panel's [`ContextBundle`] off the UI thread using `twitty_ai::context::assemble`,
+    /// honoring `config.memory_exclude` and the user's inspector `context_overrides`.
+    fn refresh_agent_context(&mut self) {
+        self.agent_panel.context_generation = self.agent_panel.context_generation.wrapping_add(1);
+        let generation = self.agent_panel.context_generation;
+        let cwd = (!self.agent_panel.state.cwd.as_os_str().is_empty())
+            .then(|| self.agent_panel.state.cwd.clone());
+        let request = self.agent_panel.state.composer.text().to_owned();
+        let excludes = self.config.memory_exclude.clone();
+        let selected_blocks = self.collect_agent_selected_blocks();
+        let overrides = self.agent_panel.state.context_overrides.clone();
+        let proxy = self.proxy.clone();
+        let _ = thread::Builder::new()
+            .name("twitty-agent-context".into())
+            .spawn(move || {
+                let store = twitty_store::Store::open_default().ok();
+                let bundle = twitty_ai::context::assemble(&AssembleInput {
+                    cwd: cwd.as_deref(),
+                    project_root: None,
+                    request: &request,
+                    budget_tokens: DEFAULT_BUDGET_TOKENS,
+                    memory_exclude: &excludes,
+                    store: store.as_ref(),
+                    selected_blocks: &selected_blocks,
+                    included_overrides: &overrides,
+                });
+                let _ = proxy.send_event(AppEvent::AgentContext(generation, bundle));
+            });
+    }
+
+    /// Assemble a fresh [`ContextBundle`] for `AgentCommand::Start` off the UI thread using
+    /// `twitty_ai::context::assemble` (including the prompt's FTS5 query and inspector toggles),
+    /// update the inspector snapshot, and deliver `Start` to the engine.
+    fn send_agent_start_with_assembled_context(
+        &mut self,
+        session: SessionId,
+        request: String,
+        cwd: PathBuf,
+    ) {
+        let Some(tx) = self.ensure_agent_engine() else {
+            return;
+        };
+        self.agent_panel.context_generation = self.agent_panel.context_generation.wrapping_add(1);
+        let generation = self.agent_panel.context_generation;
+        let cwd_opt = (!cwd.as_os_str().is_empty()).then(|| cwd.clone());
+        let excludes = self.config.memory_exclude.clone();
+        let selected_blocks = self.collect_agent_selected_blocks();
+        let overrides = self.agent_panel.state.context_overrides.clone();
+        let proxy = self.proxy.clone();
+        let _ = thread::Builder::new()
+            .name("twitty-agent-start-context".into())
+            .spawn(move || {
+                let store = twitty_store::Store::open_default().ok();
+                let context = twitty_ai::context::assemble(&AssembleInput {
+                    cwd: cwd_opt.as_deref(),
+                    project_root: None,
+                    request: &request,
+                    budget_tokens: DEFAULT_BUDGET_TOKENS,
+                    memory_exclude: &excludes,
+                    store: store.as_ref(),
+                    selected_blocks: &selected_blocks,
+                    included_overrides: &overrides,
+                });
+                let _ = proxy.send_event(AppEvent::AgentContext(generation, context.clone()));
+                let _ = tx.send(AgentCommand::Start {
+                    session,
+                    request,
+                    context,
+                    cwd,
+                });
+            });
     }
 
     /// Receive an [`AgentEvent`] forwarded from the engine thread.
@@ -388,9 +506,21 @@ impl App {
                 self.agent_panel.dragging_divider = true;
                 return;
             }
+            AgentPanelAction::SendCommand(AgentCommand::Start {
+                session,
+                request,
+                cwd,
+                ..
+            }) => {
+                self.send_agent_start_with_assembled_context(session, request, cwd);
+                self.sync_agent_needs_input();
+            }
             AgentPanelAction::SendCommand(cmd) => {
                 self.send_agent_command(cmd);
                 self.sync_agent_needs_input();
+            }
+            AgentPanelAction::RefreshContext => {
+                self.refresh_agent_context();
             }
             AgentPanelAction::CopyText(text) => {
                 self.clipboard.set_text(text);
@@ -411,7 +541,13 @@ impl App {
                 project_root,
                 text,
             } => {
-                self.persist_agent_fact(project_root, text);
+                let root = project_root.or_else(|| {
+                    (!self.agent_panel.state.cwd.as_os_str().is_empty())
+                        .then(|| self.agent_panel.state.cwd.clone())
+                });
+                if self.remember_fact(root.as_deref(), &text) {
+                    self.refresh_agent_context();
+                }
             }
         }
         self.window.request_redraw();
@@ -568,37 +704,6 @@ impl App {
         }
         self.agent_panel.state.set_focused(false);
         self.window.request_redraw();
-    }
-
-    /// Persist a user-approved `FactSuggestion` to `twitty-store` off the UI thread.
-    ///
-    /// TODO(lane-n21): forward through lane n21's higher-level project memory API once merged.
-    fn persist_agent_fact(&self, project_root: Option<PathBuf>, text: String) {
-        let root = project_root
-            .or_else(|| {
-                (!self.agent_panel.state.cwd.as_os_str().is_empty())
-                    .then(|| self.agent_panel.state.cwd.clone())
-            })
-            .map(|p| p.display().to_string())
-            .unwrap_or_default();
-        if root.is_empty() || text.trim().is_empty() {
-            return;
-        }
-        let store = self.store.clone();
-        let entry = NewMemory {
-            project_root: root,
-            kind: MemoryKind::Fact,
-            text: redact(&text).into_owned(),
-            source: "agent".to_owned(),
-            approved: true,
-        };
-        let _ = thread::Builder::new()
-            .name("twitty-agent-memory".into())
-            .spawn(move || {
-                if let Err(err) = store.create_memory(entry) {
-                    tracing::warn!("twitty agent failed to remember fact: {err}");
-                }
-            });
     }
 
     /// Keep pane header and sidebar card "Needs input" status in sync with waiting agent cards.

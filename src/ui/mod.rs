@@ -5,6 +5,7 @@ pub mod chrome;
 pub mod clipboard;
 pub mod git_diff;
 pub mod hit;
+pub mod memory_panel;
 pub mod motion;
 pub mod notifications;
 pub mod palette;

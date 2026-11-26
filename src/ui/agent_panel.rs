@@ -161,6 +161,20 @@ pub fn paragraph_is_rtl(text: &str) -> bool {
     false
 }
 
+/// Format an Arabic noun with proper number agreement:
+/// - `1` → `one` (e.g. `"ذكرى واحدة"`, `"كتلة واحدة"`)
+/// - `2` → `two` (e.g. `"ذكريان"`, `"كتلتان"`)
+/// - `n % 100` in `3..=10` → `"{n} {few}"` (e.g. `"3 ذكريات"`, `"10 كتل"`)
+/// - otherwise (`0`, `11+`, `100`, `101`, `102`, ...) → `"{n} {many}"` (e.g. `"11 ذكرى"`, `"12 كتلة"`)
+pub fn arabic_count(n: usize, one: &str, two: &str, few: &str, many: &str) -> String {
+    match n {
+        1 => one.to_owned(),
+        2 => two.to_owned(),
+        n if (3..=10).contains(&(n % 100)) => format!("{n} {few}"),
+        n => format!("{n} {many}"),
+    }
+}
+
 /// Format token count and optional USD cost for the header pill.
 pub fn format_usage_pill(usage: Usage, language: UiLanguage) -> Option<String> {
     let total_tokens = usage.input_tokens.saturating_add(usage.output_tokens);
@@ -174,7 +188,6 @@ pub fn format_usage_pill(usage: Usage, language: UiLanguage) -> Option<String> {
     } else {
         total_tokens.to_string()
     };
-    let tok_unit = language.text("tok", "رمز");
     match (language, usage.cost_micros_usd) {
         (UiLanguage::English, Some(micros)) => {
             let usd = micros as f64 / 1_000_000.0;
@@ -193,7 +206,20 @@ pub fn format_usage_pill(usage: Usage, language: UiLanguage) -> Option<String> {
                 Some(format!("{tok_label} · ${usd:.4}"))
             }
         }
-        (_, None) => Some(format!("{tok_label} {tok_unit}")),
+        (UiLanguage::English, None) => Some(format!("{tok_label} tok")),
+        (UiLanguage::Arabic, None) => {
+            if total_tokens < 1_000 {
+                Some(arabic_count(
+                    total_tokens as usize,
+                    "رمز واحد",
+                    "رمزان",
+                    "رموز",
+                    "رمز",
+                ))
+            } else {
+                Some(format!("{tok_label} رمز"))
+            }
+        }
     }
 }
 
@@ -254,20 +280,32 @@ pub fn format_context_strip(bundle: &ContextBundle, language: UiLanguage) -> Str
                 if rules == 1 {
                     parts.push("القواعد".to_owned());
                 } else {
-                    parts.push(format!("{rules} قواعد"));
+                    parts.push(arabic_count(
+                        rules,
+                        "قاعدة واحدة",
+                        "قاعدتان",
+                        "قواعد",
+                        "قاعدة",
+                    ));
                 }
             }
             if memories > 0 {
-                parts.push(format!("{memories} ذكريات"));
+                parts.push(arabic_count(
+                    memories,
+                    "ذكرى واحدة",
+                    "ذكريان",
+                    "ذكريات",
+                    "ذكرى",
+                ));
             }
             if blocks > 0 {
-                parts.push(format!("{blocks} كتل"));
+                parts.push(arabic_count(blocks, "كتلة واحدة", "كتلتان", "كتل", "كتلة"));
             }
             if files > 0 {
-                parts.push(format!("{files} ملفات"));
+                parts.push(arabic_count(files, "ملف واحد", "ملفان", "ملفات", "ملف"));
             }
             if parts.is_empty() {
-                "السياق · 0 عناصر".to_owned()
+                "السياق · لا عناصر".to_owned()
             } else {
                 parts.join(" · ")
             }
@@ -708,6 +746,8 @@ pub enum AgentPanelAction {
         project_root: Option<PathBuf>,
         text: String,
     },
+    /// User toggled a context inspector item; ask the app to re-assemble via `twitty_ai::context::assemble`.
+    RefreshContext,
     StartDividerDrag,
 }
 
@@ -741,6 +781,9 @@ pub struct AgentPanelState {
     history_draft: String,
     /// Context bundle provided by lane n21's assembler (displayed and toggled here).
     pub context: ContextBundle,
+    /// Per-item `included` overrides chosen in the context inspector (`label -> included`),
+    /// passed back to `twitty_ai::context::assemble` so unticking items frees token budget.
+    pub context_overrides: Vec<(String, bool)>,
     /// Whether the context inspector sheet is open over the panel.
     pub inspector_open: bool,
     pub inspector_selected: usize,
@@ -782,6 +825,7 @@ impl AgentPanelState {
             history_cursor: None,
             history_draft: String::new(),
             context: ContextBundle::default(),
+            context_overrides: Vec::new(),
             inspector_open: false,
             inspector_selected: 0,
             scroll_y: 0.0,
@@ -866,12 +910,41 @@ impl AgentPanelState {
     }
 
     pub fn set_project_context(&mut self, cwd: PathBuf) {
+        if self.cwd != cwd {
+            self.context_overrides.clear();
+        }
         self.project_name = cwd
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or_default()
             .to_owned();
         self.cwd = cwd;
+    }
+
+    /// Assemble (or re-assemble) the panel's [`ContextBundle`] via `twitty_ai::context::assemble`,
+    /// honoring the user's per-item inspector toggles (`self.context_overrides`).
+    pub fn assemble_context(
+        &mut self,
+        store: Option<&twitty_store::Store>,
+        request: &str,
+        selected_blocks: &[twitty_ai::context::SelectedBlock],
+        memory_exclude: &[String],
+        budget_tokens: u32,
+    ) -> ContextBundle {
+        let cwd = (!self.cwd.as_os_str().is_empty()).then_some(self.cwd.as_path());
+        let input = twitty_ai::context::AssembleInput {
+            cwd,
+            project_root: None,
+            request,
+            budget_tokens,
+            memory_exclude,
+            store,
+            selected_blocks,
+            included_overrides: &self.context_overrides,
+        };
+        let bundle = twitty_ai::context::assemble(&input);
+        self.set_context_bundle(bundle.clone());
+        bundle
     }
 
     /// Associate a terminal command block with a `CommandResult` step so "Open block" works.
@@ -1113,11 +1186,22 @@ impl AgentPanelState {
     }
 
     /// Toggle whether `index` in `context.items` is included in the next request.
+    ///
+    /// Records the override in `context_overrides` and returns [`AgentPanelAction::RefreshContext`]
+    /// so the app re-assembles through `twitty_ai::context::assemble` (freeing budget for lower-
+    /// priority memories or longer block tails).
     pub fn toggle_context_item(&mut self, index: usize) -> AgentPanelAction {
         if let Some(item) = self.context.items.get_mut(index) {
             item.included = !item.included;
+            let label = item.label.clone();
+            let included = item.included;
+            if let Some(entry) = self.context_overrides.iter_mut().find(|(l, _)| *l == label) {
+                entry.1 = included;
+            } else {
+                self.context_overrides.push((label, included));
+            }
             self.inspector_selected = index;
-            AgentPanelAction::Redraw
+            AgentPanelAction::RefreshContext
         } else {
             AgentPanelAction::None
         }

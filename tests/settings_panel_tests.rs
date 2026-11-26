@@ -653,7 +653,7 @@ fn keyboard_navigation_tab_shift_tab_sidebar_and_about_copy() {
     );
     assert_eq!(state.focus, FocusZone::Sidebar);
 
-    // ArrowDown in Sidebar cycles sections: Appearance -> Behaviour -> Ai -> Keys -> About.
+    // ArrowDown in Sidebar cycles sections: Appearance -> Behaviour -> AI -> Keys -> About.
     state.on_key(
         &Key::Named(NamedKey::ArrowDown),
         None,
@@ -1073,9 +1073,10 @@ fn overlay_renders_and_clips_underlying_terminal_text_in_dark_light_en_ar() {
         }
         assert!(overlay_count > 5, "expected settings labels inside panel");
 
-        // Also smoke-render Behaviour, Keys, and About sections without panicking.
+        // Also smoke-render Behaviour, AI, Keys, and About sections without panicking.
         for sec in [
             SettingsSection::Behaviour,
+            SettingsSection::Ai,
             SettingsSection::Keys,
             SettingsSection::About,
         ] {

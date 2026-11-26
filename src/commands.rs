@@ -40,6 +40,7 @@ commands! {
     "palette.open", "Command palette", "لوحة الأوامر", Some("Ctrl+Shift+P") => InputAction::CommandPalette;
     "composer.open", "Compose command", "اكتب أمر", Some("Ctrl+Shift+Space") => InputAction::ToggleComposer;
     "settings.open", "Settings", "الإعدادات", Some("Ctrl+,") => InputAction::Settings;
+    "memory.open", "Project memory", "ذاكرة المشروع", None => InputAction::ProjectMemory;
     "welcome.open", "Welcome", "الترحيب", None => InputAction::Welcome;
     "tab.new", "New tab", "تاب جديد", Some("Ctrl+Shift+T") => InputAction::NewTab;
     "tab.next", "Next tab", "التاب التالي", Some("Ctrl+Tab") => InputAction::NextTab;

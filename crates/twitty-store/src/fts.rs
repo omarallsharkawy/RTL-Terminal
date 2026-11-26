@@ -17,7 +17,19 @@ const MAX_TERM_BYTES: usize = 128;
 /// for prefix matching.
 ///
 /// Returns `None` when `input` contains no searchable alphanumeric tokens.
-pub fn escape_fts5_query(input: &str) -> Option<String> {
+/// Like [`escape_fts5_query`], joining terms with `OR` so natural-language AI requests retrieve
+/// relevant memories even when a memory matches only a subset of request keywords (BM25 still
+/// ranks multi-term matches highest).
+pub fn escape_fts5_or_query(input: &str) -> Option<String> {
+    let terms = collect_fts5_terms(input);
+    if terms.is_empty() {
+        None
+    } else {
+        Some(terms.join(" OR "))
+    }
+}
+
+fn collect_fts5_terms(input: &str) -> Vec<String> {
     let mut terms: Vec<String> = Vec::new();
     for raw in input.split_whitespace() {
         if terms.len() >= MAX_TERMS {
@@ -30,11 +42,7 @@ pub fn escape_fts5_query(input: &str) -> Option<String> {
         if !cleaned.chars().any(char::is_alphanumeric) {
             continue;
         }
-        // Truncate safely on a UTF-8 char boundary.
         let truncated = truncate_utf8(&cleaned, MAX_TERM_BYTES);
-        // Strip leading/trailing punctuation outside the token so e.g. `NEAR(` searches for
-        // `NEAR` safely as a quoted prefix rather than passing unbalanced punctuation, while
-        // preserving internal punctuation (like `foo-bar`, `src/main.rs`) inside quotes.
         let escaped = truncated.replace('"', "\"\"");
         if !escaped.chars().any(char::is_alphanumeric) {
             continue;
@@ -46,6 +54,11 @@ pub fn escape_fts5_query(input: &str) -> Option<String> {
         term.push('*');
         terms.push(term);
     }
+    terms
+}
+
+pub fn escape_fts5_query(input: &str) -> Option<String> {
+    let terms = collect_fts5_terms(input);
     if terms.is_empty() {
         None
     } else {

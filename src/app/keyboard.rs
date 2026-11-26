@@ -30,6 +30,9 @@ impl App {
         if self.welcome_open() {
             return self.handle_welcome_key(event);
         }
+        if self.memory_open() {
+            return self.handle_memory_key(event);
+        }
         if self.settings_open() {
             return self.handle_settings_key(event);
         }
@@ -147,6 +150,11 @@ impl App {
             Ime::Commit(text) => {
                 if self.welcome_open() {
                     self.update_preedit(None);
+                    return;
+                }
+                if self.memory_open() {
+                    self.update_preedit(None);
+                    self.memory_text(&text);
                     return;
                 }
                 if self.settings_open() {
@@ -286,6 +294,7 @@ impl App {
             InputAction::ToggleAgentPanel => self.toggle_agent_panel(),
             InputAction::ToggleComposer => self.toggle_composer(),
             InputAction::Settings => self.open_settings(),
+            InputAction::ProjectMemory => self.open_memory(),
             InputAction::Welcome => self.open_welcome(),
             InputAction::PrevBlock => self.navigate_blocks(id, BlockList::select_prev),
             InputAction::NextBlock => self.navigate_blocks(id, BlockList::select_next),

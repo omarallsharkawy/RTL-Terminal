@@ -4,4 +4,5 @@
 
 pub mod agent;
 pub mod ai;
+pub mod context;
 pub mod engine;

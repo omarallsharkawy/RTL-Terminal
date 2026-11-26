@@ -26,6 +26,7 @@ impl App {
             return;
         }
         self.close_palette();
+        self.close_memory();
         self.close_welcome();
         self.reset_pointer_gesture();
         let (mono, all) = self.window.font_families();
@@ -332,6 +333,7 @@ impl App {
                     | SettingId::ControlSocket
                     | SettingId::CmuxCompat
                     | SettingId::AgentCommand
+                    | SettingId::ProjectMemory
                     | SettingId::CopyConfigPath => {}
                 }
             }
@@ -340,6 +342,11 @@ impl App {
             if needs_layout {
                 self.apply_layout();
             }
+        }
+        if outcome.open_memory {
+            self.close_settings();
+            self.open_memory();
+            return;
         }
         if outcome.close {
             self.settings = None;

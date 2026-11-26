@@ -111,6 +111,8 @@ pub enum SettingId {
     ControlSocket,
     CmuxCompat,
     AgentCommand,
+    // AI
+    ProjectMemory,
     // About
     CopyConfigPath,
 }
@@ -143,6 +145,8 @@ impl SettingId {
         Self::CmuxCompat,
         Self::AgentCommand,
     ];
+
+    pub const AI: [Self; 1] = [Self::ProjectMemory];
 
     pub const ABOUT: [Self; 1] = [Self::CopyConfigPath];
 
@@ -196,6 +200,7 @@ impl SettingId {
             | Self::ControlSocket
             | Self::CmuxCompat
             | Self::AgentCommand => SettingsSection::Behaviour,
+            Self::ProjectMemory => SettingsSection::Ai,
             Self::CopyConfigPath => SettingsSection::About,
         }
     }
@@ -225,7 +230,7 @@ impl SettingId {
             Self::ControlSocket => "control_socket",
             Self::CmuxCompat => "cmux_compat",
             Self::AgentCommand => "agent_command",
-            Self::CopyConfigPath => return None,
+            Self::ProjectMemory | Self::CopyConfigPath => return None,
         })
     }
 
@@ -424,6 +429,16 @@ impl SettingId {
                     placeholder_en: "Auto (claude, codex…)",
                     placeholder_ar: "تلقائي (claude, codex…)",
                 },
+            },
+            Self::ProjectMemory => SettingDescriptor {
+                id: self,
+                label_en: "Project memory",
+                label_ar: "ذاكرة المشروع",
+                note_en: Some(
+                    "Rules files, facts, frequent commands, environment notes, and exclusions",
+                ),
+                note_ar: Some("ملفات القواعد والحقائق والأوامر المتكررة وملاحظات البيئة والاستثناءات"),
+                kind: ControlKind::ActionButton,
             },
             Self::CopyConfigPath => SettingDescriptor {
                 id: self,
@@ -699,6 +714,8 @@ pub struct SettingsOutcome {
     pub delete_secret: Option<String>,
     /// Clear in-memory agent panel session history.
     pub clear_agent_history: bool,
+    /// Open the Project Memory overlay (Settings -> AI -> Project memory).
+    pub open_memory: bool,
 }
 
 /// One option inside a picker list (Theme / Font family).
@@ -844,7 +861,8 @@ impl SettingsPanelState {
         match section {
             SettingsSection::Appearance => &SettingId::APPEARANCE,
             SettingsSection::Behaviour => &SettingId::BEHAVIOUR,
-            SettingsSection::Ai | SettingsSection::Keys => &[],
+            SettingsSection::Ai => &SettingId::AI,
+            SettingsSection::Keys => &[],
             SettingsSection::About => &SettingId::ABOUT,
         }
     }
@@ -1406,7 +1424,6 @@ impl SettingsPanelState {
                     }
                 }
             }
-            return outcome;
         }
 
         // 5b. Keys section content: searchable, editable shortcut list.
@@ -1800,6 +1817,9 @@ impl SettingsPanelState {
                     outcome.redraw = true;
                 }
             }
+            ControlKind::ActionButton if setting == SettingId::ProjectMemory => {
+                outcome.open_memory = true;
+            }
             _ => {}
         }
     }
@@ -2116,20 +2136,15 @@ impl SettingsPanelState {
                 }
                 outcome.redraw = true;
             }
-            SettingsHit::AiRuleToggle(idx) => {
-                self.focus = FocusZone::Content;
-                if let Some(&file) = crate::ui::settings_ai::RULES_FILES.get(idx) {
-                    if self.ai.toggle_rules_file(file, config) {
-                        outcome.ai_config_changed = true;
-                    }
-                    outcome.redraw = true;
-                }
-            }
             SettingsHit::AiClearHistory => {
                 self.focus = FocusZone::Content;
                 self.ai.history_cleared = true;
                 outcome.clear_agent_history = true;
                 outcome.redraw = true;
+            }
+            SettingsHit::OpenMemory => {
+                self.focus_setting(SettingId::ProjectMemory);
+                outcome.open_memory = true;
             }
             SettingsHit::Inside => {
                 // Clicking empty space inside the panel collapses an open picker (reverting preview)
@@ -2477,8 +2492,8 @@ pub enum SettingsHit {
     AiAllowInput,
     AiAllowAdd,
     AiAllowRemove(usize),
-    AiRuleToggle(usize),
     AiClearHistory,
+    OpenMemory,
 }
 
 impl SettingsHit {
@@ -3014,7 +3029,7 @@ impl SettingsLayout {
     fn build_ai_layout(&mut self, scale: f32, state: &SettingsPanelState, config: &TwittyConfig) {
         use crate::ui::settings_ai::{
             AiApiRowLayout, AiSectionLayout, AiTextField, API_PROVIDERS, DEFAULT_PROVIDER_CHOICES,
-            HARD_DENY_SUMMARY, RULES_FILES,
+            HARD_DENY_SUMMARY,
         };
         let px = |l: f32| l * scale;
         let vp = self.viewport;
@@ -3033,8 +3048,11 @@ impl SettingsLayout {
         } else {
             0.0
         };
+        let mem_row_h = px(48.0).round();
         let deny_h = px(26.0) + HARD_DENY_SUMMARY.len() as f32 * px(18.0) + px(12.0);
         let total_h = notice_h
+            + mem_row_h
+            + gap
             + px(56.0) // default provider
             + gap
             + px(44.0) // cli agents
@@ -3049,8 +3067,6 @@ impl SettingsLayout {
             + px(68.0) // allow list header + add input
             + allow_count as f32 * px(28.0)
             + gap
-            + px(58.0) // rules approvals
-            + gap
             + deny_h
             + gap
             + px(36.0); // clear history
@@ -3063,6 +3079,50 @@ impl SettingsLayout {
         if state.ai.notice.is_some() {
             ai.notice_rect = Some(Rect::new(vp.x, y, vp.w, px(30.0)));
             y += px(30.0) + gap;
+        }
+
+        // Top row: n21 Project Memory entry (rules-file SHA-256 approvals, facts, commands, env, exclusions).
+        {
+            let rect = Rect::new(vp.x, y, vp.w, mem_row_h);
+            let inner_pad = px(10.0);
+            let inner = Rect::new(
+                rect.x + inner_pad,
+                rect.y,
+                (rect.w - 2.0 * inner_pad).max(0.0),
+                rect.h,
+            );
+            let widget_w = px(130.0).min(inner.w * 0.45);
+            let row_gap = px(12.0);
+            let (label, widget) = if self.mirrored {
+                let w_rect = Rect::new(inner.x, inner.y, widget_w, inner.h);
+                let l_x = w_rect.right() + row_gap;
+                let l_rect = Rect::new(l_x, inner.y, (inner.right() - l_x).max(0.0), inner.h);
+                (l_rect, w_rect)
+            } else {
+                let w_rect = Rect::new(inner.right() - widget_w, inner.y, widget_w, inner.h);
+                let l_rect = Rect::new(
+                    inner.x,
+                    inner.y,
+                    (w_rect.x - row_gap - inner.x).max(0.0),
+                    inner.h,
+                );
+                (l_rect, w_rect)
+            };
+            let geometry = build_control_geometry(
+                SettingId::ProjectMemory.descriptor().kind,
+                widget,
+                scale,
+                self.mirrored,
+            );
+            self.rows.push(ControlRowLayout {
+                id: SettingId::ProjectMemory,
+                rect,
+                label,
+                widget,
+                geometry,
+                picker: None,
+            });
+            y += mem_row_h + gap;
         }
 
         // Default provider buttons.
@@ -3197,24 +3257,6 @@ impl SettingsLayout {
         }
         y += gap;
 
-        // Per-project rules file approvals (AGENTS.md / CLAUDE.md / TWITTY.md).
-        y += px(24.0);
-        let r_gap = px(6.0);
-        let r_w = ((vp.w - r_gap * (RULES_FILES.len() as f32 - 1.0)) / RULES_FILES.len() as f32)
-            .max(px(64.0));
-        for i in 0..RULES_FILES.len() {
-            let vis = if self.mirrored {
-                RULES_FILES.len() - 1 - i
-            } else {
-                i
-            };
-            ai.rules_toggles.push((
-                i,
-                Rect::new(vp.x + vis as f32 * (r_w + r_gap), y, r_w, px(26.0)),
-            ));
-        }
-        y += px(34.0) + gap;
-
         // Read-only deny-list view.
         ai.deny_box = Rect::new(vp.x, y, vp.w, deny_h);
         y += deny_h + gap;
@@ -3320,11 +3362,6 @@ impl SettingsLayout {
                         return SettingsHit::AiAllowRemove(idx);
                     }
                 }
-                for &(idx, r) in &ai.rules_toggles {
-                    if r.contains(x, y) {
-                        return SettingsHit::AiRuleToggle(idx);
-                    }
-                }
                 if ai.clear_history_button.contains(x, y) {
                     return SettingsHit::AiClearHistory;
                 }
@@ -3394,7 +3431,10 @@ impl SettingsLayout {
                         }
                         ControlGeometry::ActionButton { button } => {
                             if button.contains(x, y) {
-                                return SettingsHit::CopyConfigPath;
+                                return match row.id {
+                                    SettingId::ProjectMemory => SettingsHit::OpenMemory,
+                                    _ => SettingsHit::CopyConfigPath,
+                                };
                             }
                         }
                     }

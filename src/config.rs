@@ -91,9 +91,9 @@ pub struct TwittyConfig {
     /// Optional per-project exact argv-prefix allow-lists (off/empty by default).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub ai_project_allow_list: std::collections::BTreeMap<String, Vec<String>>,
-    /// Per-project approved rules files (`AGENTS.md`, `CLAUDE.md`, `TWITTY.md`).
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub ai_approved_rules_files: std::collections::BTreeMap<String, Vec<String>>,
+    /// Globs or paths excluded from project memory recording and AI context assembly.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub memory_exclude: Vec<String>,
     /// Directories scanned (1-2 levels deep) for git repositories in the project switcher.
     #[serde(default = "crate::projects::scan::default_project_roots")]
     pub project_roots: Vec<String>,
@@ -154,7 +154,7 @@ impl Default for TwittyConfig {
             ai_ollama_url: default_ollama_url(),
             ai_monthly_cost_cap_usd: None,
             ai_project_allow_list: std::collections::BTreeMap::new(),
-            ai_approved_rules_files: std::collections::BTreeMap::new(),
+            memory_exclude: Vec::new(),
             project_roots: crate::projects::scan::default_project_roots(),
             commands: Vec::new(),
             keybindings: crate::input::keybindings::KeybindingsConfig::default(),
@@ -476,6 +476,13 @@ impl TwittyConfig {
                 self.ai_monthly_cost_cap_usd = None;
             }
         }
+        self.memory_exclude = self
+            .memory_exclude
+            .iter()
+            .map(|p| crate::shell_integration::clean_text(p.trim(), 512))
+            .filter(|p| !p.is_empty())
+            .take(256)
+            .collect();
         if !self.keybindings.is_empty() {
             let resolved = crate::input::keybindings::KeyBindings::resolve(&self.keybindings);
             for w in resolved.warnings {

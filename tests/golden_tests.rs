@@ -36,6 +36,10 @@ const CHANNEL_TOLERANCE: u8 = 12;
 const MAX_BAD_FRACTION: f64 = 0.0005;
 
 const NASKH: &[u8] = include_bytes!("../assets/fonts/NotoNaskhArabic-Regular.ttf");
+const UI_LATIN_REG: &[u8] = include_bytes!("../assets/fonts/TwittyLatinUI-Regular.ttf");
+const UI_LATIN_SEMI: &[u8] = include_bytes!("../assets/fonts/TwittyLatinUI-SemiBold.ttf");
+const UI_ARABIC_REG: &[u8] = include_bytes!("../assets/fonts/TwittyArabicUI-Regular.ttf");
+const UI_ARABIC_SEMI: &[u8] = include_bytes!("../assets/fonts/TwittyArabicUI-SemiBold.ttf");
 const MONO: &[u8] = include_bytes!("golden/fonts/NotoSansMono-Subset.ttf");
 const CJK: &[u8] = include_bytes!("golden/fonts/NotoSansCJK-Subset.otf");
 const EMOJI: &[u8] = include_bytes!("golden/fonts/NotoColorEmoji-Subset.ttf");
@@ -938,4 +942,267 @@ fn golden_agent_panel_states_bilingual_dark_and_light() {
             }
         }
     }
+}
+
+fn memory_ui_font_system() -> FontSystem {
+    let mut db = fontdb::Database::new();
+    for font in [
+        UI_LATIN_REG,
+        UI_LATIN_SEMI,
+        UI_ARABIC_REG,
+        UI_ARABIC_SEMI,
+        NASKH,
+        MONO,
+    ] {
+        db.load_font_data(font.to_vec());
+    }
+    db.set_sans_serif_family("Twitty Latin UI");
+    db.set_monospace_family("Noto Sans Mono");
+    db.set_serif_family("Twitty Latin UI");
+    FontSystem::new_with_locale_and_db("en-US".into(), db)
+}
+
+fn check_memory_screen_golden(
+    name: &'static str,
+    theme: &'static str,
+    language: twitty::ui::chrome::UiLanguage,
+) {
+    use twitty::render::scene::memory::MemoryView;
+    use twitty::render::text::ui::UiFont;
+    use twitty::render::ui_style::UiStyle;
+    use twitty::ui::memory_panel::MemoryPanelState;
+    use twitty_store::{
+        FrequentCommand, MemoryEntry, MemoryKind, ProjectMemorySnapshot, RulesFileInfo,
+        RulesFileState, AUTO_COMMAND_SOURCE, AUTO_ENV_SOURCE,
+    };
+
+    let (width, height) = (920u32, 660u32);
+    let surface = (width as f32, height as f32);
+    let mut fonts = memory_ui_font_system();
+    let palette = Palette::named(theme).expect("named theme");
+    let metrics = CellMetrics::measure(&mut fonts, None, 14.5, 1.0);
+    let style = UiStyle::new(&palette, None, 1.0);
+    let font = UiFont::default();
+
+    let mut term = Terminal::new(96, 28, |_| {});
+    term.process_bytes(b"\x1b[?25l");
+    term.process_bytes(
+        "twitty$ cargo test --workspace\r\n\
+         تم تشغيل الاختبارات بنجاح (0 failures)\r\n\
+         twitty$ git status --short\r\n"
+            .as_bytes(),
+    );
+    let (lines, cursor) = term.snapshot();
+    let panes = [PaneFrame {
+        id: PaneId(1),
+        rect: Rect::new(0.0, 0.0, surface.0, surface.1),
+        lines,
+        cursor,
+        focused: true,
+        status: None,
+        blocks: Vec::new(),
+    }];
+
+    let mut state = MemoryPanelState::new(
+        Some("/home/user/projects/twitty".into()),
+        vec!["~/secrets".into(), "**/private/**".into()],
+        language,
+    );
+    state.apply_snapshot(ProjectMemorySnapshot {
+        project_root: "/home/user/projects/twitty".into(),
+        excluded: false,
+        rules_files: vec![
+            RulesFileInfo {
+                rel_path: "AGENTS.md".into(),
+                current_sha256: "a1b2c3d4e5f600001111222233334444".into(),
+                approved_sha256: Some("a1b2c3d4e5f600001111222233334444".into()),
+                state: RulesFileState::Approved,
+                approved_content: Some("Keep grid logical".into()),
+            },
+            RulesFileInfo {
+                rel_path: "CLAUDE.md".into(),
+                current_sha256: "ff00ee11dd22cc33bb44aa5599887766".into(),
+                approved_sha256: Some("00000000000000000000000000000000".into()),
+                state: RulesFileState::Changed,
+                approved_content: None,
+            },
+            RulesFileInfo {
+                rel_path: "TWITTY.md".into(),
+                current_sha256: "1234567890abcdef1234567890abcdef".into(),
+                approved_sha256: None,
+                state: RulesFileState::Unapproved,
+                approved_content: None,
+            },
+        ],
+        entries: vec![
+            MemoryEntry {
+                id: 1,
+                project_root: "/home/user/projects/twitty".into(),
+                kind: MemoryKind::Rule,
+                text: match language {
+                    twitty::ui::chrome::UiLanguage::English => {
+                        "Every UI string must have English and Arabic".into()
+                    }
+                    twitty::ui::chrome::UiLanguage::Arabic => {
+                        "كل نص في الواجهة بالعربية والإنجليزية".into()
+                    }
+                },
+                source: "user".into(),
+                created_at: 100,
+                updated_at: 200,
+                approved: true,
+            },
+            MemoryEntry {
+                id: 2,
+                project_root: "/home/user/projects/twitty".into(),
+                kind: MemoryKind::Fact,
+                text: "Run golden tests with llvmpipe".into(),
+                source: "agent".into(),
+                created_at: 110,
+                updated_at: 210,
+                approved: false,
+            },
+            MemoryEntry {
+                id: 3,
+                project_root: "/home/user/projects/twitty".into(),
+                kind: MemoryKind::Command,
+                text: "`cargo test --workspace` (12 runs, 92% ok)".into(),
+                source: AUTO_COMMAND_SOURCE.into(),
+                created_at: 120,
+                updated_at: 220,
+                approved: true,
+            },
+            MemoryEntry {
+                id: 4,
+                project_root: "/home/user/projects/twitty".into(),
+                kind: MemoryKind::Env,
+                text: "Rust toolchain: 1.90.0 · Package managers: cargo".into(),
+                source: AUTO_ENV_SOURCE.into(),
+                created_at: 130,
+                updated_at: 230,
+                approved: true,
+            },
+        ],
+        frequent_commands: vec![FrequentCommand {
+            command: "cargo test --workspace".into(),
+            runs: 12,
+            successes: 11,
+            known_exits: 12,
+            success_rate_pct: Some(92),
+            last_run_at: 220,
+        }],
+    });
+
+    let mut ctx = DrawContext {
+        font_system: &mut fonts,
+        family: None,
+        palette: &palette,
+        metrics,
+        is_srgb: false,
+    };
+    let opts = FrameOptions {
+        window_focused: true,
+        cursor_style: "block",
+        cursor_blink_on: true,
+        surface,
+    };
+    let mut cache = RowCache::default();
+    let mut ime = PreeditState::default();
+    let mut frame = build_frame(&mut ctx, &opts, &mut cache, &mut ime, &[], &panes, &[]);
+    frame.add_memory(&mut ctx, style, &font, &MemoryView { state });
+    let runs = frame.text_runs(&panes, &cache, &ime);
+
+    let _gpu = GPU.lock().unwrap_or_else(|e| e.into_inner());
+    let mut target = match Offscreen::new(width, height) {
+        Ok(target) => target,
+        Err(e) => {
+            assert!(
+                !env_flag("TWITTY_REQUIRE_GOLDEN"),
+                "TWITTY_REQUIRE_GOLDEN is set but the golden tests cannot run: {e}"
+            );
+            eprintln!("note: skipping golden image {name}: {e}");
+            return;
+        }
+    };
+    let actual = target
+        .render_layers(
+            (&frame.quads, &frame.shapes),
+            runs,
+            ctx.font_system,
+            frame.background,
+            1.0,
+        )
+        .expect("offscreen memory screen render");
+
+    let reference = golden_dir().join(format!("{name}.png"));
+    if env_flag("TWITTY_BLESS") {
+        write_png(&reference, width, height, &actual);
+        eprintln!("blessed {}", reference.display());
+        return;
+    }
+    let Some((ew, eh, expected)) = read_png(&reference) else {
+        panic!(
+            "no reference image {}; run with TWITTY_BLESS=1 to create it",
+            reference.display()
+        );
+    };
+    let out = failure_dir();
+    let actual_path = out.join(format!("{name}.actual.png"));
+    if (ew, eh) != (width, height) {
+        write_png(&actual_path, width, height, &actual);
+        panic!(
+            "{name}: size {width}x{height}, reference is {ew}x{eh} (actual: {})",
+            actual_path.display()
+        );
+    }
+    let (bad, diff_image) = diff(&expected, &actual);
+    let allowed = ((width * height) as f64 * MAX_BAD_FRACTION) as usize;
+    if bad > allowed {
+        let diff_path = out.join(format!("{name}.diff.png"));
+        write_png(&actual_path, width, height, &actual);
+        write_png(&diff_path, width, height, &diff_image);
+        panic!(
+            "{name}: {bad} pixels differ from {} by more than {CHANNEL_TOLERANCE} (allowed {allowed})\n\
+             actual: {}\ndiff:   {}\nIf the change is intended, rerun with TWITTY_BLESS=1.",
+            reference.display(),
+            actual_path.display(),
+            diff_path.display()
+        );
+    }
+}
+
+#[test]
+fn golden_memory_screen_en_dark() {
+    check_memory_screen_golden(
+        "memory_en_dark",
+        "twitty-dark",
+        twitty::ui::chrome::UiLanguage::English,
+    );
+}
+
+#[test]
+fn golden_memory_screen_en_light() {
+    check_memory_screen_golden(
+        "memory_en_light",
+        "twitty-light",
+        twitty::ui::chrome::UiLanguage::English,
+    );
+}
+
+#[test]
+fn golden_memory_screen_ar_dark() {
+    check_memory_screen_golden(
+        "memory_ar_dark",
+        "twitty-dark",
+        twitty::ui::chrome::UiLanguage::Arabic,
+    );
+}
+
+#[test]
+fn golden_memory_screen_ar_light() {
+    check_memory_screen_golden(
+        "memory_ar_light",
+        "twitty-light",
+        twitty::ui::chrome::UiLanguage::Arabic,
+    );
 }

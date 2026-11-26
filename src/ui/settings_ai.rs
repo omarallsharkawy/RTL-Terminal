@@ -50,9 +50,6 @@ pub const DEFAULT_PROVIDER_CHOICES: [(&str, &str, &str); 6] = [
     ("ollama", "Ollama", "Ollama"),
 ];
 
-/// Supported per-project rules files that require one-time user approval (AGENT.md §1.6).
-pub const RULES_FILES: [&str; 3] = ["AGENTS.md", "CLAUDE.md", "TWITTY.md"];
-
 /// Read-only hard-deny list displayed in Settings → AI (AGENT.md §1.6 & §2.2).
 pub const HARD_DENY_SUMMARY: [(&str, &str); 8] = [
     (
@@ -299,30 +296,6 @@ impl AiSettingsState {
         }
         false
     }
-
-    pub fn is_rules_file_approved(&self, file: &str, config: &TwittyConfig) -> bool {
-        config
-            .ai_approved_rules_files
-            .get(self.project_key())
-            .is_some_and(|list| list.iter().any(|f| f == file))
-    }
-
-    pub fn toggle_rules_file(&mut self, file: &str, config: &mut TwittyConfig) -> bool {
-        let key = self.project_key().to_owned();
-        let list = config
-            .ai_approved_rules_files
-            .entry(key.clone())
-            .or_default();
-        if let Some(pos) = list.iter().position(|f| f == file) {
-            list.remove(pos);
-            if list.is_empty() {
-                config.ai_approved_rules_files.remove(&key);
-            }
-        } else {
-            list.push(file.to_owned());
-        }
-        true
-    }
 }
 
 /// Detect installed coding-agent CLIs on `$PATH` (non-blocking, bounded).
@@ -369,7 +342,6 @@ pub struct AiSectionLayout {
     pub allow_input: Rect,
     pub allow_add_button: Rect,
     pub allow_entries: Vec<(usize, Rect, Rect)>,
-    pub rules_toggles: Vec<(usize, Rect)>,
     pub deny_box: Rect,
     pub clear_history_button: Rect,
     pub notice_rect: Option<Rect>,
@@ -387,7 +359,6 @@ impl Default for AiSectionLayout {
             allow_input: zero,
             allow_add_button: zero,
             allow_entries: Vec::new(),
-            rules_toggles: Vec::new(),
             deny_box: zero,
             clear_history_button: zero,
             notice_rect: None,

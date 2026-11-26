@@ -23,17 +23,15 @@ use twitty::render::ui_style::UiStyle;
 use twitty::render::{CellMetrics, PaneFrame, RowCache};
 use twitty::terminal::Terminal;
 use twitty::ui::agent_panel::{
-    format_context_strip, format_usage_pill, included_context_tokens, paragraph_is_rtl,
-    split_agent_content, width_from_divider_drag, AgentFocus, AgentPanelAction, AgentPanelHit,
-    AgentPanelLayout, AgentPanelState, CardButton, ScriptedEngine, EXAMPLE_CHIPS, MAX_PANEL_PX,
-    MIN_PANEL_PX,
+    arabic_count, format_context_strip, format_usage_pill, included_context_tokens,
+    paragraph_is_rtl, split_agent_content, width_from_divider_drag, AgentFocus, AgentPanelAction,
+    AgentPanelHit, AgentPanelLayout, AgentPanelState, CardButton, ScriptedEngine, EXAMPLE_CHIPS,
+    MAX_PANEL_PX, MIN_PANEL_PX,
 };
 use twitty::ui::chrome::{PaneHeaderLayout, TopBarLayout, UiLanguage, WindowLayout};
-use twitty::ui::settings_ai::{
-    AiTextField, API_PROVIDERS, DEFAULT_OLLAMA_URL, HARD_DENY_SUMMARY, RULES_FILES,
-};
+use twitty::ui::settings_ai::{AiTextField, API_PROVIDERS, DEFAULT_OLLAMA_URL, HARD_DENY_SUMMARY};
 use twitty::ui::settings_panel::{
-    SettingsHit, SettingsLayout, SettingsPanelState, SettingsSection,
+    SettingId, SettingsHit, SettingsLayout, SettingsPanelState, SettingsSection,
 };
 use twitty_ai::engine::model::{
     AgentCommand, AgentEvent, ContextBundle, ContextItem, ContextKind, Decision, DenyReason,
@@ -887,10 +885,20 @@ fn settings_ai_section_keyring_config_allow_list_and_deny_list() {
         Some(&vec!["cargo test".to_owned()])
     );
 
-    // Rules file approval toggle.
-    assert!(!state.ai.is_rules_file_approved(RULES_FILES[0], &cfg));
-    state.ai.toggle_rules_file(RULES_FILES[0], &mut cfg);
-    assert!(state.ai.is_rules_file_approved(RULES_FILES[0], &cfg));
+    // Project memory entry (n21) lives in the same Settings -> AI section and opens Memory.
+    assert_eq!(state.focused_setting(), Some(SettingId::ProjectMemory));
+    let mem_layout = SettingsLayout::build(surface, 1.0, &state, &cfg);
+    assert_eq!(mem_layout.rows.len(), 1);
+    assert_eq!(mem_layout.rows[0].id, SettingId::ProjectMemory);
+    let open_mem = state.on_key(
+        &Key::Named(NamedKey::Enter),
+        None,
+        ModifiersState::empty(),
+        &mut cfg,
+        surface,
+        1.0,
+    );
+    assert!(open_mem.open_memory);
 
     // Cost cap validation.
     state.ai.cost_cap_draft = "12.5".into();
@@ -970,4 +978,171 @@ fn settings_ai_section_keyring_config_allow_list_and_deny_list() {
         let runs = frame.text_runs(&[], &cache, &ime);
         assert!(runs.len() > 10, "expected Settings → AI labels to render");
     }
+}
+
+#[test]
+fn arabic_plural_agreement_and_context_strip_formatting() {
+    assert_eq!(
+        arabic_count(1, "ذكرى واحدة", "ذكريان", "ذكريات", "ذكرى"),
+        "ذكرى واحدة"
+    );
+    assert_eq!(
+        arabic_count(2, "ذكرى واحدة", "ذكريان", "ذكريات", "ذكرى"),
+        "ذكريان"
+    );
+    assert_eq!(
+        arabic_count(3, "ذكرى واحدة", "ذكريان", "ذكريات", "ذكرى"),
+        "3 ذكريات"
+    );
+    assert_eq!(
+        arabic_count(10, "ذكرى واحدة", "ذكريان", "ذكريات", "ذكرى"),
+        "10 ذكريات"
+    );
+    assert_eq!(
+        arabic_count(11, "ذكرى واحدة", "ذكريان", "ذكريات", "ذكرى"),
+        "11 ذكرى"
+    );
+    assert_eq!(
+        arabic_count(103, "ذكرى واحدة", "ذكريان", "ذكريات", "ذكرى"),
+        "103 ذكريات"
+    );
+    assert_eq!(
+        arabic_count(1, "كتلة واحدة", "كتلتان", "كتل", "كتلة"),
+        "كتلة واحدة"
+    );
+    assert_eq!(
+        arabic_count(2, "كتلة واحدة", "كتلتان", "كتل", "كتلة"),
+        "كتلتان"
+    );
+    assert_eq!(
+        arabic_count(5, "كتلة واحدة", "كتلتان", "كتل", "كتلة"),
+        "5 كتل"
+    );
+    assert_eq!(
+        arabic_count(15, "كتلة واحدة", "كتلتان", "كتل", "كتلة"),
+        "15 كتلة"
+    );
+
+    // 1 rule + 1 memory + 1 block -> proper singular Arabic agreement.
+    let single = ContextBundle {
+        project_root: Some(PathBuf::from("/workspace/twitty")),
+        budget_tokens: 4096,
+        items: vec![
+            ContextItem {
+                kind: ContextKind::Rule,
+                label: "AGENTS.md".into(),
+                text: "Rules".into(),
+                est_tokens: 100,
+                included: true,
+            },
+            ContextItem {
+                kind: ContextKind::Memory,
+                label: "fact #1".into(),
+                text: "Memory".into(),
+                est_tokens: 50,
+                included: true,
+            },
+            ContextItem {
+                kind: ContextKind::Block,
+                label: "block: cargo test".into(),
+                text: "Block".into(),
+                est_tokens: 80,
+                included: true,
+            },
+        ],
+    };
+    assert_eq!(
+        format_context_strip(&single, UiLanguage::Arabic),
+        "القواعد · ذكرى واحدة · كتلة واحدة"
+    );
+
+    // 1 rule + 3 memories + 2 blocks -> dual + few plural forms.
+    assert_eq!(
+        format_context_strip(&sample_context(), UiLanguage::Arabic),
+        "القواعد · 3 ذكريات · كتلتان"
+    );
+
+    // Empty bundle.
+    assert_eq!(
+        format_context_strip(&ContextBundle::default(), UiLanguage::Arabic),
+        "السياق · لا عناصر"
+    );
+}
+
+#[test]
+fn context_assembly_honors_inspector_toggles_and_remember_fact_integration() {
+    use twitty_ai::context::SelectedBlock;
+    use twitty_store::{MemoryKind, NewMemory, Store, StoreHandle};
+
+    let tmp_dir = std::env::temp_dir().join(format!("twitty-n20-ctx-test-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(tmp_dir.join(".git"));
+    let resolved_root = twitty_store::resolve_project_root(&tmp_dir);
+    let root_str = resolved_root.to_string_lossy().into_owned();
+
+    let store = Store::open_in_memory().expect("in-memory store");
+    store
+        .create_memory(&NewMemory {
+            project_root: root_str.clone(),
+            kind: MemoryKind::Rule,
+            text: "Keep grid logical".into(),
+            source: "user".into(),
+            approved: true,
+        })
+        .unwrap();
+    store
+        .create_memory(&NewMemory {
+            project_root: root_str.clone(),
+            kind: MemoryKind::Fact,
+            text: "Golden tests need llvmpipe".into(),
+            source: "agent".into(),
+            approved: true,
+        })
+        .unwrap();
+
+    let blocks = [SelectedBlock {
+        command: Some("cargo test".into()),
+        exit_code: Some(0),
+        output: "test result: ok.".into(),
+    }];
+
+    let mut panel = AgentPanelState::new();
+    panel.set_project_context(tmp_dir.clone());
+    let first = panel.assemble_context(Some(&store), "llvmpipe", &blocks, &[], 4096);
+    assert!(
+        first.items.len() >= 3,
+        "expected rule + fts fact + selected block, got {:?}",
+        first.items
+    );
+    assert!(first.items.iter().all(|i| i.included));
+
+    // Toggle item 0 off in the inspector -> returns RefreshContext and records override.
+    let action = panel.toggle_context_item(0);
+    assert_eq!(action, AgentPanelAction::RefreshContext);
+    let toggled_label = panel.context.items[0].label.clone();
+
+    // Re-assembling via twitty_ai::context::assemble preserves the user's untick toggle.
+    let second = panel.assemble_context(Some(&store), "llvmpipe", &blocks, &[], 4096);
+    let item = second
+        .items
+        .iter()
+        .find(|i| i.label == toggled_label)
+        .expect("toggled item still listed in inspector");
+    assert!(
+        !item.included,
+        "unticked item must remain excluded after re-assembly"
+    );
+
+    // Verify twitty::remember_fact works through StoreHandle.
+    let handle = StoreHandle::open_in_memory();
+    assert!(twitty::remember_fact(
+        &handle,
+        Some(resolved_root.as_path()),
+        "Always run cargo clippy with -D warnings"
+    ));
+    let listed = handle.list_memory(&root_str, true, 10).unwrap();
+    assert!(listed
+        .iter()
+        .any(|m| m.text.contains("cargo clippy") && m.approved));
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
 }

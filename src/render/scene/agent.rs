@@ -31,7 +31,7 @@ use crate::render::ui_style::{
 };
 use crate::review::diff::{parse as parse_diff, Limits as DiffLimits, LineKind};
 use crate::ui::agent_panel::{
-    format_context_strip, format_deny_reason, format_duration_ms, format_usage_pill,
+    arabic_count, format_context_strip, format_deny_reason, format_duration_ms, format_usage_pill,
     included_context_tokens, paragraph_is_rtl, read_tool_name, AgentFocus, AgentPanelHit,
     AgentPanelLayout, AgentPanelView, CardButton, CardLayout, StepEntry, CARD_EDITOR_MAX_LINES,
     COMPOSER_MAX_LINES, EXAMPLE_CHIPS, MAX_PATCH_DIFF_ROWS, PLAN_COLLAPSED_LINES,
@@ -696,9 +696,17 @@ impl AgentDrawer<'_, '_> {
                     Some(clip),
                 );
                 let mut cur_y = title_rect.bottom() + s.px(4.0);
+                let cw = self.ctx.metrics.char_width.max(s.px(7.5));
                 for file in files.iter().take(6) {
+                    // File paths and `+N -M` counts are code: always LTR in `+N -M` order.
                     let row_r = Rect::new(inner.x, cur_y, inner.w, mono_lh);
-                    let count_w = s.px(64.0).min(inner.w * 0.35);
+                    let add_s = format!("+{}", file.added);
+                    let del_s = format!("-{}", file.removed);
+                    let add_w = add_s.chars().count() as f32 * cw + s.px(2.0);
+                    let del_w = del_s.chars().count() as f32 * cw + s.px(2.0);
+                    let gap = s.px(6.0);
+                    let total_cnt_w = add_w + gap + del_w;
+                    let count_w = total_cnt_w.min(inner.w * 0.45);
                     let path_r = Rect::new(
                         row_r.x,
                         row_r.y,
@@ -708,27 +716,22 @@ impl AgentDrawer<'_, '_> {
                     let cnt_r = Rect::new(path_r.right() + s.px(6.0), row_r.y, count_w, row_r.h);
                     let path_str = file.path.display().to_string();
                     self.push_mono_line(path_r, &path_str, s.text, clip);
-                    let add_s = format!("+{}", file.added);
-                    let del_s = format!("−{}", file.removed);
-                    let half = cnt_r.w * 0.5;
-                    self.push_label(
-                        Rect::new(cnt_r.x, cnt_r.y, half, cnt_r.h),
+                    let start_x = (cnt_r.right() - total_cnt_w).max(cnt_r.x);
+                    self.push_mono_line(
+                        Rect::new(start_x, cnt_r.y, add_w.min(cnt_r.w), cnt_r.h),
                         &add_s,
-                        UiSize::Small,
-                        UiWeight::Semibold,
-                        UiAlign::Right,
                         s.ok,
-                        Some(clip),
+                        clip,
                     );
-                    self.push_label(
-                        Rect::new(cnt_r.x + half, cnt_r.y, half, cnt_r.h),
-                        &del_s,
-                        UiSize::Small,
-                        UiWeight::Semibold,
-                        UiAlign::Right,
-                        s.danger,
-                        Some(clip),
-                    );
+                    let del_x = start_x + add_w + gap;
+                    if del_x < cnt_r.right() {
+                        self.push_mono_line(
+                            Rect::new(del_x, cnt_r.y, (cnt_r.right() - del_x).min(del_w), cnt_r.h),
+                            &del_s,
+                            s.danger,
+                            clip,
+                        );
+                    }
                     cur_y += mono_lh;
                 }
                 if !reason.is_empty() {
@@ -1024,14 +1027,12 @@ impl AgentDrawer<'_, '_> {
                     self.rect_fill(hunk_r, RADIUS_6, s.bg2, None);
                 }
                 let hdr = hunk.header();
-                self.push_label(
+                // Hunk headers (`@@ -1,3 +1,4 @@`) are code: always LTR monospace.
+                self.push_mono_line(
                     Rect::new(rect.x + s.px(8.0), y, (rect.w - s.px(16.0)).max(0.0), lh),
                     &hdr,
-                    UiSize::Small,
-                    UiWeight::Regular,
-                    UiAlign::Left,
                     s.text_dim,
-                    Some(diff_clip),
+                    diff_clip,
                 );
                 y += lh;
                 drawn += 1;
@@ -1403,12 +1404,18 @@ impl AgentDrawer<'_, '_> {
         let hdr_text = if budget > 0 {
             match self.lang() {
                 UiLanguage::English => format!("Context · {used_tok} / {budget} tok"),
-                UiLanguage::Arabic => format!("السياق · {used_tok} / {budget} رمز"),
+                UiLanguage::Arabic => format!(
+                    "السياق · {used_tok} / {}",
+                    arabic_count(budget as usize, "رمز واحد", "رمزان", "رموز", "رمز")
+                ),
             }
         } else {
             match self.lang() {
                 UiLanguage::English => format!("Context · {used_tok} tok"),
-                UiLanguage::Arabic => format!("السياق · {used_tok} رمز"),
+                UiLanguage::Arabic => format!(
+                    "السياق · {}",
+                    arabic_count(used_tok as usize, "رمز واحد", "رمزان", "رموز", "رمز")
+                ),
             }
         };
         let title_r = Rect::new(
@@ -1497,7 +1504,12 @@ impl AgentDrawer<'_, '_> {
                 ContextKind::Block => self.lang().text("Block", "كتلة"),
                 ContextKind::File => self.lang().text("File", "ملف"),
             };
-            let tok_str = format!("{} {}", item.est_tokens, self.lang().text("tok", "رمز"));
+            let tok_str = match self.lang() {
+                UiLanguage::English => format!("{} tok", item.est_tokens),
+                UiLanguage::Arabic => {
+                    arabic_count(item.est_tokens as usize, "رمز واحد", "رمزان", "رموز", "رمز")
+                }
+            };
             let tok_w = s.px(56.0).min(row_r.w * 0.28);
             let label_str = format!("[{kind_tag}] {}", item.label);
 
