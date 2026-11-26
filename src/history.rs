@@ -48,6 +48,20 @@ pub fn record_finished_block(
     is_local: bool,
     shell: Option<&str>,
 ) -> bool {
+    record_finished_block_with_excludes(store, record_history, &[], block, cwd, is_local, shell)
+}
+
+/// Like [`record_finished_block`], also skipping recording when `cwd` (or its resolved git
+/// project root) matches any pattern in `memory_exclude`.
+pub fn record_finished_block_with_excludes(
+    store: &StoreHandle,
+    record_history: bool,
+    memory_exclude: &[String],
+    block: &Block,
+    cwd: Option<&Path>,
+    is_local: bool,
+    shell: Option<&str>,
+) -> bool {
     if block.is_running() {
         return false;
     }
@@ -57,17 +71,23 @@ pub fn record_finished_block(
     if !should_record_command(record_history, command) {
         return false;
     }
+    if let Some(dir) = cwd {
+        if !memory_exclude.is_empty() && twitty_store::is_path_excluded(dir, memory_exclude) {
+            return false;
+        }
+    }
     let duration_ms = block
         .duration()
         .map(|d| d.as_millis().min(i64::MAX as u128) as i64);
     let finished_at = now_epoch_ms();
     let started_at = finished_at.saturating_sub(duration_ms.unwrap_or(0).max(0));
-    store.record_finished_block_async(
+    store.record_finished_block_with_excludes_async(
         command.trim_end().to_owned(),
         block.exit,
         duration_ms,
         cwd.map(Path::to_path_buf).unwrap_or_default(),
         is_local,
+        memory_exclude.to_vec(),
         shell.map(str::to_owned),
         started_at,
         Some(finished_at),

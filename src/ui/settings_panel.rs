@@ -31,19 +31,27 @@ pub enum SettingsSection {
     #[default]
     Appearance,
     Behaviour,
+    Ai,
     Keys,
     About,
 }
 
 impl SettingsSection {
-    pub const ALL: [Self; 4] = [Self::Appearance, Self::Behaviour, Self::Keys, Self::About];
+    pub const ALL: [Self; 5] = [
+        Self::Appearance,
+        Self::Behaviour,
+        Self::Ai,
+        Self::Keys,
+        Self::About,
+    ];
 
     pub fn index(self) -> usize {
         match self {
             Self::Appearance => 0,
             Self::Behaviour => 1,
-            Self::Keys => 2,
-            Self::About => 3,
+            Self::Ai => 2,
+            Self::Keys => 3,
+            Self::About => 4,
         }
     }
 
@@ -55,6 +63,7 @@ impl SettingsSection {
         match self {
             Self::Appearance => "Appearance",
             Self::Behaviour => "Behaviour",
+            Self::Ai => "AI",
             Self::Keys => "Keys",
             Self::About => "About",
         }
@@ -64,6 +73,7 @@ impl SettingsSection {
         match self {
             Self::Appearance => "المظهر",
             Self::Behaviour => "السلوك",
+            Self::Ai => "الذكاء الاصطناعي",
             Self::Keys => "الاختصارات",
             Self::About => "حول",
         }
@@ -101,6 +111,8 @@ pub enum SettingId {
     ControlSocket,
     CmuxCompat,
     AgentCommand,
+    // AI
+    ProjectMemory,
     // About
     CopyConfigPath,
 }
@@ -133,6 +145,8 @@ impl SettingId {
         Self::CmuxCompat,
         Self::AgentCommand,
     ];
+
+    pub const AI: [Self; 1] = [Self::ProjectMemory];
 
     pub const ABOUT: [Self; 1] = [Self::CopyConfigPath];
 
@@ -186,6 +200,7 @@ impl SettingId {
             | Self::ControlSocket
             | Self::CmuxCompat
             | Self::AgentCommand => SettingsSection::Behaviour,
+            Self::ProjectMemory => SettingsSection::Ai,
             Self::CopyConfigPath => SettingsSection::About,
         }
     }
@@ -215,7 +230,7 @@ impl SettingId {
             Self::ControlSocket => "control_socket",
             Self::CmuxCompat => "cmux_compat",
             Self::AgentCommand => "agent_command",
-            Self::CopyConfigPath => return None,
+            Self::ProjectMemory | Self::CopyConfigPath => return None,
         })
     }
 
@@ -414,6 +429,16 @@ impl SettingId {
                     placeholder_en: "Auto (claude, codex…)",
                     placeholder_ar: "تلقائي (claude, codex…)",
                 },
+            },
+            Self::ProjectMemory => SettingDescriptor {
+                id: self,
+                label_en: "Project memory",
+                label_ar: "ذاكرة المشروع",
+                note_en: Some(
+                    "Rules files, facts, frequent commands, environment notes, and exclusions",
+                ),
+                note_ar: Some("ملفات القواعد والحقائق والأوامر المتكررة وملاحظات البيئة والاستثناءات"),
+                kind: ControlKind::ActionButton,
             },
             Self::CopyConfigPath => SettingDescriptor {
                 id: self,
@@ -681,6 +706,8 @@ pub struct SettingsOutcome {
     pub preview_theme: Option<Option<String>>,
     /// Text to copy to the clipboard (About -> Copy config path).
     pub copy_text: Option<String>,
+    /// Open the Project Memory overlay (Settings -> AI -> Project memory).
+    pub open_memory: bool,
 }
 
 /// One option inside a picker list (Theme / Font family).
@@ -823,6 +850,7 @@ impl SettingsPanelState {
         match section {
             SettingsSection::Appearance => &SettingId::APPEARANCE,
             SettingsSection::Behaviour => &SettingId::BEHAVIOUR,
+            SettingsSection::Ai => &SettingId::AI,
             SettingsSection::Keys => &[],
             SettingsSection::About => &SettingId::ABOUT,
         }
@@ -1655,6 +1683,9 @@ impl SettingsPanelState {
                     outcome.redraw = true;
                 }
             }
+            ControlKind::ActionButton if setting == SettingId::ProjectMemory => {
+                outcome.open_memory = true;
+            }
             _ => {}
         }
     }
@@ -1894,6 +1925,10 @@ impl SettingsPanelState {
                     outcome.copy_text = Some(path);
                     outcome.redraw = true;
                 }
+            }
+            SettingsHit::OpenMemory => {
+                self.focus_setting(SettingId::ProjectMemory);
+                outcome.open_memory = true;
             }
             SettingsHit::Inside => {
                 // Clicking empty space inside the panel collapses an open picker (reverting preview)
@@ -2231,6 +2266,7 @@ pub enum SettingsHit {
     KeyChange(usize),
     KeyReset(usize),
     CopyConfigPath,
+    OpenMemory,
 }
 
 impl SettingsHit {
@@ -2317,7 +2353,7 @@ pub struct SettingsLayout {
     pub divider: Rect,
     pub content: Rect,
     pub viewport: Rect,
-    pub sections: [(SettingsSection, Rect); 4],
+    pub sections: [(SettingsSection, Rect); 5],
     pub rows: Vec<ControlRowLayout>,
     pub keys_search: Option<Rect>,
     pub keys_reset_all: Option<Rect>,
@@ -2465,7 +2501,7 @@ impl SettingsLayout {
         };
 
         match state.section {
-            SettingsSection::Appearance | SettingsSection::Behaviour => {
+            SettingsSection::Appearance | SettingsSection::Behaviour | SettingsSection::Ai => {
                 layout.build_control_rows(scale, state, config);
             }
             SettingsSection::Keys => {
@@ -2855,7 +2891,10 @@ impl SettingsLayout {
                         }
                         ControlGeometry::ActionButton { button } => {
                             if button.contains(x, y) {
-                                return SettingsHit::CopyConfigPath;
+                                return match row.id {
+                                    SettingId::ProjectMemory => SettingsHit::OpenMemory,
+                                    _ => SettingsHit::CopyConfigPath,
+                                };
                             }
                         }
                     }

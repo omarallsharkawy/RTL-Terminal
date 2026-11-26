@@ -22,6 +22,7 @@ mod event;
 mod git_diff;
 mod keyboard;
 mod layouts;
+mod memory;
 mod mouse;
 mod output;
 mod palette;
@@ -95,6 +96,12 @@ pub struct App {
     palette: Option<palette::OpenPalette>,
     /// The settings overlay, while it is open (keys, IME text and pointer input go to it).
     settings: Option<crate::ui::settings_panel::SettingsPanelState>,
+    /// The project memory overlay, while it is open.
+    memory: Option<crate::ui::memory_panel::MemoryPanelState>,
+    /// Generation counter for off-thread project memory snapshots.
+    memory_generation: u64,
+    /// Project roots whose environment notes have already been refreshed in this session.
+    refreshed_env_projects: std::collections::HashSet<std::path::PathBuf>,
     /// The first-run welcome wizard, while it is open.
     welcome: Option<crate::ui::welcome::WelcomeState>,
     /// Local control socket server (`twitty ctl`), when enabled.
@@ -158,6 +165,9 @@ impl App {
             window_focused: false,
             palette: None,
             settings: None,
+            memory: None,
+            memory_generation: 0,
+            refreshed_env_projects: std::collections::HashSet::new(),
             welcome: None,
             control: None,
             notification_history: Default::default(),
@@ -270,6 +280,9 @@ impl ApplicationHandler<AppEvent> for App {
             }
             AppEvent::Projects(generation, items) => self.on_projects_loaded(generation, items),
             AppEvent::AiComplete(request_id, result) => self.on_ai_complete(request_id, result),
+            AppEvent::MemorySnapshot(generation, snapshot) => {
+                self.on_memory_snapshot(generation, snapshot)
+            }
         }
     }
 
@@ -346,6 +359,7 @@ impl ApplicationHandler<AppEvent> for App {
                 self.window.resize(size.width, size.height);
                 self.sync_palette();
                 self.sync_settings();
+                self.sync_memory();
                 self.sync_welcome();
                 self.apply_layout();
             }
@@ -353,6 +367,7 @@ impl ApplicationHandler<AppEvent> for App {
                 self.window.set_scale_factor(scale_factor as f32);
                 self.sync_palette();
                 self.sync_settings();
+                self.sync_memory();
                 self.sync_welcome();
                 self.apply_layout();
             }

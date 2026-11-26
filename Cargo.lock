@@ -3467,6 +3467,7 @@ dependencies = [
  "tracing",
  "twitty-control",
  "twitty-core",
+ "twitty-store",
 ]
 
 [[package]]

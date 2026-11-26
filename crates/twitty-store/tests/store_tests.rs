@@ -3,10 +3,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use twitty_store::{
-    apply_migrations, db_path_unix, db_path_windows, escape_fts5_query, now_epoch_ms,
-    resolve_project_root, DriveIndexEntry, InMemorySecretStore, MemoryKind, MemoryUpdate,
-    Migration, NewCommand, NewMemory, SecretError, SecretStore, SecretValue, Store, StoreError,
-    StoreHandle, SystemSecretStore, CURRENT_SCHEMA_VERSION, MIGRATIONS, SECRET_SERVICE,
+    apply_migrations, compute_frequent_commands, db_path_unix, db_path_windows, detect_project_env,
+    escape_fts5_query, is_path_excluded_with_home, now_epoch_ms, resolve_project_root, sha256_hex,
+    DriveIndexEntry, HistoryEntry, InMemorySecretStore, MemoryKind, MemoryUpdate, Migration,
+    NewCommand, NewMemory, RulesFileState, SecretError, SecretStore, SecretValue, Store,
+    StoreError, StoreHandle, SystemSecretStore, AUTO_COMMAND_SOURCE, AUTO_ENV_SOURCE,
+    CURRENT_SCHEMA_VERSION, MIGRATIONS, SECRET_SERVICE,
 };
 
 static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
@@ -179,7 +181,7 @@ fn migrations_fresh_intermediate_rerun_and_newer_schema() {
         assert_eq!(rows[0].command, "cargo check");
         drop(s_upgraded);
 
-        // 3. Opening a v3 DB with only v1 migrations must fail with NewerSchema without downgrading.
+        // 3. Opening a v3 DB with only supported migrations must fail with NewerSchema without downgrading.
         let err = match Store::open_with_migrations(&p, MIGRATIONS) {
             Ok(_) => panic!("expected NewerSchema error"),
             Err(err) => err,
@@ -189,7 +191,7 @@ fn migrations_fresh_intermediate_rerun_and_newer_schema() {
                 err,
                 StoreError::NewerSchema {
                     found: 3,
-                    supported: 1
+                    supported: CURRENT_SCHEMA_VERSION,
                 }
             ),
             "unexpected error: {err:?}"
@@ -203,10 +205,39 @@ fn migrations_fresh_intermediate_rerun_and_newer_schema() {
         assert_eq!(rows[0].command, "cargo check");
     }
 
-    // 4. Verify apply_migrations on an in-memory connection directly as well.
+    // 4. Verify real v1 -> v2 upgrade preserves existing rows and creates rules_file_approvals.
+    let v1_path = dir.path().join("upgrade_v1_to_v2.db");
+    {
+        let s_v1 = Store::open_with_migrations(&v1_path, &MIGRATIONS[..1]).unwrap();
+        assert_eq!(s_v1.schema_version().unwrap(), 1);
+        s_v1.create_memory(&NewMemory {
+            project_root: "/repo/v1".into(),
+            kind: MemoryKind::Rule,
+            text: "Keep tests deterministic".into(),
+            source: "user".into(),
+            approved: true,
+        })
+        .unwrap();
+    }
+    {
+        let s_v2 = Store::open(&v1_path).unwrap();
+        assert_eq!(s_v2.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
+        assert_eq!(s_v2.list_memory("/repo/v1", true, 10).unwrap().len(), 1);
+        s_v2.approve_rules_file("/repo/v1", "AGENTS.md", "deadbeef")
+            .unwrap();
+        assert_eq!(s_v2.list_rules_approvals("/repo/v1").unwrap().len(), 1);
+    }
+
+    // 5. Verify apply_migrations on an in-memory connection directly as well.
     let mut mem = rusqlite::Connection::open_in_memory().unwrap();
-    assert_eq!(apply_migrations(&mut mem, MIGRATIONS).unwrap(), 1);
-    assert_eq!(apply_migrations(&mut mem, MIGRATIONS).unwrap(), 1);
+    assert_eq!(
+        apply_migrations(&mut mem, MIGRATIONS).unwrap(),
+        CURRENT_SCHEMA_VERSION
+    );
+    assert_eq!(
+        apply_migrations(&mut mem, MIGRATIONS).unwrap(),
+        CURRENT_SCHEMA_VERSION
+    );
 }
 
 #[test]
@@ -523,4 +554,372 @@ fn secret_store_crud_and_debug_never_leaks_secrets() {
         dyn_store.get("openai").unwrap(),
         Some(SecretValue::new("sk-test-val"))
     );
+}
+
+#[test]
+fn project_exclusion_matches_paths_tilde_and_globs() {
+    let home = Path::new("/home/omar");
+    let patterns: Vec<String> = vec![
+        "~/secrets".into(),
+        "/work/clients/*".into(),
+        "**/private/**".into(),
+        "*-confidential".into(),
+    ];
+
+    assert!(is_path_excluded_with_home(
+        Path::new("/home/omar/secrets"),
+        &patterns,
+        Some(home)
+    ));
+    assert!(is_path_excluded_with_home(
+        Path::new("/home/omar/secrets/subrepo"),
+        &patterns,
+        Some(home)
+    ));
+    assert!(!is_path_excluded_with_home(
+        Path::new("/home/omar/secrets2"),
+        &patterns,
+        Some(home)
+    ));
+    assert!(is_path_excluded_with_home(
+        Path::new("/work/clients/acme/service"),
+        &patterns,
+        Some(home)
+    ));
+    assert!(is_path_excluded_with_home(
+        Path::new("/a/b/private/c/d"),
+        &patterns,
+        Some(home)
+    ));
+    assert!(is_path_excluded_with_home(
+        Path::new("/srv/app-confidential/repo"),
+        &patterns,
+        Some(home)
+    ));
+    assert!(!is_path_excluded_with_home(
+        Path::new("/home/omar/Projects/twitty"),
+        &patterns,
+        Some(home)
+    ));
+}
+
+#[test]
+fn rules_files_require_sha256_approval_and_silently_lapse_on_change() {
+    let dir = TempDir::new("rules");
+    let root = dir.path();
+    fs::create_dir_all(root.join(".twitty")).unwrap();
+
+    let agents_v1 = format!(
+        "# Rules\nNever leak {}\nAlways run tests.",
+        concat!("gh", "p_1234567890abcdef1234567890abcdef1234")
+    );
+    fs::write(root.join("AGENTS.md"), &agents_v1).unwrap();
+    fs::write(root.join("CLAUDE.md"), "Use cargo fmt").unwrap();
+    fs::write(root.join(".twitty/rules.md"), "قواعد عربية للمشروع").unwrap();
+
+    let store = Store::open_in_memory().unwrap();
+    let key = root.to_string_lossy().into_owned();
+
+    // Initially nothing is approved; content must NOT be read.
+    let initial = store.inspect_rules_files(root).unwrap();
+    assert_eq!(initial.len(), 3);
+    assert_eq!(initial[0].rel_path, "AGENTS.md");
+    assert_eq!(initial[1].rel_path, "CLAUDE.md");
+    assert_eq!(initial[2].rel_path, ".twitty/rules.md");
+    for f in &initial {
+        assert_eq!(f.state, RulesFileState::Unapproved);
+        assert!(f.approved_content.is_none());
+    }
+
+    // Approve AGENTS.md with its current SHA-256 -> content is returned redacted.
+    let sha_v1 = sha256_hex(agents_v1.as_bytes());
+    assert_eq!(initial[0].current_sha256, sha_v1);
+    store
+        .approve_rules_file(&key, "AGENTS.md", &sha_v1)
+        .unwrap();
+
+    let after_approve = store.inspect_rules_files(root).unwrap();
+    assert_eq!(after_approve[0].state, RulesFileState::Approved);
+    let content = after_approve[0]
+        .approved_content
+        .as_deref()
+        .expect("approved content returned");
+    assert!(content.contains("[REDACTED:github_token]"));
+    assert!(!content.contains("1234567890abcdef"));
+    assert_eq!(after_approve[1].state, RulesFileState::Unapproved);
+    assert!(after_approve[1].approved_content.is_none());
+
+    // Modify AGENTS.md on disk -> approval silently lapses to Changed and content is withheld!
+    let agents_v2 = "# Rules v2\nChanged content";
+    fs::write(root.join("AGENTS.md"), agents_v2).unwrap();
+    let after_change = store.inspect_rules_files(root).unwrap();
+    assert_eq!(after_change[0].state, RulesFileState::Changed);
+    assert!(after_change[0].approved_content.is_none());
+    assert_eq!(
+        after_change[0].approved_sha256.as_deref(),
+        Some(sha_v1.as_str())
+    );
+    assert_ne!(after_change[0].current_sha256, sha_v1);
+
+    // Re-approve with new SHA-256 -> Approved again.
+    let sha_v2 = sha256_hex(agents_v2.as_bytes());
+    store
+        .approve_rules_file(&key, "AGENTS.md", &sha_v2)
+        .unwrap();
+    let reapproved = store.inspect_rules_files(root).unwrap();
+    assert_eq!(reapproved[0].state, RulesFileState::Approved);
+    assert_eq!(
+        reapproved[0].approved_content.as_deref(),
+        Some("# Rules v2\nChanged content")
+    );
+
+    // Revoke -> Unapproved.
+    assert!(store.revoke_rules_file(&key, "AGENTS.md").unwrap());
+    let revoked = store.inspect_rules_files(root).unwrap();
+    assert_eq!(revoked[0].state, RulesFileState::Unapproved);
+    assert!(revoked[0].approved_content.is_none());
+
+    // Symlink escaping project root must be ignored.
+    #[cfg(unix)]
+    {
+        let outside = TempDir::new("outside-rules");
+        let outside_file = outside.path().join("secret.md");
+        fs::write(&outside_file, "outside secret").unwrap();
+        std::os::unix::fs::symlink(&outside_file, root.join("TWITTY.md")).unwrap();
+        let inspected = store.inspect_rules_files(root).unwrap();
+        assert!(
+            !inspected.iter().any(|f| f.rel_path == "TWITTY.md"),
+            "symlink escaping project root must be skipped"
+        );
+    }
+}
+
+#[test]
+fn env_notes_detection_and_refresh_preserve_user_notes() {
+    let dir = TempDir::new("env");
+    let root = dir.path();
+
+    fs::write(
+        root.join("rust-toolchain.toml"),
+        "[toolchain]\nchannel = \"1.90.0\"\ncomponents = [\"clippy\", \"rustfmt\"]\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("mise.toml"),
+        "[tools]\nnode = \"22\"\npython = \"3.12\"\n",
+    )
+    .unwrap();
+    fs::write(root.join(".tool-versions"), "golang 1.23.1\n").unwrap();
+    fs::write(root.join("Cargo.toml"), "[package]\nname = \"demo\"\n").unwrap();
+    fs::write(root.join("pnpm-lock.yaml"), "lockfileVersion: '9.0'\n").unwrap();
+
+    let detected = detect_project_env(root);
+    assert_eq!(detected.len(), 4);
+    assert!(detected[0].text.contains("Rust toolchain: 1.90.0"));
+    assert!(detected[0].text.contains("clippy, rustfmt"));
+    assert!(detected[1]
+        .text
+        .contains("mise tools: node 22, python 3.12"));
+    assert!(detected[2].text.contains(".tool-versions: golang 1.23.1"));
+    assert!(detected[3].text.contains("Package managers: cargo, pnpm"));
+
+    let store = Store::open_in_memory().unwrap();
+    let key = root.to_string_lossy().into_owned();
+    // Add a user-authored env note; refresh must preserve it.
+    store
+        .create_memory(&NewMemory {
+            project_root: key.clone(),
+            kind: MemoryKind::Env,
+            text: "Uses Mesa llvmpipe for golden tests".into(),
+            source: "user".into(),
+            approved: true,
+        })
+        .unwrap();
+
+    let refreshed = store.refresh_env_notes(root).unwrap();
+    assert_eq!(refreshed.len(), 5);
+    assert!(refreshed
+        .iter()
+        .any(|e| e.source == "user" && e.text.contains("llvmpipe")));
+    assert_eq!(
+        refreshed
+            .iter()
+            .filter(|e| e.source == AUTO_ENV_SOURCE)
+            .count(),
+        4
+    );
+
+    // Update rust-toolchain.toml -> refresh replaces only auto:env entries cleanly.
+    fs::write(root.join("rust-toolchain.toml"), "channel = \"nightly\"\n").unwrap();
+    let refreshed2 = store.refresh_env_notes(root).unwrap();
+    assert!(refreshed2
+        .iter()
+        .any(|e| e.text.contains("Rust toolchain: nightly")));
+    assert!(!refreshed2.iter().any(|e| e.text.contains("1.90.0")));
+    assert!(refreshed2
+        .iter()
+        .any(|e| e.source == "user" && e.text.contains("llvmpipe")));
+}
+
+#[test]
+fn frequent_commands_compute_success_rates_filter_noise_and_forget_project() {
+    let store = Store::open_in_memory().unwrap();
+    let proj = "/repo/alpha";
+    let other = "/repo/beta";
+
+    // Trivial commands should be filtered out even when run frequently.
+    for i in 0..5 {
+        store
+            .record_command(&NewCommand {
+                command: "ls -la".into(),
+                exit_code: Some(0),
+                duration_ms: Some(5),
+                cwd: proj.into(),
+                project_root: Some(proj.into()),
+                shell: Some("bash".into()),
+                started_at: 100 + i,
+                finished_at: Some(105 + i),
+            })
+            .unwrap();
+    }
+    // `cargo test --workspace`: 4 runs, 3 succeeded (75%).
+    for (idx, code) in [0, 0, 1, 0].into_iter().enumerate() {
+        store
+            .record_command(&NewCommand {
+                command: "cargo   test  --workspace".into(),
+                exit_code: Some(code),
+                duration_ms: Some(200),
+                cwd: proj.into(),
+                project_root: Some(proj.into()),
+                shell: Some("bash".into()),
+                started_at: 200 + idx as i64,
+                finished_at: Some(400 + idx as i64),
+            })
+            .unwrap();
+    }
+    // `cargo clippy`: 2 runs, 2 succeeded (100%).
+    for idx in 0..2 {
+        store
+            .record_command(&NewCommand {
+                command: "cargo clippy".into(),
+                exit_code: Some(0),
+                duration_ms: Some(100),
+                cwd: proj.into(),
+                project_root: Some(proj.into()),
+                shell: Some("bash".into()),
+                started_at: 300 + idx,
+                finished_at: Some(400 + idx),
+            })
+            .unwrap();
+    }
+    // Single run command -> below min_runs=2.
+    store
+        .record_command(&NewCommand {
+            command: "cargo doc".into(),
+            exit_code: Some(0),
+            duration_ms: Some(50),
+            cwd: proj.into(),
+            project_root: Some(proj.into()),
+            shell: Some("bash".into()),
+            started_at: 500,
+            finished_at: Some(550),
+        })
+        .unwrap();
+    // Unrelated project must stay untouched by forget_project.
+    store
+        .create_memory(&NewMemory {
+            project_root: other.into(),
+            kind: MemoryKind::Fact,
+            text: "Beta fact".into(),
+            source: "user".into(),
+            approved: true,
+        })
+        .unwrap();
+
+    let freq = store.frequent_commands(proj, 2, 10).unwrap();
+    assert_eq!(freq.len(), 2);
+    assert_eq!(freq[0].command, "cargo test --workspace");
+    assert_eq!(freq[0].runs, 4);
+    assert_eq!(freq[0].success_rate_pct, Some(75));
+    assert_eq!(freq[1].command, "cargo clippy");
+    assert_eq!(freq[1].runs, 2);
+    assert_eq!(freq[1].success_rate_pct, Some(100));
+
+    let synced = store.sync_frequent_commands(proj, 2, 10).unwrap();
+    assert_eq!(synced.len(), 2);
+    assert!(synced.iter().all(|e| e.source == AUTO_COMMAND_SOURCE));
+
+    store
+        .approve_rules_file(proj, "AGENTS.md", "abc123")
+        .unwrap();
+    let report = store.forget_project(proj).unwrap();
+    assert_eq!(report.memories_deleted, 2);
+    assert_eq!(report.rules_approvals_deleted, 1);
+    assert!(report.history_deleted >= 12);
+
+    assert!(store.list_memory(proj, false, 10).unwrap().is_empty());
+    assert!(store.list_rules_approvals(proj).unwrap().is_empty());
+    assert!(store.recent_history(Some(proj), 10).unwrap().is_empty());
+    // Other project completely untouched!
+    assert_eq!(store.list_memory(other, true, 10).unwrap().len(), 1);
+
+    // Pure helper sanity check with empty input.
+    let empty: Vec<HistoryEntry> = Vec::new();
+    assert!(compute_frequent_commands(&empty, 2, 5).is_empty());
+}
+
+#[test]
+fn worker_respects_exclusions_on_history_and_env_refresh() {
+    let dir = TempDir::new("worker-excl");
+    let repo = dir.path().join("secret-repo");
+    fs::create_dir_all(repo.join(".git")).unwrap();
+    fs::write(repo.join("Cargo.toml"), "[package]\nname=\"s\"\n").unwrap();
+
+    let handle = StoreHandle::open_in_memory();
+    let excludes = vec![repo.to_string_lossy().into_owned()];
+
+    handle.record_finished_block_with_excludes_async(
+        "cargo test".into(),
+        Some(0),
+        Some(10),
+        repo.clone(),
+        true,
+        excludes.clone(),
+        Some("bash".into()),
+        100,
+        Some(110),
+    );
+    handle.refresh_env_notes_async(repo.clone(), excludes.clone());
+    handle.flush();
+
+    assert!(handle.recent_history(None, 10).unwrap().is_empty());
+    assert!(handle
+        .list_memory(repo.to_string_lossy(), false, 10)
+        .unwrap()
+        .is_empty());
+
+    let snap = handle.load_project_snapshot(repo, excludes).unwrap();
+    assert!(snap.excluded);
+    assert!(snap.entries.is_empty());
+    assert!(snap.rules_files.is_empty());
+}
+
+#[test]
+fn sha256_matches_fips_180_test_vectors() {
+    assert_eq!(
+        sha256_hex(b"abc"),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+    assert_eq!(
+        sha256_hex(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+        "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
+    );
+    assert_eq!(
+        sha256_hex(&vec![b'a'; 1_000_000]),
+        "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0"
+    );
+    // Lengths around the 55/56/64-byte padding boundaries.
+    for len in [55usize, 56, 63, 64, 65, 119, 120] {
+        assert_eq!(sha256_hex(&vec![0u8; len]).len(), 64);
+    }
 }

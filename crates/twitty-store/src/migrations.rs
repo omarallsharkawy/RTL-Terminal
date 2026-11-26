@@ -5,7 +5,7 @@ use rusqlite::Connection;
 use crate::error::StoreError;
 
 /// Latest schema version supported by this build.
-pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+pub const CURRENT_SCHEMA_VERSION: u32 = 2;
 
 /// One forward-only schema migration applied inside a transaction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -99,11 +99,31 @@ CREATE TABLE drive_index (
 CREATE INDEX idx_drive_index_kind ON drive_index(kind, updated_at DESC);
 "#;
 
+/// Schema v2: per-project SHA-256 approvals for project rules files (`AGENTS.md`, `CLAUDE.md`,
+/// `TWITTY.md`, `.twitty/rules.md`).
+const SCHEMA_V2: &str = r#"
+CREATE TABLE rules_file_approvals (
+    project_root TEXT NOT NULL,
+    rel_path TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    approved_at INTEGER NOT NULL,
+    PRIMARY KEY (project_root, rel_path)
+);
+
+CREATE INDEX idx_rules_approvals_project ON rules_file_approvals(project_root);
+"#;
+
 /// Ordered list of schema migrations shipped with this crate.
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    sql: SCHEMA_V1,
-}];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        sql: SCHEMA_V1,
+    },
+    Migration {
+        version: 2,
+        sql: SCHEMA_V2,
+    },
+];
 
 /// Read SQLite's `PRAGMA user_version`.
 pub fn read_user_version(conn: &Connection) -> Result<u32, StoreError> {

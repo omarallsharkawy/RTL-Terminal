@@ -116,7 +116,9 @@ impl SettingsDrawer<'_, '_> {
         self.draw_sidebar();
 
         match self.view.state.section {
-            SettingsSection::Appearance | SettingsSection::Behaviour => self.draw_controls(),
+            SettingsSection::Appearance | SettingsSection::Behaviour | SettingsSection::Ai => {
+                self.draw_controls()
+            }
             SettingsSection::Keys => self.draw_keys(),
             SettingsSection::About => self.draw_about(),
         }
@@ -232,6 +234,7 @@ impl SettingsDrawer<'_, '_> {
             let icon = match section {
                 SettingsSection::Appearance => Icon::Agent,
                 SettingsSection::Behaviour => Icon::Terminal,
+                SettingsSection::Ai => Icon::Explain,
                 SettingsSection::Keys => Icon::CopyCommand,
                 SettingsSection::About => Icon::Folder,
             };
@@ -288,7 +291,9 @@ impl SettingsDrawer<'_, '_> {
                     | SettingsHit::PickerToggle(id)
             ) if id == row.id
         ) || (row.id == SettingId::UiAccent
-            && matches!(self.view.state.hover, Some(SettingsHit::Swatch(_))));
+            && matches!(self.view.state.hover, Some(SettingsHit::Swatch(_))))
+            || (row.id == SettingId::ProjectMemory
+                && self.view.state.hover == Some(SettingsHit::OpenMemory));
 
         if focused {
             self.shapes.push(Shape::RoundedRect {
@@ -395,6 +400,30 @@ impl SettingsDrawer<'_, '_> {
                     .as_ref()
                     .is_some_and(|e| e.setting == row.id);
                 self.draw_picker_button(row.id, *button, expanded, clip);
+            }
+            (ControlKind::ActionButton, ControlGeometry::ActionButton { button }) => {
+                let hovered = row.id == SettingId::ProjectMemory
+                    && self.view.state.hover == Some(SettingsHit::OpenMemory);
+                self.shapes.push(Shape::RoundedRect {
+                    rect: *button,
+                    radii: [s.px(RADIUS_6); 4],
+                    fill: self.ctx.color(if hovered { s.bg3 } else { s.bg0 }),
+                    border: Some(Border {
+                        width: s.px(1.0),
+                        color: self.ctx.color(if hovered { s.accent } else { s.border }),
+                    }),
+                    shadow: None,
+                });
+                let text = self.lang().text("Open…", "فتح…");
+                self.push_label(
+                    *button,
+                    text,
+                    UiSize::Caption,
+                    UiWeight::Semibold,
+                    UiAlign::Center,
+                    s.text,
+                    Some(clip),
+                );
             }
             _ => {}
         }

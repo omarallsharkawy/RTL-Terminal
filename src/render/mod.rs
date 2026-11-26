@@ -38,6 +38,7 @@ use gpu::Gpu;
 use scene::blocks::{BlockFades, BlockPaint};
 use scene::context::DrawContext;
 use scene::frame::{build_frame_base, FrameOptions};
+use scene::memory::MemoryView;
 use scene::palette::{PaletteIcons, PaletteLayout, PaletteView};
 use scene::preedit::PreeditState;
 use scene::settings::SettingsView;
@@ -116,6 +117,8 @@ pub(crate) struct Renderer {
     ai_consent_view: Option<scene::ai::ConsentOverlayView>,
     /// The settings panel, while it is open.
     settings_view: Option<SettingsView>,
+    /// The project memory overlay, while it is open.
+    memory_view: Option<MemoryView>,
     /// The first-run welcome wizard, while it is open.
     welcome_view: Option<WelcomeView>,
     /// The code review panel, while it is open.
@@ -179,6 +182,7 @@ impl Renderer {
             block_ai_view: None,
             ai_consent_view: None,
             settings_view: None,
+            memory_view: None,
             welcome_view: None,
             review_view: AnimatedView::default(),
             review_labels: Default::default(),
@@ -382,6 +386,11 @@ impl Renderer {
     /// Show the settings overlay (`Some`) or hide it.
     pub(crate) fn set_settings_panel(&mut self, view: Option<SettingsView>) {
         self.settings_view = view;
+    }
+
+    /// Show the project memory overlay (`Some`) or hide it.
+    pub(crate) fn set_memory_panel(&mut self, view: Option<MemoryView>) {
+        self.memory_view = view;
     }
 
     /// Show the first-run welcome wizard (`Some`) or hide it.
@@ -606,6 +615,8 @@ impl Renderer {
                 icons,
                 opacity,
             );
+        } else if let Some(view) = &self.memory_view {
+            frame.add_memory(&mut ctx, style, &self.ui_font, view);
         } else if let Some(view) = &self.settings_view {
             frame.add_settings(&mut ctx, style, &self.ui_font, view);
         }

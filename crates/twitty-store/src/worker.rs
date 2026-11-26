@@ -10,10 +10,14 @@ use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::Duration;
 
+use crate::commands::{FrequentCommand, DEFAULT_FREQUENT_COMMAND_LIMIT, DEFAULT_MIN_COMMAND_RUNS};
 use crate::error::StoreError;
 use crate::paths::{default_db_path, resolve_project_root};
+use crate::project::{is_path_excluded, is_project_excluded};
+use crate::rules::{RulesApproval, RulesFileInfo};
 use crate::store::{
-    DriveIndexEntry, HistoryEntry, MemoryEntry, MemoryUpdate, NewCommand, NewMemory, Store,
+    DriveIndexEntry, ForgetReport, HistoryEntry, MemoryEntry, MemoryKind, MemoryUpdate, NewCommand,
+    NewMemory, ProjectMemorySnapshot, Store,
 };
 
 /// Bounded channel capacity so a command flood cannot grow memory unboundedly if disk I/O stalls.
@@ -35,6 +39,7 @@ enum StoreOp {
         duration_ms: Option<i64>,
         cwd: PathBuf,
         resolve_git_root: bool,
+        excludes: Vec<String>,
         shell: Option<String>,
         started_at: i64,
         finished_at: Option<i64>,
@@ -58,7 +63,8 @@ enum StoreOp {
     },
     CreateMemory {
         entry: NewMemory,
-        reply: mpsc::Sender<Result<i64, StoreError>>,
+        excludes: Vec<String>,
+        reply: Option<mpsc::Sender<Result<i64, StoreError>>>,
     },
     GetMemory {
         id: i64,
@@ -66,6 +72,13 @@ enum StoreOp {
     },
     ListMemory {
         project_root: String,
+        approved_only: bool,
+        limit: usize,
+        reply: mpsc::Sender<Result<Vec<MemoryEntry>, StoreError>>,
+    },
+    ListMemoryByKind {
+        project_root: String,
+        kind: Option<MemoryKind>,
         approved_only: bool,
         limit: usize,
         reply: mpsc::Sender<Result<Vec<MemoryEntry>, StoreError>>,
@@ -89,6 +102,58 @@ enum StoreOp {
         query: String,
         limit: usize,
         reply: mpsc::Sender<Result<Vec<MemoryEntry>, StoreError>>,
+    },
+    SearchApprovedMemory {
+        project_root: String,
+        query: String,
+        kind: Option<MemoryKind>,
+        limit: usize,
+        reply: mpsc::Sender<Result<Vec<MemoryEntry>, StoreError>>,
+    },
+    ForgetProject {
+        project_root: String,
+        reply: mpsc::Sender<Result<ForgetReport, StoreError>>,
+    },
+    ApproveRulesFile {
+        project_root: String,
+        rel_path: String,
+        sha256: String,
+        reply: mpsc::Sender<Result<(), StoreError>>,
+    },
+    RevokeRulesFile {
+        project_root: String,
+        rel_path: String,
+        reply: mpsc::Sender<Result<bool, StoreError>>,
+    },
+    ListRulesApprovals {
+        project_root: String,
+        reply: mpsc::Sender<Result<Vec<RulesApproval>, StoreError>>,
+    },
+    InspectRulesFiles {
+        project_root: PathBuf,
+        reply: mpsc::Sender<Result<Vec<RulesFileInfo>, StoreError>>,
+    },
+    RefreshEnvNotes {
+        project_root: PathBuf,
+        excludes: Vec<String>,
+        reply: Option<mpsc::Sender<Result<Vec<MemoryEntry>, StoreError>>>,
+    },
+    FrequentCommands {
+        project_root: String,
+        min_runs: usize,
+        limit: usize,
+        reply: mpsc::Sender<Result<Vec<FrequentCommand>, StoreError>>,
+    },
+    SyncFrequentCommands {
+        project_root: String,
+        min_runs: usize,
+        limit: usize,
+        reply: Option<mpsc::Sender<Result<Vec<MemoryEntry>, StoreError>>>,
+    },
+    LoadProjectSnapshot {
+        project_root: PathBuf,
+        excludes: Vec<String>,
+        reply: mpsc::Sender<Result<ProjectMemorySnapshot, StoreError>>,
     },
     UpsertDriveIndex {
         entry: DriveIndexEntry,
@@ -207,12 +272,41 @@ impl StoreHandle {
         started_at: i64,
         finished_at: Option<i64>,
     ) {
+        self.record_finished_block_with_excludes_async(
+            command,
+            exit_code,
+            duration_ms,
+            cwd,
+            resolve_git_root,
+            Vec::new(),
+            shell,
+            started_at,
+            finished_at,
+        );
+    }
+
+    /// Like [`Self::record_finished_block_async`], skipping persistence when `cwd` or its
+    /// resolved project root matches `excludes` (`config.memory_exclude`). Never blocks.
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_finished_block_with_excludes_async(
+        &self,
+        command: String,
+        exit_code: Option<i32>,
+        duration_ms: Option<i64>,
+        cwd: PathBuf,
+        resolve_git_root: bool,
+        excludes: Vec<String>,
+        shell: Option<String>,
+        started_at: i64,
+        finished_at: Option<i64>,
+    ) {
         self.send_fire_and_forget(StoreOp::RecordFinishedBlock {
             command,
             exit_code,
             duration_ms,
             cwd,
             resolve_git_root,
+            excludes,
             shell,
             started_at,
             finished_at,
@@ -232,6 +326,52 @@ impl StoreHandle {
             duration_ms,
             reply: None,
         });
+    }
+
+    /// Enqueue `create_memory` without waiting for a reply (never blocks).
+    pub fn create_memory_async(&self, entry: NewMemory) {
+        self.send_fire_and_forget(StoreOp::CreateMemory {
+            entry,
+            excludes: Vec::new(),
+            reply: None,
+        });
+    }
+
+    /// Enqueue `create_memory` off the UI thread, skipping when `entry.project_root` matches
+    /// `excludes`.
+    pub fn create_memory_if_not_excluded_async(&self, entry: NewMemory, excludes: Vec<String>) {
+        self.send_fire_and_forget(StoreOp::CreateMemory {
+            entry,
+            excludes,
+            reply: None,
+        });
+    }
+
+    /// Refresh environment notes for `project_root` off the UI thread, skipping excluded folders.
+    pub fn refresh_env_notes_async(&self, project_root: PathBuf, excludes: Vec<String>) {
+        self.send_fire_and_forget(StoreOp::RefreshEnvNotes {
+            project_root,
+            excludes,
+            reply: None,
+        });
+    }
+
+    /// Refresh environment notes and frequent commands for `project_root` off the UI thread.
+    pub fn refresh_project_memory_async(&self, project_root: PathBuf, excludes: Vec<String>) {
+        let key = project_root.to_string_lossy().into_owned();
+        if !is_path_excluded(&project_root, &excludes) {
+            self.send_fire_and_forget(StoreOp::RefreshEnvNotes {
+                project_root,
+                excludes,
+                reply: None,
+            });
+            self.send_fire_and_forget(StoreOp::SyncFrequentCommands {
+                project_root: key,
+                min_runs: DEFAULT_MIN_COMMAND_RUNS,
+                limit: DEFAULT_FREQUENT_COMMAND_LIMIT,
+                reply: None,
+            });
+        }
     }
 
     // ---- Request/reply methods (for background callers and tests) ----
@@ -285,7 +425,11 @@ impl StoreHandle {
     }
 
     pub fn create_memory(&self, entry: NewMemory) -> Result<i64, StoreError> {
-        self.request(|reply| StoreOp::CreateMemory { entry, reply })
+        self.request(|reply| StoreOp::CreateMemory {
+            entry,
+            excludes: Vec::new(),
+            reply: Some(reply),
+        })
     }
 
     pub fn get_memory(&self, id: i64) -> Result<Option<MemoryEntry>, StoreError> {
@@ -301,6 +445,23 @@ impl StoreHandle {
         let project_root = project_root.into();
         self.request(|reply| StoreOp::ListMemory {
             project_root,
+            approved_only,
+            limit,
+            reply,
+        })
+    }
+
+    pub fn list_memory_by_kind(
+        &self,
+        project_root: impl Into<String>,
+        kind: Option<MemoryKind>,
+        approved_only: bool,
+        limit: usize,
+    ) -> Result<Vec<MemoryEntry>, StoreError> {
+        let project_root = project_root.into();
+        self.request(|reply| StoreOp::ListMemoryByKind {
+            project_root,
+            kind,
             approved_only,
             limit,
             reply,
@@ -334,6 +495,137 @@ impl StoreHandle {
             project_root,
             query,
             limit,
+            reply,
+        })
+    }
+
+    pub fn search_approved_memory(
+        &self,
+        project_root: impl Into<String>,
+        query: impl Into<String>,
+        kind: Option<MemoryKind>,
+        limit: usize,
+    ) -> Result<Vec<MemoryEntry>, StoreError> {
+        let project_root = project_root.into();
+        let query = query.into();
+        self.request(|reply| StoreOp::SearchApprovedMemory {
+            project_root,
+            query,
+            kind,
+            limit,
+            reply,
+        })
+    }
+
+    pub fn forget_project(
+        &self,
+        project_root: impl Into<String>,
+    ) -> Result<ForgetReport, StoreError> {
+        let project_root = project_root.into();
+        self.request(|reply| StoreOp::ForgetProject {
+            project_root,
+            reply,
+        })
+    }
+
+    pub fn approve_rules_file(
+        &self,
+        project_root: impl Into<String>,
+        rel_path: impl Into<String>,
+        sha256: impl Into<String>,
+    ) -> Result<(), StoreError> {
+        let project_root = project_root.into();
+        let rel_path = rel_path.into();
+        let sha256 = sha256.into();
+        self.request(|reply| StoreOp::ApproveRulesFile {
+            project_root,
+            rel_path,
+            sha256,
+            reply,
+        })
+    }
+
+    pub fn revoke_rules_file(
+        &self,
+        project_root: impl Into<String>,
+        rel_path: impl Into<String>,
+    ) -> Result<bool, StoreError> {
+        let project_root = project_root.into();
+        let rel_path = rel_path.into();
+        self.request(|reply| StoreOp::RevokeRulesFile {
+            project_root,
+            rel_path,
+            reply,
+        })
+    }
+
+    pub fn list_rules_approvals(
+        &self,
+        project_root: impl Into<String>,
+    ) -> Result<Vec<RulesApproval>, StoreError> {
+        let project_root = project_root.into();
+        self.request(|reply| StoreOp::ListRulesApprovals {
+            project_root,
+            reply,
+        })
+    }
+
+    pub fn inspect_rules_files(
+        &self,
+        project_root: PathBuf,
+    ) -> Result<Vec<RulesFileInfo>, StoreError> {
+        self.request(|reply| StoreOp::InspectRulesFiles {
+            project_root,
+            reply,
+        })
+    }
+
+    pub fn refresh_env_notes(&self, project_root: PathBuf) -> Result<Vec<MemoryEntry>, StoreError> {
+        self.request(|reply| StoreOp::RefreshEnvNotes {
+            project_root,
+            excludes: Vec::new(),
+            reply: Some(reply),
+        })
+    }
+
+    pub fn frequent_commands(
+        &self,
+        project_root: impl Into<String>,
+        min_runs: usize,
+        limit: usize,
+    ) -> Result<Vec<FrequentCommand>, StoreError> {
+        let project_root = project_root.into();
+        self.request(|reply| StoreOp::FrequentCommands {
+            project_root,
+            min_runs,
+            limit,
+            reply,
+        })
+    }
+
+    pub fn sync_frequent_commands(
+        &self,
+        project_root: impl Into<String>,
+        min_runs: usize,
+        limit: usize,
+    ) -> Result<Vec<MemoryEntry>, StoreError> {
+        let project_root = project_root.into();
+        self.request(|reply| StoreOp::SyncFrequentCommands {
+            project_root,
+            min_runs,
+            limit,
+            reply: Some(reply),
+        })
+    }
+
+    pub fn load_project_snapshot(
+        &self,
+        project_root: PathBuf,
+        excludes: Vec<String>,
+    ) -> Result<ProjectMemorySnapshot, StoreError> {
+        self.request(|reply| StoreOp::LoadProjectSnapshot {
+            project_root,
+            excludes,
             reply,
         })
     }
@@ -427,6 +719,7 @@ fn worker_loop(target: StoreTarget, rx: mpsc::Receiver<StoreOp>) {
                 duration_ms,
                 cwd,
                 resolve_git_root,
+                excludes,
                 shell,
                 started_at,
                 finished_at,
@@ -434,13 +727,21 @@ fn worker_loop(target: StoreTarget, rx: mpsc::Receiver<StoreOp>) {
                 let Some(s) = store.as_ref() else {
                     continue;
                 };
-                let project_root = if cwd.as_os_str().is_empty() {
+                let resolved_root = if cwd.as_os_str().is_empty() {
                     None
                 } else if resolve_git_root {
-                    Some(resolve_project_root(&cwd).to_string_lossy().into_owned())
+                    Some(resolve_project_root(&cwd))
                 } else {
-                    Some(cwd.to_string_lossy().into_owned())
+                    Some(cwd.clone())
                 };
+                if let Some(ref root) = resolved_root {
+                    if is_project_excluded(&cwd, root, &excludes) {
+                        continue;
+                    }
+                }
+                let project_root = resolved_root
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().into_owned());
                 let entry = NewCommand {
                     command,
                     exit_code,
@@ -501,7 +802,19 @@ fn worker_loop(target: StoreTarget, rx: mpsc::Receiver<StoreOp>) {
                 }
                 let _ = reply.send(res);
             }
-            StoreOp::CreateMemory { entry, reply } => {
+            StoreOp::CreateMemory {
+                entry,
+                excludes,
+                reply,
+            } => {
+                if !excludes.is_empty()
+                    && is_path_excluded(std::path::Path::new(&entry.project_root), &excludes)
+                {
+                    if let Some(reply) = reply {
+                        let _ = reply.send(Err(StoreError::InvalidInput("project is excluded")));
+                    }
+                    continue;
+                }
                 let res = match store.as_ref() {
                     Some(s) => s.create_memory(&entry),
                     None => Err(StoreError::Unavailable),
@@ -509,7 +822,9 @@ fn worker_loop(target: StoreTarget, rx: mpsc::Receiver<StoreOp>) {
                 if let Err(ref err) = res {
                     log_once("create_memory failed", err);
                 }
-                let _ = reply.send(res);
+                if let Some(reply) = reply {
+                    let _ = reply.send(res);
+                }
             }
             StoreOp::GetMemory { id, reply } => {
                 let res = match store.as_ref() {
@@ -533,6 +848,22 @@ fn worker_loop(target: StoreTarget, rx: mpsc::Receiver<StoreOp>) {
                 };
                 if let Err(ref err) = res {
                     log_once("list_memory failed", err);
+                }
+                let _ = reply.send(res);
+            }
+            StoreOp::ListMemoryByKind {
+                project_root,
+                kind,
+                approved_only,
+                limit,
+                reply,
+            } => {
+                let res = match store.as_ref() {
+                    Some(s) => s.list_memory_by_kind(&project_root, kind, approved_only, limit),
+                    None => Err(StoreError::Unavailable),
+                };
+                if let Err(ref err) = res {
+                    log_once("list_memory_by_kind failed", err);
                 }
                 let _ = reply.send(res);
             }
@@ -582,6 +913,158 @@ fn worker_loop(target: StoreTarget, rx: mpsc::Receiver<StoreOp>) {
                 };
                 if let Err(ref err) = res {
                     log_once("search_memory failed", err);
+                }
+                let _ = reply.send(res);
+            }
+            StoreOp::SearchApprovedMemory {
+                project_root,
+                query,
+                kind,
+                limit,
+                reply,
+            } => {
+                let res = match store.as_ref() {
+                    Some(s) => s.search_approved_memory(&project_root, &query, kind, limit),
+                    None => Err(StoreError::Unavailable),
+                };
+                if let Err(ref err) = res {
+                    log_once("search_approved_memory failed", err);
+                }
+                let _ = reply.send(res);
+            }
+            StoreOp::ForgetProject {
+                project_root,
+                reply,
+            } => {
+                let res = match store.as_ref() {
+                    Some(s) => s.forget_project(&project_root),
+                    None => Err(StoreError::Unavailable),
+                };
+                if let Err(ref err) = res {
+                    log_once("forget_project failed", err);
+                }
+                let _ = reply.send(res);
+            }
+            StoreOp::ApproveRulesFile {
+                project_root,
+                rel_path,
+                sha256,
+                reply,
+            } => {
+                let res = match store.as_ref() {
+                    Some(s) => s.approve_rules_file(&project_root, &rel_path, &sha256),
+                    None => Err(StoreError::Unavailable),
+                };
+                if let Err(ref err) = res {
+                    log_once("approve_rules_file failed", err);
+                }
+                let _ = reply.send(res);
+            }
+            StoreOp::RevokeRulesFile {
+                project_root,
+                rel_path,
+                reply,
+            } => {
+                let res = match store.as_ref() {
+                    Some(s) => s.revoke_rules_file(&project_root, &rel_path),
+                    None => Err(StoreError::Unavailable),
+                };
+                if let Err(ref err) = res {
+                    log_once("revoke_rules_file failed", err);
+                }
+                let _ = reply.send(res);
+            }
+            StoreOp::ListRulesApprovals {
+                project_root,
+                reply,
+            } => {
+                let res = match store.as_ref() {
+                    Some(s) => s.list_rules_approvals(&project_root),
+                    None => Err(StoreError::Unavailable),
+                };
+                if let Err(ref err) = res {
+                    log_once("list_rules_approvals failed", err);
+                }
+                let _ = reply.send(res);
+            }
+            StoreOp::InspectRulesFiles {
+                project_root,
+                reply,
+            } => {
+                let res = match store.as_ref() {
+                    Some(s) => s.inspect_rules_files(&project_root),
+                    None => Err(StoreError::Unavailable),
+                };
+                if let Err(ref err) = res {
+                    log_once("inspect_rules_files failed", err);
+                }
+                let _ = reply.send(res);
+            }
+            StoreOp::RefreshEnvNotes {
+                project_root,
+                excludes,
+                reply,
+            } => {
+                if !excludes.is_empty() && is_path_excluded(&project_root, &excludes) {
+                    if let Some(reply) = reply {
+                        let _ = reply.send(Ok(Vec::new()));
+                    }
+                    continue;
+                }
+                let res = match store.as_ref() {
+                    Some(s) => s.refresh_env_notes(&project_root),
+                    None => Err(StoreError::Unavailable),
+                };
+                if let Err(ref err) = res {
+                    log_once("refresh_env_notes failed", err);
+                }
+                if let Some(reply) = reply {
+                    let _ = reply.send(res);
+                }
+            }
+            StoreOp::FrequentCommands {
+                project_root,
+                min_runs,
+                limit,
+                reply,
+            } => {
+                let res = match store.as_ref() {
+                    Some(s) => s.frequent_commands(&project_root, min_runs, limit),
+                    None => Err(StoreError::Unavailable),
+                };
+                if let Err(ref err) = res {
+                    log_once("frequent_commands failed", err);
+                }
+                let _ = reply.send(res);
+            }
+            StoreOp::SyncFrequentCommands {
+                project_root,
+                min_runs,
+                limit,
+                reply,
+            } => {
+                let res = match store.as_ref() {
+                    Some(s) => s.sync_frequent_commands(&project_root, min_runs, limit),
+                    None => Err(StoreError::Unavailable),
+                };
+                if let Err(ref err) = res {
+                    log_once("sync_frequent_commands failed", err);
+                }
+                if let Some(reply) = reply {
+                    let _ = reply.send(res);
+                }
+            }
+            StoreOp::LoadProjectSnapshot {
+                project_root,
+                excludes,
+                reply,
+            } => {
+                let res = match store.as_ref() {
+                    Some(s) => s.load_project_snapshot(&project_root, &excludes),
+                    None => Err(StoreError::Unavailable),
+                };
+                if let Err(ref err) = res {
+                    log_once("load_project_snapshot failed", err);
                 }
                 let _ = reply.send(res);
             }

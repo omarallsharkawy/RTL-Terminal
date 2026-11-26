@@ -12,6 +12,7 @@ use super::cursor::{
     cursor_cell_width, cursor_left, cursor_quads, effective_cursor_shape,
     geometry_under_block_cursor,
 };
+use super::memory::{memory_overlay, MemoryView};
 use super::motion::Slide;
 use super::palette::{palette_overlay, PaletteIcons, PaletteView};
 use super::preedit::{bounds_outside, ImeArea, PreeditState};
@@ -600,6 +601,26 @@ impl Frame {
         view: &WelcomeView,
     ) {
         let (outer, texts) = welcome_overlay(
+            ctx,
+            style,
+            font,
+            view,
+            self.surface,
+            &mut self.shapes.overlay,
+        );
+        self.overlay.extend(texts);
+        self.overlay_rect = outer;
+    }
+
+    /// Draw the Project Memory overlay above everything else, clipping underlying text behind it.
+    pub fn add_memory(
+        &mut self,
+        ctx: &mut DrawContext,
+        style: UiStyle,
+        font: &UiFont,
+        view: &MemoryView,
+    ) {
+        let (outer, texts) = memory_overlay(
             ctx,
             style,
             font,

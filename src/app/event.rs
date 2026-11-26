@@ -50,6 +50,8 @@ pub enum AppEvent {
     Projects(u64, Vec<crate::projects::ProjectItem>),
     /// Result of a non-interactive built-in AI CLI request.
     AiComplete(u64, crate::ai::AiResult),
+    /// Project memory snapshot loaded off the UI thread for the Memory screen.
+    MemorySnapshot(u64, twitty_store::ProjectMemorySnapshot),
 }
 
 /// Longest title kept from a program, in characters.
@@ -145,11 +147,13 @@ impl App {
         }
         if let Some(cwd) = recorded_cwd {
             self.record_project_cwd(&cwd);
+            self.maybe_refresh_project_env(&cwd);
         }
         if let Some(block) = finished_block {
-            crate::history::record_finished_block(
+            crate::history::record_finished_block_with_excludes(
                 &self.store,
                 self.config.record_history,
+                &self.config.memory_exclude,
                 &block,
                 finished_cwd.as_deref(),
                 is_local,

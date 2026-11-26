@@ -79,6 +79,9 @@ pub struct TwittyConfig {
     pub ai_agent: Option<String>,
     /// Timeout in seconds for non-interactive built-in AI requests (default 60, clamped 5..=300).
     pub ai_timeout_secs: u64,
+    /// Globs or paths excluded from project memory recording and AI context assembly.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub memory_exclude: Vec<String>,
     /// Directories scanned (1-2 levels deep) for git repositories in the project switcher.
     #[serde(default = "crate::projects::scan::default_project_roots")]
     pub project_roots: Vec<String>,
@@ -135,6 +138,7 @@ impl Default for TwittyConfig {
             ai: true,
             ai_agent: None,
             ai_timeout_secs: 60,
+            memory_exclude: Vec::new(),
             project_roots: crate::projects::scan::default_project_roots(),
             commands: Vec::new(),
             keybindings: crate::input::keybindings::KeybindingsConfig::default(),
@@ -444,6 +448,13 @@ impl TwittyConfig {
         } else {
             self.ai_timeout_secs.clamp(5, 300)
         };
+        self.memory_exclude = self
+            .memory_exclude
+            .iter()
+            .map(|p| crate::shell_integration::clean_text(p.trim(), 512))
+            .filter(|p| !p.is_empty())
+            .take(256)
+            .collect();
         if !self.keybindings.is_empty() {
             let resolved = crate::input::keybindings::KeyBindings::resolve(&self.keybindings);
             for w in resolved.warnings {

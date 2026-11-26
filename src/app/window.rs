@@ -577,6 +577,15 @@ impl Window {
         }
     }
 
+    pub(super) fn set_memory_panel(
+        &mut self,
+        view: Option<crate::render::scene::memory::MemoryView>,
+    ) {
+        if let Some(ref mut r) = self.renderer {
+            r.set_memory_panel(view);
+        }
+    }
+
     pub(super) fn set_welcome(&mut self, view: Option<crate::render::scene::welcome::WelcomeView>) {
         if let Some(ref mut r) = self.renderer {
             r.set_welcome(view);

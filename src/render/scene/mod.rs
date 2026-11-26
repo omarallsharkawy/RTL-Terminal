@@ -5,6 +5,7 @@ pub mod blocks;
 pub mod chrome;
 pub mod composer;
 pub mod frame;
+pub mod memory;
 mod motion;
 pub mod palette;
 pub mod review;

@@ -94,6 +94,8 @@ pub enum InputAction {
     ToggleComposer,
     /// Open the settings panel.
     Settings,
+    /// Open the project memory screen.
+    ProjectMemory,
     /// Open the first-run welcome wizard.
     Welcome,
 }
