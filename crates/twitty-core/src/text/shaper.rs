@@ -4,7 +4,9 @@ use alacritty_terminal::term::cell::Flags as CellFlags;
 use alacritty_terminal::vte::ansi::Color as AnsiColor;
 use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping};
 
-use super::bidi::{arabic_phrase, is_rtl_char, trails_rtl_neutrals, LRI, LRM, PDI, RLI, RLM};
+use super::bidi::{
+    arabic_phrase, arabic_phrase_end, is_rtl_char, trails_rtl_neutrals, LRI, LRM, PDI, RLI, RLM,
+};
 use super::fonts::{arabic_family, grid_family, is_arabic_script};
 use super::segment::CachedSegment;
 use crate::boxdraw::is_box_or_block;
@@ -97,8 +99,12 @@ impl RowShaper<'_> {
             spans.push((0, Attrs::new().family(grid_family(self.family))));
             text.push_str(mark);
         }
-        // A phrase after a left-to-right lead (a prompt, `echo `) is isolated right to left.
+        // A phrase after a left-to-right lead (a prompt, `echo `) is isolated right to left,
+        // up to where its Arabic ends (`phrase_end`, exclusive).
         let phrase_isolate = phrase.filter(|&p| p > start);
+        let phrase_end = phrase_isolate.map_or(end, |p| {
+            start + arabic_phrase_end(&cells[start..end], p - start, cursor.is_some())
+        });
 
         // Words (runs of non-blank cells) with Latin letters or digits and no Arabic. Neighbouring
         // ones share one isolate so "world 123" keeps its order inside right-to-left text.
@@ -116,6 +122,13 @@ impl RowShaper<'_> {
                 let word_start = c;
                 while c < end && !cells[c].is_word_break() {
                     c += 1;
+                }
+                // Latin runs never straddle the end of the Arabic phrase (isolates must nest).
+                if word_start >= phrase_end && open.is_some_and(|o| o < phrase_end) {
+                    if let Some(o) = open.take() {
+                        isolate[o - start].0 = true;
+                        isolate[last_end - 1 - start].1 = true;
+                    }
                 }
                 let word = &cells[word_start..c];
                 if word.iter().any(|w| w.c.is_ascii_alphanumeric())
@@ -146,6 +159,9 @@ impl RowShaper<'_> {
             cell_bytes.push(text.len());
             cell.push_text(&mut text);
             if closes {
+                text.push_str(PDI);
+            }
+            if phrase_isolate.is_some() && col + 1 == phrase_end && phrase_end < end {
                 text.push_str(PDI);
             }
             if text.len() == span_start {
@@ -193,7 +209,7 @@ impl RowShaper<'_> {
         if has_rtl && trails_rtl_neutrals(&cells[start..end]) {
             text.push_str(RLM);
         }
-        if phrase_isolate.is_some() {
+        if phrase_isolate.is_some() && phrase_end == end {
             text.push_str(PDI);
         }
 

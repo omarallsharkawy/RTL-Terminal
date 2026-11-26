@@ -69,3 +69,50 @@ pub(crate) fn arabic_phrase(cells: &[CellData], typing: bool) -> Option<usize> {
     let lead_has_words = cells[..start].iter().any(|c| c.c.is_alphabetic());
     (arabic > latin || (arabic == latin && !lead_has_words)).then_some(start)
 }
+
+/// The closing partner of an opening quote or bracket.
+fn closer_of(open: char) -> Option<char> {
+    Some(match open {
+        '"' => '"',
+        '\'' => '\'',
+        '`' => '`',
+        '(' => ')',
+        '[' => ']',
+        '{' => '}',
+        '<' => '>',
+        '\u{AB}' => '\u{BB}',
+        '\u{201C}' => '\u{201D}',
+        '\u{2018}' => '\u{2019}',
+        _ => return None,
+    })
+}
+
+/// Where the right-to-left phrase that starts at `start` (from [`arabic_phrase`]) ends,
+/// exclusive, so left-to-right text after it keeps reading left to right:
+/// `git commit -m "إصلاح المسافات" done` must not pull `done` into the Arabic.
+///
+/// - A phrase opened by a quote or bracket ends at its partner, typed or not.
+/// - Finished output ends after the last word holding an Arabic letter.
+/// - The line being typed runs to the end: English typed after Arabic lands on its left.
+pub(crate) fn arabic_phrase_end(cells: &[CellData], start: usize, typing: bool) -> usize {
+    let len = cells.len();
+    let first_rtl = cells[start..]
+        .iter()
+        .position(|c| is_rtl_char(c.c))
+        .map_or(len, |p| start + p);
+    if let Some(close) = cells.get(start).and_then(|c| closer_of(c.c)) {
+        if let Some(p) = cells[first_rtl..].iter().position(|c| c.c == close) {
+            return first_rtl + p + 1;
+        }
+    }
+    if typing {
+        return len;
+    }
+    let Some(last_rtl) = cells.iter().rposition(|c| is_rtl_char(c.c)) else {
+        return len;
+    };
+    cells[last_rtl..]
+        .iter()
+        .position(CellData::is_word_break)
+        .map_or(len, |p| last_rtl + p)
+}

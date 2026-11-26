@@ -296,3 +296,53 @@ fn english_message_quoting_an_arabic_name_keeps_reading_left_to_right() {
     let s = shaped("تم حفظ الملف config بنجاح", false);
     assert!(span(&s.row, 13, 18).1 <= span(&s.row, 0, 1).0 + 0.5);
 }
+
+#[test]
+fn english_after_quoted_arabic_stays_after_it_typed_or_finished() {
+    // `git commit -m "إصلاح المسافات" done`: cols 15-28 hold the Arabic, 31-34 "done".
+    let text = "git commit -m \"إصلاح المسافات\" done";
+    for typing in [true, false] {
+        let s = shaped(text, typing);
+        let flag = span(&s.row, 11, 12);
+        let arabic = span(&s.row, 15, 28);
+        let done = span(&s.row, 31, 34);
+        assert!(flag.1 <= arabic.0 + 0.5, "{flag:?} {arabic:?} ({typing})");
+        assert!(
+            done.0 >= arabic.1 - 0.5,
+            "\"done\" must follow the quoted Arabic: {arabic:?} {done:?} ({typing})"
+        );
+        // The quotes stay around the Arabic, not after "done".
+        let close = span(&s.row, 29, 29);
+        assert!(close.1 <= done.0 + 0.5, "{close:?} {done:?} ({typing})");
+    }
+}
+
+#[test]
+fn finished_output_ends_the_arabic_phrase_at_its_last_arabic_word() {
+    // "echo مرحبا hello يا عالم done": hello sits inside the Arabic, "done" after it.
+    let s = shaped("echo مرحبا hello يا عالم done", false);
+    let first = span(&s.row, 5, 9);
+    let hello = span(&s.row, 11, 15);
+    let last = span(&s.row, 17, 22);
+    let done = span(&s.row, 24, 27);
+    assert!(
+        hello.1 <= first.0 + 0.5,
+        "inside the phrase: {hello:?} {first:?}"
+    );
+    assert!(last.1 <= hello.0 + 0.5, "{last:?} {hello:?}");
+    assert!(
+        done.0 >= first.1 - 0.5,
+        "after the phrase: {done:?} {first:?}"
+    );
+}
+
+#[test]
+fn a_quoted_phrase_with_english_inside_closes_cleanly_while_typing() {
+    // x "مرحبا hello" world — the Latin run inside the quotes must not swallow "world".
+    let s = shaped("x \"مرحبا hello\" world", true);
+    let arabic = span(&s.row, 3, 7);
+    let hello = span(&s.row, 9, 13);
+    let world = span(&s.row, 16, 20);
+    assert!(world.0 >= arabic.1 - 0.5, "{world:?} {arabic:?}");
+    assert!(world.0 >= hello.1 - 0.5, "{world:?} {hello:?}");
+}
