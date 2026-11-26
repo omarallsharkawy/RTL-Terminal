@@ -66,20 +66,25 @@ fn write_executable_stub(dir: &Path, name: &str) {
 
 #[test]
 fn flag_path_respects_xdg_state_home_and_ignores_relative_paths() {
-    let xdg = OsStr::new("/tmp/state-root");
-    let home = OsStr::new("/home/tester");
+    // Platform-absolute paths, so the test also holds on Windows.
+    let xdg_root = std::env::temp_dir().join("state-root");
+    let home_root = std::env::temp_dir().join("home-tester");
+    let xdg = xdg_root.as_os_str();
+    let home = home_root.as_os_str();
+    let home_flag = home_root
+        .join(".local")
+        .join("state")
+        .join("twitty")
+        .join(FIRST_RUN_FLAG_NAME);
     assert_eq!(
         flag_path_from(Some(xdg), Some(home)),
-        Some(PathBuf::from("/tmp/state-root/twitty").join(FIRST_RUN_FLAG_NAME))
+        Some(xdg_root.join("twitty").join(FIRST_RUN_FLAG_NAME))
     );
-    assert_eq!(
-        flag_path_from(None, Some(home)),
-        Some(PathBuf::from("/home/tester/.local/state/twitty").join(FIRST_RUN_FLAG_NAME))
-    );
+    assert_eq!(flag_path_from(None, Some(home)), Some(home_flag.clone()));
     // Relative XDG_STATE_HOME falls back to HOME.
     assert_eq!(
         flag_path_from(Some(OsStr::new("relative/state")), Some(home)),
-        Some(PathBuf::from("/home/tester/.local/state/twitty").join(FIRST_RUN_FLAG_NAME))
+        Some(home_flag)
     );
     assert_eq!(flag_path_from(Some(OsStr::new("")), None), None);
 }
