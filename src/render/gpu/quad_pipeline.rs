@@ -17,6 +17,7 @@ struct ScreenUniform {
 
 pub(crate) struct QuadRenderer {
     pipeline: wgpu::RenderPipeline,
+    material_opacity: wgpu::RenderPipeline,
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     vertex_buffer: Option<wgpu::Buffer>,
@@ -118,8 +119,45 @@ impl QuadRenderer {
             cache: None,
         });
 
+        // Scale the already composed material in place. A second fill with source-over
+        // blending would raise alpha wherever chrome or highlight layers overlap.
+        let attenuate = wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::Zero,
+            dst_factor: wgpu::BlendFactor::Constant,
+            operation: wgpu::BlendOperation::Add,
+        };
+        let material_opacity = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("window material opacity"),
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("material_vertex"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("material_fragment"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState {
+                        color: attenuate,
+                        alpha: attenuate,
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: Default::default(),
+            depth_stencil: None,
+            multisample: Default::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
         Self {
             pipeline,
+            material_opacity,
             uniform_buffer,
             bind_group,
             vertex_buffer: None,
@@ -196,6 +234,25 @@ impl QuadRenderer {
         if let Some(ref buffer) = self.vertex_buffer {
             queue.write_buffer(buffer, 0, bytemuck::cast_slice(vertices));
         }
+    }
+
+    pub(crate) fn apply_material_opacity<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        opacity: f32,
+    ) {
+        if opacity >= 1.0 {
+            return;
+        }
+        let opacity = f64::from(opacity);
+        pass.set_pipeline(&self.material_opacity);
+        pass.set_blend_constant(wgpu::Color {
+            r: opacity,
+            g: opacity,
+            b: opacity,
+            a: opacity,
+        });
+        pass.draw(0..3, 0..1);
     }
 
     pub fn render<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>) {

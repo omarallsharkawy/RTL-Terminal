@@ -66,8 +66,7 @@ impl Gpu {
         self.ctx.acquire(config, window)
     }
 
-    /// Draw plain quads, shapes and text over a window cleared to `background` (surface color space)
-    /// at `opacity`, and present it.
+    /// Compose window material at `opacity`, draw text over it, and present it.
     pub fn draw<'a>(
         &mut self,
         surface_texture: wgpu::SurfaceTexture,
@@ -105,8 +104,8 @@ impl Gpu {
     }
 }
 
-/// Record a frame's render pass into `encoder`: clear `view` to `background` at `opacity`,
-/// then draw the prepared quads, shapes and text over it. Shared by the window and offscreen targets.
+/// Compose geometry over the theme background, apply uniform material opacity, then draw text.
+/// Shared by the window and offscreen targets.
 pub(crate) fn encode_pass(
     encoder: &mut wgpu::CommandEncoder,
     view: &wgpu::TextureView,
@@ -121,11 +120,10 @@ pub(crate) fn encode_pass(
             resolve_target: None,
             ops: wgpu::Operations {
                 load: wgpu::LoadOp::Clear(wgpu::Color {
-                    // Premultiplied, so transparency keeps the theme's tint.
-                    r: (background[0] * opacity) as f64,
-                    g: (background[1] * opacity) as f64,
-                    b: (background[2] * opacity) as f64,
-                    a: opacity as f64,
+                    r: f64::from(background[0]),
+                    g: f64::from(background[1]),
+                    b: f64::from(background[2]),
+                    a: 1.0,
                 }),
                 store: wgpu::StoreOp::Store,
             },
@@ -139,5 +137,6 @@ pub(crate) fn encode_pass(
     shapes.render_underlay(&mut pass);
     quads.render(&mut pass);
     shapes.render(&mut pass);
+    quads.apply_material_opacity(&mut pass, opacity);
     text.render(&mut pass)
 }

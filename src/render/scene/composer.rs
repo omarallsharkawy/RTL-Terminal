@@ -770,34 +770,34 @@ pub fn build(
         bottom: layout.input.bottom().ceil() as i32,
     };
 
+    let caret_w = style.px(2.0).max(1.5).round();
     if all_empty {
         let placeholder = match view.language {
             UiLanguage::Arabic => "اكتب أمرك هنا…",
             UiLanguage::English => "Type a command… / اكتب أمرك هنا…",
         };
+        // Start at the input's text inset and leave room for the empty editor's beam.
+        // Reserve it during both blink phases so the placeholder never shifts.
+        let start = (layout.input.x + caret_w + style.px(2.0)).min(layout.input.right());
+        let hint = Rect::new(
+            start,
+            layout.input.y,
+            layout.input.right() - start,
+            layout.line_height,
+        );
         let ph_buf = font.fit(
             ctx.font_system,
             UiSize::Body,
             UiWeight::Regular,
             style.scale,
             placeholder,
-            layout.input.w,
+            hint.w,
         );
-        let ph_rect = Rect::new(
-            layout.input.x,
-            layout.input.y,
-            layout.input.w,
-            layout.line_height,
-        );
-        scene.labels.push(UiLabel::new(
-            ph_buf,
-            ph_rect,
-            UiAlign::Start,
-            style.text_faint,
-        ));
+        scene
+            .labels
+            .push(UiLabel::new(ph_buf, hint, UiAlign::Left, style.text_faint));
     }
 
-    let caret_w = style.px(2.0).max(1.5).round();
     let visible_end = (layout.scroll_line + layout.visible_lines).min(view.lines.len());
     for (vis_idx, line_idx) in (layout.scroll_line..visible_end).enumerate() {
         let line_text = &view.lines[line_idx];

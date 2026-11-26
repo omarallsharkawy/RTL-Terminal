@@ -40,8 +40,9 @@ selection and attention. The terminal grid stays logical while drawing handles b
   metadata line. Working uses animated dots, needs input a warning, done a check and error
   a cross. Keep the glyph by itself when space is tight.
 - Show a single optional 12 px third line for a notification, agent message or last command.
-  Titles and messages follow their text direction. The right sidebar mirrors its row layout,
-  and Arabic UI uses a right-to-left row layout on either sidebar placement.
+  Titles and messages keep their text direction within labels anchored to the card's start edge.
+  The unread badge follows the title in the UI direction. English starts at the left on either
+  sidebar placement, and Arabic starts at the right.
 - Idle rows sit on the sidebar surface. Hover uses a subtly raised surface. Selection uses
   a slightly stronger surface and a slim accent marker at the leading edge. Text retains the
   theme foreground. Hover reveals the close control. The list scrolls and supports dragging
@@ -49,7 +50,8 @@ selection and attention. The terminal grid stays logical while drawing handles b
 
 ## Command blocks
 
-- Draw command blocks behind the terminal rows. Use a faint, borderless tint, a slim 2 px
+- Draw command blocks behind the terminal rows. Blend a faint, borderless tint over the
+  terminal background, with a slim 2 px
   leading status strip, 6 px corners and 4 px between adjacent blocks. The tint and spacing
   are visual and leave row and column positions intact.
 - Place the floating action toolbar on the trailing edge on hover. Duration and exit status
@@ -65,6 +67,8 @@ selection and attention. The terminal grid stays logical while drawing handles b
   dark themes. Hairlines are 14% foreground, snapped from 1 logical px. The dim and faint
   foregrounds use 69% and 48%. The accent comes from the theme cursor or `ui_accent`,
   and status colors come from the active ANSI palette.
+- Apply window opacity once to the composed terminal and chrome material before drawing text.
+  Overlapping fills and hairlines share the same opacity as the surrounding material.
 - Use the 4 px spacing grid (4, 8, 12, 16, 24 px) and 6, 8 or 12 px radii. Thin rules,
   strokes and status markers are sized separately. Chrome dimensions and type scale with DPI.
 - UI text uses bundled Inter for Latin and IBM Plex Sans Arabic for Arabic. Paths, branches
@@ -87,5 +91,7 @@ text after quads and shapes. Clip runs behind chrome overlays using
 ## Offscreen showcase
 
 Run `TWITTY_SHOWCASE_DIR=/tmp/twitty-showcase cargo test --test showcase_tests` to export both
-themes as 1280×800 at 1× (English) and 951×1002 at 1.5× (Arabic). The test uses the production
-frame builder without a window. A fifth PNG samples the palette entrance. The output is for visual review and has no pixel assertions.
+themes as 1280×800 at 1× (English) and 951×1002 at 1.5× (Arabic). Each has a right sidebar
+and an empty composer. All four scenes are composited over a grey checker at 100%, 78%,
+and 50% opacity. A thirteenth PNG samples the palette entrance at 78%. The showcase uses
+the production frame builder without a window.

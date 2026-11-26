@@ -12,6 +12,8 @@ pub const RADIUS_6: f32 = 6.0;
 pub const RADIUS_8: f32 = 8.0;
 pub const RADIUS_12: f32 = 12.0;
 pub const HAIRLINE: f32 = 1.0;
+const BG1_LIFT: f32 = 0.035;
+const BG2_LIFT: f32 = 0.068;
 pub const OVERLAY_BLUR: f32 = 16.0;
 pub const OVERLAY_OFFSET: [f32; 2] = [0.0, 4.0];
 pub const OVERLAY_SHADOW: Rgba = Rgba::new(0.0, 0.0, 0.0, 0.30);
@@ -40,8 +42,8 @@ impl UiStyle {
         let tone = |amount| bg0.mix(text, amount);
         Self {
             bg0,
-            bg1: tone(0.035),
-            bg2: tone(0.068),
+            bg1: tone(BG1_LIFT),
+            bg2: tone(BG2_LIFT),
             bg3: tone(0.12),
             border: tone(0.14),
             accent: accent.unwrap_or(theme.cursor),
@@ -52,6 +54,24 @@ impl UiStyle {
             warn: theme.ansi[3],
             ok: theme.ansi[2],
             scale,
+        }
+    }
+
+    /// Command-block fill as source-over ink. On the terminal base it gives the same
+    /// lift as the chrome tones, with a little accent mixed into the selected state.
+    pub(crate) fn block_tint(self, selected: bool, hover: f32) -> Rgba {
+        if selected {
+            let accent = 0.08;
+            let alpha = BG2_LIFT * (1.0 - accent) + accent;
+            Rgba {
+                a: alpha,
+                ..self.text.mix(self.accent, accent / alpha)
+            }
+        } else {
+            Rgba {
+                a: BG1_LIFT + (BG2_LIFT - BG1_LIFT) * hover,
+                ..self.text
+            }
         }
     }
 

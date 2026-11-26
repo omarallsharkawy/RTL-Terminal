@@ -419,7 +419,7 @@ impl Cards<'_, '_> {
                 parts.message,
                 Kind::Message,
                 message,
-                UiAlign::Start,
+                self.leading_align(),
                 s.text_dim,
             );
         }
@@ -430,13 +430,12 @@ impl Cards<'_, '_> {
         let buffer = self
             .cache
             .get(self.ctx, self.font, Kind::Title, title, row.w);
-        let rtl = buffer.layout_runs().next().is_some_and(|run| run.rtl);
         let text_width = label_width(&buffer).min(row.w);
-        self.placed_label(row, buffer, UiAlign::Start, s.text);
+        self.placed_label(row, buffer, self.leading_align(), s.text);
         if let Some(count) = count_badge(unread).filter(|_| badge.w > 0.0) {
             let gap = s.px(SPACE_4);
-            // Move the reserved badge toward the measured title, on its visual trailing side.
-            let x = if rtl {
+            // Move the reserved badge toward the measured title, on the card's trailing side.
+            let x = if self.view.mirrored {
                 (row.right() - text_width - gap - badge.w).max(badge.x)
             } else {
                 (row.x + text_width + gap).min(badge.x)
@@ -502,7 +501,7 @@ impl Cards<'_, '_> {
         if self.view.mirrored {
             UiAlign::Right
         } else {
-            UiAlign::Start
+            UiAlign::Left
         }
     }
 

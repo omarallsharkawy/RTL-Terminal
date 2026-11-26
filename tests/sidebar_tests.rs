@@ -360,7 +360,7 @@ fn scrolling_clamps_hits_and_reveals_keyboard_selection() {
         )
     };
     let first = view(&mut scroll, 0);
-    assert!(first.mirrored && first.items[0].active);
+    assert!(!first.mirrored && first.items[0].active);
     assert_eq!(first.hit_test(610.0, 43.0), Some(0));
     assert_eq!(first.pointer_hit(610.0, 43.0), Some(Hit::Tab(0)));
     assert_eq!(first.hit_test(610.0, 44.0), None);
@@ -690,7 +690,7 @@ fn title_and_notice_input_caps_keep_whole_graphemes() {
 }
 
 #[test]
-fn arabic_labels_are_shaped_right_aligned_and_clipped_with_colored_states() {
+fn arabic_labels_are_shaped_left_aligned_in_english_sidebar_with_colored_states() {
     let mut fs = twitty::render::text::fonts::new_font_system();
     let palette = Palette::default();
     let style = UiStyle::new(&palette, None, 1.0);
@@ -731,7 +731,7 @@ fn arabic_labels_are_shaped_right_aligned_and_clipped_with_colored_states() {
     };
     for text in ["محرر", "جاهز: تم", "ميزة"] {
         let label = label(text);
-        assert!((label.left + label_width(&label.buffer) - label.bounds.right as f32).abs() <= 1.0);
+        assert!((label.left - label.bounds.left as f32).abs() <= 1.0);
         assert!(label
             .buffer
             .layout_runs()
@@ -1461,48 +1461,71 @@ fn desktop_command_uses_literal_arguments_and_ends_option_parsing() {
 }
 
 #[test]
-fn arabic_title_and_unread_badge_follow_the_title_direction_in_both_languages() {
+fn workspace_titles_and_badges_follow_ui_direction_on_both_sidebar_sides() {
     use twitty::render::text::ui::label_width;
 
     let mut fonts = twitty::render::text::fonts::new_font_system();
     let font = UiFont::new(&mut fonts, None);
     let palette = Palette::default();
     let mut cache = LabelCache::default();
-    let title = "مراجعة التغييرات";
-    let entry = Entry::new(title, None, false, None, [Notice::new(None, "Ready")]);
-    for (language, side) in [
-        (UiLanguage::English, SidebarPosition::Left),
-        (UiLanguage::Arabic, SidebarPosition::Right),
-    ] {
-        let scale = 1.5;
-        let area = Rect::new(200.0, 0.0, 360.0, 400.0);
-        let mut ctx = DrawContext {
-            font_system: &mut fonts,
-            family: None,
-            palette: &palette,
-            metrics: CellMetrics { scale, ..metrics() },
-            is_srgb: false,
-        };
-        let cards = cache.cards(&font, ctx.font_system, vec![entry.clone()], area, scale);
-        let view = ScrollState::default().view(&cards, 0, area, scale, side, language);
-        let scene = build(
-            &mut ctx,
-            &view,
-            &mut cache,
-            UiStyle::new(&palette, None, scale),
-            &font,
-        );
-        let label = |text| {
-            scene
-                .labels
-                .iter()
-                .find(|label| label.buffer.lines[0].text() == text)
-                .unwrap()
-        };
-        let title_label = label(title);
-        let badge = label("1");
-        let title_edge = title_label.left + label_width(&title_label.buffer);
-        assert!((title_edge - view.items[0].layout(&view).title.right()).abs() <= 1.0);
-        assert!((title_label.left - badge.bounds.right as f32 - 4.0 * scale).abs() <= 1.0);
+    let arabic_title = "مراجعة التغييرات";
+    let english_title = "Terminal rendering";
+    let entries = [
+        Entry::new(
+            arabic_title,
+            None,
+            false,
+            None,
+            [Notice::new(None, "Ready")],
+        ),
+        Entry::new(english_title, None, false, None, []),
+    ];
+    let scale = 1.5;
+    let area = Rect::new(200.0, 0.0, 360.0, 400.0);
+    for language in [UiLanguage::English, UiLanguage::Arabic] {
+        for side in [SidebarPosition::Left, SidebarPosition::Right] {
+            let mut ctx = DrawContext {
+                font_system: &mut fonts,
+                family: None,
+                palette: &palette,
+                metrics: CellMetrics { scale, ..metrics() },
+                is_srgb: false,
+            };
+            let cards = cache.cards(&font, ctx.font_system, entries.to_vec(), area, scale);
+            let view = ScrollState::default().view(&cards, 0, area, scale, side, language);
+            let scene = build(
+                &mut ctx,
+                &view,
+                &mut cache,
+                UiStyle::new(&palette, None, scale),
+                &font,
+            );
+            let label = |text| {
+                scene
+                    .labels
+                    .iter()
+                    .find(|label| label.buffer.lines[0].text() == text)
+                    .unwrap()
+            };
+            let arabic = label(arabic_title);
+            let english = label(english_title);
+            let badge = label("1");
+            let button = label(language.text("New tab", "تاب جديد"));
+            let arabic_right = arabic.left + label_width(&arabic.buffer);
+            let english_right = english.left + label_width(&english.buffer);
+            let gap = 4.0 * scale;
+            assert!(arabic.buffer.layout_runs().next().unwrap().rtl);
+            if language == UiLanguage::English {
+                assert_eq!(arabic.left, english.left);
+                assert!((arabic.left - view.items[0].layout(&view).title.x).abs() <= 1.0);
+                assert!((badge.bounds.left as f32 - arabic_right - gap).abs() <= 1.0);
+                assert!(button.left < view.new_tab.x + view.new_tab.w / 3.0);
+            } else {
+                assert!((arabic_right - english_right).abs() <= 1.0);
+                assert!((arabic_right - view.items[0].layout(&view).title.right()).abs() <= 1.0);
+                assert!((arabic.left - badge.bounds.right as f32 - gap).abs() <= 1.0);
+                assert!(button.left > view.new_tab.x + view.new_tab.w / 2.0);
+            }
+        }
     }
 }

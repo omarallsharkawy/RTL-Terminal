@@ -1,11 +1,13 @@
-//! Offscreen window previews for design review. Set TWITTY_SHOWCASE_DIR to write static previews and one transition sample.
+//! Offscreen window previews at three opacities. Set TWITTY_SHOWCASE_DIR to export PNGs.
 use std::path::Path;
 
+use twitty::blocks::cards::{BlockButton, BlockHover};
 use twitty::blocks::{BlockDecor, BlockStatus};
 use twitty::color::Palette;
 use twitty::layout::{self, Node, PaneId, Rect, SidebarPosition, SplitDir};
 use twitty::render::gpu::offscreen::Offscreen;
 use twitty::render::icons::Icon;
+use twitty::render::scene::composer::ComposerView;
 use twitty::render::scene::context::DrawContext;
 use twitty::render::scene::frame::{build_frame_with_cards, FrameOptions};
 use twitty::render::scene::palette::{PaletteIcons, PaletteItem, PaletteView};
@@ -36,14 +38,21 @@ fn render_window_showcase() {
             (1280, 800, 1.0, UiLanguage::English),
             (951, 1002, 1.5, UiLanguage::Arabic),
         ] {
-            let path = dir.join(format!("{theme}-{width}x{height}.png"));
-            render(&path, width, height, scale, language, &palette, false);
+            render(
+                dir,
+                theme,
+                (width, height),
+                scale,
+                language,
+                &palette,
+                false,
+            );
         }
     }
     render(
-        &dir.join("twitty-dark-palette-opening-1280x800.png"),
-        1280,
-        800,
+        dir,
+        "twitty-dark-palette-opening",
+        (1280, 800),
         1.0,
         UiLanguage::English,
         &Palette::named("twitty-dark").unwrap(),
@@ -52,9 +61,9 @@ fn render_window_showcase() {
 }
 
 fn render(
-    path: &Path,
-    width: u32,
-    height: u32,
+    dir: &Path,
+    name: &str,
+    (width, height): (u32, u32),
     scale: f32,
     language: UiLanguage,
     palette: &Palette,
@@ -65,16 +74,17 @@ fn render(
     let metrics = CellMetrics::measure(&mut fonts, None, 14.0, scale);
     let style = UiStyle::new(palette, None, scale);
     let surface = (width as f32, height as f32);
-    let (side, dir) = if language == UiLanguage::Arabic {
-        (SidebarPosition::Right, SplitDir::Vertical)
+    let side = SidebarPosition::Right;
+    let split = if language == UiLanguage::Arabic {
+        SplitDir::Vertical
     } else {
-        (SidebarPosition::Left, SplitDir::Horizontal)
+        SplitDir::Horizontal
     };
     let entries = workspaces(language);
     let window = WindowLayout::new(metrics, surface, entries.len(), (side, 256.0), true)
         .with_language(language);
     let tree = Node::Split {
-        dir,
+        dir: split,
         ratio: 0.54,
         a: Box::new(Node::Leaf(PaneId(1))),
         b: Box::new(Node::Leaf(PaneId(2))),
@@ -122,6 +132,7 @@ fn render(
         panes: &headers,
         tabs: &[],
     };
+    panes[0].blocks[0].selected = true;
     let mut ctx = DrawContext {
         font_system: &mut fonts,
         family: None,
@@ -151,7 +162,11 @@ fn render(
         &dividers,
         style,
         &font,
-        None,
+        (!in_motion).then_some(BlockHover {
+            pane: PaneId(2),
+            block: 3,
+            button: Some(BlockButton::Rerun),
+        }),
         language,
     );
     frame.add_sidebar(&mut ctx, &sidebar, &mut labels, style, &font);
@@ -197,18 +212,62 @@ fn render(
             &icons,
             transition.value(start + PANEL / 3),
         );
+    } else {
+        frame.add_composer(
+            &mut ctx,
+            style,
+            &font,
+            &ComposerView {
+                pane_rect: panes[0].rect,
+                lines: vec![String::new()],
+                caret: (0, 0),
+                selection: None,
+                preedit: None,
+                ghost: None,
+                highlights: Vec::new(),
+                lints: Vec::new(),
+                focused: true,
+                cursor_blink_on: true,
+                popup: None,
+                language,
+            },
+        );
     }
 
-    let pixels = Offscreen::new(width, height)
-        .expect("allocate offscreen showcase target")
-        .render_layers(
-            (&frame.quads, &frame.shapes),
-            frame.text_runs(&panes, &rows, &ime),
-            ctx.font_system,
-            frame.background,
-            1.0,
-        )
-        .expect("render window showcase");
+    let mut target = Offscreen::new(width, height).expect("allocate offscreen showcase target");
+    let opacities: &[u8] = if in_motion { &[78] } else { &[100, 78, 50] };
+    for &percent in opacities {
+        let mut pixels = target
+            .render_layers(
+                (&frame.quads, &frame.shapes),
+                frame.text_runs(&panes, &rows, &ime),
+                ctx.font_system,
+                frame.background,
+                f32::from(percent) / 100.0,
+            )
+            .expect("render window showcase");
+        // Offscreen RGB is premultiplied. Put a quiet desktop checker behind it so the
+        // screenshot shows the actual difference between opaque and translucent material.
+        let checker = (64.0 * scale).round() as usize;
+        for (i, pixel) in pixels.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            let (x, y) = (i % width as usize, i / width as usize);
+            let backdrop = if (x / checker + y / checker).is_multiple_of(2) {
+                112
+            } else {
+                136
+            };
+            let desktop = ((255 - u16::from(pixel[3])) * backdrop + 127) / 255;
+            for channel in &mut pixel[..3] {
+                *channel = channel.saturating_add(desktop as u8);
+            }
+            pixel[3] = 255;
+        }
+        let path = dir.join(format!("{name}-{width}x{height}-opacity-{percent}.png"));
+        write_png(&path, width, height, &pixels);
+    }
+}
+
+fn write_png(path: &Path, width: u32, height: u32, pixels: &[u8]) {
     let file = std::fs::File::create(path).expect("create showcase PNG");
     let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), width, height);
     encoder.set_color(png::ColorType::Rgba);
@@ -216,7 +275,7 @@ fn render(
     encoder
         .write_header()
         .unwrap()
-        .write_image_data(&pixels)
+        .write_image_data(pixels)
         .unwrap();
 }
 

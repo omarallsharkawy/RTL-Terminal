@@ -312,8 +312,8 @@ fn sidebar_entry_gets_ports_in_the_mono_footer_below_an_arabic_title() {
     let (p, t) = (&scene.labels[ports], &scene.labels[title]);
     assert!(p.top > t.top, "ports below the title");
     assert!(
-        p.left < t.left,
-        "ports go at the trailing side of the mirrored footer"
+        p.left > t.left,
+        "ports go at the trailing side of the English footer"
     );
     assert_eq!(p.buffer.metrics().font_size, 11.0);
     assert!(t.buffer.layout_runs().next().unwrap().rtl);
