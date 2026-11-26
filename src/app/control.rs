@@ -177,7 +177,7 @@ impl ControlHost for App {
     fn command_list(&self) -> Value {
         let cwd = self.focused_id().and_then(|id| App::pane_cwd(self, id));
         let set = WorkflowSet::load(&self.config.commands, cwd.as_deref());
-        Value::Array(set.control_list_json())
+        Value::Array(set.control_list_json_with(&self.keybindings))
     }
 
     fn command_run(&mut self, name: &str, pane: Option<u64>) -> Result<(Value, bool), String> {

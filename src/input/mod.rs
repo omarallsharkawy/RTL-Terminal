@@ -5,6 +5,7 @@
 //! mouse state machines.
 
 pub mod broadcast;
+pub mod keybindings;
 mod keys;
 pub mod mouse;
 pub mod pointer;

@@ -75,6 +75,8 @@ pub struct App {
     clipboard: Clipboard,
     config: TwittyConfig,
     config_dirty: bool,
+    /// Compiled keyboard shortcut table (defaults + `config.keybindings`), updated live.
+    keybindings: crate::input::keybindings::KeyBindings,
     session: SessionStore,
     startup_session: Option<PreparedSession>,
     startup_ssh: Option<crate::remote::Target>,
@@ -117,6 +119,7 @@ pub struct App {
 impl App {
     pub fn new(proxy: EventLoopProxy<AppEvent>) -> Self {
         let config = TwittyConfig::load();
+        let keybindings = crate::input::keybindings::KeyBindings::from_config(&config.keybindings);
         let session = SessionStore::new();
         let startup_session = if config.restore_session {
             session.load()
@@ -132,6 +135,7 @@ impl App {
             clipboard: Clipboard::default(),
             config,
             config_dirty: false,
+            keybindings,
             session,
             startup_session,
             startup_ssh: None,

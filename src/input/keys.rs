@@ -5,6 +5,7 @@
 //! 2. The kitty keyboard protocol, when the program enabled any of its flags.
 //! 3. The legacy xterm encoding (also the fallback for keys kitty leaves alone).
 
+use super::keybindings::KeyBindings;
 use crate::layout::FocusDir;
 use alacritty_terminal::term::TermMode;
 use winit::event::{ElementState, KeyEvent};
@@ -133,26 +134,50 @@ impl<'a> KeyInput<'a> {
 
 /// What a key event does in a terminal with keyboard mode `mode`: a Twitty shortcut, or the
 /// bytes to send. `None` when the key sends nothing (a release, a lone modifier...).
+#[allow(dead_code)]
 pub(crate) fn handle_key(
     event: &KeyEvent,
     modifiers: ModifiersState,
     mode: TermMode,
 ) -> Option<InputAction> {
+    handle_key_with(event, modifiers, mode, KeyBindings::defaults())
+}
+
+/// Like [`handle_key`], resolving shortcuts against `bindings`.
+pub(crate) fn handle_key_with(
+    event: &KeyEvent,
+    modifiers: ModifiersState,
+    mode: TermMode,
+    bindings: &KeyBindings,
+) -> Option<InputAction> {
     let unshifted = event.key_without_modifiers();
     key_with_mode(
         &KeyInput::from_event(event, &unshifted, modifiers),
         mode,
-        true,
+        Some(bindings),
     )
 }
 
 /// The Twitty shortcut this key (pressed or released) belongs to, if any.
+#[allow(dead_code)]
 pub(crate) fn key_shortcut(event: &KeyEvent, modifiers: ModifiersState) -> Option<InputAction> {
+    key_shortcut_with(event, modifiers, KeyBindings::defaults())
+}
+
+/// The Twitty shortcut this key belongs to in `bindings`, if any (respects AltGr text pass-through).
+pub(crate) fn key_shortcut_with(
+    event: &KeyEvent,
+    modifiers: ModifiersState,
+    bindings: &KeyBindings,
+) -> Option<InputAction> {
+    if is_altgr_text(event.text.as_deref(), modifiers) {
+        return None;
+    }
     let physical = match event.physical_key {
         PhysicalKey::Code(c) => Some(c),
         _ => None,
     };
-    shortcut_key(physical, &event.logical_key).and_then(|k| app_shortcut(k, modifiers))
+    shortcut_key_code(physical, &event.logical_key).and_then(|k| bindings.lookup(k, modifiers))
 }
 
 /// The bytes a key sends to the program, ignoring Twitty's own shortcuts. Used when a
@@ -166,11 +191,11 @@ pub(crate) fn terminal_key(
     into_bytes(key_with_mode(
         &KeyInput::from_event(event, &unshifted, modifiers),
         mode,
-        false,
+        None,
     ))
 }
 
-/// Legacy (non-kitty) key handling, with Twitty's shortcuts. `app_cursor` is DECCKM.
+/// Legacy (non-kitty) key handling, with Twitty's default shortcuts. `app_cursor` is DECCKM.
 pub fn handle_key_raw(
     physical: Option<KeyCode>,
     logical: &Key,
@@ -178,6 +203,27 @@ pub fn handle_key_raw(
     state: ElementState,
     modifiers: ModifiersState,
     app_cursor: bool,
+) -> Option<InputAction> {
+    handle_key_raw_with(
+        physical,
+        logical,
+        text,
+        state,
+        modifiers,
+        app_cursor,
+        KeyBindings::defaults(),
+    )
+}
+
+/// Legacy (non-kitty) key handling using custom `bindings`.
+pub fn handle_key_raw_with(
+    physical: Option<KeyCode>,
+    logical: &Key,
+    text: Option<&str>,
+    state: ElementState,
+    modifiers: ModifiersState,
+    app_cursor: bool,
+    bindings: &KeyBindings,
 ) -> Option<InputAction> {
     let key = KeyInput {
         physical,
@@ -193,7 +239,7 @@ pub fn handle_key_raw(
     } else {
         TermMode::NONE
     };
-    legacy_key(&key, mode, true)
+    legacy_key(&key, mode, Some(bindings))
 }
 
 /// Key handling aware of the terminal's keyboard mode. Without any kitty protocol flag active
@@ -210,6 +256,32 @@ pub fn handle_key_mode_raw(
     modifiers: ModifiersState,
     mode: TermMode,
 ) -> Option<InputAction> {
+    handle_key_mode_raw_with(
+        physical,
+        logical,
+        unshifted,
+        text,
+        state,
+        repeat,
+        modifiers,
+        mode,
+        KeyBindings::defaults(),
+    )
+}
+
+/// Like [`handle_key_mode_raw`], resolving shortcuts against `bindings`.
+#[allow(clippy::too_many_arguments)]
+pub fn handle_key_mode_raw_with(
+    physical: Option<KeyCode>,
+    logical: &Key,
+    unshifted: Option<&Key>,
+    text: Option<&str>,
+    state: ElementState,
+    repeat: bool,
+    modifiers: ModifiersState,
+    mode: TermMode,
+    bindings: &KeyBindings,
+) -> Option<InputAction> {
     let key = KeyInput {
         physical,
         logical,
@@ -219,7 +291,7 @@ pub fn handle_key_mode_raw(
         repeat,
         modifiers,
     };
-    key_with_mode(&key, mode, true)
+    key_with_mode(&key, mode, Some(bindings))
 }
 
 /// Like [`handle_key_mode_raw`], but Twitty's shortcuts are not looked up: the bytes the
@@ -244,7 +316,7 @@ pub fn terminal_key_raw(
         repeat,
         modifiers,
     };
-    into_bytes(key_with_mode(&key, mode, false))
+    into_bytes(key_with_mode(&key, mode, None))
 }
 
 fn into_bytes(action: Option<InputAction>) -> Option<Vec<u8>> {
@@ -294,141 +366,114 @@ fn key_letter(key_code: KeyCode) -> Option<u8> {
         .map(|i| b'a' + i as u8)
 }
 
+/// Digit keys in order: index `i` is `'0' + i`.
+const DIGIT_KEYS: [KeyCode; 10] = [
+    KeyCode::Digit0,
+    KeyCode::Digit1,
+    KeyCode::Digit2,
+    KeyCode::Digit3,
+    KeyCode::Digit4,
+    KeyCode::Digit5,
+    KeyCode::Digit6,
+    KeyCode::Digit7,
+    KeyCode::Digit8,
+    KeyCode::Digit9,
+];
+
+fn is_numpad_key(code: KeyCode) -> bool {
+    matches!(
+        code,
+        KeyCode::Numpad0
+            | KeyCode::Numpad1
+            | KeyCode::Numpad2
+            | KeyCode::Numpad3
+            | KeyCode::Numpad4
+            | KeyCode::Numpad5
+            | KeyCode::Numpad6
+            | KeyCode::Numpad7
+            | KeyCode::Numpad8
+            | KeyCode::Numpad9
+            | KeyCode::NumpadDecimal
+            | KeyCode::NumpadDivide
+            | KeyCode::NumpadMultiply
+            | KeyCode::NumpadSubtract
+            | KeyCode::NumpadAdd
+            | KeyCode::NumpadEnter
+            | KeyCode::NumpadEqual
+    )
+}
+
 /// Named keys that shortcuts can be bound to, and the physical key each stands for.
-const SHORTCUT_NAMED_KEYS: [(NamedKey, KeyCode); 8] = [
+const SHORTCUT_NAMED_KEYS: [(NamedKey, KeyCode); 27] = [
+    (NamedKey::Enter, KeyCode::Enter),
     (NamedKey::Tab, KeyCode::Tab),
     (NamedKey::Space, KeyCode::Space),
+    (NamedKey::Escape, KeyCode::Escape),
+    (NamedKey::Backspace, KeyCode::Backspace),
+    (NamedKey::Delete, KeyCode::Delete),
+    (NamedKey::Insert, KeyCode::Insert),
+    (NamedKey::Home, KeyCode::Home),
+    (NamedKey::End, KeyCode::End),
     (NamedKey::PageUp, KeyCode::PageUp),
     (NamedKey::PageDown, KeyCode::PageDown),
     (NamedKey::ArrowLeft, KeyCode::ArrowLeft),
     (NamedKey::ArrowRight, KeyCode::ArrowRight),
     (NamedKey::ArrowUp, KeyCode::ArrowUp),
     (NamedKey::ArrowDown, KeyCode::ArrowDown),
+    (NamedKey::F1, KeyCode::F1),
+    (NamedKey::F2, KeyCode::F2),
+    (NamedKey::F3, KeyCode::F3),
+    (NamedKey::F4, KeyCode::F4),
+    (NamedKey::F5, KeyCode::F5),
+    (NamedKey::F6, KeyCode::F6),
+    (NamedKey::F7, KeyCode::F7),
+    (NamedKey::F8, KeyCode::F8),
+    (NamedKey::F9, KeyCode::F9),
+    (NamedKey::F10, KeyCode::F10),
+    (NamedKey::F11, KeyCode::F11),
+    (NamedKey::F12, KeyCode::F12),
 ];
 
-/// The key a shortcut refers to: the Latin letter or named key that was typed when there is
-/// one (so shortcuts follow the key labels on AZERTY and work with virtual keyboards such as
-/// `wtype`), otherwise the physical key (non-Latin layouts like Arabic).
-fn shortcut_key(physical: Option<KeyCode>, logical: &Key) -> Option<KeyCode> {
+/// The key a shortcut refers to: the Latin letter, ASCII symbol/digit, or named key that was
+/// typed when there is one (so shortcuts follow the key labels on AZERTY and work with virtual
+/// keyboards such as `wtype`), otherwise the physical key (non-Latin layouts like Arabic, and
+/// dedicated numpad keys).
+pub fn shortcut_key_code(physical: Option<KeyCode>, logical: &Key) -> Option<KeyCode> {
     let from_logical = match logical {
         Key::Character(s) => {
             let mut chars = s.chars();
             match (chars.next().map(|c| c.to_ascii_lowercase()), chars.next()) {
                 (Some(c @ 'a'..='z'), None) => Some(LETTER_KEYS[(c as u8 - b'a') as usize]),
+                (Some(c @ '0'..='9'), None) if !physical.is_some_and(is_numpad_key) => {
+                    Some(DIGIT_KEYS[(c as u8 - b'0') as usize])
+                }
                 (Some(','), None) => Some(KeyCode::Comma),
+                (Some('.'), None) if physical != Some(KeyCode::NumpadDecimal) => {
+                    Some(KeyCode::Period)
+                }
+                (Some('/'), None) if physical != Some(KeyCode::NumpadDivide) => {
+                    Some(KeyCode::Slash)
+                }
+                (Some(';'), None) => Some(KeyCode::Semicolon),
+                (Some('\''), None) => Some(KeyCode::Quote),
+                (Some('['), None) => Some(KeyCode::BracketLeft),
+                (Some(']'), None) => Some(KeyCode::BracketRight),
+                (Some('\\'), None) => Some(KeyCode::Backslash),
+                (Some('-'), None) if physical != Some(KeyCode::NumpadSubtract) => {
+                    Some(KeyCode::Minus)
+                }
+                (Some('='), None) if physical != Some(KeyCode::NumpadEqual) => Some(KeyCode::Equal),
+                (Some('`'), None) => Some(KeyCode::Backquote),
                 _ => None,
             }
         }
-        Key::Named(named) => SHORTCUT_NAMED_KEYS
+        Key::Named(named) if physical != Some(KeyCode::NumpadEnter) => SHORTCUT_NAMED_KEYS
             .iter()
             .find(|(n, _)| n == named)
             .map(|&(_, code)| code),
         _ => None,
     };
     from_logical.or(physical)
-}
-
-/// Shortcuts handled by Twitty itself, independent of the terminal's keyboard mode.
-fn app_shortcut(key_code: KeyCode, modifiers: ModifiersState) -> Option<InputAction> {
-    let (ctrl, shift, alt) = (
-        modifiers.control_key(),
-        modifiers.shift_key(),
-        modifiers.alt_key(),
-    );
-    match (ctrl, shift, alt) {
-        (true, true, true) => ctrl_shift_alt_shortcut(key_code),
-        (true, true, false) => {
-            ctrl_shift_shortcut(key_code).or_else(|| tab_shortcut(key_code, true))
-        }
-        (true, false, false) => tab_shortcut(key_code, false)
-            .or_else(|| zoom_shortcut(key_code))
-            .or_else(|| (key_code == KeyCode::Comma).then_some(InputAction::Settings)),
-        (false, false, true) => focus_shortcut(key_code),
-        _ => None,
-    }
-}
-
-/// Ctrl+Shift+Alt+letter: secondary tab shortcuts.
-fn ctrl_shift_alt_shortcut(key_code: KeyCode) -> Option<InputAction> {
-    match key_code {
-        KeyCode::KeyT => Some(InputAction::ReopenClosedTab),
-        _ => None,
-    }
-}
-
-/// Ctrl+Shift+letter: clipboard, search, tabs and splits.
-fn ctrl_shift_shortcut(key_code: KeyCode) -> Option<InputAction> {
-    Some(match key_code {
-        KeyCode::KeyC => InputAction::Copy,
-        KeyCode::KeyV => InputAction::Paste,
-        KeyCode::KeyF => InputAction::Search,
-        KeyCode::KeyG => InputAction::SearchAll,
-        KeyCode::KeyL => InputAction::OpenProject,
-        KeyCode::KeyT => InputAction::NewTab,
-        KeyCode::KeyW => InputAction::ClosePane,
-        KeyCode::KeyK => InputAction::CloseOtherPanes,
-        KeyCode::KeyZ => InputAction::TogglePaneZoom,
-        KeyCode::KeyH => InputAction::FlashPane,
-        KeyCode::KeyN => InputAction::RenameTab,
-        KeyCode::KeyJ => InputAction::JumpUnread,
-        KeyCode::KeyE => InputAction::SplitRight,
-        KeyCode::KeyO => InputAction::SplitDown,
-        KeyCode::KeyP => InputAction::CommandPalette,
-        KeyCode::KeyI => InputAction::NotificationList,
-        KeyCode::KeyB => InputAction::ToggleSidebar,
-        KeyCode::KeyU => InputAction::NextAttention,
-        KeyCode::KeyY => InputAction::CopyBlockOutput,
-        KeyCode::KeyA => InputAction::AskAgent,
-        KeyCode::KeyR => InputAction::ToggleReview,
-        KeyCode::Space => InputAction::ToggleComposer,
-        KeyCode::ArrowUp => InputAction::PrevBlock,
-        KeyCode::ArrowDown => InputAction::NextBlock,
-        KeyCode::PageUp => InputAction::MoveTabLeft,
-        KeyCode::PageDown => InputAction::MoveTabRight,
-        KeyCode::Digit1 => InputAction::SelectTab(0),
-        KeyCode::Digit2 => InputAction::SelectTab(1),
-        KeyCode::Digit3 => InputAction::SelectTab(2),
-        KeyCode::Digit4 => InputAction::SelectTab(3),
-        KeyCode::Digit5 => InputAction::SelectTab(4),
-        KeyCode::Digit6 => InputAction::SelectTab(5),
-        KeyCode::Digit7 => InputAction::SelectTab(6),
-        KeyCode::Digit8 => InputAction::SelectTab(7),
-        KeyCode::Digit9 => InputAction::SelectTab(8),
-        _ => return None,
-    })
-}
-
-/// Ctrl+Tab / Ctrl+Shift+Tab and Ctrl+PageDown / Ctrl+PageUp cycle tabs.
-fn tab_shortcut(key_code: KeyCode, shift: bool) -> Option<InputAction> {
-    match key_code {
-        KeyCode::Tab if shift => Some(InputAction::PrevTab),
-        KeyCode::Tab => Some(InputAction::NextTab),
-        KeyCode::PageDown if !shift => Some(InputAction::NextTab),
-        KeyCode::PageUp if !shift => Some(InputAction::PrevTab),
-        _ => None,
-    }
-}
-
-/// Ctrl+= / Ctrl+- / Ctrl+0 (main row or keypad) zoom.
-fn zoom_shortcut(key_code: KeyCode) -> Option<InputAction> {
-    match key_code {
-        KeyCode::Equal | KeyCode::NumpadAdd => Some(InputAction::ZoomIn),
-        KeyCode::Minus | KeyCode::NumpadSubtract => Some(InputAction::ZoomOut),
-        KeyCode::Digit0 | KeyCode::Numpad0 => Some(InputAction::ZoomReset),
-        _ => None,
-    }
-}
-
-/// Alt+arrow moves focus between panes.
-fn focus_shortcut(key_code: KeyCode) -> Option<InputAction> {
-    let dir = match key_code {
-        KeyCode::ArrowLeft => FocusDir::Left,
-        KeyCode::ArrowRight => FocusDir::Right,
-        KeyCode::ArrowUp => FocusDir::Up,
-        KeyCode::ArrowDown => FocusDir::Down,
-        _ => return None,
-    };
-    Some(InputAction::Focus(dir))
 }
 
 // ---- legacy (xterm) encoding ----
@@ -494,20 +539,29 @@ fn ctrl_byte(key_code: KeyCode) -> Option<u8> {
 }
 
 /// AltGr arrives as Ctrl+Alt on Windows: symbols like @ € { } it types go through untouched.
-fn altgr_text(key: &KeyInput) -> Option<Vec<u8>> {
-    if !(key.modifiers.control_key() && key.modifiers.alt_key()) {
-        return None;
+fn is_altgr_text(text: Option<&str>, modifiers: ModifiersState) -> bool {
+    if !(modifiers.control_key() && modifiers.alt_key()) {
+        return false;
     }
-    key.text
-        .filter(|t| {
-            !t.is_empty()
-                && t.chars()
-                    .all(|c| !c.is_control() && !c.is_ascii_alphanumeric())
-        })
-        .map(|t| t.as_bytes().to_vec())
+    text.is_some_and(|t| {
+        !t.is_empty()
+            && t.chars()
+                .all(|c| !c.is_control() && !c.is_ascii_alphanumeric())
+    })
 }
 
-fn legacy_key(key: &KeyInput, mode: TermMode, shortcuts: bool) -> Option<InputAction> {
+fn altgr_text(key: &KeyInput) -> Option<Vec<u8>> {
+    if !is_altgr_text(key.text, key.modifiers) {
+        return None;
+    }
+    key.text.map(|t| t.as_bytes().to_vec())
+}
+
+fn legacy_key(
+    key: &KeyInput,
+    mode: TermMode,
+    bindings: Option<&KeyBindings>,
+) -> Option<InputAction> {
     if !key.pressed() {
         return None;
     }
@@ -516,10 +570,10 @@ fn legacy_key(key: &KeyInput, mode: TermMode, shortcuts: bool) -> Option<InputAc
     }
     // App shortcuts and Ctrl combos go by the typed Latin letter, else the physical key
     // (so Ctrl+A is ^A on AZERTY, and Ctrl works on Arabic layouts).
-    let key_code = shortcut_key(key.physical, key.logical);
+    let key_code = shortcut_key_code(key.physical, key.logical);
     if let Some(action) = key_code
-        .filter(|_| shortcuts)
-        .and_then(|k| app_shortcut(k, key.modifiers))
+        .zip(bindings)
+        .and_then(|(k, b)| b.lookup(k, key.modifiers))
     {
         return Some(action);
     }
@@ -950,9 +1004,13 @@ fn kitty_text_key(
 }
 
 /// Shortcuts, then the kitty protocol when enabled, then the legacy encoding.
-fn key_with_mode(key: &KeyInput, mode: TermMode, shortcuts: bool) -> Option<InputAction> {
+fn key_with_mode(
+    key: &KeyInput,
+    mode: TermMode,
+    bindings: Option<&KeyBindings>,
+) -> Option<InputAction> {
     if !mode.intersects(TermMode::KITTY_KEYBOARD_PROTOCOL) {
-        return legacy_key(key, mode, shortcuts);
+        return legacy_key(key, mode, bindings);
     }
 
     // Releases are only reported when the application asked for event types.
@@ -960,22 +1018,23 @@ fn key_with_mode(key: &KeyInput, mode: TermMode, shortcuts: bool) -> Option<Inpu
         return None;
     }
 
-    let shortcut = shortcut_key(key.physical, key.logical)
-        .filter(|_| shortcuts)
-        .and_then(|c| app_shortcut(c, key.modifiers));
-    if let Some(action) = shortcut {
-        // Twitty consumed the press; a lone release would confuse the program.
-        return key.pressed().then_some(action);
-    }
     if key.pressed() {
         if let Some(bytes) = altgr_text(key) {
             return Some(InputAction::Bytes(bytes));
         }
     }
 
+    let shortcut = shortcut_key_code(key.physical, key.logical)
+        .zip(bindings)
+        .and_then(|(c, b)| b.lookup(c, key.modifiers));
+    if let Some(action) = shortcut {
+        // Twitty consumed the press; a lone release would confuse the program.
+        return key.pressed().then_some(action);
+    }
+
     match encode_kitty(key, mode) {
         Some(bytes) => Some(InputAction::Bytes(bytes)),
-        None => legacy_key(key, mode, shortcuts),
+        None => legacy_key(key, mode, bindings),
     }
 }
 
