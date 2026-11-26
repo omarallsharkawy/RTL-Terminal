@@ -4,49 +4,64 @@
 
 # Twitty
 
-**A native, GPU-rendered terminal that reads Arabic the way it's written.**
+**A native, GPU-rendered terminal workspace built for Arabic and bidirectional text.**
 
-Arabic letters join, sentences flow right-to-left, and English words, hashes and numbers inside them stay intact, all without touching the bytes your shell and TUIs rely on.
+Twitty is a Rust (`wgpu` + `cosmic-text` + `alacritty_terminal`) terminal emulator where Arabic letters join with harakat, right-to-left phrases flow naturally, and embedded English words, hashes, and numbers stay intact—all while keeping the terminal grid strictly logical so shells and TUIs never see altered bytes. Alongside fast bidirectional rendering, it ships with a workspace sidebar, OSC 133 command blocks, an Arabic-aware multi-line command composer, read-only local-agent AI, a side-by-side Git review panel, persistent SSH tabs, in-app bilingual settings, and a scriptable control socket.
 
 [![Build](https://github.com/omarallsharkawy/RTL-Terminal/actions/workflows/build.yml/badge.svg)](https://github.com/omarallsharkawy/RTL-Terminal/actions/workflows/build.yml)
-&nbsp;·&nbsp; Rust · wgpu · cosmic-text · alacritty_terminal
-
-<img src="docs/assets/screenshot.png" alt="Twitty showing git output with Arabic commit messages, a mixed Arabic/English sentence with an intact commit hash, and a box-drawn table with Arabic and English columns." width="860">
+&nbsp;·&nbsp; Rust · wgpu · cosmic-text · alacritty_terminal · AGPL-3.0-or-later
 
 </div>
 
+## Screenshots
+
+> Release screenshots live in [`docs/screenshots/`](docs/screenshots/README.md).
+
+| Twitty Dark | Twitty Light |
+| --- | --- |
+| ![Twitty Dark workspace with Arabic output, command blocks, and sidebar](docs/screenshots/twitty-dark.png) | ![Twitty Light workspace with theme-derived chrome](docs/screenshots/twitty-light.png) |
+
+| Arabic UI & mixed RTL text | Git review panel & command composer |
+| --- | --- |
+| ![Arabic UI layout with right-to-left mixed text and box-drawn tables](docs/screenshots/arabic-rtl.png) | ![Side-by-side Git code review panel and multi-line command composer](docs/screenshots/review-and-composer.png) |
+
 ## Features
 
-**Arabic and mixed text**
-- Contextual Arabic shaping with harakat (تشكيل) kept on their letters.
-- Right-to-left flow inside a line, while prompts and terminal layout stay left-to-right, so nothing flips.
-- English words, commit hashes and numbers inside Arabic stay whole and in order (`7abaf40`, `v3.0.0`, `2026`).
-- While you type Arabic, the cursor sits on the left of what you wrote, and spaces stay on that side too.
+**Arabic and bidirectional text**
+- Contextual Arabic shaping with harakat (تشكيل) kept on their letters and embedded Noto Naskh Arabic fallback when no system Arabic font is installed.
+- Right-to-left flow for Arabic phrases (including after a shell prompt) while prompts and terminal layout remain left-to-right.
+- English words, commit hashes, and numbers inside Arabic stay whole and in order (`7abaf40`, `v3.0.0`, `2026`); selection, highlights, underlines, and cursor placement follow the drawn glyphs.
+- Input methods (`fcitx5`, `ibus`, Windows IME) with inline composition at the cursor and caret-following candidate popups.
 
-**Terminal**
-- Full ANSI and 24-bit color, bold/italic/dim/inverse, underline, strikethrough.
-- Pixel-exact box drawing and block elements for TUIs (htop, vim, lazygit…).
-- Scrollback with mouse wheel and trackpad, bracketed paste, xterm mouse reporting.
-- Complete key encoding: Alt/Meta, F1–F12, modified arrows and navigation keys, AltGr layouts.
-- Window title, bell, OSC 52 copy and OSC 10/11 color queries.
+**Workspaces, sidebar, and productivity**
+- Vertical workspace sidebar (`right`, `left`, or `hidden`) showing each tab's title, working directory, Git branch, listening TCP ports, running/exit/agent state, unread badge, and latest message, with drag-to-reorder and a rounded pill tab strip when hidden.
+- Tabs and split panes with pane zoom (`Ctrl+Shift+Z`), outline flash (`Ctrl+Shift+H`), tab rename (`Ctrl+Shift+N`), close sibling panes (`Ctrl+Shift+K`), tab reordering, reopen closed tab (`Ctrl+Shift+Alt+T`), and session restore.
+- Bilingual English/Arabic command palette (`Ctrl+Shift+P`), project switcher (`Ctrl+Shift+L`), named split layouts, opt-in broadcast input, custom workflows (global and per-project `.twitty/commands.json` with SHA-256 trust), scrollback search (`Ctrl+Shift+F`), and Arabic-aware search across all terminals (`Ctrl+Shift+G`).
+- Desktop notifications (`notify-send`), notification history (`Ctrl+Shift+I`), and jumping to unread panes (`Ctrl+Shift+J` / `Ctrl+Shift+U`).
 
-**Everyday use**
-- Input methods (fcitx5, ibus, Windows IME) with inline composition at the cursor and the candidate popup next to it.
-- Select with the mouse (double-click for a word, triple-click for a line). Releasing the mouse copies the text.
-- See-through window background.
-- Cursor style: block, beam or underline. It turns hollow when the window loses focus.
-- Ctrl+Click opens OSC 8 hyperlinks and plain `http(s)`, `file`, `ftp` and `mailto` URLs.
-- Tabs and split panes: each pane is its own shell; a tab bar appears with two or more tabs, panes split side by side or stacked, and the divider can be dragged. New tabs and splits open in the focused pane's directory (Linux).
-- Zoom with Ctrl+wheel or Ctrl+= / Ctrl+-, saved between sessions.
-- HiDPI aware. Falls back to a software GPU adapter on VMs and RDP.
+**Command blocks and multi-line composer**
+- Automatic bash, zsh, and fish shell integration emitting OSC 133 command marks and OSC 7 working directories.
+- Rounded command block cards on the main screen with status strips, keyboard navigation (`Ctrl+Shift+Up`/`Down`), output copy (`Ctrl+Shift+Y`), and a hover toolbar (copy command, copy output, ask agent, rerun without newline, duration and exit status).
+- Multi-line Arabic-aware command composer (`Ctrl+Shift+Space`) with history, spec-driven and dynamic completions, inline ghost suggestions, shell syntax highlighting, and pre-run lint marks.
+
+**Built-in AI, code review, and coding agents**
+- Read-only built-in AI backed by locally installed coding-agent CLIs (`claude`, `codex`, `gemini`, `opencode`)—no API keys stored by Twitty—for natural-language command generation in the composer and **Explain error** / **Suggest a fix** on failed blocks, with one-time consent and review-before-run.
+- Interactive **Ask an agent** (`Ctrl+Shift+A`) and zero-config Claude Code hooks (`claude_hooks`) reporting live per-pane agent status and notifications without editing `~/.claude/settings.json`.
+- Side-by-side Git code review panel (`Ctrl+Shift+R`) for uncommitted changes and untracked files, with Arabic-shaped diffs and line comments pasted straight into the tab's coding agent.
+
+**Look, settings, SSH, and control socket**
+- **Twitty Dark** (default) and **Twitty Light** themes plus eight additional built-in themes and custom `colors` overrides, theme-derived chrome surfaces, unified window opacity, bundled Inter and IBM Plex Sans Arabic UI fonts, and an in-app bilingual Settings screen (`Ctrl+,`).
+- Persistent Linux SSH tabs (`twitty ssh`) backed by `twitty-remote` with automatic upload, reconnect, 256 KiB output replay, and session restore.
+- Private Unix control socket (`twitty ctl`) with cmux v2 JSON-RPC and minimal v1 hook compatibility.
+- Full ANSI and 24-bit color, pixel-exact box drawing, kitty keyboard protocol, clickable OSC 8 / plain links with target preview and safe `file://` handling, Trojan Source bidi protection, HiDPI scaling, and software GPU fallback.
 
 ## Install
 
 ### Linux
 
-Works on Wayland and X11. Each release ships a `SHA256SUMS.txt`.
+Works on Wayland and X11. Every release ships a `SHA256SUMS.txt`.
 
-**Arch Linux (AUR)** — once published:
+**Arch Linux (AUR):**
 
 ```bash
 yay -S twitty-bin    # prebuilt release binaries
@@ -79,11 +94,11 @@ sudo ./install.sh --system    # installs to /usr/local
 
 ### Windows
 
-Download `twitty-<version>-windows-x86_64.exe` from the [latest release](https://github.com/omarallsharkawy/RTL-Terminal/releases/latest) and run it. Each release ships a `SHA256SUMS.txt`. Builds are not code-signed yet, so SmartScreen may warn about an unknown publisher.
+Download `twitty-<version>-windows-x86_64.zip` from the [latest release](https://github.com/omarallsharkawy/RTL-Terminal/releases/latest), extract it, and run `twitty.exe`. Every release ships a `SHA256SUMS.txt`. Builds are not code-signed yet, so SmartScreen may warn about an unknown publisher.
 
 ### From source
 
-Requires [Rust](https://rustup.rs/) (stable).
+Requires [Rust](https://rustup.rs/) (stable, MSRV 1.90).
 
 ```bash
 git clone https://github.com/omarallsharkawy/RTL-Terminal.git
@@ -99,6 +114,8 @@ cargo build --release
 | Action | Keys |
 | --- | --- |
 | Command palette | Ctrl+Shift+P |
+| Command composer (toggle / open) | Ctrl+Shift+Space |
+| Settings (Appearance, Behaviour, Keys, About) | Ctrl+, |
 | Copy selection | Release the mouse, or Ctrl+Shift+C |
 | Paste | Ctrl+Shift+V, or middle-click |
 | Search scrollback | Ctrl+Shift+F, then type. Enter = older match, Shift+Enter = newer, Esc closes |
@@ -120,10 +137,9 @@ cargo build --release
 | Close other panes in the tab (confirms if any runs a program) | Ctrl+Shift+K |
 | Flash focused pane outline | Ctrl+Shift+H |
 | Focus the pane to the left / right / above / below | Alt+Arrow keys, or click the pane |
-| Jump to newest unread notification (any tab) / oldest unread | Ctrl+Shift+J / Ctrl+Shift+U |
 | Resize a split | Drag the divider |
 | Toggle workspace sidebar | Ctrl+Shift+B |
-| Jump to next unseen notification | Ctrl+Shift+U |
+| Jump to newest / next unread notification | Ctrl+Shift+J / Ctrl+Shift+U |
 | Open notification list | Ctrl+Shift+I |
 | Previous / next command block | Ctrl+Shift+Up / Ctrl+Shift+Down |
 | Copy command block output | Ctrl+Shift+Y |
@@ -164,9 +180,13 @@ The config file is `~/.config/twitty/config.json` (`%APPDATA%\twitty\config.json
 | `sidebar` | Where the workspace sidebar sits: `"right"` (default), `"left"`, or `"hidden"`. |
 | `sidebar_width` | Maximum sidebar width in logical pixels (default `180`, clamped to `140`–`480`; also capped at 25% of the window width, down to `140`). |
 | `desktop_notifications` | `true` (default) sends desktop notifications via `notify-send` when an unfocused pane requests attention. |
+| `composer` | Multi-line command composer mode: `"off"`, `"on-demand"` (default, open with `Ctrl+Shift+Space`), or `"always"` (shown at OSC 133 shell prompts). |
 | `shell_integration` | `true` (default) loads Twitty's automatic bash/zsh/fish integration for OSC 133 command blocks and OSC 7 working directories. |
 | `restore_session` | `true` (default) restores tabs, splits, directories, titles, and SSH sessions saved on normal window close. |
 | `agent_command` | Command run by "Ask an agent" (`Ctrl+Shift+A`), e.g. `"claude"` or `"codex"`. Unset auto-detects the first installed agent (`claude`, `codex`, `gemini`, `opencode`, `grok`). |
+| `ai` | `true` (default) enables built-in read-only AI helpers (composer command generation, failed-block explain/fix). |
+| `ai_agent` | Optional coding-agent CLI override for built-in AI (`claude`, `codex`, `gemini`, `opencode`). Unset falls back to `agent_command`, then auto-detects on `PATH`. |
+| `ai_timeout_secs` | Timeout in seconds for non-interactive built-in AI requests (default `60`, clamped `5`–`300`). |
 | `project_roots` | Array of directories scanned one or two levels deep for git repositories in the project switcher (`Ctrl+Shift+L`). Defaults to `["~/Projects", "~/src", "~/code"]` (only existing directories are scanned). |
 | `commands` | Array of custom workflow commands listed in the command palette (always trusted). See [Custom commands (workflows)](#custom-commands-workflows). |
 | `control_socket` | `true` (default) listens on a private Unix socket (`0600` in a `0700` dir) for `twitty ctl` and agent tools. |
@@ -330,16 +350,19 @@ cargo fmt
 
 | Path | What it does |
 | --- | --- |
-| `src/app/` | The winit app: routes window events to keyboard, mouse, selection, pane and window modules; `window.rs` holds every renderer call |
-| `src/session/` | Panes (terminal + PTY), the workspace of tabs and splits, shell spawning |
-| `src/ui/` | Window-free UI logic: hit testing, search bar, selection lifecycle, zoom/opacity, clipboard |
-| `src/render/` | Rendering. `text/`: fonts, bidi and row shaping; `row/`: shaped-row cache, hit testing, caret placement; `scene/`: CPU frame layout (cell quads, box drawing, cursor, tab bar, status line, IME preedit); `gpu/`: wgpu surface, quad and glyphon text pipelines |
-| `src/terminal.rs` | `alacritty_terminal` wrapper: snapshots, scrollback, selection |
-| `src/input/` | Keyboard, paste and mouse encoding; key routing; mouse and pointer state machines |
-| `src/layout.rs` | Split tree, pane and divider geometry, tab bar |
+| `src/app/` | The winit app: routes window events to keyboard, mouse, selection, pane, settings, review, SSH, and window modules; `window.rs` holds every renderer call |
+| `src/session/` | Panes (terminal + PTY), the workspace of tabs and splits, shell integration setup, session restore |
+| `src/ui/` | Window-free UI logic: chrome geometry, hit testing, search, command palette, Settings panel, notifications, selection, clipboard |
+| `src/render/` | Rendering. `text/`: fonts, bidi and row shaping; `row/`: shaped-row cache, hit testing, caret placement; `scene/`: CPU frame layout (block cards, cell quads, chrome shapes, overlays); `gpu/`: wgpu quad, shape, and glyphon text pipelines |
+| `src/blocks/`, `src/composer/`, `src/ai/` | OSC 133 command blocks and cards; multi-line Arabic-aware command composer with completions, highlighting, and linting; read-only local-agent AI |
+| `src/sidebar/`, `src/review/`, `src/projects/`, `src/layouts/`, `src/workflows/` | Workspace sidebar model, Git review panel, project switcher, named layouts, custom workflow commands |
+| `src/control/`, `src/remote/` | Control socket (`twitty ctl` + cmux compatibility), Claude Code hooks, persistent SSH tabs and `twitty-remote` daemon |
+| `src/terminal.rs` | `alacritty_terminal` wrapper: snapshots, scrollback, selection, search |
+| `src/input/` | Keyboard (legacy + kitty protocol), paste and mouse encoding; key routing; pointer state machines |
+| `src/layout.rs` | Split tree, pane and divider geometry, sidebar and tab strip layout |
 | `src/pty.rs` | Shell discovery and PTY I/O |
-| `src/color.rs` | Palette (Tokyo Night) and color resolution |
-| `src/config.rs` | `config.json` loading and saving |
+| `src/color.rs` | Built-in themes (`twitty-dark`, `twitty-light`, and 8 others) and color resolution |
+| `src/config.rs` | `config.json` loading, clamping, warnings, and atomic saving |
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for how the pieces fit, [docs/adr/](docs/adr/) for design decisions, and [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 

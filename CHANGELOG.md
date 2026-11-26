@@ -2,63 +2,95 @@
 
 ## Unreleased
 
-- Workspace cards in both sidebar positions show unread counts, agent status, the latest message, and a compact branch, directory and ports footer. Cards resize with their content and support closing, drag reordering and opening a new tab. The hidden-sidebar tab strip uses rounded pills with hover-to-close and a plus button.
-- The toolbar fits whole bilingual or locale-specific search placeholders beside a shortcut keycap, hides zero line-count diff badges, and badges the bell only for unread notifications. The review panel uses a compact header, rounded controls and file rows, tinted diff lines, a selection outline and a bordered comment input.
+### Arabic text
 
-- Command block cards (`block_cards`, default `true`): OSC 133 command blocks on the main screen render as subtle rounded `bg2` cards behind the block's rows (preserving the logical terminal grid and keeping selection and search highlights visible above them) with a thin left status strip (`ok`/`danger`) and a floating top-right toolbar on hover or selection offering copy command, copy output, ask agent, rerun (inserts into the prompt without a newline), and a dim duration/exit label (`"2.3s · exit 1"`). Alternate screen programs never draw cards.
-- Pane and tab commands (bilingual in the command palette): `pane.zoom` (`Ctrl+Shift+Z`, maximizes the focused pane within its tab with a pane-header zoom indicator and restores on toggle or focus change), `notifications.jump-unread` (`Ctrl+Shift+J`, focuses the pane with the newest unread notification across tabs and flashes its outline), `pane.flash` (`Ctrl+Shift+H`, briefly flashes the focused pane's outline), `tab.rename` (`Ctrl+Shift+N`, palette text-input mode `"Rename tab… / غيّر اسم التاب…"` supporting Arabic titles and empty-to-clear, saved in session restore), and `pane.close-others` (`Ctrl+Shift+K`, closes sibling panes in the tab with palette confirmation when any runs a program).
-- Linux desktop packaging: added Freedesktop desktop entry (`twitty.desktop`, with English and Arabic names/comments and matching Wayland `app_id` / X11 `WM_CLASS`), AppStream metainfo (`dev.twitty.Twitty.metainfo.xml`), hicolor icons (16–512 px PNGs + scalable SVG), AUR packages (`twitty-bin` and `twitty-git` with `.SRCINFO`), an `x86_64` AppImage CI job and local build script (`packaging/linux/build-appimage.sh`), and a release tarball `install.sh` targeting `~/.local` or `/usr/local`.
-- Code review panel (`Ctrl+Shift+R`, `review.toggle`, "راجع التغييرات"): the focused repository's uncommitted changes (`git diff HEAD` and untracked files) in a panel beside the panes, with line numbers, red/green lines, foldable files, keyboard and wheel scrolling and Arabic shown as in the terminal. Comment on a line (click its number, or `c`) and the comment is typed into the tab's coding agent as `path:line: comment` with bracketed paste and no newline, so you review it before pressing Enter; with no agent pane, one can be started with the comment. **Commit** types `git commit` without running it. git runs on a worker thread with fixed arguments, a timeout and bounds (2 MiB, 200 files, 20 000 lines); external diff and textconv drivers are off, and bidi or control characters in a diff line are shown as `�`.
-- Theme-aware window chrome with a bilingual command-palette entry, sidebar toggle, Git diff counts for the focused local pane and an unread notification bell. Pane headers show program or agent titles, split and close controls, and focus and attention outlines. The horizontal tab bar yields to the visible sidebar.
-- The command palette uses proportional UI type, rounded surfaces and shortcut keycaps. Configure the chrome with `ui_font_family`, `ui_accent`, `top_bar` and `pane_headers`.
+- Right-to-left Arabic phrases now read right-to-left even after a shell prompt (`❯ مرحبا hello` shows `hello` left of `مرحبا`), while English sentences containing an Arabic word keep reading left-to-right.
+- Selection, background colors, and underlines follow drawn right-to-left glyphs; trailing punctuation and symbols (`تم ✓`, `مرحبا!`) stay on the Arabic side, and adjacent Latin words and numbers stay grouped.
+- Embedded Noto Naskh Arabic ensures Arabic renders on machines without a system Arabic font, while installed system fonts still take precedence.
+- Roughly 5× faster Arabic row shaping (full-screen redraw down from 77 ms to 18 ms) and ~4× cheaper Arabic scrolling by naming the Arabic font up front instead of falling back per word.
+- Input method (IME) support draws composition inline at the cursor with the candidate popup anchored to the caret and no bleed-through of underlying text.
+- Arabic punctuation (`،`, `؛`, `؟`) and closing quotes after URLs are no longer absorbed into clickable links.
 
-- Fix: shell integration scripts are kept per build (`…/twitty/shell/<digest>`), so after updating Twitty new shells load the new scripts instead of a copy left from an older version in the runtime directory.
-- cmux-compatible control socket (`cmux_compat`, default `true`): Twitty's control socket now also speaks cmux v2 JSON-RPC (mapped to Twitty tabs/panes, notifications, and sidebar status) and minimal v1 text hook commands while keeping all `twitty ctl` methods unchanged. Panes receive `CMUX_SOCKET_PATH`, `CMUX_WORKSPACE_ID`, and `CMUX_SURFACE_ID` when `cmux_compat` and `control_socket` are enabled; inherited `CMUX_*` variables are stripped.
-- Claude Code integration (`claude_hooks`, default `true`): Twitty writes a private `claude` wrapper (`0700`) first on `PATH` inside Twitty shells that passes `--settings` invoking `twitty claude-hook <event>` without modifying user Claude settings files (passing through unchanged outside Twitty, when disabled, or if the socket is unreachable within ~0.75 s). Per-pane agent status (`working` / `needs input` / `done`) and cleaned Arabic/English notification text show in the sidebar, and `needs input` / `done` events go through Twitty's notification history and desktop notifications.
-- Search all terminals (`Ctrl+Shift+G`, `search.all`, "دوّر في كل الترمينالات"): the command palette searches the screen and scrollback of every pane in every tab, case-insensitive and Arabic-aware (tashkeel, alef, yeh and teh marbuta forms, vim's pre-shaped letters). Each result shows the line cut around the match with its tab and pane; Enter jumps there, scrolls to the line and highlights it with the scrollback search. Bounded: the last 10 000 rows per pane, 200 results shared between panes, scanned 120 ms after typing pauses, in 8 ms slices so typing and drawing never wait for it.
-- Persistent SSH tabs on Linux with `twitty ssh` and `tab.new-ssh`. Remote shells survive dropped connections, replay recent output on reattach, and reopen from session restore. The sidebar shows the destination and connection state.
-- License: Twitty is now AGPL-3.0-or-later (it was MIT OR Apache-2.0 up to 3.0.0), so it can include code from cmux-gtk, cmux and Warp. Their licenses are in `licenses/`.
-- Session restore reopens tabs and splits with fresh shells in their saved directories and restores focus, pane titles, and sidebar visibility. Closing the last pane clears the saved session. Set `restore_session` to `false` to start fresh on launch.
-- Custom commands ("workflows") in the command palette (`Ctrl+Shift+P`), loaded from `"commands"` in `config.json` and per-project `.twitty/commands.json` files (walked up from the focused pane's cwd, bounded to `$HOME` / root and 32 levels). Supports English and Arabic titles, `"insert"` (no newline, bracketed paste aware) and `"run"` (new split/tab via `$SHELL -c`, cwd confined to the project root) modes, per-file SHA-256 trust persisted in `$XDG_STATE_HOME/twitty/trust.json`, and `command.list` / `command.run` integration on the control socket (which never runs or trusts untrusted project commands).
-- Security: Ctrl+Click on a `file://` link never runs a program. Links to executables, scripts and launchers (`.desktop`, `.exe`, `.bat`, `.AppImage`…, or any file with an execute bit) open their folder instead, and `file://` links to other hosts are refused (on Windows they would send the user's credentials to that host).
-- Security: while Ctrl is held over a link, its real target is shown in the status line, so a hyperlink (OSC 8) whose text names one site can't silently open another. Bidi and control characters in the shown target are replaced with `�`.
-- Security: bidi embeddings, overrides and isolates (U+202A–202E, U+2066–2069) in program output and window titles are no longer applied, so `cat` of a file can't make a line read differently from what it contains ("Trojan Source"). Direction marks still work.
-- Security: an OSC string (title, link, clipboard copy) longer than 8 MiB is cut and ignored. Before, an unterminated one grew the terminal's memory without limit.
-- Security: row cache keys use a per-process random seed, so output can't be crafted to collide with an earlier line and be drawn as that line.
-- Dependencies updated (clipboard-win 5.4.1 was yanked).
-- Fixed: English typed after an Arabic word appeared on its right (before it, for an Arabic reader). An Arabic phrase now reads right to left, also on the line being typed and after a prompt (`❯ مرحبا hello` shows `hello` left of `مرحبا`). English sentences with an Arabic word in program output keep reading left to right.
-- Faster: Arabic rows are shaped ~5x faster (the Arabic font is named up front instead of found by font fallback for every word); a full-screen redraw of Arabic text went from 77 ms to 18 ms, and scrolling Arabic output is ~4x cheaper.
-- More responsive under heavy output: shell output is batched through a bounded queue instead of one event per read, so the screen keeps updating during `cat` of a huge file, keypresses and Ctrl+C are never stuck behind a backlog, and floods finish sooner.
-- New tabs and splits open in the focused pane's directory (Linux).
-- Colors that programs redefine with OSC 4 (pywal, vim themes) are used for drawing and reported back to color queries.
-- Config problems (invalid JSON, unknown theme, bad color, missing font) are shown in yellow at the top of the first pane, not only on stderr.
-- Fixed: a config.json with a syntax error was silently replaced by the defaults on the next zoom or opacity change. It is now left untouched; saves are atomic, and out-of-range `font_size` / `background_opacity` are clamped.
-- Fixed: concealed text (`\e[8m`, passwords) showed through a see-through background, and was revealed by selection or search.
-- Fixed: text was drawn darker than its theme color on non-sRGB surfaces.
-- Fixed: the block cursor covered only half of a wide (CJK, emoji) character, and box-drawing characters under it vanished.
-- Fixed: `╬` and the `╓╖╙╜` joins were drawn wrong.
-- Fixed: `font_family` is matched case-insensitively (`"jetbrains mono"` works).
-- Fixed: IME composition in the middle of a line no longer shows the text behind it.
-- Fixed: on AZERTY and other layouts, Ctrl+letter sent the control byte of the physical key instead of the typed letter.
-- Fixed: Alt+Arrow with one pane, and Ctrl+Tab / Ctrl+PageUp/PageDown with one tab, now reach the program (fish, vim).
-- Fixed: Shift+drag selections leaked mouse drag reports to programs, and a focus loss mid-drag left a button stuck.
-- Fixed: the release of a key Twitty used as a shortcut was still reported to programs using the kitty keyboard protocol.
-- Fixed: Arabic punctuation (`،` `؛` `؟`) and closing quotes after a URL are no longer part of the link.
-- Fixed: a trackpad Ctrl+swipe zoomed to the minimum or maximum font size at once.
-- Fixed: shells started from inside kitty, tmux or WezTerm inherited that terminal's variables (KITTY_WINDOW_ID, TMUX, TERMINFO…). `TERM_PROGRAM_VERSION` is now set.
-- Fixed: the Windows release opened an extra console window.
-- Internals: the app and the renderer are split into focused modules (`app/`, `session/`, `input/`, `ui/`, `render/`); terminal state no longer sits behind a mutex; per-frame CPU work is separated from the GPU code and tested without a GPU.
-- Tabs and split panes. Ctrl+Shift+T opens a tab, Ctrl+Shift+E / Ctrl+Shift+O split the focused pane side by side or stacked, Ctrl+Shift+W closes a pane (the last pane closes the tab, the last tab closes the window), Ctrl+Tab / Ctrl+PageDown cycle tabs, Alt+Arrow moves focus between panes, and dragging a divider resizes a split. Each pane has its own shell, selection, search and links; the unfocused pane's cursor is hollow. A tab bar (titles from the program's OSC 0/2 title, Arabic included) shows with two or more tabs. Ctrl+Tab no longer reaches programs; Ctrl+Alt+Tab still does.
-- Noto Naskh Arabic is embedded, so Arabic renders on machines without an Arabic font. System fonts still win where they cover the script.
-- `font_family` option picks the terminal font; a family that is not installed falls back to the system monospace font.
-- Scrollback search: Ctrl+Shift+F opens a search bar at the bottom. Matching is literal and case-insensitive, updates as you type (Arabic included), highlights every visible match, and shows `n/N`. Enter jumps to the next older match, Shift+Enter to a newer one, Esc closes.
-- Input method (IME) support: composition text is drawn inline at the cursor, and the candidate popup follows the caret.
-- Clickable links: Ctrl+Click opens OSC 8 hyperlinks and plain URLs (http, https, file, ftp, mailto). The link is underlined and the cursor becomes a pointer while Ctrl is held over it.
-- Blinking cursor (530 ms on/off), controlled by `cursor_blink` (default `true`) and by programs that request a blinking or steady cursor. It stays solid while typing and while the window is unfocused.
-- Arabic layout: selection, background colors and underlines now follow the drawn glyphs of right-to-left text; punctuation and symbols after Arabic (`تم ✓`, `مرحبا!`) stay on its left; finished output lines that start with Arabic read right to left as a whole (the line being typed keeps its stable layout); neighbouring Latin words and numbers keep their order together.
-- Relicensed under MIT OR Apache-2.0, at your option. This replaces the old end-user license agreement, which was written for the legacy installer.
-- Color themes: pick one with `"theme"` in config.json (`tokyo-night` is still the default; also `catppuccin-mocha`, `gruvbox-dark`, `dracula`, `nord`, `one-dark`, `solarized-dark`, `github-light`). The optional `"colors"` block overrides the background, foreground, cursor, selection and ANSI colors.
-- Box drawing: double, heavy and dashed lines, block eighths, quadrants and shades are drawn pixel-exact.
+### Look
+
+- New **Twitty Dark** (default) and **Twitty Light** themes, alongside `tokyo-night`, `catppuccin-mocha`, `gruvbox-dark`, `dracula`, `nord`, `one-dark`, `solarized-dark`, `github-light`, and per-field `colors` overrides.
+- Theme-derived chrome surfaces with unified window translucency, smooth 120–160 ms transitions (`reduce_motion` disables animation), and bundled Inter + IBM Plex Sans Arabic proportional UI fonts (`ui_font_family`, `ui_accent`).
+- Compact 36 px top bar (`top_bar`) with a sidebar toggle, bilingual command-palette search field, focused Git diff badge, and unread notification bell.
+- 24 px pane headers (`pane_headers`) with program/agent icons, titles, split and close buttons, zoom indicator, and focus/attention outlines.
+- Redesigned command palette with proportional UI typography, rounded surfaces, and shortcut keycaps.
+- Pixel-exact box drawing (double, heavy, and dashed lines, including fixed `╬` and `╓╖╙╜` joins) and block elements; OSC 4 program color redefinition; full-width block cursor over wide CJK/emoji cells; accurate colors on non-sRGB surfaces.
+
+### Sidebar & workspaces
+
+- Vertical workspace sidebar (`sidebar`: `"right"`, `"left"`, `"hidden"`; `sidebar_width`) showing each tab's title, working directory, Git branch, listening TCP ports, running/exit/agent state, unread count, and latest message, with hover close, drag-to-reorder, and a New tab button.
+- Hidden-sidebar tab strip uses rounded pills with hover-to-close and a plus button.
+- Tabs and split panes (`Ctrl+Shift+T`, `Ctrl+Shift+E`, `Ctrl+Shift+O`, `Ctrl+Shift+W`, `Alt+Arrow`, draggable dividers) open in the focused pane's directory on Linux, with pane zoom (`Ctrl+Shift+Z`), outline flash (`Ctrl+Shift+H`), tab rename (`Ctrl+Shift+N`), close other panes (`Ctrl+Shift+K`), tab reordering (`Ctrl+Shift+PageUp`/`PageDown`), and reopen closed tab (`Ctrl+Shift+Alt+T`).
+- Session restore (`restore_session`) reopens tabs, split sizes, directories, titles, focus, sidebar visibility, and SSH sessions saved on normal window close.
+- Project switcher (`Ctrl+Shift+L`) combines recent pane directories with Git repositories discovered under `project_roots`.
+- Named layouts (save, open, and delete split trees per tab) and opt-in broadcast input to all panes of the active tab (`Esc-Esc` to turn off).
+- Scrollback search (`Ctrl+Shift+F`) and Arabic-aware **Search all terminals** (`Ctrl+Shift+G`) across every tab and pane.
+- Desktop notifications (`desktop_notifications` via `notify-send`), notification history (`Ctrl+Shift+I`), and unread jumps (`Ctrl+Shift+J` / `Ctrl+Shift+U`).
+- Custom workflow commands in `config.json` and per-project `.twitty/commands.json` with English/Arabic titles and `insert` or `run` execution modes.
+
+### Command blocks
+
+- Automatic shell integration (`shell_integration`) for bash, zsh, and fish providing OSC 133 command marks and OSC 7 working directories, with per-build script caching so updates take effect immediately.
+- Rounded command block cards (`block_cards`, default `true`) behind main-screen rows with a status strip and hover/selected toolbar (copy command, copy output, ask agent, rerun without newline, duration and exit status); hidden on alternate-screen programs.
+- Keyboard navigation between blocks (`Ctrl+Shift+Up`/`Down`) and quick output copy (`Ctrl+Shift+Y`).
+
+### Composer
+
+- Multi-line Arabic-aware command composer (`Ctrl+Shift+Space`; `composer`: `"off"`, `"on-demand"`, `"always"`) docked below the focused pane with bracketed-paste submission.
+- History browsing, spec-driven and dynamic completions with Arabic-aware matching and inline ghost suggestions, shell syntax highlighting, and non-blocking pre-run lint marks for unknown commands, unclosed quotes/brackets, and trailing operators.
+
+### AI
+
+- Built-in read-only AI assistant (`ai`, `ai_agent`, `ai_timeout_secs`) powered by locally installed coding-agent CLIs (`claude`, `codex`, `gemini`, `opencode`) — Twitty never stores API keys or makes network calls itself.
+- Natural-language command generation in the composer and **Explain error** / **Suggest a fix** on failed command blocks, with one-time privacy consent and review-before-run.
+- Interactive **Ask an agent** (`Ctrl+Shift+A`, `agent_command`) opens a local agent in a split with fenced context from the selected block or screen.
+- Claude Code hook integration (`claude_hooks`) via a private `claude` wrapper on `PATH` reports live per-pane status (`working` / `needs input` / `done`) and notifications without modifying user Claude settings.
+
+### Settings
+
+- In-app bilingual Settings overlay (`Ctrl+,`) covering Appearance, Behaviour, Keys, and About with live theme and font pickers, search, and atomic `config.json` saving.
+- Invalid configuration entries display visible warnings at startup without overwriting hand-edited `config.json` files; `font_family` matches case-insensitively and out-of-range values are clamped.
+
+### SSH
+
+- Persistent Linux SSH tabs via `twitty ssh` and `tab.new-ssh` that verify and upload `twitty-remote` automatically over OpenSSH.
+- Remote shells survive dropped connections, replay up to 256 KiB of recent output on reattach, show connection state in the sidebar, and reopen from session restore.
+
+### Control socket
+
+- Private Unix control socket (`control_socket`) and `twitty ctl` CLI for managing tabs and panes, sending input, reading output, posting notifications, and listing or running trusted commands.
+- cmux v2 JSON-RPC and minimal v1 hook compatibility (`cmux_compat`), exposing `TWITTY_*` and `CMUX_*` pane variables while stripping inherited ones.
+
+### Review panel
+
+- Side-by-side Git code review panel (`Ctrl+Shift+R`) showing uncommitted changes (`git diff HEAD`) and untracked files with foldable files, line numbers, tinted diff lines, and Arabic-shaped text.
+- Comment on any line (click its line number or press `c`) to paste `path:line: comment` into the tab's coding agent without auto-sending; **Commit** inserts `git commit` without running it.
+- Runs Git off the UI thread with fixed arguments, timeouts, size/file/line bounds, and external diff/textconv drivers disabled.
+
+### Terminal & input
+
+- Bounded output batching keeps the screen responsive and `Ctrl+C` immediate during heavy output floods.
+- Clickable OSC 8 hyperlinks and plain URLs (`Ctrl+Click`), plus configurable blinking cursor (`cursor_blink`, solid while typing or unfocused).
+- Input and platform fixes: layout-aware `Ctrl+letter` on AZERTY and other layouts, single-pane/single-tab passthrough for `Alt+Arrow` and `Ctrl+Tab`/`PageUp`/`PageDown`, clean kitty keyboard release handling, fixed Shift+drag mouse reporting and trackpad zoom increments, and no extra console window on Windows release builds.
+
+### Packaging
+
+- Relicensed to AGPL-3.0-or-later with third-party notices in `licenses/`.
+- Linux desktop integration: bilingual `twitty.desktop` (matching Wayland `app_id` / X11 `WM_CLASS`), AppStream metainfo (`dev.twitty.Twitty.metainfo.xml`), 16–512 px PNG + scalable SVG hicolor icons, and a release tarball `install.sh` targeting `~/.local` or `/usr/local`.
+- AUR packages (`twitty-bin` and `twitty-git` with `.SRCINFO`), an `x86_64` AppImage build, a Windows release zip archive, and release automation scripts (`scripts/release.sh`, `scripts/aur-checksums.sh`).
+
+### Security
+
+- `Ctrl+Click` on a `file://` link to an executable, script, or launcher (`.desktop`, `.AppImage`, `.exe`, `.bat`, or execute-bit set) opens its folder instead of running it, and links to remote hosts are refused.
+- Holding `Ctrl` over a link previews its real target in the status line with bidi and control characters replaced by the Unicode replacement character (U+FFFD).
+- Bidi overrides, embeddings, and isolates (U+202A–202E, U+2066–2069) in program output and titles are neutralized to prevent Trojan Source spoofing.
+- OSC payloads exceeding 8 MiB are cut and ignored; row-cache keys use a per-process random seed; concealed text (`\e[8m`) stays hidden from transparency, selection, and search.
+- Per-project `.twitty/commands.json` workflows require explicit SHA-256 trust confirmation in `trust.json` and cannot be run untrusted or auto-trusted over the control socket.
+- Private `0700`/`0600` permissions on control sockets, hook wrappers, and state files; inherited terminal variables (`KITTY_WINDOW_ID`, `TMUX`, `CMUX_*`, etc.) are stripped; clipboard paste via `command.run` is blocked.
 
 ## 3.0.0 — 2026-10-11
 
