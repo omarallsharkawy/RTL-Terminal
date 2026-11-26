@@ -340,6 +340,7 @@ impl App {
         self.pointer.forget(id);
         let Some(now) = closed.focused else {
             self.close_palette();
+            self.close_settings();
             self.session.last_pane_closed();
             return true;
         };
@@ -373,6 +374,7 @@ impl App {
         }
         let Some(now) = closed.focused else {
             self.close_palette();
+            self.close_settings();
             self.session.last_pane_closed();
             return true;
         };

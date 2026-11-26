@@ -27,6 +27,9 @@ impl App {
         if self.handle_ai_consent_key(event) {
             return false;
         }
+        if self.settings_open() {
+            return self.handle_settings_key(event);
+        }
         if self.palette_open() {
             return self.handle_palette_key(event);
         }
@@ -134,6 +137,11 @@ impl App {
                 }
             }
             Ime::Commit(text) => {
+                if self.settings_open() {
+                    self.update_preedit(None);
+                    self.settings_text(&text);
+                    return;
+                }
                 if !self.composer_ime_preedit(None) {
                     self.update_preedit(None);
                 }
@@ -260,6 +268,7 @@ impl App {
             }
             InputAction::ToggleReview => self.toggle_review(),
             InputAction::ToggleComposer => self.toggle_composer(),
+            InputAction::Settings => self.open_settings(),
             InputAction::PrevBlock => self.navigate_blocks(id, BlockList::select_prev),
             InputAction::NextBlock => self.navigate_blocks(id, BlockList::select_next),
             InputAction::CopyBlockOutput => self.copy_block_output(id),

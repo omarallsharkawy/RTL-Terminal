@@ -28,21 +28,38 @@ pub enum Icon {
     Rerun,
     Zoom,
     Explain,
+    Composer,
+    Project,
+    Layout,
+    Broadcast,
 }
 
 impl Icon {
+    /// Pictograms for feature commands that appear in the palette.
+    pub fn for_command(name: &str) -> Option<Self> {
+        match name {
+            "composer.open" => Some(Self::Composer),
+            "project.open" => Some(Self::Project),
+            "layout.save" | "layout.open" | "layout.delete" => Some(Self::Layout),
+            "input.broadcast" => Some(Self::Broadcast),
+            _ => None,
+        }
+    }
+
     /// Append primitives in drawing order. `color` comes from `DrawContext::color`.
     pub fn draw(self, rect: Rect, color: [f32; 4], out: &mut Vec<Shape>) {
         let side = rect.w.min(rect.h).max(0.0);
         if side == 0.0 {
             return;
         }
+        let unit = side / 16.0;
+        // Snap the optical center to a half pixel. Preserve symmetry across fractional DPI,
+        // and use the same physical stroke for capsules and outlines.
+        let origin = |start: f32, length: f32| (2.0 * start + length).round() * 0.5 - side * 0.5;
         let icon = IconGeometry {
-            origin: [
-                rect.x + (rect.w - side) / 2.0,
-                rect.y + (rect.h - side) / 2.0,
-            ],
-            unit: side / 16.0,
+            origin: [origin(rect.x, rect.w), origin(rect.y, rect.h)],
+            unit,
+            width: (1.5 * unit * 4.0).round().max(1.0) / 4.0,
             color,
         };
         let line = |out: &mut Vec<Shape>, points: &[[f32; 2]]| {
@@ -57,8 +74,8 @@ impl Icon {
                 }
             }
             Self::Search => {
-                icon.outline(out, [2.5, 2.5, 9.5, 9.5], 5.0);
-                icon.stroke(out, [10.8, 10.8], [13.6, 13.6]);
+                icon.outline(out, [2.0, 2.0, 10.0, 10.0], 5.0);
+                icon.stroke(out, [10.5, 10.5], [13.5, 13.5]);
             }
             Self::Bell => {
                 line(
@@ -87,8 +104,8 @@ impl Icon {
                 }
             }
             Self::Close => {
-                icon.stroke(out, [4.3, 4.3], [11.7, 11.7]);
-                icon.stroke(out, [4.3, 11.7], [11.7, 4.3]);
+                icon.stroke(out, [4.0, 4.0], [12.0, 12.0]);
+                icon.stroke(out, [4.0, 12.0], [12.0, 4.0]);
             }
             Self::GitBranch => {
                 for p in [[4.6, 4.0], [4.6, 12.0], [11.6, 4.0]] {
@@ -162,8 +179,8 @@ impl Icon {
                 );
                 line(out, &[[10.1, 6.9], [13.0, 6.9], [13.0, 4.0]]);
             }
-            Self::ChevronRight => line(out, &[[6.0, 4.0], [10.0, 8.0], [6.0, 12.0]]),
-            Self::ChevronDown => line(out, &[[4.0, 6.0], [8.0, 10.0], [12.0, 6.0]]),
+            Self::ChevronRight => line(out, &[[5.5, 3.8], [10.5, 8.0], [5.5, 12.2]]),
+            Self::ChevronDown => line(out, &[[3.8, 5.5], [8.0, 10.5], [12.2, 5.5]]),
             Self::Diff => {
                 icon.stroke(out, [3.9, 5.8], [12.1, 5.8]);
                 icon.stroke(out, [8.0, 2.9], [8.0, 8.7]);
@@ -197,6 +214,48 @@ impl Icon {
                 );
                 line(out, &[[3.3, 3.8], [4.3, 5.9], [6.6, 5.4]]);
             }
+            Self::Composer => {
+                icon.outline(out, [2.0, 3.0, 12.0, 10.0], 2.0);
+                line(out, &[[4.8, 6.0], [7.0, 8.0], [4.8, 10.0]]);
+                icon.stroke(out, [9.5, 6.0], [9.5, 10.0]);
+            }
+            Self::Project => {
+                line(
+                    out,
+                    &[
+                        [2.5, 12.8],
+                        [2.5, 3.8],
+                        [6.4, 3.8],
+                        [8.0, 5.3],
+                        [13.5, 5.3],
+                        [13.5, 12.8],
+                        [2.5, 12.8],
+                    ],
+                );
+                icon.stroke(out, [5.4, 8.4], [10.6, 8.4]);
+            }
+            Self::Layout => {
+                icon.outline(out, [2.0, 2.5, 12.0, 11.0], 2.0);
+                icon.stroke(out, [6.0, 3.3], [6.0, 12.7]);
+                icon.stroke(out, [6.0, 8.0], [13.2, 8.0]);
+            }
+            Self::Broadcast => {
+                icon.stroke(out, [8.0, 8.0], [8.0, 12.5]);
+                for direction in [-1.0, 1.0] {
+                    let x = |distance: f32| 8.0 + direction * distance;
+                    line(out, &[[x(2.4), 5.3], [x(3.1), 6.8], [x(2.4), 8.3]]);
+                    line(
+                        out,
+                        &[
+                            [x(4.4), 3.6],
+                            [x(5.5), 5.0],
+                            [x(5.8), 6.8],
+                            [x(5.5), 8.6],
+                            [x(4.4), 10.0],
+                        ],
+                    );
+                }
+            }
             Self::Zoom => {
                 line(out, &[[9.2, 3.5], [12.5, 3.5], [12.5, 6.8]]);
                 icon.stroke(out, [12.1, 3.9], [9.2, 6.8]);
@@ -226,6 +285,7 @@ impl Icon {
 struct IconGeometry {
     origin: [f32; 2],
     unit: f32,
+    width: f32,
     color: [f32; 4],
 }
 
@@ -241,7 +301,7 @@ impl IconGeometry {
         out.push(Shape::Capsule {
             from: self.point(from),
             to: self.point(to),
-            width: 1.45 * self.unit,
+            width: self.width,
             color: self.color,
         });
     }
@@ -253,7 +313,7 @@ impl IconGeometry {
             radii: [radius * self.unit; 4],
             fill: [0.0; 4],
             border: Some(Border {
-                width: 1.4 * self.unit,
+                width: self.width,
                 color: self.color,
             }),
             shadow: None,

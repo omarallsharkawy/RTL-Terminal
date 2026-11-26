@@ -26,7 +26,8 @@ use crate::commands;
 use crate::input::{key_shortcut, InputAction};
 use crate::layout::{PaneId, SplitDir};
 use crate::pty::{Pty, SpawnOptions};
-use crate::render::scene::palette::{PaletteHit, PaletteItem, PaletteView};
+use crate::render::icons::Icon;
+use crate::render::scene::palette::{PaletteHit, PaletteIcons, PaletteItem, PaletteView};
 use crate::session::workspace::CloseOthers;
 use crate::ui::notifications::{jump_target, palette_item};
 use crate::ui::palette::{
@@ -82,6 +83,7 @@ impl App {
         if self.palette.as_ref().is_some_and(|p| p.state.mode == mode) {
             return;
         }
+        self.close_settings();
         self.reset_pointer_gesture();
         let (workflows, entries) = if mode == PaletteMode::Commands {
             let cwd = self.focused_id().and_then(|id| self.pane_cwd(id));
@@ -175,17 +177,32 @@ impl App {
                 Some(project) => trust_confirm_view(project, pending.confirm.scroll),
                 None => PaletteView::default(),
             };
-            self.window.set_command_palette(Some(view));
+            self.window
+                .set_command_palette(Some((view, PaletteIcons::default())));
             self.window.request_redraw();
             return;
         }
         let state = &open.state;
+        let mut icons = PaletteIcons {
+            leading: match state.mode {
+                PaletteMode::Projects => Icon::Project,
+                PaletteMode::SaveLayout | PaletteMode::OpenLayout | PaletteMode::DeleteLayout => {
+                    Icon::Layout
+                }
+                _ => Icon::Search,
+            },
+            ..PaletteIcons::default()
+        };
         let (rows, placeholder): (Vec<PaletteItem>, _) = match state.mode {
             PaletteMode::Commands => {
                 let rows = matches(&open.entries, &state.query)
                     .into_iter()
                     .map(|i| {
                         let entry = &open.entries[i];
+                        icons.rows.push(match entry.id {
+                            PaletteId::Builtin(name) => Icon::for_command(name),
+                            PaletteId::Custom(_) => None,
+                        });
                         PaletteItem {
                             title_en: entry.title_en.clone(),
                             title_ar: entry.title_ar.clone(),
@@ -294,6 +311,9 @@ impl App {
         };
         let shown = visible_window_in(rows.len(), state.selected, self.palette_capacity());
         let selected = state.selected.min(rows.len().saturating_sub(1)) - shown.start;
+        if !icons.rows.is_empty() {
+            icons.rows = icons.rows[shown.clone()].to_vec();
+        }
         let mut items: Vec<PaletteItem> = rows[shown].to_vec();
         if items.is_empty() && state.query.is_empty() {
             match state.mode {
@@ -333,7 +353,7 @@ impl App {
             selected,
             placeholder,
         };
-        self.window.set_command_palette(Some(view));
+        self.window.set_command_palette(Some((view, icons)));
         self.window.request_redraw();
     }
 
@@ -363,6 +383,11 @@ impl App {
             }
             Some(InputAction::OpenProject) => {
                 self.toggle_palette_mode(PaletteMode::Projects);
+                return false;
+            }
+            Some(InputAction::Settings) => {
+                self.close_palette();
+                self.open_settings();
                 return false;
             }
             _ => {}

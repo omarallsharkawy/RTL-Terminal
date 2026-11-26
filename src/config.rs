@@ -25,7 +25,7 @@ pub struct TwittyConfig {
     pub colors: Option<ThemeColors>,
     /// Font family for the terminal grid, e.g. "JetBrains Mono". Unset or not installed: monospace.
     pub font_family: Option<String>,
-    /// Proportional chrome font. Unset uses the system sans-serif.
+    /// Proportional chrome font. Unset uses the bundled Latin and Arabic UI fonts.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ui_font_family: Option<String>,
     /// Chrome accent as `#rgb` or `#rrggbb`. Unset uses the theme cursor color.
@@ -33,6 +33,8 @@ pub struct TwittyConfig {
     pub ui_accent: Option<String>,
     pub top_bar: bool,
     pub pane_headers: bool,
+    /// Skip chrome animations and show a steady working indicator.
+    pub reduce_motion: bool,
     /// Render OSC 133 command blocks on the main screen as rounded cards with a hover toolbar.
     pub block_cards: bool,
     /// Blink the cursor, unless the running program asks for a steady one (DECSCUSR).
@@ -103,6 +105,7 @@ impl Default for TwittyConfig {
             ui_accent: None,
             top_bar: true,
             pane_headers: true,
+            reduce_motion: false,
             block_cards: true,
             cursor_blink: true,
             sidebar: "right".into(),
@@ -246,7 +249,7 @@ impl TwittyConfig {
 
     /// `%APPDATA%\twitty\config.json` on Windows, `$XDG_CONFIG_HOME/twitty/config.json`
     /// (default `~/.config`) elsewhere. Relative environment paths are ignored.
-    fn config_path() -> Option<PathBuf> {
+    pub fn config_path() -> Option<PathBuf> {
         let absolute_dir = |key: &str| {
             std::env::var_os(key)
                 .filter(|v| !v.is_empty())

@@ -2,13 +2,19 @@
 //! focused pane.
 //!
 //! Window-free state machine covering config modes (`off` | `on-demand` | `always`), OSC 133
-//! prompt-state show/hide rules, editing, history browsing, Arabic-aware completion + inline
-//! ghost suggestions, and bracketed-paste submission.
+//! prompt-state show/hide rules, editing, history browsing, spec-driven + dynamic completion with
+//! Arabic-aware matching and inline ghost suggestions, syntax highlighting, pre-run linting, and
+//! bracketed-paste submission.
 
 pub mod complete;
 pub mod editor;
+pub mod generators;
+pub mod highlight;
 pub mod history;
+pub mod lint;
+pub mod specs;
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -18,10 +24,12 @@ use crate::input::encode_paste;
 use crate::shell_integration::MarkKind;
 use crate::workflows::Workflow;
 use complete::{
-    complete as compute_completions, extract_path_query, ghost_suggestion, CompletionItem,
-    DirEntryInfo,
+    complete_with, extract_path_query, ghost_suggestion, needed_generators, CompleteInputs,
+    CompletionItem, DirEntryInfo,
 };
 use editor::TextEditor;
+use generators::{GeneratedItem, GeneratorKey, GeneratorKind};
+use specs::default_registry;
 
 /// Maximum rows shown at once in the completion popup.
 pub const MAX_POPUP_ROWS: usize = 8;
@@ -182,6 +190,8 @@ pub enum ComposerAction {
     RequestPaste,
     /// Path completion needs directory entries for `PathBuf` loaded off the UI thread.
     RequestDir(PathBuf),
+    /// Dynamic completion needs one or more generators executed off the UI thread.
+    RequestGenerators(Vec<GeneratorKey>),
     /// Natural-language request (`# ...`, Ctrl+Enter, or Generate button) to send to the AI agent.
     /// The reply is placed back into the editor for review and NEVER executed automatically.
     GenerateAi(String),
@@ -349,6 +359,16 @@ impl ComposerState {
         extract_path_query(self.editor.text(), self.editor.caret(), cwd).map(|q| q.dir_to_read)
     }
 
+    /// Return any dynamic generators needed for the current caret position.
+    pub fn needed_generators(&self, cwd: Option<&Path>) -> Vec<GeneratorKey> {
+        needed_generators(
+            self.editor.text(),
+            self.editor.caret(),
+            default_registry(),
+            cwd,
+        )
+    }
+
     /// Refresh open completion popup when background directory entries arrive.
     pub fn refresh_popup_if_open(
         &mut self,
@@ -357,10 +377,25 @@ impl ComposerState {
         dir_cache: Option<(&Path, &[DirEntryInfo])>,
         cwd: Option<&Path>,
     ) -> bool {
+        let empty = HashMap::new();
+        self.refresh_popup_if_open_with(history, workflows, dir_cache, cwd, &empty, None)
+    }
+
+    /// Refresh open completion popup when directory entries or dynamic generator results arrive.
+    pub fn refresh_popup_if_open_with(
+        &mut self,
+        history: &[String],
+        workflows: &[Workflow],
+        dir_cache: Option<(&Path, &[DirEntryInfo])>,
+        cwd: Option<&Path>,
+        generated: &HashMap<GeneratorKind, Vec<GeneratedItem>>,
+        path_commands: Option<&HashSet<String>>,
+    ) -> bool {
         if self.popup.is_none() {
             return false;
         }
-        let items = self.build_completions(history, workflows, dir_cache, cwd);
+        let items =
+            self.build_completions(history, workflows, dir_cache, cwd, generated, path_commands);
         if items.is_empty() {
             self.popup = None;
         } else if let Some(popup) = self.popup.as_mut() {
@@ -376,23 +411,27 @@ impl ComposerState {
         workflows: &[Workflow],
         dir_cache: Option<(&Path, &[DirEntryInfo])>,
         cwd: Option<&Path>,
+        generated: &HashMap<GeneratorKind, Vec<GeneratedItem>>,
+        path_commands: Option<&HashSet<String>>,
     ) -> Vec<CompletionItem> {
         let pq = extract_path_query(self.editor.text(), self.editor.caret(), cwd);
         let entries: &[DirEntryInfo] = match (&pq, dir_cache) {
             (Some(q), Some((cached_dir, entries))) if cached_dir == q.dir_to_read => entries,
             _ => &[],
         };
-        compute_completions(
-            self.editor.text(),
-            self.editor.caret(),
+        let inputs = CompleteInputs {
             history,
             workflows,
-            pq.as_ref(),
-            entries,
-        )
+            path_query: pq.as_ref(),
+            dir_entries: entries,
+            specs: default_registry(),
+            generated,
+            path_commands,
+        };
+        complete_with(self.editor.text(), self.editor.caret(), &inputs)
     }
 
-    /// Handle one key press inside the composer.
+    /// Handle one key press inside the composer (without dynamic generator cache).
     #[allow(clippy::too_many_arguments)]
     pub fn key(
         &mut self,
@@ -404,6 +443,27 @@ impl ComposerState {
         workflows: &[Workflow],
         dir_cache: Option<(&Path, &[DirEntryInfo])>,
         cwd: Option<&Path>,
+    ) -> ComposerAction {
+        let empty = HashMap::new();
+        self.key_with_context(
+            key, physical, text, modifiers, history, workflows, dir_cache, cwd, &empty, None,
+        )
+    }
+
+    /// Handle one key press inside the composer with dynamic generator results and `$PATH` cache.
+    #[allow(clippy::too_many_arguments)]
+    pub fn key_with_context(
+        &mut self,
+        key: &Key,
+        physical: Option<KeyCode>,
+        text: Option<&str>,
+        modifiers: ModifiersState,
+        history: &[String],
+        workflows: &[Workflow],
+        dir_cache: Option<(&Path, &[DirEntryInfo])>,
+        cwd: Option<&Path>,
+        generated: &HashMap<GeneratorKind, Vec<GeneratedItem>>,
+        path_commands: Option<&HashSet<String>>,
     ) -> ComposerAction {
         let ctrl = modifiers.control_key();
         let shift = modifiers.shift_key();
@@ -536,17 +596,35 @@ impl ComposerState {
                     .as_ref()
                     .filter(|q| dir_cache.is_none_or(|(d, _)| d != q.dir_to_read))
                     .map(|q| q.dir_to_read.clone());
-                let items = self.build_completions(history, workflows, dir_cache, cwd);
-                if items.len() == 1 && cache_miss.is_none() {
+                let missing_gens: Vec<GeneratorKey> = self
+                    .needed_generators(cwd)
+                    .into_iter()
+                    .filter(|k| !generated.contains_key(&k.kind))
+                    .collect();
+                let items = self.build_completions(
+                    history,
+                    workflows,
+                    dir_cache,
+                    cwd,
+                    generated,
+                    path_commands,
+                );
+                if items.len() == 1 && cache_miss.is_none() && missing_gens.is_empty() {
                     self.apply_completion(&items[0], history, workflows);
                     return ComposerAction::Redraw;
                 }
                 if !items.is_empty() {
                     self.popup = Some(PopupState { items, selected: 0 });
+                    if !missing_gens.is_empty() {
+                        return ComposerAction::RequestGenerators(missing_gens);
+                    }
                     if let Some(dir) = cache_miss {
                         return ComposerAction::RequestDir(dir);
                     }
                     return ComposerAction::Redraw;
+                }
+                if !missing_gens.is_empty() {
+                    return ComposerAction::RequestGenerators(missing_gens);
                 }
                 if let Some(ghost) = self.ghost.clone() {
                     self.editor.insert_text(&ghost);
@@ -560,7 +638,6 @@ impl ComposerState {
             }
             Key::Named(NamedKey::ArrowLeft) if !alt && !super_key => {
                 self.popup = None;
-                // Accept inline ghost when advancing logically forward at end of an RTL line.
                 if !ctrl
                     && !shift
                     && self.editor.caret_is_rtl()
@@ -583,8 +660,6 @@ impl ComposerState {
             }
             Key::Named(NamedKey::ArrowRight) if !alt && !super_key => {
                 self.popup = None;
-                // Accept inline ghost when pressing Right at end of an LTR line (or end of line
-                // with no selection when ghost exists on LTR/neutral text).
                 if !ctrl
                     && !shift
                     && !self.editor.caret_is_rtl()

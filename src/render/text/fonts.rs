@@ -17,6 +17,13 @@ pub fn new_font_system() -> FontSystem {
     font_system
 }
 
+/// Fork the database before loading UI faces. Both systems retain the original font IDs,
+/// so glyphon can rasterize terminal and UI runs together. Terminal fallback only sees its
+/// original font database.
+pub fn ui_font_system(terminal: &FontSystem) -> FontSystem {
+    FontSystem::new_with_locale_and_db(terminal.locale().to_owned(), terminal.db().clone())
+}
+
 /// The installed spelling of a font family named `name` (case-insensitive), if any. Shaping
 /// matches family names exactly, so the configured name must be replaced with this one.
 pub fn installed_family(font_system: &FontSystem, name: &str) -> Option<String> {
@@ -26,6 +33,29 @@ pub fn installed_family(font_system: &FontSystem, name: &str) -> Option<String> 
             .find(|(n, _)| n.eq_ignore_ascii_case(name))
             .map(|(n, _)| n.clone())
     })
+}
+
+/// Sorted, deduplicated list of monospace font family names in `font_system`.
+pub fn monospace_families(font_system: &FontSystem) -> Vec<String> {
+    collect_families(font_system, true)
+}
+
+/// Sorted, deduplicated list of all font family names in `font_system`.
+pub fn all_families(font_system: &FontSystem) -> Vec<String> {
+    collect_families(font_system, false)
+}
+
+fn collect_families(font_system: &FontSystem, monospace_only: bool) -> Vec<String> {
+    let mut names: Vec<String> = font_system
+        .db()
+        .faces()
+        .filter(|face| !monospace_only || face.monospaced)
+        .filter_map(|face| face.families.first().map(|(name, _)| name.clone()))
+        .filter(|name| !name.trim().is_empty())
+        .collect();
+    names.sort_by_key(|name| name.to_ascii_lowercase());
+    names.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    names
 }
 
 /// The family used for terminal cells: the configured name, or the generic monospace.

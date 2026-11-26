@@ -153,9 +153,10 @@ The config file is `~/.config/twitty/config.json` (`%APPDATA%\twitty\config.json
 | --- | --- |
 | `font_size` | 8 to 48 |
 | `font_family` | Font for the terminal grid, e.g. `JetBrains Mono`. Unset, or not installed: the system monospace font. Arabic uses an embedded Noto Naskh Arabic when no system font covers it. |
-| `ui_font_family` | Proportional chrome font. Defaults to the system sans, with bundled Noto Naskh Arabic for fallback. |
+| `ui_font_family` | Proportional chrome font. Defaults to bundled Inter for Latin and IBM Plex Sans Arabic for Arabic. |
 | `ui_accent` | Chrome accent in `#rgb` or `#rrggbb`. Defaults to the theme cursor color. |
 | `top_bar`, `pane_headers` | Both default to `true`. Set either to `false` to hide it. |
+| `reduce_motion` | Defaults to `false`. Set to `true` for instant chrome transitions and a steady working indicator. |
 | `block_cards` | `true` (default) renders OSC 133 command blocks on the main screen as rounded cards with a status strip and hover/selected toolbar (copy command, copy output, ask agent, rerun without newline). Set to `false` for thin gutter markers. |
 | `background_opacity` | 0.2 (very see-through) to 1.0 (solid) |
 | `cursor_style` | `block`, `beam` or `underline`. Programs that set their own cursor shape (vim insert mode, for example) still win. |

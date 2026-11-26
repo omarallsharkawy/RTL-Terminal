@@ -1,7 +1,9 @@
-//! App-level hooks for the command composer: visibility lifecycle, off-thread shell history and
-//! directory listing loads, keyboard/IME/mouse routing, and building the per-frame `ComposerView`.
+//! App-level hooks for the command composer: visibility lifecycle, off-thread shell history,
+//! directory listing, `$PATH` / path-stat, and dynamic generator loads, keyboard/IME/mouse
+//! routing, and building the per-frame `ComposerView`.
 
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use alacritty_terminal::term::TermMode;
@@ -11,7 +13,14 @@ use winit::window::CursorIcon;
 
 use super::{App, AppEvent};
 use crate::composer::complete::{read_dir_entries, DirEntryInfo, MAX_DIR_ENTRIES};
+use crate::composer::generators::{
+    run_generator, scan_path_executables, GeneratedItem, GeneratorCache, GeneratorKey,
+};
+use crate::composer::highlight::{
+    extract_candidate_paths, highlight_command, resolve_shell_path, HighlightContext,
+};
 use crate::composer::history::{load_shell_history_default, HistoryStore};
+use crate::composer::lint::lint_command;
 use crate::composer::{
     encode_submit, should_show_composer, ComposerAction, ComposerMode, ComposerState,
 };
@@ -24,6 +33,8 @@ use crate::render::scene::composer::{
 };
 use crate::shell_integration::MarkKind;
 use crate::workflows::WorkflowSet;
+
+const MAX_PATH_STAT_CACHE: usize = 256;
 
 /// Window-wide composer state owned by `App`.
 #[derive(Default)]
@@ -38,6 +49,12 @@ pub(super) struct ComposerHost {
     workflows_cwd: Option<PathBuf>,
     dir_cache: Option<(PathBuf, Vec<DirEntryInfo>)>,
     dir_pending: Option<PathBuf>,
+    generator_cache: GeneratorCache,
+    generators_pending: HashSet<GeneratorKey>,
+    path_commands: Option<HashSet<String>>,
+    path_commands_requested: bool,
+    path_exists_cache: HashMap<PathBuf, bool>,
+    path_exists_pending: HashSet<PathBuf>,
 }
 
 impl App {
@@ -143,6 +160,8 @@ impl App {
         self.composer.dir_cache = None;
         self.composer.dir_pending = None;
         self.composer.workflows_cwd = None;
+        self.composer.path_exists_cache.clear();
+        self.composer.path_exists_pending.clear();
         if self.composer_visible() {
             self.composer.focused = true;
             self.prepare_composer_sources();
@@ -162,6 +181,10 @@ impl App {
             {
                 self.composer.history.push_session(&cmd);
             }
+            if let Some(cwd) = self.pane_cwd(id) {
+                self.composer.generator_cache.invalidate_cwd(&cwd);
+            }
+            self.composer.path_exists_cache.clear();
         }
         if self.focused_id() != Some(id) {
             return;
@@ -193,6 +216,7 @@ impl App {
     fn prepare_composer_sources(&mut self) {
         self.harvest_block_history();
         self.ensure_shell_history_loaded();
+        self.ensure_path_commands_loaded();
         let cwd = self.focused_id().and_then(|id| self.pane_cwd(id));
         if self.composer.workflows_cwd != cwd || self.composer.workflows.workflows().is_empty() {
             self.composer.workflows = WorkflowSet::load(&self.config.commands, cwd.as_deref());
@@ -203,6 +227,8 @@ impl App {
             self.composer.workflows.workflows(),
         );
         self.maybe_request_composer_dir(cwd.as_deref());
+        self.maybe_request_composer_generators(cwd.as_deref());
+        self.maybe_request_composer_path_stats(cwd.as_deref());
     }
 
     /// Collect commands from all panes' command blocks (newest first).
@@ -217,7 +243,6 @@ impl App {
                 }
             }
         }
-        // Newest first: sort by timestamp descending, breaking ties by reverse insertion order.
         timed.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
         self.composer
             .history
@@ -238,6 +263,23 @@ impl App {
             });
     }
 
+    fn ensure_path_commands_loaded(&mut self) {
+        if self.composer.path_commands_requested {
+            return;
+        }
+        self.composer.path_commands_requested = true;
+        let proxy = self.proxy.clone();
+        let _ = std::thread::Builder::new()
+            .name("twitty-composer-path".into())
+            .spawn(move || {
+                let cmds = scan_path_executables();
+                let _ = proxy.send_event(AppEvent::ComposerPathInfo {
+                    commands: Some(cmds),
+                    existing: Vec::new(),
+                });
+            });
+    }
+
     pub(super) fn on_composer_history(&mut self, entries: Vec<String>) {
         self.composer.history.set_shell_history(entries);
         self.composer.state.refresh_ghost(
@@ -249,7 +291,7 @@ impl App {
         }
     }
 
-    fn maybe_request_composer_dir(&mut self, cwd: Option<&std::path::Path>) {
+    fn maybe_request_composer_dir(&mut self, cwd: Option<&Path>) {
         let Some(dir) = self.composer.state.needed_dir(cwd) else {
             return;
         };
@@ -281,17 +323,125 @@ impl App {
             self.composer.dir_pending = None;
         }
         self.composer.dir_cache = Some((dir, entries));
+        self.refresh_composer_popup_after_async();
+    }
+
+    fn maybe_request_composer_generators(&mut self, cwd: Option<&Path>) {
+        let keys = self.composer.state.needed_generators(cwd);
+        self.request_composer_generators(keys);
+    }
+
+    fn request_composer_generators(&mut self, keys: Vec<GeneratorKey>) {
+        let now = Instant::now();
+        for key in keys {
+            if self.composer.generator_cache.get(&key, now).is_some()
+                || self.composer.generators_pending.contains(&key)
+            {
+                continue;
+            }
+            self.composer.generators_pending.insert(key.clone());
+            let proxy = self.proxy.clone();
+            let _ = std::thread::Builder::new()
+                .name("twitty-composer-gen".into())
+                .spawn(move || {
+                    let items = run_generator(key.kind, key.cwd.as_deref());
+                    let _ = proxy.send_event(AppEvent::ComposerGenerator(key, items));
+                });
+        }
+    }
+
+    pub(super) fn on_composer_generator(&mut self, key: GeneratorKey, items: Vec<GeneratedItem>) {
+        self.composer.generators_pending.remove(&key);
+        self.composer
+            .generator_cache
+            .insert(key, items, Instant::now());
+        self.refresh_composer_popup_after_async();
+    }
+
+    fn maybe_request_composer_path_stats(&mut self, cwd: Option<&Path>) {
+        // Only stat local filesystem paths (never for remote SSH panes).
+        let is_remote = self
+            .focused_id()
+            .and_then(|id| self.ws.pane(id))
+            .is_some_and(|p| p.remote.is_some());
+        if is_remote {
+            return;
+        }
+        let candidates = extract_candidate_paths(self.composer.state.editor.text(), cwd);
+        let to_check: Vec<PathBuf> = candidates
+            .into_iter()
+            .filter(|p| {
+                !self.composer.path_exists_cache.contains_key(p)
+                    && !self.composer.path_exists_pending.contains(p)
+            })
+            .collect();
+        if to_check.is_empty() {
+            return;
+        }
+        for p in &to_check {
+            self.composer.path_exists_pending.insert(p.clone());
+        }
+        let proxy = self.proxy.clone();
+        let _ = std::thread::Builder::new()
+            .name("twitty-composer-stat".into())
+            .spawn(move || {
+                let existing = to_check
+                    .into_iter()
+                    .map(|p| {
+                        let ok = std::fs::symlink_metadata(&p).is_ok();
+                        (p, ok)
+                    })
+                    .collect();
+                let _ = proxy.send_event(AppEvent::ComposerPathInfo {
+                    commands: None,
+                    existing,
+                });
+            });
+    }
+
+    pub(super) fn on_composer_path_info(
+        &mut self,
+        commands: Option<HashSet<String>>,
+        existing: Vec<(PathBuf, bool)>,
+    ) {
+        let mut changed = false;
+        if let Some(cmds) = commands {
+            self.composer.path_commands = Some(cmds);
+            changed = true;
+        }
+        for (path, ok) in existing {
+            self.composer.path_exists_pending.remove(&path);
+            if self.composer.path_exists_cache.len() >= MAX_PATH_STAT_CACHE {
+                self.composer.path_exists_cache.clear();
+            }
+            if self.composer.path_exists_cache.insert(path, ok) != Some(ok) {
+                changed = true;
+            }
+        }
+        if changed && self.composer_visible() {
+            self.refresh_composer_popup_after_async();
+            self.window.request_redraw();
+        }
+    }
+
+    fn refresh_composer_popup_after_async(&mut self) {
         let cwd = self.focused_id().and_then(|id| self.pane_cwd(id));
         let dir_cache = self
             .composer
             .dir_cache
             .as_ref()
             .map(|(d, e)| (d.as_path(), e.as_slice()));
-        if self.composer.state.refresh_popup_if_open(
+        let gen_snap = self
+            .composer
+            .generator_cache
+            .snapshot_for(cwd.as_deref(), Instant::now());
+        if self.composer.state.refresh_popup_if_open_with(
             self.composer.history.entries(),
             self.composer.workflows.workflows(),
             dir_cache,
             cwd.as_deref(),
+            &gen_snap,
+            self.composer.path_commands.as_ref(),
         ) {
             self.window.request_redraw();
         }
@@ -341,7 +491,11 @@ impl App {
             .as_ref()
             .map(|(d, e)| (d.as_path(), e.as_slice()));
         self.composer.state.ai_enabled = self.config.ai;
-        let action = self.composer.state.key(
+        let gen_snap = self
+            .composer
+            .generator_cache
+            .snapshot_for(cwd.as_deref(), Instant::now());
+        let action = self.composer.state.key_with_context(
             &event.logical_key,
             physical,
             event.text.as_deref(),
@@ -350,6 +504,8 @@ impl App {
             self.composer.workflows.workflows(),
             dir_cache,
             cwd.as_deref(),
+            &gen_snap,
+            self.composer.path_commands.as_ref(),
         );
         self.apply_composer_action(action, cwd.as_deref());
         Some(false)
@@ -389,12 +545,14 @@ impl App {
         true
     }
 
-    fn apply_composer_action(&mut self, action: ComposerAction, cwd: Option<&std::path::Path>) {
+    fn apply_composer_action(&mut self, action: ComposerAction, cwd: Option<&Path>) {
         match action {
             ComposerAction::None => {}
             ComposerAction::Redraw => {
                 self.cursor_blink.reset(Instant::now());
                 self.maybe_request_composer_dir(cwd);
+                self.maybe_request_composer_generators(cwd);
+                self.maybe_request_composer_path_stats(cwd);
                 self.window.request_redraw();
             }
             ComposerAction::Close => self.close_composer(),
@@ -414,6 +572,10 @@ impl App {
             }
             ComposerAction::RequestDir(dir) => {
                 self.request_composer_dir(dir);
+                self.window.request_redraw();
+            }
+            ComposerAction::RequestGenerators(keys) => {
+                self.request_composer_generators(keys);
                 self.window.request_redraw();
             }
             ComposerAction::GenerateAi(request) => {
@@ -447,6 +609,38 @@ impl App {
         }
     }
 
+    fn composer_highlight_and_lint(
+        &self,
+        text: &str,
+        cwd: Option<&Path>,
+    ) -> (
+        Vec<crate::composer::highlight::HighlightSpan>,
+        Vec<crate::composer::lint::LintMark>,
+    ) {
+        let path_exists = |token: &str| -> bool {
+            let Some(path) = resolve_shell_path(token, cwd) else {
+                return false;
+            };
+            if let Some(&ok) = self.composer.path_exists_cache.get(&path) {
+                return ok;
+            }
+            // Fast fallback against already-cached directory listing for simple filenames.
+            if let Some((cached_dir, entries)) = &self.composer.dir_cache {
+                if path.parent() == Some(cached_dir.as_path()) {
+                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                        return entries.iter().any(|e| e.name == name);
+                    }
+                }
+            }
+            false
+        };
+        let hctx =
+            HighlightContext::with_defaults(self.composer.path_commands.as_ref(), &path_exists);
+        let highlights = highlight_command(text, &hctx);
+        let lints = lint_command(text, &hctx);
+        (highlights, lints)
+    }
+
     fn composer_layout(&self) -> Option<ComposerLayout> {
         if !self.composer_visible() {
             return None;
@@ -463,7 +657,10 @@ impl App {
             .as_ref()
             .map_or(0, |p| p.visible_range().len());
         let ai_view = self.composer_ai_view();
-        Some(ComposerLayout::new_with_ai(
+        let cwd = self.pane_cwd(id);
+        let (_, lints) =
+            self.composer_highlight_and_lint(self.composer.state.editor.text(), cwd.as_deref());
+        Some(ComposerLayout::with_ai_and_lint(
             pane_rect,
             metrics,
             metrics.scale,
@@ -472,6 +669,7 @@ impl App {
             popup_items,
             ai_view.enabled,
             ai_view.has_banner(),
+            !lints.is_empty(),
         ))
     }
 
@@ -560,11 +758,14 @@ impl App {
         }
         let id = self.focused_id()?;
         let pane_rect = self.pane_rect(id)?;
+        let cwd = self.pane_cwd(id);
         let ed = &self.composer.state.editor;
         let lines = ed.lines().into_iter().map(str::to_owned).collect();
         let caret = ed.caret_line_col();
         let selection = ed.selection_line_cols();
         let preedit = ed.preedit().map(|p| (p.text.clone(), p.cursor));
+        let language = self.window.ui_language();
+        let (highlights, lints) = self.composer_highlight_and_lint(ed.text(), cwd.as_deref());
         let popup = self.composer.state.popup.as_ref().map(|p| {
             let range = p.visible_range();
             let items = p.items[range.clone()]
@@ -572,7 +773,7 @@ impl App {
                 .map(|item| ComposerPopupItem {
                     kind: item.kind,
                     label: item.label.clone(),
-                    detail: item.detail.clone(),
+                    detail: item.localized_detail(language).map(str::to_owned),
                 })
                 .collect();
             ComposerPopupView {
@@ -587,10 +788,12 @@ impl App {
             selection,
             preedit,
             ghost: self.composer.state.ghost.clone(),
+            highlights,
+            lints,
             focused: self.composer.focused && self.window_focused,
             cursor_blink_on: self.cursor_blink.visible(),
             popup,
-            language: self.window.ui_language(),
+            language,
             ai: self.composer_ai_view(),
         })
     }

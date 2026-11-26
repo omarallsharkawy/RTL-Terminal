@@ -28,6 +28,7 @@ mod ports;
 mod projects;
 mod review;
 mod selection;
+mod settings;
 mod ssh;
 mod window;
 
@@ -86,6 +87,8 @@ pub struct App {
     window_focused: bool,
     /// The command palette, while it is open (keys and IME text go to it).
     palette: Option<palette::OpenPalette>,
+    /// The settings overlay, while it is open (keys, IME text and pointer input go to it).
+    settings: Option<crate::ui::settings_panel::SettingsPanelState>,
     /// Local control socket server (`twitty ctl`), when enabled.
     control: Option<ControlServer>,
     /// The last notifications of this window, for the palette's notifications mode.
@@ -138,6 +141,7 @@ impl App {
             // Until the system says the window has focus (it does as soon as it gets it).
             window_focused: false,
             palette: None,
+            settings: None,
             control: None,
             notification_history: Default::default(),
             ports: ports::PortWatch::default(),
@@ -244,6 +248,10 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::GitDiff(generation, stat) => self.on_git_diff(generation, stat),
             AppEvent::ComposerHistory(entries) => self.on_composer_history(entries),
             AppEvent::ComposerDir(dir, entries) => self.on_composer_dir(dir, entries),
+            AppEvent::ComposerGenerator(key, items) => self.on_composer_generator(key, items),
+            AppEvent::ComposerPathInfo { commands, existing } => {
+                self.on_composer_path_info(commands, existing)
+            }
             AppEvent::Projects(generation, items) => self.on_projects_loaded(generation, items),
             AppEvent::AiComplete(request_id, result) => self.on_ai_complete(request_id, result),
         }
@@ -252,7 +260,7 @@ impl ApplicationHandler<AppEvent> for App {
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
         let (blinking, shown) = if self.composer_has_keys() {
-            (self.config.cursor_blink, true)
+            (self.config.cursor_blink && !self.config.reduce_motion, true)
         } else {
             self.focused_id()
                 .and_then(|id| {
@@ -272,18 +280,16 @@ impl ApplicationHandler<AppEvent> for App {
             self.window.request_redraw();
         }
         let search_due = self.poll_search_all(now);
-        let flash_due = self.window.tick_pane_flash(now);
         let selection_due = self.poll_selection_clears(now);
         let ssh_due = self.poll_ssh_retries(now);
         let deadline = [
             self.cursor_blink.next_deadline(),
             search_due,
-            flash_due,
             selection_due,
             ssh_due,
             self.poll_git_diff(now),
             self.poll_ai_animation(now),
-            self.window.poll_sidebar_animation(now),
+            self.window.poll_motion(now),
         ]
         .into_iter()
         .flatten()
@@ -315,11 +321,13 @@ impl ApplicationHandler<AppEvent> for App {
             WindowEvent::Resized(size) => {
                 self.window.resize(size.width, size.height);
                 self.sync_palette();
+                self.sync_settings();
                 self.apply_layout();
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 self.window.set_scale_factor(scale_factor as f32);
                 self.sync_palette();
+                self.sync_settings();
                 self.apply_layout();
             }
             WindowEvent::Occluded(occluded) => self.window.set_occluded(occluded),

@@ -1,0 +1,1434 @@
+{
+  "commands": [
+    {
+      "name": "git",
+      "desc": "Distributed version control",
+      "desc_ar": "نظام التحكم بالإصدارات",
+      "options": [
+        { "short": "-C", "value": "dir", "desc": "Run as if started in directory" },
+        { "short": "-c", "takes_value": true, "desc": "Set configuration parameter" },
+        { "long": "--no-pager", "desc": "Do not pipe output into a pager" },
+        { "long": "--version", "desc": "Show git version" },
+        { "short": "-h", "long": "--help", "desc": "Show help" }
+      ],
+      "subcommands": [
+        {
+          "name": "status",
+          "desc": "Show working tree status",
+          "desc_ar": "عرض حالة المستودع",
+          "options": [
+            { "short": "-s", "long": "--short", "desc": "Give output in short format" },
+            { "short": "-b", "long": "--branch", "desc": "Show branch and tracking info" },
+            { "short": "-u", "long": "--untracked-files", "value": { "values": ["no", "normal", "all"] }, "desc": "Show untracked files mode" },
+            { "long": "--ignored", "desc": "Show ignored files" }
+          ]
+        },
+        {
+          "name": "add",
+          "desc": "Stage file contents for commit",
+          "desc_ar": "إضافة الملفات للتثبيت",
+          "options": [
+            { "short": "-A", "long": "--all", "desc": "Stage all changes" },
+            { "short": "-p", "long": "--patch", "desc": "Interactively choose hunks" },
+            { "short": "-u", "long": "--update", "desc": "Stage modified and deleted tracked files" },
+            { "short": "-n", "long": "--dry-run", "desc": "Don't actually add files" },
+            { "short": "-f", "long": "--force", "desc": "Allow adding ignored files" }
+          ],
+          "args": ["git-changed-file"]
+        },
+        {
+          "name": "commit",
+          "desc": "Record changes to the repository",
+          "desc_ar": "تثبيت التغييرات في المستودع",
+          "options": [
+            { "short": "-m", "long": "--message", "takes_value": true, "desc": "Commit message", "desc_ar": "رسالة التثبيت" },
+            { "short": "-a", "long": "--all", "desc": "Stage modified and deleted files" },
+            { "long": "--amend", "desc": "Amend previous commit" },
+            { "long": "--no-edit", "desc": "Use existing commit message" },
+            { "long": "--no-verify", "desc": "Bypass pre-commit and commit-msg hooks" },
+            { "short": "-S", "long": "--gpg-sign", "desc": "GPG-sign commit" },
+            { "short": "-s", "long": "--signoff", "desc": "Add Signed-off-by trailer" }
+          ]
+        },
+        {
+          "name": "push",
+          "desc": "Update remote refs and objects",
+          "desc_ar": "دفع التغييرات للمستودع البعيد",
+          "options": [
+            { "short": "-u", "long": "--set-upstream", "desc": "Set upstream tracking branch" },
+            { "short": "-f", "long": "--force", "desc": "Force update remote refs" },
+            { "long": "--force-with-lease", "desc": "Safer force push" },
+            { "long": "--tags", "desc": "Push all tags" },
+            { "short": "-d", "long": "--delete", "desc": "Delete remote ref" },
+            { "short": "-n", "long": "--dry-run", "desc": "Simulate push without sending" }
+          ],
+          "args": ["git-remote", "git-branch"]
+        },
+        {
+          "name": "pull",
+          "desc": "Fetch and integrate remote changes",
+          "desc_ar": "سحب ودمج التغييرات البعيدة",
+          "options": [
+            { "short": "-r", "long": "--rebase", "desc": "Rebase current branch on upstream" },
+            { "long": "--ff-only", "desc": "Refuse to merge unless fast-forward" },
+            { "long": "--autostash", "desc": "Stash local changes before pull" },
+            { "long": "--tags", "desc": "Fetch all tags" }
+          ],
+          "args": ["git-remote", "git-branch"]
+        },
+        {
+          "name": "fetch",
+          "desc": "Download objects and refs from remote",
+          "desc_ar": "جلب التحديثات من المستودع البعيد",
+          "options": [
+            { "long": "--all", "desc": "Fetch all remotes" },
+            { "short": "-p", "long": "--prune", "desc": "Prune deleted remote-tracking branches" },
+            { "short": "-t", "long": "--tags", "desc": "Fetch all tags" },
+            { "long": "--depth", "takes_value": true, "desc": "Limit fetching to specified commits" }
+          ],
+          "args": ["git-remote", "git-branch"]
+        },
+        {
+          "name": "checkout",
+          "desc": "Switch branches or restore working files",
+          "desc_ar": "التبديل إلى فرع أو استعادة ملفات",
+          "options": [
+            { "short": "-b", "takes_value": true, "desc": "Create and switch to new branch" },
+            { "short": "-B", "takes_value": true, "desc": "Create or reset and switch to branch" },
+            { "short": "-t", "long": "--track", "desc": "Set up upstream tracking" },
+            { "short": "-f", "long": "--force", "desc": "Discard local modifications" }
+          ],
+          "args": ["git-ref"]
+        },
+        {
+          "name": "switch",
+          "desc": "Switch branches",
+          "desc_ar": "تبديل الفرع الحالي",
+          "options": [
+            { "short": "-c", "long": "--create", "takes_value": true, "desc": "Create and switch to a new branch" },
+            { "short": "-C", "long": "--force-create", "takes_value": true, "desc": "Create or reset branch" },
+            { "short": "-d", "long": "--detach", "desc": "Switch to commit in detached HEAD" },
+            { "short": "-t", "long": "--track", "desc": "Set upstream configuration" }
+          ],
+          "args": ["git-branch"]
+        },
+        {
+          "name": "branch",
+          "desc": "List, create, or delete branches",
+          "desc_ar": "إدارة الفروع",
+          "options": [
+            { "short": "-a", "long": "--all", "desc": "List local and remote branches" },
+            { "short": "-r", "long": "--remotes", "desc": "List remote-tracking branches" },
+            { "short": "-d", "long": "--delete", "value": "git-branch", "desc": "Delete a merged branch" },
+            { "short": "-D", "value": "git-branch", "desc": "Force delete a branch" },
+            { "short": "-m", "long": "--move", "desc": "Rename a branch" },
+            { "short": "-v", "long": "--verbose", "desc": "Show commit hash and subject" },
+            { "long": "--show-current", "desc": "Print current branch name" }
+          ],
+          "args": ["git-branch"]
+        },
+        {
+          "name": "merge",
+          "desc": "Join development histories together",
+          "desc_ar": "دمج فرع في الفرع الحالي",
+          "options": [
+            { "long": "--no-ff", "desc": "Always create a merge commit" },
+            { "long": "--ff-only", "desc": "Abort unless fast-forward" },
+            { "long": "--squash", "desc": "Squash commits into working tree" },
+            { "long": "--abort", "desc": "Abort current merge conflict" },
+            { "long": "--continue", "desc": "Continue merge after resolving conflicts" }
+          ],
+          "args": ["git-ref"]
+        },
+        {
+          "name": "rebase",
+          "desc": "Reapply commits on top of another base",
+          "desc_ar": "إعادة بناء التثبيتات على قاعدة أخرى",
+          "options": [
+            { "short": "-i", "long": "--interactive", "desc": "Interactive rebase" },
+            { "long": "--onto", "value": "git-ref", "desc": "Rebase onto specific ref" },
+            { "long": "--continue", "desc": "Continue rebase" },
+            { "long": "--abort", "desc": "Abort rebase" },
+            { "long": "--skip", "desc": "Skip current patch" },
+            { "long": "--autostash", "desc": "Stash local changes automatically" }
+          ],
+          "args": ["git-ref"]
+        },
+        {
+          "name": "diff",
+          "desc": "Show changes between commits or working tree",
+          "desc_ar": "عرض الفروقات في الملفات",
+          "options": [
+            { "long": "--staged", "desc": "Show staged changes" },
+            { "long": "--cached", "desc": "Show staged changes" },
+            { "long": "--stat", "desc": "Generate a diffstat" },
+            { "long": "--name-only", "desc": "Show only names of changed files" },
+            { "long": "--name-status", "desc": "Show names and status of changed files" },
+            { "short": "-w", "long": "--ignore-all-space", "desc": "Ignore whitespace changes" }
+          ],
+          "args": ["git-changed-file"]
+        },
+        {
+          "name": "log",
+          "desc": "Show commit logs",
+          "desc_ar": "عرض سجل التثبيتات",
+          "options": [
+            { "long": "--oneline", "desc": "Compact one-line per commit" },
+            { "long": "--graph", "desc": "Draw text-based branch graph" },
+            { "long": "--all", "desc": "Show all refs" },
+            { "long": "--stat", "desc": "Show diffstat for each commit" },
+            { "short": "-p", "long": "--patch", "desc": "Show patch for each commit" },
+            { "short": "-n", "long": "--max-count", "takes_value": true, "desc": "Limit number of commits" },
+            { "long": "--author", "takes_value": true, "desc": "Filter by author" },
+            { "long": "--grep", "takes_value": true, "desc": "Filter by commit message" }
+          ],
+          "args": ["git-ref"]
+        },
+        {
+          "name": "stash",
+          "desc": "Stash dirty working directory changes",
+          "desc_ar": "تخزين التغييرات مؤقتاً",
+          "subcommands": [
+            {
+              "name": "push",
+              "desc": "Save local modifications to a new stash",
+              "options": [
+                { "short": "-m", "long": "--message", "takes_value": true, "desc": "Stash description" },
+                { "short": "-u", "long": "--include-untracked", "desc": "Include untracked files" },
+                { "short": "-p", "long": "--patch", "desc": "Interactively select hunks" }
+              ]
+            },
+            { "name": "pop", "desc": "Apply and remove the latest stash" },
+            { "name": "apply", "desc": "Apply a stash without removing it" },
+            { "name": "list", "desc": "List all stashes" },
+            { "name": "drop", "desc": "Remove a single stash entry" },
+            { "name": "clear", "desc": "Remove all stash entries" },
+            { "name": "show", "desc": "Show changes recorded in stash" }
+          ]
+        },
+        {
+          "name": "reset",
+          "desc": "Reset current HEAD to specified state",
+          "options": [
+            { "long": "--soft", "desc": "Keep index and working tree" },
+            { "long": "--mixed", "desc": "Reset index, keep working tree" },
+            { "long": "--hard", "desc": "Reset index and working tree" }
+          ],
+          "args": ["git-ref"]
+        },
+        {
+          "name": "restore",
+          "desc": "Restore working tree files",
+          "options": [
+            { "short": "-S", "long": "--staged", "desc": "Restore index (unstage)" },
+            { "short": "-W", "long": "--worktree", "desc": "Restore working tree" },
+            { "short": "-s", "long": "--source", "value": "git-ref", "desc": "Restore from tree/commit" }
+          ],
+          "args": ["git-changed-file"]
+        },
+        {
+          "name": "cherry-pick",
+          "desc": "Apply changes from existing commits",
+          "options": [
+            { "short": "-n", "long": "--no-commit", "desc": "Apply changes without committing" },
+            { "long": "--continue", "desc": "Continue cherry-pick" },
+            { "long": "--abort", "desc": "Abort cherry-pick" }
+          ],
+          "args": ["git-ref"]
+        },
+        {
+          "name": "tag",
+          "desc": "Create, list, delete or verify tags",
+          "options": [
+            { "short": "-a", "long": "--annotate", "desc": "Make an annotated tag" },
+            { "short": "-m", "long": "--message", "takes_value": true, "desc": "Tag message" },
+            { "short": "-d", "long": "--delete", "value": "git-tag", "desc": "Delete existing tag" },
+            { "short": "-l", "long": "--list", "desc": "List tags" }
+          ],
+          "args": ["git-tag"]
+        },
+        {
+          "name": "remote",
+          "desc": "Manage tracked remote repositories",
+          "options": [
+            { "short": "-v", "long": "--verbose", "desc": "Show remote URLs" }
+          ],
+          "subcommands": [
+            { "name": "add", "desc": "Add a new remote" },
+            { "name": "remove", "aliases": ["rm"], "desc": "Remove a remote", "args": ["git-remote"] },
+            { "name": "rename", "desc": "Rename a remote", "args": ["git-remote"] },
+            { "name": "set-url", "desc": "Change remote URL", "args": ["git-remote"] },
+            { "name": "show", "desc": "Show remote details", "args": ["git-remote"] },
+            { "name": "prune", "desc": "Delete stale remote-tracking branches", "args": ["git-remote"] }
+          ]
+        },
+        {
+          "name": "clone",
+          "desc": "Clone a repository into a new directory",
+          "options": [
+            { "long": "--depth", "takes_value": true, "desc": "Create shallow clone" },
+            { "short": "-b", "long": "--branch", "takes_value": true, "desc": "Checkout specific branch" },
+            { "long": "--recursive", "desc": "Initialize submodules" }
+          ]
+        },
+        { "name": "init", "desc": "Create an empty git repository", "args": ["dir"] },
+        { "name": "show", "desc": "Show git objects", "args": ["git-ref"] },
+        {
+          "name": "worktree",
+          "desc": "Manage multiple working trees",
+          "subcommands": [
+            { "name": "add", "desc": "Create a new worktree", "args": ["dir", "git-ref"] },
+            { "name": "list", "desc": "List worktrees" },
+            { "name": "remove", "desc": "Remove a worktree", "args": ["dir"] },
+            { "name": "prune", "desc": "Prune stale worktree info" }
+          ]
+        },
+        {
+          "name": "clean",
+          "desc": "Remove untracked files from working tree",
+          "options": [
+            { "short": "-f", "long": "--force", "desc": "Force removal" },
+            { "short": "-d", "desc": "Remove untracked directories" },
+            { "short": "-n", "long": "--dry-run", "desc": "Show what would be removed" },
+            { "short": "-x", "desc": "Also remove ignored files" }
+          ]
+        },
+        {
+          "name": "config",
+          "desc": "Get and set repository or global options",
+          "options": [
+            { "long": "--global", "desc": "Use global config file" },
+            { "long": "--local", "desc": "Use repository config file" },
+            { "short": "-l", "long": "--list", "desc": "List all variables" },
+            { "long": "--unset", "takes_value": true, "desc": "Remove matching key" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "cargo",
+      "desc": "Rust package manager and build tool",
+      "desc_ar": "مدير حزم وأداة بناء رست",
+      "options": [
+        { "short": "-V", "long": "--version", "desc": "Print version info" },
+        { "short": "-v", "long": "--verbose", "desc": "Use verbose output" },
+        { "short": "-q", "long": "--quiet", "desc": "Do not print log messages" },
+        { "long": "--offline", "desc": "Run without accessing the network" },
+        { "long": "--locked", "desc": "Assert Cargo.lock remains unchanged" },
+        { "long": "--color", "value": { "values": ["auto", "always", "never"] }, "desc": "Coloring mode" }
+      ],
+      "subcommands": [
+        {
+          "name": "build",
+          "aliases": ["b"],
+          "desc": "Compile the current package",
+          "desc_ar": "بناء المشروع",
+          "options": [
+            { "short": "-r", "long": "--release", "desc": "Build optimized release artifacts" },
+            { "long": "--bin", "value": "cargo-target", "desc": "Build only the specified binary" },
+            { "long": "--example", "value": "cargo-target", "desc": "Build only the specified example" },
+            { "long": "--all-targets", "desc": "Build all targets" },
+            { "short": "-F", "long": "--features", "value": "cargo-feature", "desc": "Space/comma list of features" },
+            { "long": "--all-features", "desc": "Activate all available features" },
+            { "long": "--no-default-features", "desc": "Do not activate default feature" },
+            { "short": "-p", "long": "--package", "takes_value": true, "desc": "Package to build" },
+            { "long": "--workspace", "desc": "Build all packages in workspace" },
+            { "short": "-j", "long": "--jobs", "takes_value": true, "desc": "Number of parallel jobs" },
+            { "long": "--target", "takes_value": true, "desc": "Build for target triple" },
+            { "long": "--manifest-path", "value": "file", "desc": "Path to Cargo.toml" }
+          ]
+        },
+        {
+          "name": "run",
+          "aliases": ["r"],
+          "desc": "Run a binary or example",
+          "desc_ar": "تشغيل البرنامج",
+          "options": [
+            { "short": "-r", "long": "--release", "desc": "Run in release mode" },
+            { "long": "--bin", "value": "cargo-target", "desc": "Name of binary target to run" },
+            { "long": "--example", "value": "cargo-target", "desc": "Name of example target to run" },
+            { "short": "-F", "long": "--features", "value": "cargo-feature", "desc": "Features to activate" },
+            { "long": "--all-features", "desc": "Activate all features" },
+            { "long": "--no-default-features", "desc": "Disable default features" },
+            { "short": "-p", "long": "--package", "takes_value": true, "desc": "Package with target to run" }
+          ]
+        },
+        {
+          "name": "test",
+          "aliases": ["t"],
+          "desc": "Run unit and integration tests",
+          "desc_ar": "تشغيل الاختبارات",
+          "options": [
+            { "short": "-r", "long": "--release", "desc": "Test in release mode" },
+            { "long": "--lib", "desc": "Test only this package's library" },
+            { "long": "--bin", "value": "cargo-target", "desc": "Test only the specified binary" },
+            { "long": "--test", "value": "cargo-target", "desc": "Test only the specified integration test" },
+            { "long": "--doc", "desc": "Test only documentation examples" },
+            { "long": "--all-targets", "desc": "Test all targets" },
+            { "short": "-F", "long": "--features", "value": "cargo-feature", "desc": "Features to activate" },
+            { "long": "--all-features", "desc": "Activate all features" },
+            { "long": "--no-run", "desc": "Compile tests without running" },
+            { "short": "-p", "long": "--package", "takes_value": true, "desc": "Package to test" },
+            { "long": "--workspace", "desc": "Test all workspace packages" },
+            { "short": "-j", "long": "--jobs", "takes_value": true, "desc": "Parallel jobs" }
+          ]
+        },
+        {
+          "name": "check",
+          "aliases": ["c"],
+          "desc": "Analyze package without producing binaries",
+          "desc_ar": "فحص الشيفرة دون بناء",
+          "options": [
+            { "long": "--all-targets", "desc": "Check all targets" },
+            { "short": "-F", "long": "--features", "value": "cargo-feature", "desc": "Features to activate" },
+            { "long": "--all-features", "desc": "Activate all features" },
+            { "long": "--workspace", "desc": "Check all workspace members" }
+          ]
+        },
+        {
+          "name": "clippy",
+          "desc": "Lint code with Clippy",
+          "options": [
+            { "long": "--all-targets", "desc": "Check all targets" },
+            { "long": "--all-features", "desc": "Activate all features" },
+            { "long": "--fix", "desc": "Automatically apply suggestions" },
+            { "long": "--workspace", "desc": "Check all workspace members" }
+          ]
+        },
+        {
+          "name": "fmt",
+          "desc": "Format Rust source code",
+          "options": [
+            { "long": "--check", "desc": "Run in check mode without modifying files" },
+            { "long": "--all", "desc": "Format all packages in workspace" }
+          ]
+        },
+        {
+          "name": "bench",
+          "desc": "Execute benchmarks",
+          "options": [
+            { "long": "--bench", "value": "cargo-target", "desc": "Run specific benchmark target" },
+            { "short": "-F", "long": "--features", "value": "cargo-feature", "desc": "Features to activate" }
+          ]
+        },
+        {
+          "name": "doc",
+          "desc": "Build package documentation",
+          "options": [
+            { "long": "--open", "desc": "Open docs in browser" },
+            { "long": "--no-deps", "desc": "Skip building dependency docs" }
+          ]
+        },
+        {
+          "name": "add",
+          "desc": "Add dependencies to Cargo.toml",
+          "options": [
+            { "long": "--dev", "desc": "Add as dev-dependency" },
+            { "long": "--build", "desc": "Add as build-dependency" },
+            { "short": "-F", "long": "--features", "takes_value": true, "desc": "Enable dependency features" },
+            { "long": "--no-default-features", "desc": "Disable default features" }
+          ]
+        },
+        { "name": "remove", "desc": "Remove dependencies from Cargo.toml" },
+        { "name": "update", "desc": "Update dependencies in Cargo.lock" },
+        { "name": "clean", "desc": "Remove generated artifacts" },
+        { "name": "install", "desc": "Install a Rust binary crate" },
+        { "name": "uninstall", "desc": "Remove a Rust binary" },
+        { "name": "tree", "desc": "Display dependency graph" },
+        { "name": "metadata", "desc": "Output package metadata as JSON" },
+        { "name": "new", "desc": "Create a new Cargo package" },
+        { "name": "init", "desc": "Initialize Cargo package in existing directory" },
+        { "name": "publish", "desc": "Upload package to registry" }
+      ]
+    },
+    {
+      "name": "npm",
+      "desc": "Node.js package manager",
+      "desc_ar": "مدير حزم نود",
+      "subcommands": [
+        { "name": "run", "desc": "Run a script from package.json", "desc_ar": "تشغيل سكربت المشروع", "args": ["npm-script"] },
+        {
+          "name": "install",
+          "aliases": ["i"],
+          "desc": "Install packages",
+          "desc_ar": "تثبيت الحزم",
+          "options": [
+            { "short": "-D", "long": "--save-dev", "desc": "Save to devDependencies" },
+            { "short": "-g", "long": "--global", "desc": "Install globally" },
+            { "long": "--legacy-peer-deps", "desc": "Ignore peer dependency conflicts" }
+          ]
+        },
+        { "name": "uninstall", "aliases": ["rm", "remove"], "desc": "Remove a package" },
+        { "name": "ci", "desc": "Clean install from lockfile" },
+        { "name": "test", "aliases": ["t"], "desc": "Run package test script" },
+        { "name": "start", "desc": "Run package start script" },
+        { "name": "init", "desc": "Create a package.json file" },
+        { "name": "update", "desc": "Update packages" },
+        { "name": "outdated", "desc": "Check for outdated packages" },
+        { "name": "audit", "desc": "Run security audit", "options": [{ "long": "--fix", "desc": "Install compatible updates" }] },
+        { "name": "ls", "desc": "List installed packages" },
+        { "name": "exec", "desc": "Run command from local or remote package" },
+        { "name": "publish", "desc": "Publish package to registry" },
+        { "name": "version", "desc": "Bump package version", "args": [{ "values": ["patch", "minor", "major"] }] }
+      ]
+    },
+    {
+      "name": "pnpm",
+      "desc": "Fast, disk-efficient Node package manager",
+      "desc_ar": "مدير حزم نود السريع",
+      "options": [
+        { "short": "-r", "long": "--recursive", "desc": "Run in every workspace package" },
+        { "long": "--filter", "takes_value": true, "desc": "Filter workspace packages" }
+      ],
+      "subcommands": [
+        { "name": "run", "desc": "Run a package.json script", "args": ["npm-script"] },
+        {
+          "name": "add",
+          "desc": "Add a dependency",
+          "options": [
+            { "short": "-D", "long": "--save-dev", "desc": "Save as devDependency" },
+            { "short": "-g", "long": "--global", "desc": "Install globally" },
+            { "short": "-w", "long": "--workspace-root", "desc": "Add to workspace root" }
+          ]
+        },
+        {
+          "name": "install",
+          "aliases": ["i"],
+          "desc": "Install all dependencies",
+          "options": [
+            { "long": "--frozen-lockfile", "desc": "Fail if lockfile needs update" },
+            { "long": "--offline", "desc": "Use local store only" }
+          ]
+        },
+        { "name": "remove", "aliases": ["rm"], "desc": "Remove a dependency" },
+        { "name": "update", "aliases": ["up"], "desc": "Update dependencies" },
+        { "name": "test", "desc": "Run test script" },
+        { "name": "dev", "desc": "Run dev script" },
+        { "name": "build", "desc": "Run build script" },
+        { "name": "exec", "desc": "Execute shell command in package scope" },
+        { "name": "dlx", "desc": "Fetch and run a package without installing" },
+        { "name": "list", "aliases": ["ls"], "desc": "List installed dependencies" },
+        { "name": "outdated", "desc": "Check for outdated packages" },
+        { "name": "audit", "desc": "Audit dependencies for vulnerabilities" }
+      ],
+      "args": ["npm-script"]
+    },
+    {
+      "name": "yarn",
+      "desc": "JavaScript package manager",
+      "desc_ar": "مدير حزم يارن",
+      "subcommands": [
+        { "name": "run", "desc": "Run a package.json script", "args": ["npm-script"] },
+        {
+          "name": "add",
+          "desc": "Add a dependency",
+          "options": [
+            { "short": "-D", "long": "--dev", "desc": "Add to devDependencies" },
+            { "short": "-E", "long": "--exact", "desc": "Install exact version" }
+          ]
+        },
+        { "name": "install", "desc": "Install dependencies", "options": [{ "long": "--frozen-lockfile", "desc": "Don't generate a lockfile" }] },
+        { "name": "remove", "desc": "Remove a package" },
+        { "name": "upgrade", "desc": "Upgrade packages" },
+        { "name": "test", "desc": "Run test script" },
+        { "name": "dev", "desc": "Run dev script" },
+        { "name": "build", "desc": "Run build script" },
+        { "name": "dlx", "desc": "Run package in temporary environment" },
+        { "name": "workspaces", "desc": "Manage Yarn workspaces" },
+        { "name": "info", "desc": "Show package information" },
+        { "name": "cache", "desc": "Manage Yarn cache" }
+      ],
+      "args": ["npm-script"]
+    },
+    {
+      "name": "docker",
+      "desc": "Manage containers and images",
+      "desc_ar": "إدارة الحاويات والصور",
+      "subcommands": [
+        {
+          "name": "run",
+          "desc": "Create and run a new container",
+          "desc_ar": "تشغيل حاوية جديدة",
+          "options": [
+            { "short": "-d", "long": "--detach", "desc": "Run container in background" },
+            { "short": "-i", "long": "--interactive", "desc": "Keep STDIN open" },
+            { "short": "-t", "long": "--tty", "desc": "Allocate a pseudo-TTY" },
+            { "long": "--rm", "desc": "Remove container when it exits" },
+            { "short": "-p", "long": "--publish", "takes_value": true, "desc": "Publish container port to host" },
+            { "short": "-v", "long": "--volume", "takes_value": true, "desc": "Bind mount a volume" },
+            { "short": "-e", "long": "--env", "takes_value": true, "desc": "Set environment variable" },
+            { "long": "--name", "takes_value": true, "desc": "Assign name to container" },
+            { "long": "--network", "takes_value": true, "desc": "Connect container to network" },
+            { "long": "--entrypoint", "takes_value": true, "desc": "Overwrite default ENTRYPOINT" }
+          ],
+          "args": ["docker-image"]
+        },
+        {
+          "name": "ps",
+          "desc": "List containers",
+          "options": [
+            { "short": "-a", "long": "--all", "desc": "Show all containers" },
+            { "short": "-q", "long": "--quiet", "desc": "Only display container IDs" },
+            { "long": "--format", "takes_value": true, "desc": "Format output template" }
+          ]
+        },
+        {
+          "name": "build",
+          "desc": "Build an image from a Dockerfile",
+          "options": [
+            { "short": "-t", "long": "--tag", "takes_value": true, "desc": "Name and tag for image" },
+            { "short": "-f", "long": "--file", "value": "file", "desc": "Path to Dockerfile" },
+            { "long": "--no-cache", "desc": "Do not use build cache" },
+            { "long": "--build-arg", "takes_value": true, "desc": "Set build-time variable" },
+            { "long": "--platform", "takes_value": true, "desc": "Set target platform" }
+          ],
+          "args": ["dir"]
+        },
+        { "name": "pull", "desc": "Download an image from a registry", "args": ["docker-image"] },
+        { "name": "push", "desc": "Upload an image to a registry", "args": ["docker-image"] },
+        {
+          "name": "exec",
+          "desc": "Execute a command in a running container",
+          "options": [
+            { "short": "-i", "long": "--interactive", "desc": "Keep STDIN open" },
+            { "short": "-t", "long": "--tty", "desc": "Allocate a pseudo-TTY" },
+            { "short": "-u", "long": "--user", "takes_value": true, "desc": "Username or UID" },
+            { "short": "-w", "long": "--workdir", "takes_value": true, "desc": "Working directory inside container" },
+            { "short": "-e", "long": "--env", "takes_value": true, "desc": "Set environment variable" }
+          ],
+          "args": ["docker-container"]
+        },
+        {
+          "name": "logs",
+          "desc": "Fetch logs of a container",
+          "options": [
+            { "short": "-f", "long": "--follow", "desc": "Follow log output" },
+            { "short": "-n", "long": "--tail", "takes_value": true, "desc": "Number of lines from end" },
+            { "short": "-t", "long": "--timestamps", "desc": "Show timestamps" },
+            { "long": "--since", "takes_value": true, "desc": "Show logs since timestamp" }
+          ],
+          "args": ["docker-container"]
+        },
+        { "name": "stop", "desc": "Stop running containers", "args": ["docker-container"] },
+        { "name": "start", "desc": "Start stopped containers", "args": ["docker-container"] },
+        { "name": "restart", "desc": "Restart containers", "args": ["docker-container"] },
+        {
+          "name": "rm",
+          "desc": "Remove containers",
+          "options": [
+            { "short": "-f", "long": "--force", "desc": "Force removal of running container" },
+            { "short": "-v", "long": "--volumes", "desc": "Remove anonymous volumes" }
+          ],
+          "args": ["docker-container"]
+        },
+        {
+          "name": "rmi",
+          "desc": "Remove images",
+          "options": [{ "short": "-f", "long": "--force", "desc": "Force removal" }],
+          "args": ["docker-image"]
+        },
+        { "name": "images", "desc": "List local images", "options": [{ "short": "-a", "long": "--all", "desc": "Show all images" }, { "short": "-q", "long": "--quiet", "desc": "Only show IDs" }] },
+        { "name": "inspect", "desc": "Return low-level info on objects", "args": ["docker-container"] },
+        {
+          "name": "network",
+          "desc": "Manage networks",
+          "subcommands": [
+            { "name": "ls", "desc": "List networks" },
+            { "name": "inspect", "desc": "Inspect a network" },
+            { "name": "create", "desc": "Create a network" },
+            { "name": "rm", "desc": "Remove a network" },
+            { "name": "prune", "desc": "Remove unused networks" }
+          ]
+        },
+        {
+          "name": "volume",
+          "desc": "Manage volumes",
+          "subcommands": [
+            { "name": "ls", "desc": "List volumes" },
+            { "name": "inspect", "desc": "Inspect a volume" },
+            { "name": "create", "desc": "Create a volume" },
+            { "name": "rm", "desc": "Remove a volume" },
+            { "name": "prune", "desc": "Remove unused volumes" }
+          ]
+        },
+        {
+          "name": "system",
+          "desc": "Manage Docker system",
+          "subcommands": [
+            { "name": "df", "desc": "Show Docker disk usage" },
+            { "name": "prune", "desc": "Remove unused data", "options": [{ "short": "-a", "long": "--all", "desc": "Remove all unused images" }, { "short": "-f", "long": "--force", "desc": "Do not prompt" }] },
+            { "name": "info", "desc": "Display system-wide info" }
+          ]
+        },
+        {
+          "name": "compose",
+          "desc": "Define and run multi-container applications",
+          "desc_ar": "تشغيل تطبيقات متعددة الحاويات",
+          "options": [
+            { "short": "-f", "long": "--file", "value": "file", "desc": "Compose configuration file" },
+            { "short": "-p", "long": "--project-name", "takes_value": true, "desc": "Project name" },
+            { "long": "--profile", "takes_value": true, "desc": "Enable profile" }
+          ],
+          "subcommands": [
+            {
+              "name": "up",
+              "desc": "Create and start containers",
+              "options": [
+                { "short": "-d", "long": "--detach", "desc": "Run in background" },
+                { "long": "--build", "desc": "Build images before starting" },
+                { "long": "--force-recreate", "desc": "Recreate containers" },
+                { "long": "--remove-orphans", "desc": "Remove undefined service containers" }
+              ]
+            },
+            {
+              "name": "down",
+              "desc": "Stop and remove containers and networks",
+              "options": [
+                { "short": "-v", "long": "--volumes", "desc": "Remove named volumes" },
+                { "long": "--remove-orphans", "desc": "Remove orphan containers" }
+              ]
+            },
+            { "name": "build", "desc": "Build or rebuild services", "options": [{ "long": "--no-cache", "desc": "Do not use cache" }] },
+            { "name": "logs", "desc": "View output from services", "options": [{ "short": "-f", "long": "--follow", "desc": "Follow log output" }, { "short": "-n", "long": "--tail", "takes_value": true, "desc": "Number of lines" }] },
+            { "name": "ps", "desc": "List service containers" },
+            { "name": "exec", "desc": "Execute a command in a running service" },
+            { "name": "restart", "desc": "Restart service containers" },
+            { "name": "start", "desc": "Start existing services" },
+            { "name": "stop", "desc": "Stop running services" },
+            { "name": "pull", "desc": "Pull service images" },
+            { "name": "config", "desc": "Validate and view compose file" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "docker-compose",
+      "desc": "Define and run multi-container Docker applications",
+      "options": [
+        { "short": "-f", "long": "--file", "value": "file", "desc": "Compose file path" },
+        { "short": "-p", "long": "--project-name", "takes_value": true, "desc": "Project name" }
+      ],
+      "subcommands": [
+        { "name": "up", "desc": "Create and start containers", "options": [{ "short": "-d", "long": "--detach", "desc": "Detached mode" }, { "long": "--build", "desc": "Build images before starting" }] },
+        { "name": "down", "desc": "Stop and remove containers", "options": [{ "short": "-v", "long": "--volumes", "desc": "Remove volumes" }] },
+        { "name": "build", "desc": "Build or rebuild services" },
+        { "name": "logs", "desc": "View service logs", "options": [{ "short": "-f", "long": "--follow", "desc": "Follow log output" }] },
+        { "name": "ps", "desc": "List containers" },
+        { "name": "exec", "desc": "Execute command in service" },
+        { "name": "restart", "desc": "Restart services" },
+        { "name": "pull", "desc": "Pull service images" },
+        { "name": "config", "desc": "Validate compose file" }
+      ]
+    },
+    {
+      "name": "kubectl",
+      "desc": "Control Kubernetes clusters",
+      "desc_ar": "إدارة عناقيد كوبرنيتيس",
+      "options": [
+        { "short": "-n", "long": "--namespace", "takes_value": true, "desc": "Namespace scope" },
+        { "short": "-A", "long": "--all-namespaces", "desc": "List across all namespaces" },
+        { "long": "--context", "takes_value": true, "desc": "Kubeconfig context name" },
+        { "long": "--kubeconfig", "value": "file", "desc": "Path to kubeconfig file" }
+      ],
+      "subcommands": [
+        {
+          "name": "get",
+          "desc": "Display one or many resources",
+          "options": [
+            { "short": "-n", "long": "--namespace", "takes_value": true, "desc": "Namespace" },
+            { "short": "-A", "long": "--all-namespaces", "desc": "All namespaces" },
+            { "short": "-o", "long": "--output", "value": { "values": ["wide", "yaml", "json", "name", "jsonpath="] }, "desc": "Output format" },
+            { "short": "-w", "long": "--watch", "desc": "Watch for changes" },
+            { "short": "-l", "long": "--selector", "takes_value": true, "desc": "Label selector" }
+          ],
+          "args": [{ "values": ["pods", "deployments", "services", "nodes", "namespaces", "configmaps", "secrets", "ingresses", "jobs", "cronjobs", "statefulsets", "daemonsets", "pv", "pvc", "events", "all"] }]
+        },
+        {
+          "name": "describe",
+          "desc": "Show details of a resource",
+          "options": [
+            { "short": "-n", "long": "--namespace", "takes_value": true, "desc": "Namespace" },
+            { "short": "-l", "long": "--selector", "takes_value": true, "desc": "Label selector" }
+          ],
+          "args": [{ "values": ["pod", "deployment", "service", "node", "namespace", "configmap", "secret", "ingress", "job"] }]
+        },
+        {
+          "name": "apply",
+          "desc": "Apply a configuration to a resource",
+          "options": [
+            { "short": "-f", "long": "--filename", "value": "file", "desc": "Manifest file or directory" },
+            { "short": "-k", "long": "--kustomize", "value": "dir", "desc": "Kustomization directory" },
+            { "short": "-n", "long": "--namespace", "takes_value": true, "desc": "Namespace" },
+            { "long": "--dry-run", "value": { "values": ["none", "client", "server"] }, "desc": "Dry-run mode" }
+          ]
+        },
+        {
+          "name": "delete",
+          "desc": "Delete resources",
+          "options": [
+            { "short": "-f", "long": "--filename", "value": "file", "desc": "Manifest file" },
+            { "short": "-n", "long": "--namespace", "takes_value": true, "desc": "Namespace" },
+            { "long": "--force", "desc": "Force deletion" }
+          ],
+          "args": [{ "values": ["pod", "deployment", "service", "configmap", "secret", "job", "namespace"] }]
+        },
+        {
+          "name": "logs",
+          "desc": "Print logs for a container in a pod",
+          "options": [
+            { "short": "-f", "long": "--follow", "desc": "Stream logs" },
+            { "short": "-c", "long": "--container", "takes_value": true, "desc": "Container name" },
+            { "short": "-p", "long": "--previous", "desc": "Previous terminated container logs" },
+            { "long": "--tail", "takes_value": true, "desc": "Lines of recent logs" },
+            { "short": "-n", "long": "--namespace", "takes_value": true, "desc": "Namespace" }
+          ]
+        },
+        {
+          "name": "exec",
+          "desc": "Execute a command in a container",
+          "options": [
+            { "short": "-i", "long": "--stdin", "desc": "Pass stdin to container" },
+            { "short": "-t", "long": "--tty", "desc": "Allocate a TTY" },
+            { "short": "-c", "long": "--container", "takes_value": true, "desc": "Container name" },
+            { "short": "-n", "long": "--namespace", "takes_value": true, "desc": "Namespace" }
+          ]
+        },
+        {
+          "name": "port-forward",
+          "desc": "Forward local ports to a pod or service",
+          "options": [{ "short": "-n", "long": "--namespace", "takes_value": true, "desc": "Namespace" }]
+        },
+        {
+          "name": "scale",
+          "desc": "Set a new size for a workload",
+          "options": [
+            { "long": "--replicas", "takes_value": true, "desc": "Desired replica count" },
+            { "short": "-n", "long": "--namespace", "takes_value": true, "desc": "Namespace" }
+          ]
+        },
+        {
+          "name": "rollout",
+          "desc": "Manage the rollout of a resource",
+          "subcommands": [
+            { "name": "status", "desc": "Show rollout status" },
+            { "name": "restart", "desc": "Restart a resource" },
+            { "name": "undo", "desc": "Undo a previous rollout" },
+            { "name": "history", "desc": "View rollout history" }
+          ]
+        },
+        {
+          "name": "config",
+          "desc": "Modify kubeconfig files",
+          "subcommands": [
+            { "name": "get-contexts", "desc": "List kubeconfig contexts" },
+            { "name": "use-context", "desc": "Switch active context" },
+            { "name": "current-context", "desc": "Display current context" },
+            { "name": "view", "desc": "Display merged kubeconfig" }
+          ]
+        },
+        { "name": "create", "desc": "Create a resource from a file or stdin" },
+        { "name": "edit", "desc": "Edit a resource on the server" },
+        { "name": "top", "desc": "Display resource (CPU/memory) usage", "args": [{ "values": ["pods", "nodes"] }] },
+        { "name": "diff", "desc": "Diff live version against applied config", "options": [{ "short": "-f", "long": "--filename", "value": "file", "desc": "Manifest file" }] }
+      ]
+    },
+    {
+      "name": "systemctl",
+      "desc": "Control the systemd service manager",
+      "desc_ar": "إدارة خدمات النظام",
+      "options": [
+        { "long": "--user", "desc": "Talk to the user service manager" },
+        { "long": "--system", "desc": "Talk to the system service manager" },
+        { "long": "--now", "desc": "Also start/stop unit on enable/disable" },
+        { "long": "--no-pager", "desc": "Do not pipe output into a pager" },
+        { "short": "-t", "long": "--type", "value": { "values": ["service", "socket", "timer", "target", "mount", "path"] }, "desc": "Filter by unit type" },
+        { "long": "--state", "value": { "values": ["running", "failed", "active", "inactive", "enabled", "disabled"] }, "desc": "Filter by unit state" }
+      ],
+      "subcommands": [
+        { "name": "status", "desc": "Show runtime status of units", "args": ["systemctl-unit"] },
+        { "name": "start", "desc": "Start one or more units", "args": ["systemctl-unit"] },
+        { "name": "stop", "desc": "Stop one or more units", "args": ["systemctl-unit"] },
+        { "name": "restart", "desc": "Restart one or more units", "args": ["systemctl-unit"] },
+        { "name": "reload", "desc": "Reload unit configuration", "args": ["systemctl-unit"] },
+        { "name": "enable", "desc": "Enable units at boot", "options": [{ "long": "--now", "desc": "Also start the unit now" }], "args": ["systemctl-unit"] },
+        { "name": "disable", "desc": "Disable units at boot", "options": [{ "long": "--now", "desc": "Also stop the unit now" }], "args": ["systemctl-unit"] },
+        { "name": "is-active", "desc": "Check whether units are active", "args": ["systemctl-unit"] },
+        { "name": "is-enabled", "desc": "Check whether units are enabled", "args": ["systemctl-unit"] },
+        { "name": "list-units", "desc": "List loaded units" },
+        { "name": "list-unit-files", "desc": "List installed unit files" },
+        { "name": "list-timers", "desc": "List active timers" },
+        { "name": "daemon-reload", "desc": "Reload systemd manager configuration" },
+        { "name": "cat", "desc": "Show unit file contents", "args": ["systemctl-unit"] },
+        { "name": "edit", "desc": "Edit a unit drop-in override", "args": ["systemctl-unit"] },
+        { "name": "mask", "desc": "Mask units", "args": ["systemctl-unit"] },
+        { "name": "unmask", "desc": "Unmask units", "args": ["systemctl-unit"] },
+        { "name": "failed", "desc": "List failed units" }
+      ]
+    },
+    {
+      "name": "journalctl",
+      "desc": "Query the systemd journal logs",
+      "desc_ar": "استعراض سجلات النظام",
+      "options": [
+        { "short": "-u", "long": "--unit", "value": "systemctl-unit", "desc": "Show logs for specified unit" },
+        { "short": "-f", "long": "--follow", "desc": "Follow the journal in real time" },
+        { "short": "-n", "long": "--lines", "takes_value": true, "desc": "Number of log lines to show" },
+        { "short": "-b", "long": "--boot", "desc": "Show messages from current boot" },
+        { "short": "-e", "long": "--pager-end", "desc": "Jump to end of journal" },
+        { "short": "-r", "long": "--reverse", "desc": "Show newest entries first" },
+        { "short": "-p", "long": "--priority", "value": { "values": ["emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"] }, "desc": "Filter by message priority" },
+        { "long": "--since", "takes_value": true, "desc": "Show entries since date/time" },
+        { "long": "--until", "takes_value": true, "desc": "Show entries until date/time" },
+        { "long": "--user", "desc": "Show user journal" },
+        { "long": "--system", "desc": "Show system journal" },
+        { "short": "-k", "long": "--dmesg", "desc": "Show kernel messages only" },
+        { "short": "-o", "long": "--output", "value": { "values": ["short", "short-iso", "verbose", "json", "json-pretty", "cat"] }, "desc": "Output format" },
+        { "long": "--no-pager", "desc": "Do not pipe into pager" },
+        { "long": "--disk-usage", "desc": "Show total disk usage of journal" },
+        { "long": "--vacuum-size", "takes_value": true, "desc": "Reduce journal disk usage to size" },
+        { "long": "--vacuum-time", "takes_value": true, "desc": "Remove archived journals older than time" }
+      ]
+    },
+    {
+      "name": "pacman",
+      "desc": "Arch Linux package manager",
+      "desc_ar": "مدير حزم آرتش لينكس",
+      "options": [
+        { "short": "-S", "long": "--sync", "desc": "Synchronize / install packages" },
+        { "short": "-Syu", "desc": "Sync databases and upgrade all packages" },
+        { "short": "-Sy", "desc": "Refresh package databases" },
+        { "short": "-Ss", "desc": "Search remote repositories" },
+        { "short": "-Si", "desc": "Display remote package info" },
+        { "short": "-R", "long": "--remove", "desc": "Remove packages" },
+        { "short": "-Rs", "desc": "Remove package and unneeded dependencies" },
+        { "short": "-Rns", "desc": "Remove package, configs and unneeded deps" },
+        { "short": "-Q", "long": "--query", "desc": "Query installed packages" },
+        { "short": "-Qe", "desc": "List explicitly installed packages" },
+        { "short": "-Qi", "desc": "Display installed package info" },
+        { "short": "-Ql", "desc": "List files owned by package" },
+        { "short": "-Qo", "value": "path", "desc": "Query package owning a file" },
+        { "short": "-Qs", "desc": "Search installed packages" },
+        { "short": "-U", "long": "--upgrade", "value": "file", "desc": "Install local package file" },
+        { "short": "-F", "long": "--files", "desc": "Query the files database" },
+        { "long": "--noconfirm", "desc": "Bypass confirmation prompts" },
+        { "long": "--needed", "desc": "Do not reinstall up-to-date targets" },
+        { "long": "--color", "value": { "values": ["auto", "always", "never"] }, "desc": "Color output" }
+      ]
+    },
+    {
+      "name": "apt",
+      "desc": "Debian/Ubuntu package manager",
+      "desc_ar": "مدير حزم أوبونتو وديبيان",
+      "options": [
+        { "short": "-y", "long": "--yes", "desc": "Automatic yes to prompts" },
+        { "short": "-s", "long": "--simulate", "desc": "Simulate without modifying system" },
+        { "long": "--no-install-recommends", "desc": "Skip recommended packages" },
+        { "long": "--fix-broken", "desc": "Attempt to fix broken dependencies" }
+      ],
+      "subcommands": [
+        { "name": "update", "desc": "Update list of available packages" },
+        { "name": "upgrade", "desc": "Upgrade installed packages" },
+        { "name": "full-upgrade", "desc": "Upgrade handling package removals" },
+        { "name": "install", "desc": "Install packages" },
+        { "name": "remove", "desc": "Remove packages" },
+        { "name": "purge", "desc": "Remove packages and configuration files" },
+        { "name": "autoremove", "desc": "Remove automatically installed unused packages" },
+        { "name": "search", "desc": "Search in package descriptions" },
+        { "name": "show", "desc": "Show package details" },
+        { "name": "list", "desc": "List packages based on criteria", "options": [{ "long": "--installed", "desc": "Show installed packages" }, { "long": "--upgradable", "desc": "Show upgradable packages" }] },
+        { "name": "clean", "desc": "Clear local package cache" }
+      ]
+    },
+    {
+      "name": "ssh",
+      "desc": "OpenSSH remote login client",
+      "desc_ar": "الاتصال الآمن بخادم بعيد",
+      "options": [
+        { "short": "-i", "value": "file", "desc": "Identity (private key) file" },
+        { "short": "-p", "takes_value": true, "desc": "Port to connect to" },
+        { "short": "-l", "takes_value": true, "desc": "Login username" },
+        { "short": "-J", "value": "ssh-host", "desc": "Jump host (ProxyJump)" },
+        { "short": "-L", "takes_value": true, "desc": "Local port forwarding" },
+        { "short": "-R", "takes_value": true, "desc": "Remote port forwarding" },
+        { "short": "-D", "takes_value": true, "desc": "Dynamic SOCKS proxy port" },
+        { "short": "-F", "value": "file", "desc": "Alternative config file" },
+        { "short": "-o", "takes_value": true, "desc": "Pass ssh_config option" },
+        { "short": "-N", "desc": "Do not execute a remote command" },
+        { "short": "-f", "desc": "Go to background before command" },
+        { "short": "-t", "desc": "Force pseudo-terminal allocation" },
+        { "short": "-T", "desc": "Disable pseudo-terminal allocation" },
+        { "short": "-A", "desc": "Enable agent forwarding" },
+        { "short": "-X", "desc": "Enable X11 forwarding" },
+        { "short": "-C", "desc": "Request compression" },
+        { "short": "-v", "desc": "Verbose debugging output" },
+        { "short": "-q", "desc": "Quiet mode" }
+      ],
+      "args": ["ssh-host"]
+    },
+    {
+      "name": "scp",
+      "desc": "Secure copy over SSH",
+      "desc_ar": "نسخ الملفات بشكل آمن عبر SSH",
+      "options": [
+        { "short": "-r", "desc": "Recursively copy directories" },
+        { "short": "-P", "takes_value": true, "desc": "Remote SSH port" },
+        { "short": "-i", "value": "file", "desc": "Identity (private key) file" },
+        { "short": "-J", "value": "ssh-host", "desc": "Jump host" },
+        { "short": "-F", "value": "file", "desc": "Alternative ssh_config file" },
+        { "short": "-o", "takes_value": true, "desc": "Pass ssh_config option" },
+        { "short": "-p", "desc": "Preserve modification times and modes" },
+        { "short": "-C", "desc": "Enable compression" },
+        { "short": "-v", "desc": "Verbose mode" },
+        { "short": "-q", "desc": "Quiet mode" }
+      ],
+      "args": ["path"]
+    },
+    {
+      "name": "rsync",
+      "desc": "Fast, incremental file transfer",
+      "desc_ar": "مزامنة ونقل الملفات",
+      "options": [
+        { "short": "-a", "long": "--archive", "desc": "Archive mode (recursive + preserve)" },
+        { "short": "-v", "long": "--verbose", "desc": "Increase verbosity" },
+        { "short": "-z", "long": "--compress", "desc": "Compress data during transfer" },
+        { "short": "-h", "long": "--human-readable", "desc": "Human-readable sizes" },
+        { "short": "-P", "desc": "Show progress and keep partial files" },
+        { "long": "--progress", "desc": "Show transfer progress" },
+        { "long": "--delete", "desc": "Delete extraneous files from destination" },
+        { "short": "-n", "long": "--dry-run", "desc": "Perform trial run with no changes" },
+        { "short": "-r", "long": "--recursive", "desc": "Recurse into directories" },
+        { "short": "-u", "long": "--update", "desc": "Skip files newer on receiver" },
+        { "short": "-e", "long": "--rsh", "takes_value": true, "desc": "Specify remote shell" },
+        { "long": "--exclude", "takes_value": true, "desc": "Exclude files matching pattern" },
+        { "long": "--include", "takes_value": true, "desc": "Include files matching pattern" },
+        { "long": "--bwlimit", "takes_value": true, "desc": "Limit I/O bandwidth (KB/s)" }
+      ],
+      "args": ["path"]
+    },
+    {
+      "name": "tar",
+      "desc": "Archive and extract files",
+      "desc_ar": "أرشفة وفك ضغط الملفات",
+      "options": [
+        { "short": "-c", "long": "--create", "desc": "Create a new archive" },
+        { "short": "-x", "long": "--extract", "desc": "Extract files from archive" },
+        { "short": "-t", "long": "--list", "desc": "List archive contents" },
+        { "short": "-v", "long": "--verbose", "desc": "List files processed" },
+        { "short": "-f", "long": "--file", "value": "file", "desc": "Archive filename" },
+        { "short": "-z", "long": "--gzip", "desc": "Filter through gzip" },
+        { "short": "-j", "long": "--bzip2", "desc": "Filter through bzip2" },
+        { "short": "-J", "long": "--xz", "desc": "Filter through xz" },
+        { "long": "--zstd", "desc": "Filter through zstd" },
+        { "short": "-C", "long": "--directory", "value": "dir", "desc": "Change to directory before action" },
+        { "long": "--strip-components", "takes_value": true, "desc": "Strip leading path components" },
+        { "long": "--exclude", "takes_value": true, "desc": "Exclude files matching pattern" },
+        { "short": "-p", "long": "--preserve-permissions", "desc": "Preserve file permissions" }
+      ],
+      "args": ["path"]
+    },
+    {
+      "name": "grep",
+      "desc": "Search for patterns in files",
+      "desc_ar": "البحث عن نصوص داخل الملفات",
+      "options": [
+        { "short": "-r", "long": "--recursive", "desc": "Read all files under each directory" },
+        { "short": "-R", "long": "--dereference-recursive", "desc": "Recursive following symlinks" },
+        { "short": "-i", "long": "--ignore-case", "desc": "Case-insensitive matching" },
+        { "short": "-n", "long": "--line-number", "desc": "Prefix output with line numbers" },
+        { "short": "-v", "long": "--invert-match", "desc": "Select non-matching lines" },
+        { "short": "-l", "long": "--files-with-matches", "desc": "Print only names of matching files" },
+        { "short": "-c", "long": "--count", "desc": "Print count of matching lines" },
+        { "short": "-E", "long": "--extended-regexp", "desc": "Extended regular expressions" },
+        { "short": "-F", "long": "--fixed-strings", "desc": "Interpret pattern as literal string" },
+        { "short": "-P", "long": "--perl-regexp", "desc": "Perl-compatible regular expressions" },
+        { "short": "-w", "long": "--word-regexp", "desc": "Match whole words only" },
+        { "short": "-o", "long": "--only-matching", "desc": "Print only matched parts" },
+        { "short": "-q", "long": "--quiet", "desc": "Suppress normal output" },
+        { "short": "-A", "long": "--after-context", "takes_value": true, "desc": "Lines of trailing context" },
+        { "short": "-B", "long": "--before-context", "takes_value": true, "desc": "Lines of leading context" },
+        { "short": "-C", "long": "--context", "takes_value": true, "desc": "Lines of surrounding context" },
+        { "long": "--color", "value": { "values": ["auto", "always", "never"] }, "desc": "Highlight matches" },
+        { "long": "--include", "takes_value": true, "desc": "Search only files matching glob" },
+        { "long": "--exclude", "takes_value": true, "desc": "Skip files matching glob" },
+        { "long": "--exclude-dir", "takes_value": true, "desc": "Skip directories matching glob" }
+      ],
+      "args": ["any", "path"]
+    },
+    {
+      "name": "find",
+      "desc": "Search for files in a directory hierarchy",
+      "desc_ar": "البحث عن الملفات والمجلدات",
+      "options": [
+        { "short": "-name", "takes_value": true, "desc": "Match filename glob (case-sensitive)" },
+        { "short": "-iname", "takes_value": true, "desc": "Match filename glob (case-insensitive)" },
+        { "short": "-type", "value": { "values": ["f", "d", "l", "s", "p", "b", "c"] }, "desc": "File type (f=file, d=dir, l=symlink)" },
+        { "short": "-maxdepth", "takes_value": true, "desc": "Maximum directory depth" },
+        { "short": "-mindepth", "takes_value": true, "desc": "Minimum directory depth" },
+        { "short": "-size", "takes_value": true, "desc": "Match file size (e.g. +10M)" },
+        { "short": "-mtime", "takes_value": true, "desc": "Modified n*24 hours ago" },
+        { "short": "-mmin", "takes_value": true, "desc": "Modified n minutes ago" },
+        { "short": "-perm", "takes_value": true, "desc": "Match file permissions" },
+        { "short": "-empty", "desc": "Match empty files or directories" },
+        { "short": "-not", "desc": "Negate following expression" },
+        { "short": "-exec", "takes_value": true, "desc": "Execute command on matches" },
+        { "short": "-delete", "desc": "Delete matched files" },
+        { "short": "-print", "desc": "Print full file name" },
+        { "short": "-print0", "desc": "Print NUL-separated file names" },
+        { "short": "-L", "desc": "Follow symbolic links" }
+      ],
+      "args": ["path"]
+    },
+    {
+      "name": "make",
+      "desc": "Build targets from a Makefile",
+      "desc_ar": "بناء أهداف ملف Makefile",
+      "options": [
+        { "short": "-j", "long": "--jobs", "takes_value": true, "desc": "Allow N jobs at once" },
+        { "short": "-f", "long": "--file", "value": "file", "desc": "Use specified Makefile" },
+        { "short": "-C", "long": "--directory", "value": "dir", "desc": "Change to directory before reading" },
+        { "short": "-n", "long": "--dry-run", "desc": "Print commands without executing" },
+        { "short": "-B", "long": "--always-make", "desc": "Unconditionally make all targets" },
+        { "short": "-k", "long": "--keep-going", "desc": "Keep going when some targets fail" },
+        { "short": "-s", "long": "--silent", "desc": "Do not echo recipes" }
+      ],
+      "args": ["make-target"]
+    },
+    {
+      "name": "python",
+      "aliases": ["python3"],
+      "desc": "Run the Python interpreter",
+      "desc_ar": "تشغيل مفسر بايثون",
+      "options": [
+        { "short": "-m", "takes_value": true, "desc": "Run library module as a script" },
+        { "short": "-c", "takes_value": true, "desc": "Execute Python code string" },
+        { "short": "-i", "desc": "Inspect interactively after running" },
+        { "short": "-u", "desc": "Unbuffered stdout and stderr" },
+        { "short": "-V", "long": "--version", "desc": "Print Python version" },
+        { "short": "-O", "desc": "Remove assert statements" },
+        { "short": "-B", "desc": "Do not write .pyc files" },
+        { "short": "-W", "takes_value": true, "desc": "Warning control" }
+      ],
+      "args": ["file"]
+    },
+    {
+      "name": "pip",
+      "aliases": ["pip3"],
+      "desc": "Python package installer",
+      "desc_ar": "مدير حزم بايثون",
+      "subcommands": [
+        {
+          "name": "install",
+          "desc": "Install packages",
+          "options": [
+            { "short": "-r", "long": "--requirement", "value": "file", "desc": "Install from requirements file" },
+            { "short": "-e", "long": "--editable", "value": "path", "desc": "Install project in editable mode" },
+            { "short": "-U", "long": "--upgrade", "desc": "Upgrade packages to newest version" },
+            { "long": "--user", "desc": "Install to user site directory" },
+            { "long": "--no-deps", "desc": "Do not install package dependencies" },
+            { "long": "--break-system-packages", "desc": "Allow modifying externally managed env" },
+            { "short": "-q", "long": "--quiet", "desc": "Less output" }
+          ]
+        },
+        { "name": "uninstall", "desc": "Uninstall packages", "options": [{ "short": "-y", "long": "--yes", "desc": "Do not ask for confirmation" }] },
+        { "name": "freeze", "desc": "Output installed packages in requirements format" },
+        { "name": "list", "desc": "List installed packages", "options": [{ "long": "--outdated", "desc": "List outdated packages" }] },
+        { "name": "show", "desc": "Show information about installed packages" },
+        { "name": "check", "desc": "Verify installed packages have compatible deps" },
+        { "name": "download", "desc": "Download packages" },
+        { "name": "wheel", "desc": "Build wheels from requirements" },
+        { "name": "cache", "desc": "Inspect and manage pip wheel cache" }
+      ]
+    },
+    {
+      "name": "go",
+      "desc": "Go language toolchain",
+      "desc_ar": "أدوات لغة جو",
+      "subcommands": [
+        {
+          "name": "build",
+          "desc": "Compile packages and dependencies",
+          "options": [
+            { "short": "-o", "value": "path", "desc": "Output binary path" },
+            { "short": "-v", "desc": "Print package names as compiled" },
+            { "short": "-race", "desc": "Enable data race detector" },
+            { "short": "-tags", "takes_value": true, "desc": "Build tags" },
+            { "short": "-ldflags", "takes_value": true, "desc": "Linker flags" }
+          ],
+          "args": ["path"]
+        },
+        {
+          "name": "run",
+          "desc": "Compile and run Go program",
+          "options": [{ "short": "-race", "desc": "Enable data race detector" }],
+          "args": ["path"]
+        },
+        {
+          "name": "test",
+          "desc": "Test packages",
+          "options": [
+            { "short": "-v", "desc": "Verbose output" },
+            { "short": "-race", "desc": "Enable race detector" },
+            { "short": "-run", "takes_value": true, "desc": "Run only tests matching regexp" },
+            { "short": "-bench", "takes_value": true, "desc": "Run benchmarks matching regexp" },
+            { "short": "-count", "takes_value": true, "desc": "Run each test n times" },
+            { "short": "-cover", "desc": "Enable coverage analysis" }
+          ],
+          "args": ["path"]
+        },
+        {
+          "name": "mod",
+          "desc": "Module maintenance",
+          "subcommands": [
+            { "name": "init", "desc": "Initialize new module" },
+            { "name": "tidy", "desc": "Add missing and remove unused modules" },
+            { "name": "download", "desc": "Download modules to local cache" },
+            { "name": "vendor", "desc": "Make vendored copy of dependencies" },
+            { "name": "verify", "desc": "Verify dependencies have expected content" },
+            { "name": "graph", "desc": "Print module requirement graph" },
+            { "name": "why", "desc": "Explain why packages or modules are needed" }
+          ]
+        },
+        { "name": "get", "desc": "Add or update dependencies" },
+        { "name": "install", "desc": "Compile and install packages" },
+        { "name": "fmt", "desc": "Format package sources" },
+        { "name": "vet", "desc": "Report likely mistakes in packages" },
+        { "name": "doc", "desc": "Show documentation for package or symbol" },
+        { "name": "env", "desc": "Print Go environment information" },
+        { "name": "clean", "desc": "Remove object files and cached files" },
+        { "name": "version", "desc": "Print Go version" },
+        { "name": "generate", "desc": "Generate Go files by processing source" },
+        { "name": "list", "desc": "List packages or modules" }
+      ]
+    },
+    {
+      "name": "rustup",
+      "desc": "Manage Rust toolchains and targets",
+      "desc_ar": "إدارة إصدارات وأدوات رست",
+      "subcommands": [
+        { "name": "update", "desc": "Update Rust toolchains and rustup", "args": [{ "values": ["stable", "beta", "nightly"] }] },
+        { "name": "default", "desc": "Set the default toolchain", "args": [{ "values": ["stable", "beta", "nightly"] }] },
+        { "name": "show", "desc": "Show active and installed toolchains" },
+        { "name": "check", "desc": "Check for updates to toolchains and rustup" },
+        {
+          "name": "toolchain",
+          "desc": "Modify or query installed toolchains",
+          "subcommands": [
+            { "name": "list", "desc": "List installed toolchains" },
+            { "name": "install", "desc": "Install or update a toolchain", "args": [{ "values": ["stable", "beta", "nightly"] }] },
+            { "name": "uninstall", "desc": "Uninstall a toolchain" },
+            { "name": "link", "desc": "Create a custom toolchain symlink" }
+          ]
+        },
+        {
+          "name": "target",
+          "desc": "Modify a toolchain's supported targets",
+          "subcommands": [
+            { "name": "list", "desc": "List available targets", "options": [{ "long": "--installed", "desc": "List only installed targets" }] },
+            { "name": "add", "desc": "Add a compilation target" },
+            { "name": "remove", "desc": "Remove a compilation target" }
+          ]
+        },
+        {
+          "name": "component",
+          "desc": "Modify a toolchain's installed components",
+          "subcommands": [
+            { "name": "list", "desc": "List available components", "options": [{ "long": "--installed", "desc": "List only installed components" }] },
+            { "name": "add", "desc": "Add a component", "args": [{ "values": ["rustfmt", "clippy", "rust-src", "rust-analyzer", "llvm-tools-preview", "miri"] }] },
+            { "name": "remove", "desc": "Remove a component" }
+          ]
+        },
+        {
+          "name": "override",
+          "desc": "Modify directory toolchain overrides",
+          "subcommands": [
+            { "name": "set", "desc": "Set override toolchain for directory", "args": [{ "values": ["stable", "beta", "nightly"] }] },
+            { "name": "unset", "desc": "Remove directory override" },
+            { "name": "list", "desc": "List directory overrides" }
+          ]
+        },
+        { "name": "which", "desc": "Display path to binary that will be run" },
+        { "name": "run", "desc": "Run a command with a specific toolchain" },
+        { "name": "doc", "desc": "Open documentation for current toolchain" }
+      ]
+    },
+    {
+      "name": "gh",
+      "desc": "GitHub CLI",
+      "desc_ar": "واجهة سطر أوامر جيت هب",
+      "subcommands": [
+        {
+          "name": "pr",
+          "desc": "Manage pull requests",
+          "desc_ar": "إدارة طلبات السحب",
+          "subcommands": [
+            { "name": "list", "desc": "List pull requests", "options": [{ "short": "-s", "long": "--state", "value": { "values": ["open", "closed", "merged", "all"] }, "desc": "Filter by state" }, { "short": "-L", "long": "--limit", "takes_value": true, "desc": "Maximum items to fetch" }] },
+            { "name": "view", "desc": "View a pull request", "options": [{ "short": "-w", "long": "--web", "desc": "Open in browser" }] },
+            { "name": "create", "desc": "Create a pull request", "options": [{ "short": "-t", "long": "--title", "takes_value": true, "desc": "PR title" }, { "short": "-b", "long": "--body", "takes_value": true, "desc": "PR body" }, { "short": "-d", "long": "--draft", "desc": "Mark as draft" }, { "short": "-f", "long": "--fill", "desc": "Use commit info for title/body" }, { "short": "-B", "long": "--base", "value": "git-branch", "desc": "Base branch" }] },
+            { "name": "checkout", "desc": "Check out a pull request locally" },
+            { "name": "merge", "desc": "Merge a pull request", "options": [{ "short": "-s", "long": "--squash", "desc": "Squash commits" }, { "short": "-r", "long": "--rebase", "desc": "Rebase commits" }, { "short": "-d", "long": "--delete-branch", "desc": "Delete branch after merge" }, { "long": "--auto", "desc": "Enable auto-merge" }] },
+            { "name": "diff", "desc": "View changes in a pull request" },
+            { "name": "checks", "desc": "View CI status for a pull request", "options": [{ "long": "--watch", "desc": "Watch checks until finish" }] },
+            { "name": "review", "desc": "Add a review to a pull request", "options": [{ "short": "-a", "long": "--approve", "desc": "Approve PR" }, { "short": "-c", "long": "--comment", "desc": "Comment on PR" }, { "short": "-r", "long": "--request-changes", "desc": "Request changes" }] },
+            { "name": "close", "desc": "Close a pull request" },
+            { "name": "status", "desc": "Show status of relevant pull requests" }
+          ]
+        },
+        {
+          "name": "issue",
+          "desc": "Manage issues",
+          "subcommands": [
+            { "name": "list", "desc": "List issues", "options": [{ "short": "-s", "long": "--state", "value": { "values": ["open", "closed", "all"] }, "desc": "Filter by state" }] },
+            { "name": "view", "desc": "View an issue", "options": [{ "short": "-w", "long": "--web", "desc": "Open in browser" }] },
+            { "name": "create", "desc": "Create a new issue", "options": [{ "short": "-t", "long": "--title", "takes_value": true, "desc": "Issue title" }, { "short": "-b", "long": "--body", "takes_value": true, "desc": "Issue body" }] },
+            { "name": "close", "desc": "Close an issue" },
+            { "name": "comment", "desc": "Add a comment to an issue" },
+            { "name": "status", "desc": "Show status of relevant issues" }
+          ]
+        },
+        {
+          "name": "repo",
+          "desc": "Manage repositories",
+          "subcommands": [
+            { "name": "clone", "desc": "Clone a repository" },
+            { "name": "view", "desc": "View a repository", "options": [{ "short": "-w", "long": "--web", "desc": "Open in browser" }] },
+            { "name": "create", "desc": "Create a new repository" },
+            { "name": "fork", "desc": "Create a fork of a repository" },
+            { "name": "list", "desc": "List repositories" },
+            { "name": "sync", "desc": "Sync a repository" }
+          ]
+        },
+        {
+          "name": "run",
+          "desc": "View workflow runs",
+          "subcommands": [
+            { "name": "list", "desc": "List recent workflow runs" },
+            { "name": "view", "desc": "View a summary of a workflow run", "options": [{ "long": "--log-failed", "desc": "View failed step logs" }] },
+            { "name": "watch", "desc": "Watch a run until it completes" },
+            { "name": "rerun", "desc": "Rerun a failed run" }
+          ]
+        },
+        {
+          "name": "workflow",
+          "desc": "View and run GitHub Actions workflows",
+          "subcommands": [
+            { "name": "list", "desc": "List workflows" },
+            { "name": "view", "desc": "View workflow summary" },
+            { "name": "run", "desc": "Run a workflow_dispatch event" }
+          ]
+        },
+        {
+          "name": "release",
+          "desc": "Manage releases",
+          "subcommands": [
+            { "name": "list", "desc": "List releases" },
+            { "name": "view", "desc": "View release info" },
+            { "name": "create", "desc": "Create a new release" },
+            { "name": "download", "desc": "Download release assets" }
+          ]
+        },
+        {
+          "name": "auth",
+          "desc": "Authenticate gh with GitHub",
+          "subcommands": [
+            { "name": "login", "desc": "Log in to GitHub" },
+            { "name": "logout", "desc": "Log out of GitHub" },
+            { "name": "status", "desc": "View authentication status" },
+            { "name": "token", "desc": "Print active auth token" }
+          ]
+        },
+        { "name": "api", "desc": "Make an authenticated GitHub API request" },
+        { "name": "browse", "desc": "Open repository in browser" },
+        { "name": "status", "desc": "Print info about work across repos" }
+      ]
+    },
+    {
+      "name": "sudo",
+      "desc": "Execute a command as another user",
+      "desc_ar": "تنفيذ أمر بصلاحيات مستخدم آخر",
+      "options": [
+        { "short": "-u", "long": "--user", "takes_value": true, "desc": "Run command as specified user" },
+        { "short": "-g", "long": "--group", "takes_value": true, "desc": "Run command as specified group" },
+        { "short": "-i", "long": "--login", "desc": "Run login shell as target user" },
+        { "short": "-s", "long": "--shell", "desc": "Run shell as target user" },
+        { "short": "-E", "long": "--preserve-env", "desc": "Preserve user environment" },
+        { "short": "-H", "long": "--set-home", "desc": "Set HOME to target user's home" },
+        { "short": "-k", "long": "--reset-timestamp", "desc": "Invalidate cached credentials" },
+        { "short": "-v", "long": "--validate", "desc": "Update cached credentials" },
+        { "short": "-l", "long": "--list", "desc": "List allowed commands" },
+        { "short": "-n", "long": "--non-interactive", "desc": "Fail rather than prompt for password" },
+        { "short": "-b", "long": "--background", "desc": "Run command in background" }
+      ],
+      "args": ["command"]
+    },
+    {
+      "name": "cd",
+      "desc": "Change working directory",
+      "desc_ar": "تغيير المجلد الحالي",
+      "options": [
+        { "short": "-L", "desc": "Follow symbolic links" },
+        { "short": "-P", "desc": "Use physical directory structure" }
+      ],
+      "args": ["dir"]
+    },
+    {
+      "name": "ls",
+      "desc": "List directory contents",
+      "desc_ar": "عرض محتويات المجلد",
+      "options": [
+        { "short": "-l", "desc": "Use long listing format" },
+        { "short": "-a", "long": "--all", "desc": "Include hidden entries starting with ." },
+        { "short": "-A", "long": "--almost-all", "desc": "Exclude . and .." },
+        { "short": "-h", "long": "--human-readable", "desc": "Human-readable sizes" },
+        { "short": "-t", "desc": "Sort by modification time, newest first" },
+        { "short": "-r", "long": "--reverse", "desc": "Reverse sort order" },
+        { "short": "-S", "desc": "Sort by file size, largest first" },
+        { "short": "-R", "long": "--recursive", "desc": "List subdirectories recursively" },
+        { "short": "-1", "desc": "List one file per line" },
+        { "long": "--color", "value": { "values": ["auto", "always", "never"] }, "desc": "Colorize output" }
+      ],
+      "args": ["path"]
+    },
+    {
+      "name": "cp",
+      "desc": "Copy files and directories",
+      "desc_ar": "نسخ الملفات والمجلدات",
+      "options": [
+        { "short": "-r", "long": "--recursive", "desc": "Copy directories recursively" },
+        { "short": "-a", "long": "--archive", "desc": "Preserve structure and attributes" },
+        { "short": "-i", "long": "--interactive", "desc": "Prompt before overwrite" },
+        { "short": "-f", "long": "--force", "desc": "Force overwrite destination" },
+        { "short": "-n", "long": "--no-clobber", "desc": "Do not overwrite existing file" },
+        { "short": "-u", "long": "--update", "desc": "Copy only newer source files" },
+        { "short": "-v", "long": "--verbose", "desc": "Explain what is being done" },
+        { "short": "-p", "desc": "Preserve mode, ownership, timestamps" }
+      ],
+      "args": ["path"]
+    },
+    {
+      "name": "mv",
+      "desc": "Move or rename files",
+      "desc_ar": "نقل أو إعادة تسمية الملفات",
+      "options": [
+        { "short": "-i", "long": "--interactive", "desc": "Prompt before overwrite" },
+        { "short": "-f", "long": "--force", "desc": "Do not prompt before overwriting" },
+        { "short": "-n", "long": "--no-clobber", "desc": "Do not overwrite existing file" },
+        { "short": "-u", "long": "--update", "desc": "Move only newer source files" },
+        { "short": "-v", "long": "--verbose", "desc": "Explain what is being done" }
+      ],
+      "args": ["path"]
+    },
+    {
+      "name": "rm",
+      "desc": "Remove files or directories",
+      "desc_ar": "حذف الملفات أو المجلدات",
+      "options": [
+        { "short": "-r", "long": "--recursive", "desc": "Remove directories and contents recursively" },
+        { "short": "-f", "long": "--force", "desc": "Ignore nonexistent files, never prompt" },
+        { "short": "-i", "desc": "Prompt before every removal" },
+        { "short": "-d", "long": "--dir", "desc": "Remove empty directories" },
+        { "short": "-v", "long": "--verbose", "desc": "Explain what is being done" }
+      ],
+      "args": ["path"]
+    }
+  ]
+}

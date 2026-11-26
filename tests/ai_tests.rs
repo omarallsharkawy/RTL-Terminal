@@ -1123,6 +1123,8 @@ fn ai_overlays_and_composer_banner_render_and_clip_terminal_text_in_both_themes_
             selection: None,
             preedit: None,
             ghost: None,
+            highlights: Vec::new(),
+            lints: Vec::new(),
             focused: true,
             cursor_blink_on: true,
             popup: None,

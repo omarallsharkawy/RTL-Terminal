@@ -11,6 +11,7 @@ use crate::ui::chrome::{
     UiLanguage, WindowLayout, SEARCH_AR, SEARCH_EN, SEARCH_KEYCAP,
 };
 use crate::ui::git_diff::DiffStat;
+use crate::ui::motion::ChromeMotion;
 
 use super::context::DrawContext;
 
@@ -45,6 +46,7 @@ pub(crate) fn draw(
     font: &UiFont,
     view: &ChromeView,
     shapes: &mut Vec<Shape>,
+    motion: Option<&ChromeMotion<'_>>,
 ) -> Vec<UiLabel> {
     let mut chrome = Chrome {
         ctx,
@@ -52,6 +54,7 @@ pub(crate) fn draw(
         font,
         shapes,
         labels: Vec::new(),
+        motion,
     };
     chrome.top_bar(view);
     chrome.tabs(view);
@@ -67,9 +70,17 @@ struct Chrome<'a, 'b> {
     font: &'a UiFont,
     shapes: &'a mut Vec<Shape>,
     labels: Vec<UiLabel>,
+    motion: Option<&'a ChromeMotion<'a>>,
 }
 
 impl Chrome<'_, '_> {
+    fn hover(&self, current: Option<ChromeAction>, action: ChromeAction) -> f32 {
+        self.motion
+            .map_or(f32::from(current == Some(action)), |motion| {
+                motion.actions.value(action, motion.now)
+            })
+    }
+
     fn top_bar(&mut self, view: &ChromeView) {
         let top = view.top;
         if top.area.h <= 0.0 {
@@ -81,18 +92,15 @@ impl Chrome<'_, '_> {
         self.button(
             top.sidebar,
             Icon::Menu,
-            view.hover == Some(ChromeAction::Sidebar),
+            self.hover(view.hover, ChromeAction::Sidebar),
             view.sidebar_visible,
             false,
         );
         self.panel(
             top.search,
             RADIUS_6,
-            if view.hover == Some(ChromeAction::Search) {
-                s.bg3
-            } else {
-                s.bg2
-            },
+            s.bg2
+                .mix(s.bg3, self.hover(view.hover, ChromeAction::Search)),
         );
         let search_icon = self.leading_icon(top.search);
         let search_text = self.after_icon(top.search, search_icon);
@@ -108,11 +116,7 @@ impl Chrome<'_, '_> {
             self.panel(
                 rect,
                 RADIUS_6,
-                if view.hover == Some(ChromeAction::Diff) {
-                    s.bg3
-                } else {
-                    s.bg2
-                },
+                s.bg2.mix(s.bg3, self.hover(view.hover, ChromeAction::Diff)),
             );
             let icon = self.leading_icon(rect);
             Icon::Diff.draw(
@@ -169,7 +173,7 @@ impl Chrome<'_, '_> {
             }
         }
         let rect = top.notifications;
-        let hot = view.hover == Some(ChromeAction::Notifications);
+        let hot = self.hover(view.hover, ChromeAction::Notifications);
         if let Some(count) = count_badge(view.unread) {
             let buffer = self.font.shape(
                 self.ctx.font_system,
@@ -183,8 +187,8 @@ impl Chrome<'_, '_> {
             let text_width = label_width(&buffer).ceil();
             let width = (text_width + gap).max(s.px(SPACE_16));
             if side + width + gap <= rect.w {
-                if hot {
-                    self.panel(rect, RADIUS_6, s.bg3);
+                if hot > 0.0 {
+                    self.panel(rect, RADIUS_6, s.bg3.mix(s.bg1, 1.0 - hot));
                 }
                 let x = rect.right() - width - side - gap;
                 let icon = Rect::new(x, rect.y + (rect.h - side) / 2.0, side, side);
@@ -302,12 +306,18 @@ impl Chrome<'_, '_> {
         self.panel(layout.tab_bar, 0.0, s.bg1);
         self.rule(layout.tab_bar, s.border);
         for (i, (&rect, tab)) in layout.tabs.iter().zip(view.tabs).enumerate() {
-            let hovered = view.hover_tab == Some(i);
-            self.panel(
-                rect,
-                RADIUS_8,
-                if tab.active || hovered { s.bg3 } else { s.bg2 },
-            );
+            let (hovered, selected) = self
+                .motion
+                .and_then(|motion| {
+                    let &id = motion.tab_ids.get(i)?;
+                    Some((
+                        motion.tab_hover.value(id, motion.now),
+                        motion.selection.value(id, motion.now),
+                    ))
+                })
+                .unwrap_or((f32::from(view.hover_tab == Some(i)), f32::from(tab.active)));
+            let emphasis = selected + (1.0 - selected) * 0.65 * hovered;
+            self.panel(rect, RADIUS_8, s.bg2.mix(s.bg3, emphasis));
             let close = layout.tab_close(rect);
             let pad = s.px(SPACE_8).min(rect.w / 4.0);
             let canonical_close = view.language.mirror(close, rect);
@@ -330,21 +340,17 @@ impl Chrome<'_, '_> {
                 } else {
                     UiAlign::Start
                 },
-                if tab.active || hovered {
-                    s.text
-                } else {
-                    s.text_dim
-                },
+                s.text_dim.mix(s.text, emphasis),
             );
-            if hovered {
-                let hot = view.hover == Some(ChromeAction::CloseTab(i));
-                self.button(close, Icon::Close, hot, false, true);
+            if hovered > 0.0 {
+                let hot = self.hover(view.hover, ChromeAction::CloseTab(i));
+                self.button_with_opacity(close, Icon::Close, hot, false, true, hovered);
             }
         }
         self.button(
             layout.new_tab,
             Icon::Plus,
-            view.hover == Some(ChromeAction::NewTab),
+            self.hover(view.hover, ChromeAction::NewTab),
             false,
             false,
         );
@@ -385,7 +391,9 @@ impl Chrome<'_, '_> {
             } else {
                 icon
             };
-            let pictogram = if pane.agent {
+            let pictogram = if self.motion.is_some_and(|motion| motion.broadcast) {
+                Icon::Broadcast
+            } else if pane.agent {
                 Icon::Agent
             } else {
                 Icon::Terminal
@@ -510,7 +518,7 @@ impl Chrome<'_, '_> {
                 self.button(
                     button,
                     icon,
-                    hover == Some(action),
+                    self.hover(hover, action),
                     false,
                     icon == Icon::Close,
                 );
@@ -533,7 +541,7 @@ impl Chrome<'_, '_> {
             }
             if flash > 0.0 {
                 let mut glow = s.accent.mix(s.text, 0.35 * flash);
-                glow.a = (0.35 + 0.65 * flash).min(1.0);
+                glow.a = flash;
                 self.shapes.push(Shape::RoundedRect {
                     rect: outer,
                     radii: [0.0; 4],
@@ -568,10 +576,24 @@ impl Chrome<'_, '_> {
         )
     }
 
-    fn button(&mut self, rect: Rect, icon: Icon, hover: bool, active: bool, danger: bool) {
+    fn button(&mut self, rect: Rect, icon: Icon, hover: f32, active: bool, danger: bool) {
+        self.button_with_opacity(rect, icon, hover, active, danger, 1.0);
+    }
+
+    fn button_with_opacity(
+        &mut self,
+        rect: Rect,
+        icon: Icon,
+        hover: f32,
+        active: bool,
+        danger: bool,
+        opacity: f32,
+    ) {
         let s = self.style;
-        if hover {
-            self.panel(rect, RADIUS_6, s.bg3);
+        if hover > 0.0 {
+            let mut fill = s.bg3;
+            fill.a *= hover * opacity;
+            self.panel(rect, RADIUS_6, fill);
         }
         let side = s.px(16.0).min(rect.w).min(rect.h);
         let icon_rect = Rect::new(
@@ -580,13 +602,9 @@ impl Chrome<'_, '_> {
             side,
             side,
         );
-        let color = if hover && danger {
-            s.danger
-        } else if hover || active {
-            s.text
-        } else {
-            s.text_faint
-        };
+        let base = if active { s.text } else { s.text_faint };
+        let mut color = base.mix(if danger { s.danger } else { s.text }, hover);
+        color.a *= opacity;
         icon.draw(icon_rect, self.ctx.color(color), self.shapes);
     }
 

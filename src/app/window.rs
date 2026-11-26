@@ -13,10 +13,11 @@ use super::{git_diff, App};
 use crate::blocks::cards::BlockHover;
 use crate::config::TwittyConfig;
 use crate::layout::{PaneId, Rect, SidebarPosition};
+use crate::render::scene::palette::{PaletteIcons, PaletteView};
 use crate::render::scene::window_chrome::{ChromeView, PaneHeaderView};
 use crate::render::{PaneFrame, Renderer, TabLabel};
 use crate::session::workspace::{GridGeometry, Workspace};
-use crate::sidebar::cards::{Drag, ScrollState, View as SidebarView, DOT_INTERVAL};
+use crate::sidebar::cards::{Drag, ScrollState, View as SidebarView};
 use crate::sidebar::{
     git::BranchCache, localized_entry_title, pick_tab_agent_status, Entry, Notice, Placement,
 };
@@ -25,6 +26,7 @@ use crate::ui::chrome::{
 };
 use crate::ui::git_diff::DiffStat;
 use crate::ui::hit::{hit_test, Hit, HitGeometry};
+use crate::ui::motion::ChromeAnimations;
 use crate::ui::notifications::NotificationHistory;
 use crate::ui::settings::{clamp_font_size, step_opacity};
 
@@ -70,8 +72,8 @@ pub(super) struct Window {
     pub(super) language: UiLanguage,
     sidebar_view: Option<SidebarView>,
     sidebar_drag: Option<Drag>,
-    sidebar_tick: Option<Instant>,
-    sidebar_dot: usize,
+    motion: ChromeAnimations,
+    motion_frame: Option<Instant>,
     block_hover: Option<BlockHover>,
     pane_flash: PaneFlash,
     diff: Option<(git_diff::Target, DiffStat)>,
@@ -100,8 +102,8 @@ impl Window {
             language: UiLanguage::from_environment(),
             sidebar_view: None,
             sidebar_drag: None,
-            sidebar_tick: None,
-            sidebar_dot: 0,
+            motion: ChromeAnimations::default(),
+            motion_frame: None,
             block_hover: None,
             pane_flash: PaneFlash::default(),
             diff: None,
@@ -157,6 +159,8 @@ impl Window {
             }
         };
 
+        self.motion = ChromeAnimations::new(config.reduce_motion);
+        renderer.set_reduce_motion(config.reduce_motion);
         renderer.set_font_family(config.font_family.as_deref());
         renderer.set_ui_style(config.ui_font_family.as_deref(), config.ui_accent_color());
         renderer.set_opacity(config.background_opacity);
@@ -310,6 +314,12 @@ impl Window {
 
     pub(super) fn set_occluded(&mut self, occluded: bool) {
         self.occluded = occluded;
+        if occluded {
+            self.motion_frame = None;
+            self.motion.suspend();
+        } else {
+            self.request_redraw();
+        }
     }
 
     pub(super) fn set_diff(&mut self, diff: Option<(git_diff::Target, DiffStat)>) {
@@ -343,17 +353,10 @@ impl Window {
     }
 
     pub(super) fn flash_pane(&mut self, id: PaneId) {
-        self.pane_flash.trigger(id, Instant::now());
-        self.request_redraw();
-    }
-
-    pub(super) fn tick_pane_flash(&mut self, now: Instant) -> Option<Instant> {
-        let was_active = self.pane_flash.is_active();
-        let next = self.pane_flash.tick(now);
-        if was_active {
+        if !self.motion.reduced() {
+            self.pane_flash.trigger(id, Instant::now());
             self.request_redraw();
         }
-        next
     }
 
     /// The sidebar is on screen.
@@ -445,21 +448,16 @@ impl Window {
             return None;
         }
         let target = drag.target(view, ws.active(), pointer)?;
-        self.sidebar_view = None;
         self.reveal_active_tab();
         Some(target)
     }
 
-    pub(super) fn poll_sidebar_animation(&mut self, now: Instant) -> Option<Instant> {
-        if self.occluded {
-            return None;
-        }
-        if now >= self.sidebar_tick? {
-            self.sidebar_dot = (self.sidebar_dot + 1) % 3;
-            self.sidebar_tick = Some(now + DOT_INTERVAL);
+    pub(super) fn poll_motion(&mut self, now: Instant) -> Option<Instant> {
+        if self.motion_frame.is_some_and(|deadline| now >= deadline) {
+            self.motion_frame = None;
             self.request_redraw();
         }
-        self.sidebar_tick
+        self.motion_frame
     }
 
     /// Ask for one redraw; repeated requests before it happens are merged.
@@ -511,12 +509,80 @@ impl Window {
         }
     }
 
-    pub(super) fn set_command_palette(
-        &mut self,
-        view: Option<crate::render::scene::palette::PaletteView>,
-    ) {
+    pub(super) fn set_command_palette(&mut self, view: Option<(PaletteView, PaletteIcons)>) {
         if let Some(ref mut r) = self.renderer {
             r.set_command_palette(view);
+        }
+    }
+
+    pub(super) fn set_settings_panel(
+        &mut self,
+        view: Option<crate::render::scene::settings::SettingsView>,
+    ) {
+        if let Some(ref mut r) = self.renderer {
+            r.set_settings_panel(view);
+        }
+    }
+
+    pub(super) fn font_families(&self) -> (Vec<String>, Vec<String>) {
+        self.renderer
+            .as_ref()
+            .map_or_else(|| (Vec::new(), Vec::new()), Renderer::font_families)
+    }
+
+    pub(super) fn surface_size(&self) -> Option<(f32, f32)> {
+        self.renderer.as_ref().map(Renderer::surface_size)
+    }
+
+    pub(super) fn set_palette(&mut self, palette: crate::color::Palette) {
+        if let Some(ref mut r) = self.renderer {
+            r.set_palette(palette);
+        }
+    }
+
+    pub(super) fn set_font_family(&mut self, family: Option<&str>) {
+        if let Some(ref mut r) = self.renderer {
+            r.set_font_family(family);
+        }
+    }
+
+    pub(super) fn set_ui_font_family(&mut self, family: Option<&str>) {
+        if let Some(ref mut r) = self.renderer {
+            r.set_ui_font_family(family);
+        }
+    }
+
+    pub(super) fn set_ui_accent(&mut self, accent: Option<crate::color::Rgba>) {
+        if let Some(ref mut r) = self.renderer {
+            r.set_ui_accent(accent);
+        }
+    }
+
+    pub(super) fn set_cursor_style(&mut self, style: String) {
+        if let Some(ref mut r) = self.renderer {
+            r.set_cursor_style(style);
+        }
+    }
+
+    pub(super) fn set_sidebar_position(&mut self, position: SidebarPosition) {
+        self.sidebar = Placement::new(position);
+    }
+
+    pub(super) fn set_sidebar_width(&mut self, width: f32) {
+        self.sidebar_width = crate::layout::clamp_sidebar_width(width);
+    }
+
+    pub(super) fn set_top_bar(&mut self, enabled: bool) {
+        self.top_bar = enabled;
+    }
+
+    pub(super) fn set_pane_headers(&mut self, enabled: bool) {
+        self.pane_headers = enabled;
+    }
+
+    pub(super) fn set_block_cards(&mut self, enabled: bool) {
+        if let Some(ref mut r) = self.renderer {
+            r.set_block_cards(enabled);
         }
     }
 
@@ -712,6 +778,11 @@ impl Window {
         let Some(layout) = self.layout(ws.tabs().len()) else {
             return;
         };
+        let now = Instant::now();
+        let ids: Vec<_> = ws.tabs().iter().map(|tab| tab.id).collect();
+        self.pane_flash.tick(now);
+        self.motion
+            .begin_frame(now, ws.active_tab().map(|tab| tab.id), self.chrome_hover);
         self.sidebar_view = layout.sidebar.and_then(|area| {
             let mut entries = sidebar_entries(ws, &self.ports, history, self.language);
             let directories = entries.iter().filter_map(|e| e.cwd.clone()).collect();
@@ -728,8 +799,9 @@ impl Window {
                 self.sidebar.position,
                 self.language,
             );
+            self.motion
+                .reorder(&mut view, &cards, &ids, ws.active(), now);
             view.update_hover(pointer);
-            view.dot_phase = self.sidebar_dot;
             view.drop_target = self
                 .sidebar_drag
                 .and_then(|drag| drag.target(&view, ws.active(), pointer));
@@ -738,18 +810,17 @@ impl Window {
         if self.sidebar_view.is_none() {
             self.branches.clear();
         }
-        if self
-            .sidebar_view
-            .as_ref()
-            .is_some_and(SidebarView::animates)
-        {
-            self.sidebar_tick
-                .get_or_insert_with(|| Instant::now() + DOT_INTERVAL);
-        } else {
-            self.sidebar_tick = None;
-            self.sidebar_dot = 0;
-        }
-        let now = Instant::now();
+        let hover_tab = match layout.tab_hit(pointer.0, pointer.1) {
+            Some(Hit::Tab(i) | Hit::Chrome(ChromeAction::CloseTab(i))) => Some(i),
+            _ => None,
+        };
+        self.motion.apply(
+            self.sidebar_view.as_mut(),
+            hover_tab,
+            &ids,
+            now,
+            self.occluded,
+        );
         let zoomed_id = ws.zoomed_pane();
         let pane_headers = ws
             .active_layout(self)
@@ -793,10 +864,6 @@ impl Window {
                 active: i == ws.active(),
             })
             .collect();
-        let hover_tab = match layout.tab_hit(pointer.0, pointer.1) {
-            Some(Hit::Tab(i) | Hit::Chrome(ChromeAction::CloseTab(i))) => Some(i),
-            _ => None,
-        };
         let chrome = ChromeView {
             layout: &layout,
             top: TopBarLayout::new(layout.top_bar, metrics.scale, diff)
@@ -812,7 +879,27 @@ impl Window {
         };
         if let Some(ref mut r) = self.renderer {
             r.set_cursor_blink(blink);
-            if let Err(e) = r.render(&chrome, panes, dividers, self.sidebar_view.as_ref()) {
+            let motion = self.motion.sample(&ids, broadcast, now);
+            let rendered = r.render(
+                &chrome,
+                &motion,
+                panes,
+                dividers,
+                self.sidebar_view.as_ref(),
+            );
+            self.motion_frame = if self.occluded || self.motion.reduced() {
+                None
+            } else {
+                [
+                    r.next_motion_frame(now),
+                    self.motion.next_frame(now),
+                    self.pane_flash.tick(now),
+                ]
+                .into_iter()
+                .flatten()
+                .min()
+            };
+            if let Err(e) = rendered {
                 tracing::error!("render error: {e:?}");
             }
         }
@@ -944,7 +1031,7 @@ impl App {
     /// Draw the active tab.
     pub(super) fn redraw(&mut self) {
         self.window.needs_redraw = false;
-        if self.modifiers.control_key() && !self.palette_open() {
+        if self.modifiers.control_key() && !self.palette_open() && !self.settings_open() {
             self.refresh_pointer_hover();
         }
         // A notification counts as seen once its pane is on screen, focused, in a focused window.

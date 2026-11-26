@@ -23,7 +23,7 @@ use crate::ui::hit::Hit;
 impl App {
     pub(super) fn on_modifiers(&mut self, modifiers: ModifiersState) {
         self.modifiers = modifiers;
-        if self.palette_open() {
+        if self.palette_open() || self.settings_open() {
             return;
         }
         let (x, y) = self.pointer.pos;
@@ -37,6 +37,10 @@ impl App {
         self.window.update_sidebar_drag();
         if let Some(icon) = self.ai_consent_cursor(x, y) {
             self.window.set_cursor_icon(icon);
+            return;
+        }
+        if self.settings_open() {
+            self.on_settings_cursor_moved(x, y);
             return;
         }
         if self.palette_open() {
@@ -139,6 +143,9 @@ impl App {
     }
 
     pub(super) fn on_cursor_left(&mut self) {
+        if self.settings_open() {
+            self.on_settings_cursor_left();
+        }
         self.window.set_chrome_hover(None, None);
         self.window.cancel_sidebar_drag();
         self.window.set_block_hover(None);
@@ -157,6 +164,10 @@ impl App {
             if pressed {
                 self.ai_consent_mouse_press(button);
             }
+            return false;
+        }
+        if self.settings_open() {
+            self.on_settings_mouse(button, pressed);
             return false;
         }
         if self.palette_open() {
@@ -276,7 +287,14 @@ impl App {
     }
 
     pub(super) fn on_wheel(&mut self, delta: MouseScrollDelta) {
-        if self.ai_consent_open() || self.palette_open() {
+        if self.ai_consent_open() {
+            return;
+        }
+        if self.settings_open() {
+            self.on_settings_wheel(delta);
+            return;
+        }
+        if self.palette_open() {
             return;
         }
         let line_height = self.window.line_height().unwrap_or(20.0);
@@ -434,7 +452,11 @@ impl App {
     }
 
     pub(super) fn refresh_pointer_hover(&mut self) {
-        if self.palette_open() || self.pointer.capture.is_some() || self.pointer.drag.is_some() {
+        if self.palette_open()
+            || self.settings_open()
+            || self.pointer.capture.is_some()
+            || self.pointer.drag.is_some()
+        {
             return;
         }
         let (x, y) = self.pointer.pos;

@@ -37,6 +37,16 @@ pub enum AppEvent {
     ComposerHistory(Vec<String>),
     /// Directory entries loaded off the UI thread for composer path completion.
     ComposerDir(PathBuf, Vec<crate::composer::complete::DirEntryInfo>),
+    /// Dynamic completion generator results produced off the UI thread.
+    ComposerGenerator(
+        crate::composer::generators::GeneratorKey,
+        Vec<crate::composer::generators::GeneratedItem>,
+    ),
+    /// `$PATH` executables and/or local path-existence checks resolved off the UI thread.
+    ComposerPathInfo {
+        commands: Option<std::collections::HashSet<String>>,
+        existing: Vec<(PathBuf, bool)>,
+    },
     /// Project directories (MRU + scanned git repos) resolved off the UI thread.
     Projects(u64, Vec<crate::projects::ProjectItem>),
     /// Result of a non-interactive built-in AI CLI request.
@@ -112,7 +122,7 @@ impl App {
             self.window.request_redraw();
         }
         // The output may have replaced the link under a Ctrl-hovering pointer.
-        if self.modifiers.control_key() && !self.palette_open() {
+        if self.modifiers.control_key() && !self.palette_open() && !self.settings_open() {
             self.update_link_hover(id);
         }
         for event in events {

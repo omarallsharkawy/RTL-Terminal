@@ -11,7 +11,7 @@ pub const TOP_BAR_HEIGHT: f32 = 36.0;
 pub const PANE_HEADER_HEIGHT: f32 = 24.0;
 /// How long `pane.flash` highlights a pane's outline.
 pub const PANE_FLASH_DURATION: Duration = Duration::from_millis(450);
-const PANE_FLASH_STEP: Duration = Duration::from_millis(16);
+use super::motion::{ease_out, progress, FRAME_STEP};
 
 /// Brief outline flash on a pane (`pane.flash`, and after jumping to an unread notification).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -46,8 +46,7 @@ impl PaneFlash {
         if elapsed >= PANE_FLASH_DURATION {
             return 0.0;
         }
-        let remaining = 1.0 - elapsed.as_secs_f32() / PANE_FLASH_DURATION.as_secs_f32();
-        remaining * remaining
+        1.0 - ease_out(progress(elapsed, PANE_FLASH_DURATION))
     }
 
     /// Expire finished flashes and return the next redraw deadline while active.
@@ -58,11 +57,11 @@ impl PaneFlash {
             self.active = None;
             return None;
         }
-        Some((now + PANE_FLASH_STEP).min(end))
+        Some((now + FRAME_STEP).min(end))
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub enum ChromeAction {
     Sidebar,
     Search,
