@@ -145,10 +145,37 @@ struct KillOnDrop(Option<std::process::Child>);
 impl Drop for KillOnDrop {
     fn drop(&mut self) {
         if let Some(mut child) = self.0.take() {
-            let _ = child.kill();
+            kill_tree(&mut child);
             let _ = child.wait();
         }
     }
+}
+
+fn kill_tree(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        use rustix::process::{kill_process_group, Pid, Signal};
+        let _ = kill_process_group(Pid::from_child(child), Signal::KILL);
+    }
+    let _ = child.kill();
+}
+
+fn credential_env(name: &str) -> bool {
+    let name = name.to_ascii_uppercase();
+    [
+        "API_KEY",
+        "AUTH_TOKEN",
+        "ACCESS_TOKEN",
+        "OAUTH_TOKEN",
+        "SECRET_ACCESS_KEY",
+    ]
+    .iter()
+    .any(|suffix| {
+        name == *suffix
+            || name
+                .strip_suffix(suffix)
+                .is_some_and(|prefix| prefix.ends_with('_'))
+    })
 }
 
 struct SandboxTempDir(PathBuf);
@@ -213,6 +240,25 @@ pub fn run_command_blocking(
     max_output_bytes: usize,
     cancel: &AiCancel,
 ) -> Result<String, AiError> {
+    run_isolated(argv, timeout, max_output_bytes, cancel, false)
+}
+
+pub(crate) fn run_agent_command_blocking(
+    argv: &[String],
+    timeout: Duration,
+    max_output_bytes: usize,
+    cancel: &AiCancel,
+) -> Result<String, AiError> {
+    run_isolated(argv, timeout, max_output_bytes, cancel, true)
+}
+
+fn run_isolated(
+    argv: &[String],
+    timeout: Duration,
+    max_output_bytes: usize,
+    cancel: &AiCancel,
+    strip_credentials: bool,
+) -> Result<String, AiError> {
     if cancel.is_cancelled() {
         return Err(AiError::Cancelled);
     }
@@ -231,9 +277,14 @@ pub fn run_command_blocking(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
     for (key, _) in std::env::vars_os() {
         if let Some(name) = key.to_str() {
-            if is_stripped_ai_env_var(name) {
+            if is_stripped_ai_env_var(name) || strip_credentials && credential_env(name) {
                 cmd.env_remove(name);
             }
         }
@@ -295,6 +346,12 @@ pub fn run_command_blocking(
         };
         match child.try_wait() {
             Ok(Some(status)) => {
+                // A descendant can retain the pipe after its parent has exited.
+                #[cfg(unix)]
+                {
+                    use rustix::process::{kill_process_group, Pid, Signal};
+                    let _ = kill_process_group(Pid::from_child(child), Signal::KILL);
+                }
                 let _ = guard.0.take();
                 break WatchOutcome::Exited(status);
             }
@@ -311,33 +368,32 @@ pub fn run_command_blocking(
         thread::sleep(Duration::from_millis(15));
     };
 
-    // Child is now exited or killed+reaped, so pipe writers are closed and readers finish quickly.
+    // An escaped descendant can retain a pipe even after the process group is killed.
+    // Cancellation and timeout must not wait for that pipe.
+    let status = match outcome {
+        WatchOutcome::Cancelled => return Err(AiError::Cancelled),
+        WatchOutcome::TimedOut => return Err(AiError::TimedOut(timeout.as_secs().max(1))),
+        WatchOutcome::OutputTooLarge => return Err(AiError::OutputTooLarge),
+        WatchOutcome::Error(msg) => return Err(AiError::SpawnFailed(msg)),
+        WatchOutcome::Exited(status) => status,
+    };
     let (stdout_bytes, stdout_truncated) = stdout_thread.join().unwrap_or_default();
     let stderr_bytes = stderr_thread.join().unwrap_or_default();
-
-    match outcome {
-        WatchOutcome::Cancelled => Err(AiError::Cancelled),
-        WatchOutcome::TimedOut => Err(AiError::TimedOut(timeout.as_secs().max(1))),
-        WatchOutcome::OutputTooLarge => Err(AiError::OutputTooLarge),
-        WatchOutcome::Error(msg) => Err(AiError::SpawnFailed(msg)),
-        WatchOutcome::Exited(status) => {
-            if stdout_truncated {
-                return Err(AiError::OutputTooLarge);
-            }
-            if !status.success() {
-                let stderr = clean_text(&String::from_utf8_lossy(&stderr_bytes), 240);
-                return Err(AiError::NonZeroExit {
-                    code: status.code(),
-                    stderr,
-                });
-            }
-            let text = String::from_utf8_lossy(&stdout_bytes).into_owned();
-            if text.trim().is_empty() {
-                return Err(AiError::EmptyReply);
-            }
-            Ok(text)
-        }
+    if stdout_truncated {
+        return Err(AiError::OutputTooLarge);
     }
+    if !status.success() {
+        let stderr = clean_text(&String::from_utf8_lossy(&stderr_bytes), 240);
+        return Err(AiError::NonZeroExit {
+            code: status.code(),
+            stderr,
+        });
+    }
+    let text = String::from_utf8_lossy(&stdout_bytes).into_owned();
+    if text.trim().is_empty() {
+        return Err(AiError::EmptyReply);
+    }
+    Ok(text)
 }
 
 fn read_bounded(reader: impl Read, limit: usize) -> (Vec<u8>, bool) {

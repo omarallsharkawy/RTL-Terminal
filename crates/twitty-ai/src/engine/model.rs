@@ -85,6 +85,8 @@ pub enum StepKind {
         target: String,
         preview: String,
     },
+    /// A sensitive or out-of-project read waiting for explicit approval.
+    ReadApproval { tool: ReadTool, target: String },
     /// A shell command waiting for approval, then run in a visible pane by the app.
     Command {
         command: String,
@@ -127,7 +129,7 @@ pub enum StepKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StepStatus {
     Running,
-    /// The only interactive state: Command, Patch, FactSuggestion and LimitReached cards.
+    /// The only interactive state: Command, Patch, ReadApproval, FactSuggestion and LimitReached cards.
     WaitingApproval,
     Done,
     Denied,
