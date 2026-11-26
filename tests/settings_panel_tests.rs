@@ -487,6 +487,13 @@ fn model_sections_labels_and_every_control_round_trips_through_save_and_load() {
     assert_eq!(res.changed, vec![SettingId::AgentCommand]);
     assert_eq!(cfg.agent_command.as_deref(), Some("codex --model o3"));
 
+    // Theme colors (`colors` is left out of the JSON while nothing is overridden).
+    assert!(twitty::ui::settings_panel::write_text(
+        SettingId::ColorCursor,
+        "#FFCC00",
+        &mut cfg
+    ));
+
     // Verify every config_key appears in the serialized JSON!
     let json = serde_json::to_value(&cfg).unwrap();
     for &id in &SettingId::CONFIG_SETTINGS {
@@ -525,6 +532,10 @@ fn model_sections_labels_and_every_control_round_trips_through_save_and_load() {
     assert_eq!(loaded.control_socket, cfg.control_socket);
     assert_eq!(loaded.cmux_compat, cfg.cmux_compat);
     assert_eq!(loaded.agent_command, cfg.agent_command);
+    assert_eq!(
+        loaded.colors.as_ref().and_then(|c| c.cursor.as_deref()),
+        Some("#ffcc00")
+    );
 
     // Accessor sanity checks on loaded config.
     assert_eq!(read_segmented_index(SettingId::UiLanguage, &loaded), 1);
@@ -1473,12 +1484,11 @@ fn focus_setting(state: &mut SettingsPanelState, cfg: &TwittyConfig, id: Setting
 #[test]
 fn every_config_key_except_structured_lists_has_a_settings_control() {
     // Keys with their own screens: keybindings (Keys), memory_exclude (Memory), commands
-    // (Commands), colors (structured list), AI provider keys (Settings -> AI custom rows).
+    // (Commands), AI provider keys (Settings -> AI custom rows).
     let elsewhere = [
         "keybindings",
         "memory_exclude",
         "commands",
-        "colors",
         "ai_agent",
         "ai_default_provider",
         "ai_ollama_url",
@@ -1550,4 +1560,69 @@ fn new_settings_reduce_motion_composer_mode_project_folders_ai_and_timeout() {
     let res = key(&mut state, &mut cfg, NamedKey::ArrowRight);
     assert_eq!(res.changed, vec![SettingId::AiTimeout]);
     assert_eq!(cfg.ai_timeout_secs, 65);
+}
+
+#[test]
+fn theme_color_overrides_are_editable_and_half_typed_colors_are_not_saved() {
+    let mut cfg = TwittyConfig::default();
+    let mut state = SettingsPanelState::default();
+    let none = ModifiersState::empty();
+    let theme_bg = cfg.palette().background;
+
+    focus_setting(&mut state, &cfg, SettingId::ColorBackground);
+    assert!(state.accepts_text_input());
+    let res = state.on_text("#1e1", &mut cfg);
+    // `#1e1` is a valid short hex, so it is saved as typed.
+    assert_eq!(res.changed, vec![SettingId::ColorBackground]);
+    state.on_text("e", &mut cfg);
+    assert_eq!(state.text_value(SettingId::ColorBackground, &cfg), "#1e1e");
+    assert_eq!(
+        cfg.colors.as_ref().unwrap().background.as_deref(),
+        Some("#1e1"),
+        "a 4-digit value is not a color: keep the last valid one, show the draft"
+    );
+    let res = state.on_text("2E", &mut cfg);
+    assert_eq!(res.changed, vec![SettingId::ColorBackground]);
+    assert_eq!(
+        cfg.colors.as_ref().unwrap().background.as_deref(),
+        Some("#1e1e2e")
+    );
+    assert_ne!(cfg.palette().background, theme_bg);
+
+    // Clearing the field drops the override and the whole `colors` object.
+    for _ in 0..10 {
+        state.on_key(
+            &Key::Named(NamedKey::Backspace),
+            None,
+            none,
+            &mut cfg,
+            SURFACE,
+            1.0,
+        );
+    }
+    assert!(cfg.colors.is_none());
+    assert_eq!(cfg.palette().background, theme_bg);
+
+    // 16 terminal colors: spaces or commas; an invalid token is not saved.
+    focus_setting(&mut state, &cfg, SettingId::ColorAnsi);
+    state.on_text("#000000, #ff0000 #0f0", &mut cfg);
+    let ansi = cfg.colors.as_ref().unwrap().ansi.clone().unwrap();
+    assert_eq!(ansi, vec!["#000000", "#ff0000", "#0f0"]);
+    assert_eq!(
+        cfg.palette().ansi[1],
+        twitty::color::parse_hex("#ff0000").unwrap()
+    );
+    state.on_text(" #zz", &mut cfg);
+    assert_eq!(cfg.colors.as_ref().unwrap().ansi.as_ref().unwrap().len(), 3);
+    assert_eq!(
+        state.text_value(SettingId::ColorAnsi, &cfg),
+        "#000000, #ff0000 #0f0 #zz"
+    );
+
+    // Saved JSON keeps only the fields that were set.
+    let json = serde_json::to_value(&cfg).unwrap();
+    assert_eq!(
+        json["colors"],
+        serde_json::json!({"ansi": ["#000000", "#ff0000", "#0f0"]})
+    );
 }

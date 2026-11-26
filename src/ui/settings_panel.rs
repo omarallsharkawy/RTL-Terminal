@@ -108,6 +108,11 @@ pub enum SettingId {
     PaneHeaders,
     BlockCards,
     ReduceMotion,
+    ColorBackground,
+    ColorForeground,
+    ColorCursor,
+    ColorSelection,
+    ColorAnsi,
     // Behaviour
     DesktopNotifications,
     RestoreSession,
@@ -128,7 +133,7 @@ pub enum SettingId {
 }
 
 impl SettingId {
-    pub const APPEARANCE: [Self; 15] = [
+    pub const APPEARANCE: [Self; 20] = [
         Self::Theme,
         Self::FontFamily,
         Self::FontSize,
@@ -144,6 +149,20 @@ impl SettingId {
         Self::PaneHeaders,
         Self::BlockCards,
         Self::ReduceMotion,
+        Self::ColorBackground,
+        Self::ColorForeground,
+        Self::ColorCursor,
+        Self::ColorSelection,
+        Self::ColorAnsi,
+    ];
+
+    /// Theme color overrides (`config.colors`).
+    pub const COLORS: [Self; 5] = [
+        Self::ColorBackground,
+        Self::ColorForeground,
+        Self::ColorCursor,
+        Self::ColorSelection,
+        Self::ColorAnsi,
     ];
 
     pub const BEHAVIOUR: [Self; 10] = [
@@ -164,7 +183,7 @@ impl SettingId {
     pub const ABOUT: [Self; 1] = [Self::CopyConfigPath];
 
     /// All config-backed settings (Appearance + Behaviour).
-    pub const CONFIG_SETTINGS: [Self; 27] = [
+    pub const CONFIG_SETTINGS: [Self; 32] = [
         Self::Theme,
         Self::FontFamily,
         Self::FontSize,
@@ -192,6 +211,11 @@ impl SettingId {
         Self::ProjectRoots,
         Self::BuiltInAi,
         Self::AiTimeout,
+        Self::ColorBackground,
+        Self::ColorForeground,
+        Self::ColorCursor,
+        Self::ColorSelection,
+        Self::ColorAnsi,
     ];
 
     pub fn section(self) -> SettingsSection {
@@ -210,7 +234,12 @@ impl SettingId {
             | Self::TopBar
             | Self::PaneHeaders
             | Self::BlockCards
-            | Self::ReduceMotion => SettingsSection::Appearance,
+            | Self::ReduceMotion
+            | Self::ColorBackground
+            | Self::ColorForeground
+            | Self::ColorCursor
+            | Self::ColorSelection
+            | Self::ColorAnsi => SettingsSection::Appearance,
             Self::DesktopNotifications
             | Self::RestoreSession
             | Self::ShellIntegration
@@ -256,6 +285,11 @@ impl SettingId {
             Self::ProjectRoots => "project_roots",
             Self::BuiltInAi => "ai",
             Self::AiTimeout => "ai_timeout_secs",
+            Self::ColorBackground
+            | Self::ColorForeground
+            | Self::ColorCursor
+            | Self::ColorSelection
+            | Self::ColorAnsi => "colors",
             Self::ProjectMemory | Self::CopyConfigPath => return None,
         })
     }
@@ -481,6 +515,41 @@ impl SettingId {
                 kind: ControlKind::TextField {
                     placeholder_en: "~/Projects, ~/src",
                     placeholder_ar: "~/Projects, ~/src",
+                },
+            },
+            Self::ColorBackground
+            | Self::ColorForeground
+            | Self::ColorCursor
+            | Self::ColorSelection => {
+                let (label_en, label_ar) = match self {
+                    Self::ColorBackground => ("Background color", "لون الخلفية"),
+                    Self::ColorForeground => ("Text color", "لون النص"),
+                    Self::ColorCursor => ("Cursor color", "لون المؤشر"),
+                    _ => ("Selection color", "لون التحديد"),
+                };
+                SettingDescriptor {
+                    id: self,
+                    label_en,
+                    label_ar,
+                    note_en: None,
+                    note_ar: None,
+                    kind: ControlKind::TextField {
+                        placeholder_en: "Theme color, e.g. #1e1e2e",
+                        placeholder_ar: "لون السمة، مثلاً #1e1e2e",
+                    },
+                }
+            }
+            Self::ColorAnsi => SettingDescriptor {
+                id: self,
+                label_en: "Terminal colors",
+                label_ar: "ألوان الطرفية",
+                note_en: Some(
+                    "Up to 16 hex colors (black, red, … bright white), separated by spaces",
+                ),
+                note_ar: Some("لحد 16 لون hex (أسود، أحمر، … أبيض فاتح) بينهم مسافات"),
+                kind: ControlKind::TextField {
+                    placeholder_en: "Theme colors",
+                    placeholder_ar: "ألوان السمة",
                 },
             },
             Self::BuiltInAi => SettingDescriptor {
@@ -2678,8 +2747,82 @@ pub fn read_text(setting: SettingId, config: &TwittyConfig) -> String {
     match setting {
         SettingId::AgentCommand => config.agent_command.clone().unwrap_or_default(),
         SettingId::ProjectRoots => config.project_roots.join(", "),
+        SettingId::ColorAnsi => config
+            .colors
+            .as_ref()
+            .and_then(|c| c.ansi.as_ref())
+            .map(|a| a.join(" "))
+            .unwrap_or_default(),
+        id if SettingId::COLORS.contains(&id) => config
+            .colors
+            .as_ref()
+            .and_then(|c| color_slot_ref(id, c).clone())
+            .unwrap_or_default(),
         _ => String::new(),
     }
+}
+
+fn color_slot_ref(id: SettingId, colors: &crate::config::ThemeColors) -> &Option<String> {
+    match id {
+        SettingId::ColorBackground => &colors.background,
+        SettingId::ColorForeground => &colors.foreground,
+        SettingId::ColorCursor => &colors.cursor,
+        _ => &colors.selection,
+    }
+}
+
+fn color_slot_mut(id: SettingId, colors: &mut crate::config::ThemeColors) -> &mut Option<String> {
+    match id {
+        SettingId::ColorBackground => &mut colors.background,
+        SettingId::ColorForeground => &mut colors.foreground,
+        SettingId::ColorCursor => &mut colors.cursor,
+        _ => &mut colors.selection,
+    }
+}
+
+/// Parse a color field: `Some(None)` clears the override, `Some(Some(hex))` sets it, `None` is
+/// not (yet) a valid color.
+fn parse_color_field(value: &str) -> Option<Option<String>> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Some(None);
+    }
+    crate::color::parse_hex(value).map(|_| {
+        let hex = value.trim_start_matches('#').to_ascii_lowercase();
+        Some(format!("#{hex}"))
+    })
+}
+
+/// Parse the 16-color field: up to 16 hex colors separated by spaces or commas.
+fn parse_ansi_field(value: &str) -> Option<Option<Vec<String>>> {
+    let mut out = Vec::new();
+    for token in value
+        .split(|c: char| c.is_whitespace() || c == ',')
+        .filter(|t| !t.is_empty())
+    {
+        out.push(parse_color_field(token)??);
+    }
+    if out.len() > 16 {
+        return None;
+    }
+    Some((!out.is_empty()).then_some(out))
+}
+
+/// Store a colors edit, dropping `colors` entirely when no override is left.
+fn update_colors(
+    config: &mut TwittyConfig,
+    edit: impl FnOnce(&mut crate::config::ThemeColors),
+) -> bool {
+    let before = serde_json::to_value(&config.colors).ok();
+    let mut colors = config.colors.take().unwrap_or_default();
+    edit(&mut colors);
+    let empty = colors.background.is_none()
+        && colors.foreground.is_none()
+        && colors.cursor.is_none()
+        && colors.selection.is_none()
+        && colors.ansi.is_none();
+    config.colors = (!empty).then_some(colors);
+    serde_json::to_value(&config.colors).ok() != before
 }
 
 fn parse_project_roots(value: &str) -> Vec<String> {
@@ -2694,6 +2837,12 @@ fn parse_project_roots(value: &str) -> Vec<String> {
 fn draft_matches(setting: SettingId, draft: &str, config: &TwittyConfig) -> bool {
     match setting {
         SettingId::ProjectRoots => parse_project_roots(draft) == config.project_roots,
+        // An unfinished color (`#1e1`) is still being typed: keep showing it.
+        SettingId::ColorAnsi => parse_ansi_field(draft).is_none_or(|next| {
+            next.map(|a| a.join(" ")).unwrap_or_default() == read_text(setting, config)
+        }),
+        id if SettingId::COLORS.contains(&id) => parse_color_field(draft)
+            .is_none_or(|next| next.unwrap_or_default() == read_text(setting, config)),
         _ => read_text(setting, config) == draft.trim_end() || read_text(setting, config) == draft,
     }
 }
@@ -2718,6 +2867,14 @@ pub fn write_text(setting: SettingId, value: &str, config: &mut TwittyConfig) ->
             }
             false
         }
+        SettingId::ColorAnsi => match parse_ansi_field(value) {
+            Some(next) => update_colors(config, |c| c.ansi = next),
+            None => false,
+        },
+        id if SettingId::COLORS.contains(&id) => match parse_color_field(value) {
+            Some(next) => update_colors(config, |c| *color_slot_mut(id, c) = next),
+            None => false,
+        },
         _ => false,
     }
 }

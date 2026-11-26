@@ -681,6 +681,28 @@ impl SettingsDrawer<'_, '_> {
     ) {
         let value = self.view.state.text_value(id, &self.view.config);
         self.draw_text_input(input, &value, placeholder, focused, clip);
+        // Color fields show the color they hold at the reading end of the box.
+        if SettingId::COLORS.contains(&id) && id != SettingId::ColorAnsi {
+            if let Some(color) = parse_hex(&value) {
+                let s = self.style;
+                let side = (input.h - s.px(12.0)).max(0.0);
+                let x = if self.mirrored() {
+                    input.x + s.px(6.0)
+                } else {
+                    input.right() - s.px(6.0) - side
+                };
+                self.shapes.push(Shape::RoundedRect {
+                    rect: Rect::new(x, input.y + (input.h - side) / 2.0, side, side),
+                    radii: [s.px(3.0); 4],
+                    fill: self.ctx.color(color),
+                    border: Some(Border {
+                        width: s.px(1.0),
+                        color: self.ctx.color(s.border),
+                    }),
+                    shadow: None,
+                });
+            }
+        }
     }
 
     /// A one-line text box with a placeholder and, when focused, a caret at the end.

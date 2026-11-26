@@ -273,7 +273,12 @@ impl App {
             let mut needs_layout = false;
             for setting in &outcome.changed {
                 match setting {
-                    SettingId::Theme => {
+                    SettingId::Theme
+                    | SettingId::ColorBackground
+                    | SettingId::ColorForeground
+                    | SettingId::ColorCursor
+                    | SettingId::ColorSelection
+                    | SettingId::ColorAnsi => {
                         self.window.set_palette(self.config.palette());
                     }
                     SettingId::FontFamily => {
