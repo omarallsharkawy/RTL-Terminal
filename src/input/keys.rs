@@ -87,6 +87,8 @@ pub enum InputAction {
     ToggleReview,
     /// Open or close the command composer docked at the bottom of the focused pane.
     ToggleComposer,
+    /// Open the settings panel.
+    Settings,
 }
 
 /// One key event with everything the encoders look at. Window-free, so the `*_raw` entry
@@ -309,6 +311,7 @@ fn shortcut_key(physical: Option<KeyCode>, logical: &Key) -> Option<KeyCode> {
             let mut chars = s.chars();
             match (chars.next().map(|c| c.to_ascii_lowercase()), chars.next()) {
                 (Some(c @ 'a'..='z'), None) => Some(LETTER_KEYS[(c as u8 - b'a') as usize]),
+                (Some(','), None) => Some(KeyCode::Comma),
                 _ => None,
             }
         }
@@ -333,7 +336,9 @@ fn app_shortcut(key_code: KeyCode, modifiers: ModifiersState) -> Option<InputAct
         (true, true, false) => {
             ctrl_shift_shortcut(key_code).or_else(|| tab_shortcut(key_code, true))
         }
-        (true, false, false) => tab_shortcut(key_code, false).or_else(|| zoom_shortcut(key_code)),
+        (true, false, false) => tab_shortcut(key_code, false)
+            .or_else(|| zoom_shortcut(key_code))
+            .or_else(|| (key_code == KeyCode::Comma).then_some(InputAction::Settings)),
         (false, false, true) => focus_shortcut(key_code),
         _ => None,
     }

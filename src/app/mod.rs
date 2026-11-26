@@ -27,6 +27,7 @@ mod ports;
 mod projects;
 mod review;
 mod selection;
+mod settings;
 mod ssh;
 mod window;
 
@@ -85,6 +86,8 @@ pub struct App {
     window_focused: bool,
     /// The command palette, while it is open (keys and IME text go to it).
     palette: Option<palette::OpenPalette>,
+    /// The settings overlay, while it is open (keys, IME text and pointer input go to it).
+    settings: Option<crate::ui::settings_panel::SettingsPanelState>,
     /// Local control socket server (`twitty ctl`), when enabled.
     control: Option<ControlServer>,
     /// The last notifications of this window, for the palette's notifications mode.
@@ -135,6 +138,7 @@ impl App {
             // Until the system says the window has focus (it does as soon as it gets it).
             window_focused: false,
             palette: None,
+            settings: None,
             control: None,
             notification_history: Default::default(),
             ports: ports::PortWatch::default(),
@@ -308,11 +312,13 @@ impl ApplicationHandler<AppEvent> for App {
             WindowEvent::Resized(size) => {
                 self.window.resize(size.width, size.height);
                 self.sync_palette();
+                self.sync_settings();
                 self.apply_layout();
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 self.window.set_scale_factor(scale_factor as f32);
                 self.sync_palette();
+                self.sync_settings();
                 self.apply_layout();
             }
             WindowEvent::Occluded(occluded) => self.window.set_occluded(occluded),

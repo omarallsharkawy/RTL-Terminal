@@ -14,6 +14,7 @@ use super::cursor::{
 };
 use super::palette::{palette_overlay, PaletteView};
 use super::preedit::{bounds_outside, ImeArea, PreeditState};
+use super::settings::{settings_overlay, SettingsView};
 use super::window_chrome::{self, ChromeView};
 use crate::blocks::cards::BlockHover;
 use crate::layout::{PaneId, Rect};
@@ -430,6 +431,26 @@ impl Frame {
         view: &PaletteView,
     ) {
         let (outer, texts) = palette_overlay(
+            ctx,
+            style,
+            font,
+            view,
+            self.surface,
+            &mut self.shapes.overlay,
+        );
+        self.overlay.extend(texts);
+        self.overlay_rect = outer;
+    }
+
+    /// Draw the settings panel above everything else, clipping underlying text behind it.
+    pub fn add_settings(
+        &mut self,
+        ctx: &mut DrawContext,
+        style: UiStyle,
+        font: &UiFont,
+        view: &SettingsView,
+    ) {
+        let (outer, texts) = settings_overlay(
             ctx,
             style,
             font,

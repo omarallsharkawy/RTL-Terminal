@@ -82,6 +82,7 @@ impl App {
         if self.palette.as_ref().is_some_and(|p| p.state.mode == mode) {
             return;
         }
+        self.close_settings();
         self.reset_pointer_gesture();
         let (workflows, entries) = if mode == PaletteMode::Commands {
             let cwd = self.focused_id().and_then(|id| self.pane_cwd(id));
@@ -363,6 +364,11 @@ impl App {
             }
             Some(InputAction::OpenProject) => {
                 self.toggle_palette_mode(PaletteMode::Projects);
+                return false;
+            }
+            Some(InputAction::Settings) => {
+                self.close_palette();
+                self.open_settings();
                 return false;
             }
             _ => {}

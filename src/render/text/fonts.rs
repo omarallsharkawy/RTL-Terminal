@@ -28,6 +28,29 @@ pub fn installed_family(font_system: &FontSystem, name: &str) -> Option<String> 
     })
 }
 
+/// Sorted, deduplicated list of monospace font family names in `font_system`.
+pub fn monospace_families(font_system: &FontSystem) -> Vec<String> {
+    collect_families(font_system, true)
+}
+
+/// Sorted, deduplicated list of all font family names in `font_system`.
+pub fn all_families(font_system: &FontSystem) -> Vec<String> {
+    collect_families(font_system, false)
+}
+
+fn collect_families(font_system: &FontSystem, monospace_only: bool) -> Vec<String> {
+    let mut names: Vec<String> = font_system
+        .db()
+        .faces()
+        .filter(|face| !monospace_only || face.monospaced)
+        .filter_map(|face| face.families.first().map(|(name, _)| name.clone()))
+        .filter(|name| !name.trim().is_empty())
+        .collect();
+    names.sort_by_key(|name| name.to_ascii_lowercase());
+    names.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    names
+}
+
 /// The family used for terminal cells: the configured name, or the generic monospace.
 pub fn grid_family(name: Option<&'static str>) -> Family<'static> {
     name.map_or(Family::Monospace, Family::Name)
