@@ -13,6 +13,7 @@ license=('AGPL-3.0-or-later')
 #   libx11, libxcb, libxcursor, libxi
 # - Desktop integration: hicolor-icon-theme
 depends=(
+  'dbus'
   'gcc-libs'
   'glibc'
   'hicolor-icon-theme'

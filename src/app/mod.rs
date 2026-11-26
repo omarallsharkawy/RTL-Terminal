@@ -116,6 +116,10 @@ pub struct App {
     projects: projects::ProjectState,
     /// Persistent store of named tab layouts.
     layouts: crate::layouts::LayoutStore,
+    /// Off-thread SQLite store (command history, memory, Drive index).
+    store: twitty_store::StoreHandle,
+    /// Basename of the user's configured shell for history metadata.
+    shell_name: Option<String>,
     /// Bounded stack of recently closed tabs for reopening.
     closed_tabs: crate::session::closed::ClosedTabs,
     /// Per-tab broadcast input toggle and Esc-Esc state.
@@ -165,6 +169,8 @@ impl App {
             ai: ai::AiHost::load(),
             projects: projects::ProjectState::load(),
             layouts: crate::layouts::LayoutStore::default(),
+            store: twitty_store::StoreHandle::open_default(),
+            shell_name: crate::history::detect_shell_name(),
             closed_tabs: crate::session::closed::ClosedTabs::new(),
             broadcast: crate::input::broadcast::BroadcastState::new(),
         }
@@ -321,6 +327,8 @@ impl ApplicationHandler<AppEvent> for App {
         self.finish_projects();
         self.session.finish(&self.ws, self.window.sidebar_visible());
         self.control = None;
+        self.store
+            .flush_timeout(std::time::Duration::from_millis(250));
         if self.config_dirty {
             self.config.save();
         }

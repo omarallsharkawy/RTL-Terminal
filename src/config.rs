@@ -63,6 +63,9 @@ pub struct TwittyConfig {
     pub composer: String,
     /// Load Twitty's shell integration (OSC 133 prompt marks, OSC 7 cwd) into bash, zsh and fish.
     pub shell_integration: bool,
+    /// Record finished shell commands in Twitty's local history database (commands starting with a
+    /// space are never recorded). Defaults to true.
+    pub record_history: bool,
     /// Restore the tabs and splits from the last window closed normally. Defaults to true.
     pub restore_session: bool,
     /// Command run by "Ask an agent", e.g. "claude" or "codex". Unset: the first one installed.
@@ -126,6 +129,7 @@ impl Default for TwittyConfig {
             claude_hooks: true,
             composer: crate::composer::ComposerMode::OnDemand.as_str().into(),
             shell_integration: true,
+            record_history: true,
             restore_session: true,
             agent_command: None,
             ai: true,

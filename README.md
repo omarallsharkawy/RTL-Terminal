@@ -185,6 +185,7 @@ The config file is `~/.config/twitty/config.json` (`%APPDATA%\twitty\config.json
 | `desktop_notifications` | `true` (default) sends desktop notifications via `notify-send` when an unfocused pane requests attention. |
 | `composer` | Multi-line command composer mode: `"off"`, `"on-demand"` (default, open with `Ctrl+Shift+Space`), or `"always"` (shown at OSC 133 shell prompts). |
 | `shell_integration` | `true` (default) loads Twitty's automatic bash/zsh/fish integration for OSC 133 command blocks and OSC 7 working directories. |
+| `record_history` | `true` (default) records finished shell-integration command blocks (command, exit status, duration, directory, and Git root) in Twitty's local SQLite database after secret redaction. Commands starting with a space are never recorded. |
 | `restore_session` | `true` (default) restores tabs, splits, directories, titles, and SSH sessions saved on normal window close. |
 | `agent_command` | Command run by "Ask an agent" (`Ctrl+Shift+A`), e.g. `"claude"` or `"codex"`. Unset auto-detects the first installed agent (`claude`, `codex`, `gemini`, `opencode`, `grok`). |
 | `ai` | `true` (default) enables built-in read-only AI helpers (composer command generation, failed-block explain/fix). |

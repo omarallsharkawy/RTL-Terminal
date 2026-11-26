@@ -5,6 +5,7 @@ pkgbase = twitty-bin
 	url = https://github.com/omarallsharkawy/RTL-Terminal
 	arch = x86_64
 	license = AGPL-3.0-or-later
+	depends = dbus
 	depends = gcc-libs
 	depends = glibc
 	depends = hicolor-icon-theme

@@ -300,6 +300,7 @@ impl App {
                     SettingId::DesktopNotifications
                     | SettingId::RestoreSession
                     | SettingId::ShellIntegration
+                    | SettingId::RecordHistory
                     | SettingId::ClaudeHooks
                     | SettingId::ControlSocket
                     | SettingId::CmuxCompat

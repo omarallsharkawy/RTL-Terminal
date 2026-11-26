@@ -51,11 +51,12 @@ All packages inherit their version and Rust edition from the root manifest. The 
 
 | Package | Owns | Workspace dependencies |
 | --- | --- | --- |
-| `twitty-core` | Terminal and PTY, shell events, command blocks, layout primitives, palette colors, bidi, and CPU-only row shaping | — |
+| `twitty-core` | Terminal and PTY, shell events, command blocks, secret redaction (`redact`), layout primitives, palette colors, bidi, and CPU-only row shaping | — |
 | `twitty-render` | Cell metrics and row caching, block card geometry, scene primitives, UI styling, and wgpu/glyphon pipelines | `twitty-core` |
+| `twitty-store` | Local SQLite storage (command history, project memory, Drive index with FTS5 and versioned migrations), background worker thread (`StoreHandle`), and OS keyring abstraction (`SecretStore`) | `twitty-core` |
 | `twitty-control` | Control sockets, wire formats, CLI, and Claude hook client | `twitty-core` |
 | `twitty-ai` | Agent selection, prompts, subprocess execution, consent, and AI response formats | `twitty-core`, `twitty-control` (UID lookup on Unix) |
-| `twitty` | Windows, sessions, app views and frame composition, cmux dispatch, remote bootstrap and daemon, and the library facade | All four members |
+| `twitty` | Windows, sessions, app views and frame composition, cmux dispatch, remote bootstrap and daemon, and the library facade | All five members |
 
 The app composes its frame from live UI state. Its renderer and pane-specific cmux dispatch
 stay with those models. Assets and integration tests live at the repository root.
@@ -147,6 +148,12 @@ or link-hover state change.
 - **Git diff:** while the top bar has room for the badge, the focused local pane queues a
   scan on cwd change, command completion and every 3 s. Each scan gets a 2 s subprocess
   budget, at most 1 MiB of numstat output, and up to 4096 file records.
+- **Local store (`twitty-store`):** a single `twitty-store` worker thread owns the SQLite
+  connection (`$XDG_DATA_HOME/twitty/twitty.db`, WAL mode, `0600` in a `0700` dir) behind a
+  bounded channel (`StoreHandle`). Finished shell-integration command blocks are enqueued
+  non-blockingly from the UI thread; Git root lookup, secret redaction (`twitty_core::redact`),
+  and SQLite writes happen on the worker thread. Errors are logged once and Twitty continues
+  without a database.
 
 ## Shell signals
 

@@ -1,8 +1,8 @@
 use crate::blocks::anchor::{AbsLine, LineRemap, LineTracker};
 use crate::links::find_url_at;
 use crate::shell_integration::{
-    clean_text, parse_osc, MarkKind, ShellEvent, Signal, MAX_COMMAND_CHARS, MAX_PENDING_EVENTS,
-    MAX_SIGNAL_LEN,
+    clean_command_line, parse_osc, MarkKind, ShellEvent, Signal, MAX_COMMAND_CHARS,
+    MAX_PENDING_EVENTS, MAX_SIGNAL_LEN,
 };
 use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::{Dimensions, Row, Scroll};
@@ -554,7 +554,8 @@ impl Terminal {
                         .zip(abs_line)
                         .filter(|((b, _), c)| c - b <= MAX_TYPED_COMMAND_LINES)
                         .and_then(|(b, c)| self.text_between(b, (c, point.column.0)));
-                    let typed = typed.map(|t| clean_text(&t.replace('\n', " "), MAX_COMMAND_CHARS));
+                    let typed =
+                        typed.map(|t| clean_command_line(&t.replace('\n', " "), MAX_COMMAND_CHARS));
                     if let Some(text) = typed.filter(|t| !t.is_empty()) {
                         self.push_event(ShellEvent {
                             signal: Signal::CommandLine(text),

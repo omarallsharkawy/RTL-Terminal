@@ -28,6 +28,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install D-Bus headers (keyring Secret Service)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
       - name: Setup Rust stable with fmt and clippy
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -118,6 +121,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install D-Bus headers (keyring Secret Service)
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
       - name: Install SVG rasterizer
         run: sudo apt-get update && sudo apt-get install -y librsvg2-bin
 
@@ -185,6 +190,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install D-Bus headers (keyring Secret Service)
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
       - name: Download Linux release tarball
         uses: actions/download-artifact@v4
         with:
@@ -236,6 +243,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install D-Bus headers (keyring Secret Service)
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
       - name: Setup Rust 1.90
         uses: dtolnay/rust-toolchain@1.90
 
@@ -252,6 +261,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install D-Bus headers (keyring Secret Service)
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
       - name: Setup Rust stable with llvm-tools
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -284,6 +295,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install D-Bus headers (keyring Secret Service)
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
       - name: Setup Rust nightly
         uses: dtolnay/rust-toolchain@nightly
 
@@ -305,6 +318,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install D-Bus headers (keyring Secret Service)
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
       - name: Install Mesa software rendering
         run: sudo apt-get update && sudo apt-get install -y libegl-mesa0 libgl1-mesa-dri mesa-vulkan-drivers
 

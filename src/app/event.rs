@@ -86,12 +86,23 @@ impl App {
         let Some(pane) = self.ws.pane_mut(id) else {
             return;
         };
+        let running_block_id = pane
+            .blocks
+            .blocks()
+            .next_back()
+            .filter(|b| b.is_running())
+            .map(crate::blocks::Block::id);
         pane.blocks.on_event(&event, &pane.terminal, Instant::now());
         let command_ended = matches!(event.signal, Signal::Mark(MarkKind::CommandEnd { .. }));
         let mut mark_kind = None;
         let mut cmd_line = None;
         let is_local = pane.remote.is_none();
         let mut recorded_cwd = None;
+        let finished_block = running_block_id
+            .and_then(|block_id| pane.blocks.block_by_id(block_id))
+            .filter(|b| !b.is_running())
+            .cloned();
+        let finished_cwd = finished_block.as_ref().and_then(|_| pane.meta.cwd.clone());
         let meta = &mut pane.meta;
         match event.signal {
             Signal::Cwd(path) => {
@@ -106,7 +117,9 @@ impl App {
             }
             Signal::CommandLine(line) => {
                 cmd_line = Some(line.clone());
-                meta.last_command = Some(line);
+                // Leading spaces only mark ignorespace commands for history; the card shows
+                // the command itself.
+                meta.last_command = Some(line.trim_start().to_owned());
             }
             Signal::Mark(kind) => {
                 meta.prompt_state.on_mark(kind);
@@ -122,7 +135,8 @@ impl App {
                 }
             }
         }
-        if let Some(line) = cmd_line {
+        // A command typed with a leading space stays out of every history (ignorespace).
+        if let Some(line) = cmd_line.filter(|l| !l.starts_with(' ')) {
             self.on_composer_command_line(&line);
         }
         if let Some(kind) = mark_kind {
@@ -131,6 +145,16 @@ impl App {
         }
         if let Some(cwd) = recorded_cwd {
             self.record_project_cwd(&cwd);
+        }
+        if let Some(block) = finished_block {
+            crate::history::record_finished_block(
+                &self.store,
+                self.config.record_history,
+                &block,
+                finished_cwd.as_deref(),
+                is_local,
+                self.shell_name.as_deref(),
+            );
         }
         if command_ended {
             self.review_command_ended(id);

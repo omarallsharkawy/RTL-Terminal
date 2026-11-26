@@ -10,6 +10,7 @@ pub mod layout;
 pub mod links;
 pub mod paste;
 pub mod pty;
+pub mod redact;
 pub mod remote;
 pub mod row;
 pub mod shell_integration;

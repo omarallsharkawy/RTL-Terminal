@@ -26,6 +26,7 @@ twitty-ai = { path = "crates/twitty-ai" }
 twitty-control = { path = "crates/twitty-control" }
 twitty-core = { path = "crates/twitty-core" }
 twitty-render = { path = "crates/twitty-render" }
+twitty-store = { path = "crates/twitty-store" }
 
 alacritty_terminal = "0.26.0"
 anyhow = "1.0.95"
@@ -40,6 +41,7 @@ png = "0.18.1"
 pollster = "0.4.0"
 portable-pty = "0.9.0"
 proptest = { version = "1", default-features = false, features = ["std"] }
+rusqlite = { version = "0.43.0", default-features = false, features = ["bundled"] }
 rustix = { version = "1.1.6", features = ["event", "fs", "param", "process", "termios"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -69,6 +71,7 @@ twitty-ai.workspace = true
 twitty-control.workspace = true
 twitty-core.workspace = true
 twitty-render.workspace = true
+twitty-store.workspace = true
 unicode-bidi.workspace = true
 unicode-normalization.workspace = true
 unicode-segmentation.workspace = true

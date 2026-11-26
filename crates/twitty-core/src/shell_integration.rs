@@ -178,7 +178,7 @@ fn parse_mark(rest: &[u8], vscode: bool) -> Option<Signal> {
         b'E' if vscode => {
             let first = params.split(|&b| b == b';').next().unwrap_or(&[]);
             let line = unescape_633(&String::from_utf8_lossy(first));
-            let line = clean_text(&line, MAX_COMMAND_CHARS);
+            let line = clean_command_line(&line, MAX_COMMAND_CHARS);
             return (!line.is_empty()).then_some(Signal::CommandLine(line));
         }
         _ => return None,
@@ -211,6 +211,36 @@ fn unescape_633(s: &str) -> String {
         }
     }
     out
+}
+
+/// Clean a shell command line: strip control and bidi-override characters, bound to `max`
+/// characters, and trim trailing whitespace, while preserving any leading spaces so history
+/// recording can honour `HISTCONTROL=ignorespace`. Returns an empty string if the line is blank.
+pub fn clean_command_line(text: &str, max: usize) -> String {
+    use unicode_segmentation::UnicodeSegmentation;
+
+    let text = bounded_text(
+        text.chars().filter(|&c| {
+            !c.is_control()
+                && !crate::terminal::is_bidi_control(c)
+                && !matches!(
+                    c,
+                    '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{2028}' | '\u{2029}'
+                )
+        }),
+        max,
+    );
+    let mut graphemes = text.grapheme_indices(true);
+    let Some((_, _)) = graphemes
+        .clone()
+        .find(|(_, g)| !g.chars().all(char::is_whitespace))
+    else {
+        return String::new();
+    };
+    let end = graphemes
+        .rfind(|(_, g)| !g.chars().all(char::is_whitespace))
+        .map_or(0, |(i, g)| i + g.len());
+    text[..end].to_owned()
 }
 
 /// Program text as shown in the UI: no control or bidi-override characters, trimmed, at most

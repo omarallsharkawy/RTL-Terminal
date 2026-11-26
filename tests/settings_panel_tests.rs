@@ -449,9 +449,9 @@ fn model_sections_labels_and_every_control_round_trips_through_save_and_load() {
         assert!(!read_bool(expected, &cfg));
     }
 
-    // Switch to Behaviour section and toggle all 6 booleans + edit AgentCommand.
+    // Switch to Behaviour section and toggle all 7 booleans + edit AgentCommand.
     state.select_section(SettingsSection::Behaviour, &cfg);
-    for (i, &expected) in SettingId::BEHAVIOUR[..6].iter().enumerate() {
+    for (i, &expected) in SettingId::BEHAVIOUR[..7].iter().enumerate() {
         if i > 0 {
             state.on_key(
                 &Key::Named(NamedKey::ArrowDown),
@@ -520,6 +520,7 @@ fn model_sections_labels_and_every_control_round_trips_through_save_and_load() {
     assert_eq!(loaded.desktop_notifications, cfg.desktop_notifications);
     assert_eq!(loaded.restore_session, cfg.restore_session);
     assert_eq!(loaded.shell_integration, cfg.shell_integration);
+    assert_eq!(loaded.record_history, cfg.record_history);
     assert_eq!(loaded.claude_hooks, cfg.claude_hooks);
     assert_eq!(loaded.control_socket, cfg.control_socket);
     assert_eq!(loaded.cmux_compat, cfg.cmux_compat);

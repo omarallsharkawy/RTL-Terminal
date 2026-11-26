@@ -96,6 +96,7 @@ pub enum SettingId {
     DesktopNotifications,
     RestoreSession,
     ShellIntegration,
+    RecordHistory,
     ClaudeHooks,
     ControlSocket,
     CmuxCompat,
@@ -122,10 +123,11 @@ impl SettingId {
         Self::BlockCards,
     ];
 
-    pub const BEHAVIOUR: [Self; 7] = [
+    pub const BEHAVIOUR: [Self; 8] = [
         Self::DesktopNotifications,
         Self::RestoreSession,
         Self::ShellIntegration,
+        Self::RecordHistory,
         Self::ClaudeHooks,
         Self::ControlSocket,
         Self::CmuxCompat,
@@ -135,7 +137,7 @@ impl SettingId {
     pub const ABOUT: [Self; 1] = [Self::CopyConfigPath];
 
     /// All config-backed settings (Appearance + Behaviour).
-    pub const CONFIG_SETTINGS: [Self; 21] = [
+    pub const CONFIG_SETTINGS: [Self; 22] = [
         Self::Theme,
         Self::FontFamily,
         Self::FontSize,
@@ -153,6 +155,7 @@ impl SettingId {
         Self::DesktopNotifications,
         Self::RestoreSession,
         Self::ShellIntegration,
+        Self::RecordHistory,
         Self::ClaudeHooks,
         Self::ControlSocket,
         Self::CmuxCompat,
@@ -178,6 +181,7 @@ impl SettingId {
             Self::DesktopNotifications
             | Self::RestoreSession
             | Self::ShellIntegration
+            | Self::RecordHistory
             | Self::ClaudeHooks
             | Self::ControlSocket
             | Self::CmuxCompat
@@ -206,6 +210,7 @@ impl SettingId {
             Self::DesktopNotifications => "desktop_notifications",
             Self::RestoreSession => "restore_session",
             Self::ShellIntegration => "shell_integration",
+            Self::RecordHistory => "record_history",
             Self::ClaudeHooks => "claude_hooks",
             Self::ControlSocket => "control_socket",
             Self::CmuxCompat => "cmux_compat",
@@ -365,6 +370,14 @@ impl SettingId {
                 label_ar: "تكامل الشيل",
                 note_en: Some("Applies to new shells"),
                 note_ar: Some("يطبّق على الشيل الجديد"),
+                kind: ControlKind::Toggle,
+            },
+            Self::RecordHistory => SettingDescriptor {
+                id: self,
+                label_en: "Record command history",
+                label_ar: "حفظ سجل الأوامر",
+                note_en: None,
+                note_ar: None,
                 kind: ControlKind::Toggle,
             },
             Self::ClaudeHooks => SettingDescriptor {
@@ -1997,6 +2010,7 @@ pub fn read_bool(setting: SettingId, config: &TwittyConfig) -> bool {
         SettingId::DesktopNotifications => config.desktop_notifications,
         SettingId::RestoreSession => config.restore_session,
         SettingId::ShellIntegration => config.shell_integration,
+        SettingId::RecordHistory => config.record_history,
         SettingId::ClaudeHooks => config.claude_hooks,
         SettingId::ControlSocket => config.control_socket,
         SettingId::CmuxCompat => config.cmux_compat,
@@ -2013,6 +2027,7 @@ pub fn write_bool(setting: SettingId, value: bool, config: &mut TwittyConfig) ->
         SettingId::DesktopNotifications => &mut config.desktop_notifications,
         SettingId::RestoreSession => &mut config.restore_session,
         SettingId::ShellIntegration => &mut config.shell_integration,
+        SettingId::RecordHistory => &mut config.record_history,
         SettingId::ClaudeHooks => &mut config.claude_hooks,
         SettingId::ControlSocket => &mut config.control_socket,
         SettingId::CmuxCompat => &mut config.cmux_compat,

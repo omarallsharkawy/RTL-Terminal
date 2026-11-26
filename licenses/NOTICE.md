@@ -22,3 +22,9 @@ AGPL v3. The names and logos of these projects are not used.
 The renamed subsets in `assets/fonts/` retain Latin or Arabic script characters for UI text,
 common punctuation, and the OpenType tables for shaping. The Arabic subset also keeps basic
 Latin for punctuation and numerals used alongside Arabic.
+
+## Bundled libraries
+
+| Library | License | Used in |
+|---|---|---|
+| [SQLite](https://www.sqlite.org/copyright.html) (via `rusqlite` / `libsqlite3-sys`, MIT) | Public Domain | `crates/twitty-store` |

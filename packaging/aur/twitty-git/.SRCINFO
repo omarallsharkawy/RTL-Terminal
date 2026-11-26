@@ -8,6 +8,7 @@ pkgbase = twitty-git
 	license = AGPL-3.0-or-later
 	makedepends = cargo
 	makedepends = git
+	depends = dbus
 	depends = gcc-libs
 	depends = glibc
 	depends = hicolor-icon-theme
