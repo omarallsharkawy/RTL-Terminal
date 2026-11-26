@@ -98,9 +98,6 @@ pub fn is_done_at(flag_path: &Path) -> bool {
     let Ok(fd_meta) = file.metadata() else {
         return false;
     };
-    if !fd_meta.file_type().is_file() || fd_meta.len() > MAX_FLAG_BYTES {
-        return false;
-    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
@@ -111,7 +108,7 @@ pub fn is_done_at(flag_path: &Path) -> bool {
             return false;
         }
     }
-    true
+    fd_meta.file_type().is_file() && fd_meta.len() <= MAX_FLAG_BYTES
 }
 
 /// Atomically persist the `first_run_done` flag at `flag_path` with `0600` permissions inside

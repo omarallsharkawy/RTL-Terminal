@@ -1,6 +1,8 @@
 use std::ffi::OsStr;
 use std::fs;
-use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use winit::keyboard::{Key, ModifiersState, NamedKey};
