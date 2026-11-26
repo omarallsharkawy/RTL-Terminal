@@ -26,6 +26,8 @@ confidence-threshold = 0.9
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Workspace members depend on each other by path; they are never published.
+allow-wildcard-paths = true
 
 [sources]
 unknown-registry = "deny"

@@ -1,5 +1,6 @@
 [package]
 name = "twitty"
+publish = false
 default-run = "twitty"
 description = "Twitty - Native Bidirectional RTL Terminal Emulator"
 version.workspace = true

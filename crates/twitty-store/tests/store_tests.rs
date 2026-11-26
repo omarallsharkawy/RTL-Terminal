@@ -43,25 +43,28 @@ impl Drop for TempDir {
 fn db_paths_follow_xdg_and_windows_conventions() {
     use std::ffi::OsStr;
 
-    assert_eq!(
-        db_path_unix(
-            Some(OsStr::new("/srv/data")),
-            Some(OsStr::new("/home/omar"))
-        ),
-        Some(PathBuf::from("/srv/data/twitty/twitty.db"))
-    );
-    assert_eq!(
-        db_path_unix(None, Some(OsStr::new("/home/omar"))),
-        Some(PathBuf::from("/home/omar/.local/share/twitty/twitty.db"))
-    );
-    // Relative XDG_DATA_HOME is ignored and falls back to HOME.
-    assert_eq!(
-        db_path_unix(
-            Some(OsStr::new("relative/data")),
-            Some(OsStr::new("/home/omar"))
-        ),
-        Some(PathBuf::from("/home/omar/.local/share/twitty/twitty.db"))
-    );
+    // Unix-style absolute paths are only absolute on Unix.
+    if cfg!(unix) {
+        assert_eq!(
+            db_path_unix(
+                Some(OsStr::new("/srv/data")),
+                Some(OsStr::new("/home/omar"))
+            ),
+            Some(PathBuf::from("/srv/data/twitty/twitty.db"))
+        );
+        assert_eq!(
+            db_path_unix(None, Some(OsStr::new("/home/omar"))),
+            Some(PathBuf::from("/home/omar/.local/share/twitty/twitty.db"))
+        );
+        // Relative XDG_DATA_HOME is ignored and falls back to HOME.
+        assert_eq!(
+            db_path_unix(
+                Some(OsStr::new("relative/data")),
+                Some(OsStr::new("/home/omar"))
+            ),
+            Some(PathBuf::from("/home/omar/.local/share/twitty/twitty.db"))
+        );
+    }
     assert_eq!(db_path_unix(None, None), None);
 
     assert_eq!(
