@@ -151,7 +151,7 @@ impl RowShaper<'_> {
             if text.len() == span_start {
                 continue;
             }
-            complex |= !cell.c.is_ascii() || !cell.zerowidth.is_empty();
+            complex |= !cell.c.is_ascii() || cell.has_shaped_marks();
 
             let (mut fg, bg) = cell_colors(self.palette, cell);
             if cursor.is_some_and(|c| c.block && c.col == col) {
@@ -205,15 +205,20 @@ impl RowShaper<'_> {
         (self.shape_buffer(&text, &spans, shaping), cell_bytes)
     }
 
-    /// True when every glyph of an LTR buffer starts exactly at its cell's grid column.
+    /// True when every sized glyph of an LTR buffer starts at its cell's grid column.
+    /// Zero-width marks (combining accents, variation selectors) are positioned relative to their
+    /// base glyph by HarfBuzz and have no column advance of their own.
     fn is_grid_aligned(&self, buffer: &Buffer, cell_bytes: &[usize]) -> bool {
         buffer.layout_runs().all(|run| {
-            run.glyphs.iter().all(|glyph| {
-                let cell = cell_bytes
-                    .partition_point(|&b| b <= glyph.start)
-                    .saturating_sub(1);
-                (glyph.x - cell as f32 * self.char_width).abs() < 0.5
-            })
+            run.glyphs
+                .iter()
+                .filter(|glyph| glyph.w > 0.0)
+                .all(|glyph| {
+                    let cell = cell_bytes
+                        .partition_point(|&b| b <= glyph.start)
+                        .saturating_sub(1);
+                    (glyph.x - cell as f32 * self.char_width).abs() < 0.5
+                })
         })
     }
 
@@ -370,8 +375,8 @@ pub fn measure_char_width(
 }
 
 /// Shape a one-line label (status line, tab title, preedit) in the grid font with full
-/// shaping, so Arabic in it joins and reorders. Bidi embeddings, overrides and isolates in a
-/// program-set title are dropped, as in terminal cells.
+/// shaping, so Arabic in it joins and reorders. Bidi controls, control characters and
+/// non-shaping invisible marks are dropped (tabs become spaces), as in terminal cells.
 #[doc(hidden)]
 pub fn shape_label(
     font_system: &mut FontSystem,
@@ -381,7 +386,15 @@ pub fn shape_label(
 ) -> Buffer {
     let text: String = text
         .chars()
-        .filter(|&c| !crate::terminal::is_bidi_control(c))
+        .filter_map(|c| {
+            if c == '\t' {
+                Some(' ')
+            } else if crate::terminal::is_ignored_mark(c) {
+                None
+            } else {
+                Some(c)
+            }
+        })
         .collect();
     let mut buffer = Buffer::new_empty(Metrics::new(font_px, line_height));
     buffer.set_text(

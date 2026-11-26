@@ -69,25 +69,39 @@ impl CellData {
             .intersects(CellFlags::WIDE_CHAR_SPACER | CellFlags::LEADING_WIDE_CHAR_SPACER)
     }
 
-    /// A plain space with nothing attached, usable as a segment separator.
+    /// A plain space (or tab placeholder / no-break space) with no visible marks attached,
+    /// usable as a segment separator.
     pub fn is_blank(&self) -> bool {
-        self.c == ' ' && self.zerowidth.is_empty() && !self.is_spacer()
+        !self.is_spacer() && is_blank_char(self.c) && !self.has_shaped_marks()
     }
 
-    /// The characters this cell contributes to a shaped run: none for spacers, and never a
-    /// bidi embedding, override or isolate (see `is_bidi_control`).
+    /// True when this cell carries at least one combining mark or joiner that reaches shaping.
+    pub(crate) fn has_shaped_marks(&self) -> bool {
+        !self.is_spacer() && self.zerowidth.iter().any(|&c| !is_ignored_mark(c))
+    }
+
+    /// The characters this cell contributes to a shaped run: none for spacers, spaces for
+    /// control characters (such as `alacritty_terminal`'s `\t` tab placeholders), and never
+    /// bidi controls or non-shaping invisible marks (see `is_ignored_mark`).
     fn shaped_chars(&self) -> impl Iterator<Item = char> + '_ {
-        let cell = (!self.is_spacer()).then_some(self.c);
+        let cell = (!self.is_spacer()).then_some(if self.c.is_control() { ' ' } else { self.c });
         cell.into_iter()
-            .chain(self.zerowidth.iter().copied().filter(|_| !self.is_spacer()))
-            .filter(|&c| !is_bidi_control(c))
+            .filter(|&c| !is_ignored_mark(c))
+            .chain(
+                self.zerowidth
+                    .iter()
+                    .copied()
+                    .filter(|&c| !self.is_spacer() && !is_ignored_mark(c)),
+            )
             .flat_map(base_letters)
     }
 
     /// Separates words for bidi: any space, including the no-break space programs put after a
-    /// prompt (Claude Code writes `❯` + U+00A0).
+    /// prompt (Claude Code writes `❯` + U+00A0) and tab placeholders.
     pub fn is_word_break(&self) -> bool {
-        !self.is_spacer() && self.zerowidth.is_empty() && self.c.is_whitespace()
+        !self.is_spacer()
+            && !self.has_shaped_marks()
+            && (self.c.is_whitespace() || self.c.is_control())
     }
 
     /// Text this cell contributes to a shaped run (empty for spacers).
@@ -96,7 +110,7 @@ impl CellData {
     }
 }
 
-/// Arabic presentation forms (`U+FB50–FDFF`, `U+FE70–FEFF`) as the plain letters they stand
+/// Arabic presentation forms (`U+FB50–FDFF`, `U+FE70–FEFC`) as the plain letters they stand
 /// for; any other character as itself.
 ///
 /// vim and nvim shape Arabic themselves by default ('arabicshape'): they send each letter
@@ -106,7 +120,7 @@ impl CellData {
 fn base_letters(c: char) -> impl Iterator<Item = char> {
     use unicode_normalization::char::decompose_compatible;
     let mut out = smallvec_like::Chars::default();
-    if matches!(c, '\u{FB50}'..='\u{FDFF}' | '\u{FE70}'..='\u{FEFF}') {
+    if matches!(c, '\u{FB50}'..='\u{FDFF}' | '\u{FE70}'..='\u{FEFC}') {
         decompose_compatible(c, |d| out.push(d));
     }
     if out.is_empty() {
@@ -156,6 +170,26 @@ mod smallvec_like {
 #[doc(hidden)]
 pub fn is_bidi_control(c: char) -> bool {
     matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
+/// A single-cell blank character in the terminal grid: plain space, `alacritty_terminal`'s
+/// `\t` tab placeholder (which it keeps in the grid so copy preserves literal tabs),
+/// no-break space, or any control character.
+fn is_blank_char(c: char) -> bool {
+    matches!(c, ' ' | '\t' | '\u{00A0}') || c.is_control()
+}
+
+/// Zero-width characters that carry no visible mark and play no role in shaping: bidi
+/// controls, control characters, and invisible break/join formatters (ZWSP, word joiner, BOM,
+/// combining grapheme joiner, invisible math operators). ZWNJ/ZWJ, variation selectors and
+/// LRM/RLM/ALM stay because they affect Arabic joining, emoji sequences and neutral runs.
+pub(crate) fn is_ignored_mark(c: char) -> bool {
+    is_bidi_control(c)
+        || c.is_control()
+        || matches!(
+            c,
+            '\u{034F}' | '\u{200B}' | '\u{2060}'..='\u{2064}' | '\u{FEFF}'
+        )
 }
 
 /// Narrowest grid: a double-width character needs two columns.

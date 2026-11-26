@@ -113,5 +113,5 @@ pub fn is_arabic_script(c: char) -> bool {
         | '\u{0750}'..='\u{077F}'
         | '\u{0870}'..='\u{08FF}'
         | '\u{FB50}'..='\u{FDFF}'
-        | '\u{FE70}'..='\u{FEFF}')
+        | '\u{FE70}'..='\u{FEFC}')
 }
