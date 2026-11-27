@@ -3,9 +3,9 @@
 use cosmic_text::{Attrs, AttrsList, AttrsOwned, Buffer, FontSystem};
 use glyphon::{Color, TextBounds};
 
-use crate::layout::Rect;
-use crate::render::shapes::Shape;
-use crate::render::text::ui::UiLabel;
+use twitty_core::layout::Rect;
+use twitty_render::shapes::Shape;
+use twitty_render::text::ui::UiLabel;
 
 #[derive(Clone, Copy)]
 pub(super) struct Slide {

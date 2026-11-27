@@ -17,22 +17,22 @@ use unicode_width::UnicodeWidthChar;
 
 use super::context::DrawContext;
 use super::preedit::ImeArea;
-use crate::color::Rgba;
-use crate::composer::complete::CompletionKind;
-use crate::composer::highlight::{line_highlight_spans, HighlightSpan, TokenKind};
-use crate::composer::lint::{active_lint_for_caret, LintMark, LintSeverity};
-use crate::layout::Rect;
-use crate::render::icons::Icon;
-use crate::render::metrics::CellMetrics;
-use crate::render::row::{CachedRow, RowCursor};
-use crate::render::shapes::{Border, Shadow, Shape};
-use crate::render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
-use crate::render::ui_style::{
+use twitty_core::color::Rgba;
+use twitty_core::layout::Rect;
+use twitty_core::terminal::{CellData, LineData, MAX_DRAWN_MARKS};
+use twitty_render::icons::Icon;
+use twitty_render::metrics::CellMetrics;
+use twitty_render::row::{CachedRow, RowCursor};
+use twitty_render::shapes::{Border, Shadow, Shape};
+use twitty_render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
+use twitty_render::ui_style::{
     UiStyle, OVERLAY_BLUR, OVERLAY_OFFSET, OVERLAY_SHADOW, RADIUS_12, RADIUS_6, RADIUS_8, SPACE_12,
     SPACE_4, SPACE_8,
 };
-use crate::terminal::{CellData, LineData, MAX_DRAWN_MARKS};
-use crate::ui::chrome::UiLanguage;
+use twitty_ui::composer::complete::CompletionKind;
+use twitty_ui::composer::highlight::{line_highlight_spans, HighlightSpan, TokenKind};
+use twitty_ui::composer::lint::{active_lint_for_caret, LintMark, LintSeverity};
+use twitty_ui::ui::chrome::UiLanguage;
 
 /// Maximum editor lines shown simultaneously before scrolling inside the composer box.
 pub const MAX_VISIBLE_LINES: usize = 6;
@@ -1271,7 +1271,8 @@ pub fn build(
                     (banner_rect.right() - text_x - pad).max(0.0),
                     banner_rect.h,
                 );
-                let label = crate::ui::chrome::tr("Thinking…", "بيفكر… (Esc to cancel / للإلغاء)");
+                let label =
+                    twitty_ui::ui::chrome::tr("Thinking…", "بيفكر… (Esc to cancel / للإلغاء)");
                 let buf = font.fit(
                     ctx.font_system,
                     UiSize::Small,

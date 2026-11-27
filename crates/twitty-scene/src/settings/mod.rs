@@ -12,19 +12,19 @@ use glyphon::TextBounds;
 
 use super::context::DrawContext;
 use super::palette::fit_query_tail;
-use crate::color::{parse_hex, Palette, Rgba};
-use crate::config::TwittyConfig;
-use crate::input::keybindings::{command_titles, KeyBindings};
-use crate::layout::Rect;
-use crate::render::icons::Icon;
-use crate::render::shapes::{Border, Shadow, Shape};
-use crate::render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
-use crate::render::ui_style::{
+use twitty_core::color::{parse_hex, Palette, Rgba};
+use twitty_core::layout::Rect;
+use twitty_render::icons::Icon;
+use twitty_render::shapes::{Border, Shadow, Shape};
+use twitty_render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
+use twitty_render::ui_style::{
     UiStyle, OVERLAY_BLUR, OVERLAY_OFFSET, OVERLAY_SHADOW, RADIUS_12, RADIUS_6, RADIUS_8,
 };
-use crate::ui::chrome::UiLanguage;
-use crate::ui::settings_commands::{display_name, mode_label, FormField};
-use crate::ui::settings_panel::{
+use twitty_ui::config::TwittyConfig;
+use twitty_ui::input::keybindings::{command_titles, KeyBindings};
+use twitty_ui::ui::chrome::UiLanguage;
+use twitty_ui::ui::settings_commands::{display_name, mode_label, FormField};
+use twitty_ui::ui::settings_panel::{
     current_picker_value, read_bool, read_segmented_index, read_slider_value, read_swatch_index,
     ControlGeometry, ControlKind, ControlRowLayout, ExpandedPickerLayout, FocusZone, SettingId,
     SettingsHit, SettingsLayout, SettingsPanelState, SettingsSection, ACCENT_SWATCHES,
@@ -39,7 +39,7 @@ pub struct SettingsView {
 
 /// Draw the settings overlay into `shapes`, returning the outer panel rect (to clip underlying
 /// text) and the shaped UI labels.
-pub(crate) fn settings_overlay(
+pub fn settings_overlay(
     ctx: &mut DrawContext,
     style: UiStyle,
     font: &UiFont,

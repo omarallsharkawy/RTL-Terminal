@@ -142,4 +142,8 @@ Each step lands on its own with green CI and no behavior change.
 - Step 5, first half: `twitty-ui` holds config, commands, input, panels, composer, review,
   sidebar, workflows, projects and remote (about 32k lines). Four links to sessions and the
   control socket were cut first (palette item types, `Shell`, pane notifications, UID lookup).
-  `twitty-scene` is next.
+- Step 5, second half: `twitty-scene` holds `render/scene` (about 13k lines); `ports` moved
+  to `twitty-ui`. The root crate is now about 18k lines. Measured rebuilds after touching one
+  file (dev profile, no debug info): app 5.9 s → 2.5 s, scene 5.7 s → 3.2 s, UI 5.6 s → 5.4 s.
+  Release builds (thin LTO, one codegen unit) got slower: 32 s → 37 s for an app change and
+  31 s → 42 s for a UI change, since LTO now works across more crates.

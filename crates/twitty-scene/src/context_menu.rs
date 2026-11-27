@@ -2,14 +2,14 @@
 //! the highlighted row tinted, shortcuts dimmed at the trailing edge, separators as hairlines.
 
 use super::context::DrawContext;
-use crate::layout::Rect;
-use crate::render::shapes::{Border, Shadow, Shape};
-use crate::render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
-use crate::render::ui_style::{
+use twitty_core::layout::Rect;
+use twitty_render::shapes::{Border, Shadow, Shape};
+use twitty_render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
+use twitty_render::ui_style::{
     UiStyle, OVERLAY_BLUR, OVERLAY_OFFSET, OVERLAY_SHADOW, RADIUS_6, RADIUS_8, SPACE_12, SPACE_8,
 };
-use crate::ui::chrome::UiLanguage;
-use crate::ui::context_menu::{ContextMenu, MenuEntry, MenuLayout};
+use twitty_ui::ui::chrome::UiLanguage;
+use twitty_ui::ui::context_menu::{ContextMenu, MenuEntry, MenuLayout};
 
 /// Push the menu's shapes into `shapes` and return its labels.
 pub fn draw(
@@ -162,13 +162,13 @@ pub fn draw_toasts(
     ctx: &mut DrawContext,
     style: UiStyle,
     font: &UiFont,
-    toasts: &[crate::ui::toast::Toast],
+    toasts: &[twitty_ui::ui::toast::Toast],
     surface: (f32, f32),
     language: UiLanguage,
     shapes: &mut Vec<Shape>,
 ) -> (Vec<UiLabel>, Vec<Rect>) {
-    use crate::render::icons::Icon;
-    use crate::ui::toast::ToastKind;
+    use twitty_render::icons::Icon;
+    use twitty_ui::ui::toast::ToastKind;
     let mut labels = Vec::new();
     let mut rects = Vec::new();
     let h = style.px(34.0);

@@ -37,7 +37,7 @@ impl SettingsDrawer<'_, '_> {
     pub(super) fn draw_segmented(
         &mut self,
         id: SettingId,
-        options: &[crate::ui::settings_panel::SegmentedOption],
+        options: &[twitty_ui::ui::settings_panel::SegmentedOption],
         container: Rect,
         segments: &[Rect],
         clip: TextBounds,
@@ -94,7 +94,7 @@ impl SettingsDrawer<'_, '_> {
     pub(super) fn draw_slider(
         &mut self,
         id: SettingId,
-        spec: crate::ui::settings_panel::SliderSpec,
+        spec: twitty_ui::ui::settings_panel::SliderSpec,
         minus: Rect,
         track: Rect,
         plus: Rect,

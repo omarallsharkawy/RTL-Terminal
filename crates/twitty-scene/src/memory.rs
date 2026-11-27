@@ -9,20 +9,20 @@ use twitty_store::RulesFileState;
 
 use super::context::DrawContext;
 use super::palette::fit_query_tail;
-use crate::color::Rgba;
-use crate::layout::Rect;
-use crate::render::icons::Icon;
-use crate::render::shapes::{Border, Shadow, Shape};
-use crate::render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
-use crate::render::ui_style::{
+use twitty_core::color::Rgba;
+use twitty_core::layout::Rect;
+use twitty_render::icons::Icon;
+use twitty_render::shapes::{Border, Shadow, Shape};
+use twitty_render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
+use twitty_render::ui_style::{
     UiStyle, OVERLAY_BLUR, OVERLAY_OFFSET, OVERLAY_SHADOW, RADIUS_12, RADIUS_6, RADIUS_8,
 };
-use crate::ui::chrome::UiLanguage;
-use crate::ui::memory_panel::{
+use twitty_ui::ui::chrome::UiLanguage;
+use twitty_ui::ui::memory_panel::{
     MemoryEntryRowLayout, MemoryHit, MemoryInputTarget, MemoryLayout, MemoryPanelState, MemoryTab,
     RulesFileRowLayout,
 };
-use crate::ui::settings_panel::FocusZone;
+use twitty_ui::ui::settings_panel::FocusZone;
 
 /// Snapshot of Project Memory state passed to the renderer.
 #[derive(Clone, Debug)]
@@ -32,7 +32,7 @@ pub struct MemoryView {
 
 /// Draw the Project Memory overlay into `shapes`, returning its outer rect (to clip underlying
 /// terminal text) and shaped UI labels.
-pub(crate) fn memory_overlay(
+pub fn memory_overlay(
     ctx: &mut DrawContext,
     style: UiStyle,
     font: &UiFont,

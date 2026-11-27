@@ -4,18 +4,18 @@
 //! reorders the other. Titles are shortened at grapheme boundaries when space is tight.
 
 use super::context::DrawContext;
-use crate::layout::Rect;
-use crate::render::icons::Icon;
-use crate::render::shapes::{Border, Shadow, Shape};
-use crate::render::text::ui::{UiAlign, UiLabel, UiSize, UiWeight};
-use crate::render::ui_style::{
+use twitty_core::layout::Rect;
+use twitty_render::icons::Icon;
+use twitty_render::shapes::{Border, Shadow, Shape};
+use twitty_render::text::ui::{UiAlign, UiLabel, UiSize, UiWeight};
+use twitty_render::ui_style::{
     UiStyle, OVERLAY_BLUR, OVERLAY_OFFSET, OVERLAY_SHADOW, RADIUS_12, RADIUS_6, RADIUS_8,
 };
 
-use crate::render::text::labels::UiLabels;
-pub use crate::render::text::ui::{fit_query_tail, label_width};
+use twitty_render::text::labels::UiLabels;
+pub use twitty_render::text::ui::{fit_query_tail, label_width};
 
-pub use crate::ui::palette::{PaletteItem, PaletteView};
+pub use twitty_ui::ui::palette::{PaletteItem, PaletteView};
 
 /// Optional pictograms for the active mode and the visible command rows.
 pub struct PaletteIcons {
@@ -106,7 +106,7 @@ impl PaletteLayout {
 }
 
 /// Panel shapes and labels, with the area to clip out of previously laid-out text.
-pub(crate) fn palette_overlay(
+pub fn palette_overlay(
     ctx: &mut DrawContext,
     style: UiStyle,
     mut font: UiLabels<'_>,
@@ -162,7 +162,7 @@ pub(crate) fn palette_overlay(
             let placeholder = view
                 .placeholder
                 .as_deref()
-                .unwrap_or(crate::ui::chrome::tr("Type a command…", "اكتب أمر…"));
+                .unwrap_or(twitty_ui::ui::chrome::tr("Type a command…", "اكتب أمر…"));
             (
                 font.fit(
                     ctx.font_system,

@@ -1,18 +1,18 @@
 //! The toolbar, tab strip and pane headers. All controls share geometry with pointer input.
 
-use crate::layout::{PaneId, Rect};
-use crate::render::icons::Icon;
-use crate::render::shapes::{Border, Shape};
-use crate::render::text::labels::UiLabels;
-use crate::render::text::ui::{label_width, UiAlign, UiLabel, UiSize, UiWeight};
-use crate::render::ui_style::{UiStyle, RADIUS_6, RADIUS_8, SPACE_12, SPACE_16, SPACE_4, SPACE_8};
-use crate::render::TabLabel;
-use crate::ui::chrome::{
+use crate::TabLabel;
+use twitty_core::layout::{PaneId, Rect};
+use twitty_render::icons::Icon;
+use twitty_render::shapes::{Border, Shape};
+use twitty_render::text::labels::UiLabels;
+use twitty_render::text::ui::{label_width, UiAlign, UiLabel, UiSize, UiWeight};
+use twitty_render::ui_style::{UiStyle, RADIUS_6, RADIUS_8, SPACE_12, SPACE_16, SPACE_4, SPACE_8};
+use twitty_ui::ui::chrome::{
     count_badge, ChromeAction, PaneHeaderLayout, SearchContents, SearchPlaceholder, TopBarLayout,
     UiLanguage, WindowLayout, SEARCH_AR, SEARCH_EN, SEARCH_KEYCAP,
 };
-use crate::ui::git_diff::DiffStat;
-use crate::ui::motion::ChromeMotion;
+use twitty_ui::ui::git_diff::DiffStat;
+use twitty_ui::ui::motion::ChromeMotion;
 
 use super::context::DrawContext;
 
@@ -43,7 +43,7 @@ pub struct ChromeView<'a> {
     pub tabs: &'a [TabLabel],
 }
 
-pub(crate) fn draw(
+pub fn draw(
     ctx: &mut DrawContext,
     style: UiStyle,
     font: UiLabels<'_>,
@@ -644,7 +644,7 @@ impl Chrome<'_, '_> {
         icon.draw(icon_rect, self.ctx.color(color), self.shapes);
     }
 
-    fn panel(&mut self, rect: Rect, radius: f32, color: crate::color::Rgba) {
+    fn panel(&mut self, rect: Rect, radius: f32, color: twitty_core::color::Rgba) {
         if rect.w > 0.0 && rect.h > 0.0 {
             self.shapes.push(Shape::rounded(
                 rect,
@@ -654,7 +654,7 @@ impl Chrome<'_, '_> {
         }
     }
 
-    fn rule(&mut self, rect: Rect, color: crate::color::Rgba) {
+    fn rule(&mut self, rect: Rect, color: twitty_core::color::Rgba) {
         let h = self.style.hairline().min(rect.h);
         self.panel(Rect::new(rect.x, rect.bottom() - h, rect.w, h), 0.0, color);
     }
@@ -666,7 +666,7 @@ impl Chrome<'_, '_> {
         size: UiSize,
         weight: UiWeight,
         align: UiAlign,
-        color: crate::color::Rgba,
+        color: twitty_core::color::Rgba,
     ) {
         if rect.w <= 0.0 || rect.h <= 0.0 {
             return;
@@ -691,7 +691,7 @@ impl Chrome<'_, '_> {
         size: UiSize,
         weight: UiWeight,
         align: UiAlign,
-        color: crate::color::Rgba,
+        color: twitty_core::color::Rgba,
     ) {
         if rect.w > 0.0 && rect.h > 0.0 {
             let buffer = self.font.fit(

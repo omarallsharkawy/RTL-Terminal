@@ -6,18 +6,20 @@
 
 use super::ai::wrap_lines;
 use super::context::DrawContext;
-use crate::color::{Palette, Rgba};
-use crate::config::TwittyConfig;
-use crate::layout::Rect;
-use crate::render::icons::Icon;
-use crate::render::shapes::{Border, Shadow, Shape};
-use crate::render::text::ui::{UiAlign, UiFont, UiLabel, UiSize, UiWeight};
-use crate::render::ui_style::{
+use twitty_core::color::{Palette, Rgba};
+use twitty_core::layout::Rect;
+use twitty_render::icons::Icon;
+use twitty_render::shapes::{Border, Shadow, Shape};
+use twitty_render::text::ui::{UiAlign, UiFont, UiLabel, UiSize, UiWeight};
+use twitty_render::ui_style::{
     UiStyle, OVERLAY_BLUR, OVERLAY_OFFSET, OVERLAY_SHADOW, RADIUS_12, RADIUS_6, RADIUS_8, SPACE_12,
     SPACE_4, SPACE_8,
 };
-use crate::ui::chrome::{UiLanguage, UiLanguagePref};
-use crate::ui::welcome::{WelcomeHit, WelcomeLayout, WelcomeState, WelcomeStep, WELCOME_THEMES};
+use twitty_ui::config::TwittyConfig;
+use twitty_ui::ui::chrome::{UiLanguage, UiLanguagePref};
+use twitty_ui::ui::welcome::{
+    WelcomeHit, WelcomeLayout, WelcomeState, WelcomeStep, WELCOME_THEMES,
+};
 
 /// Snapshot of welcome wizard state + live config passed to the renderer.
 #[derive(Clone, Debug)]
@@ -28,7 +30,7 @@ pub struct WelcomeView {
 
 /// Draw the Welcome wizard overlay into `shapes`, returning its outer rect (to clip underlying
 /// text) and shaped UI labels.
-pub(crate) fn welcome_overlay(
+pub fn welcome_overlay(
     ctx: &mut DrawContext,
     style: UiStyle,
     font: &UiFont,

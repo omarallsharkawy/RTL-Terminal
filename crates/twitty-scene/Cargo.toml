@@ -1,0 +1,23 @@
+[package]
+name = "twitty-scene"
+publish = false
+description = "Twitty's frame on the CPU: every quad, shape and text run, from terminal and UI state"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+alacritty_terminal.workspace = true
+cosmic_text.workspace = true
+glyphon.workspace = true
+twitty-ai.workspace = true
+twitty-core.workspace = true
+twitty-render.workspace = true
+twitty-store.workspace = true
+twitty-ui.workspace = true
+unicode-bidi.workspace = true
+unicode-segmentation.workspace = true
+unicode-width.workspace = true

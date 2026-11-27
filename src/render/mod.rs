@@ -8,7 +8,8 @@
 //!
 //! `Renderer` ties them together for the app.
 
-pub mod scene;
+pub use twitty_scene as scene;
+pub use twitty_scene::{PaneFrame, TabLabel};
 
 pub use twitty_render::{gpu, icons, metrics, row, shapes, style, text, ui_style};
 
@@ -32,7 +33,6 @@ use winit::window::Window;
 use crate::blocks::cards::BlockHover;
 use crate::color::{Palette, Rgba};
 use crate::layout::{PaneId, Rect};
-use crate::terminal::{CursorState, LineData};
 use crate::ui::layers::Layer;
 use crate::ui::motion::{AnimatedView, ChromeMotion, HOVER};
 use gpu::Gpu;
@@ -54,29 +54,6 @@ use text::labels::{LabelCache as UiLabelCache, UiLabels};
 use text::ui::UiFont;
 use ui_style::UiStyle;
 
-/// Everything the renderer needs to draw one pane.
-pub struct PaneFrame {
-    pub id: PaneId,
-    /// Where the pane goes in the window (physical pixels, padding included).
-    pub rect: Rect,
-    pub lines: Vec<LineData>,
-    pub cursor: CursorState,
-    /// The pane keyboard input goes to; the others get a hollow cursor.
-    pub focused: bool,
-    /// One-line bar drawn over the pane's last row (search query), if any.
-    pub status: Option<String>,
-    /// Command blocks on screen (`BlockList::decor`); empty for most panes.
-    pub blocks: Vec<crate::blocks::BlockDecor>,
-}
-
-/// A tab in the tab bar.
-pub struct TabLabel {
-    pub title: String,
-    pub active: bool,
-}
-
-/// The terminal renderer: lays out each frame on the CPU (`scene`) and draws it on the GPU
-/// (`gpu`). Its state is reached through methods, so the app never depends on its layout.
 /// Everything the app shows over the panes in one frame, built once per redraw and handed
 /// over in one call (`Renderer::set_overlays`). Overlays opened and closed by events (palette,
 /// settings, memory, welcome) are set when they change instead.
@@ -93,6 +70,8 @@ pub(crate) struct OverlayViews {
     pub tooltip: Option<(String, (f32, f32))>,
 }
 
+/// The terminal renderer: lays out each frame on the CPU (`scene`) and draws it on the GPU
+/// (`gpu`). Its state is reached through methods, so the app never depends on its layout.
 pub(crate) struct Renderer {
     window: Arc<Window>,
     /// Surface size and format.

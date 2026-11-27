@@ -8,20 +8,20 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use super::context::DrawContext;
 use super::frame::bounds_around;
-use crate::color::Rgba;
-use crate::layout::{Rect, SidebarPosition};
-use crate::render::icons::Icon;
-use crate::render::shapes::{Border, Shape};
-use crate::render::style::Quad;
-use crate::render::text::shaper::shape_label;
-use crate::render::text::ui::{label_width, UiAlign, UiFont, UiSize, UiWeight};
-use crate::render::ui_style::{UiStyle, RADIUS_6, RADIUS_8, SPACE_12, SPACE_16, SPACE_4};
-use crate::render::CellMetrics;
-use crate::sidebar::cards::{fit_title, Card, Item, View, STATE_ICON_WIDTH, STATE_LABEL_PAD};
-use crate::sidebar::{display_path, AgentState, Entry};
-use crate::ui::chrome::{count_badge, UiLanguage};
-use crate::ui::motion::working_dot;
+use twitty_core::color::Rgba;
+use twitty_core::layout::{Rect, SidebarPosition};
+use twitty_render::icons::Icon;
+use twitty_render::metrics::CellMetrics;
+use twitty_render::shapes::{Border, Shape};
+use twitty_render::style::Quad;
 use twitty_render::text::fit_text;
+use twitty_render::text::shaper::shape_label;
+use twitty_render::text::ui::{label_width, UiAlign, UiFont, UiSize, UiWeight};
+use twitty_render::ui_style::{UiStyle, RADIUS_6, RADIUS_8, SPACE_12, SPACE_16, SPACE_4};
+use twitty_ui::sidebar::cards::{fit_title, Card, Item, View, STATE_ICON_WIDTH, STATE_LABEL_PAD};
+use twitty_ui::sidebar::{display_path, AgentState, Entry};
+use twitty_ui::ui::chrome::{count_badge, UiLanguage};
+use twitty_ui::ui::motion::working_dot;
 
 #[derive(Clone)]
 pub struct Label {
@@ -518,7 +518,7 @@ impl Cards<'_, '_> {
         let mirror = self.view.mirrored;
         let gap = s.px(SPACE_4);
         let remote = entry.remote_state.map(|state| {
-            use crate::remote::ConnectionState::*;
+            use twitty_ui::remote::ConnectionState::*;
             match state {
                 Connecting => self.view.language.text("Connecting", "جاري الاتصال"),
                 Connected => self.view.language.text("Connected", "متّصل"),
@@ -531,7 +531,7 @@ impl Cards<'_, '_> {
         let mut rest = rect;
         let mut port_rect = None;
         if !entry.ports.is_empty() {
-            let ports = crate::ports::format_ports(&entry.ports);
+            let ports = twitty_ui::ports::format_ports(&entry.ports);
             let w = if entry.branch.is_none() && detail.is_none() {
                 rect.w
             } else {
@@ -594,8 +594,8 @@ impl Cards<'_, '_> {
             } else {
                 UiAlign::Right
             };
-            for limit in (1..=entry.ports.len().min(crate::ports::MAX_SHOWN)).rev() {
-                let text = crate::ports::format_ports_limit(&entry.ports, limit);
+            for limit in (1..=entry.ports.len().min(twitty_ui::ports::MAX_SHOWN)).rev() {
+                let text = twitty_ui::ports::format_ports_limit(&entry.ports, limit);
                 let result = self
                     .cache
                     .get(self.ctx, self.font, Kind::Ports, &text, port_rect.w);

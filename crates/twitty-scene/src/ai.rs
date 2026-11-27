@@ -7,16 +7,16 @@
 //! behind every surface via `Frame::text_runs`.
 
 use super::context::DrawContext;
-use crate::ai::{BlockAiCardStatus, BlockAiMode, ConsentNotice};
-use crate::layout::Rect;
-use crate::render::icons::Icon;
-use crate::render::shapes::{Border, Shadow, Shape};
-use crate::render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
-use crate::render::ui_style::{
+use twitty_core::layout::Rect;
+use twitty_render::icons::Icon;
+use twitty_render::shapes::{Border, Shadow, Shape};
+use twitty_render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
+use twitty_render::ui_style::{
     UiStyle, OVERLAY_BLUR, OVERLAY_OFFSET, OVERLAY_SHADOW, RADIUS_12, RADIUS_6, RADIUS_8, SPACE_12,
     SPACE_16, SPACE_4, SPACE_8,
 };
-use crate::ui::chrome::UiLanguage;
+use twitty_ui::ai::{BlockAiCardStatus, BlockAiMode, ConsentNotice};
+use twitty_ui::ui::chrome::UiLanguage;
 
 // ---- Failed-block Explain / Fix popover card ----
 
@@ -532,7 +532,7 @@ pub fn block_ai_overlay(
             shadow: None,
         });
         let text = if btn.w >= style.px(290.0) {
-            crate::ui::chrome::tr("Insert fix into composer", "حط الحل في خانة الأوامر")
+            twitty_ui::ui::chrome::tr("Insert fix into composer", "حط الحل في خانة الأوامر")
         } else if view.language == UiLanguage::Arabic {
             "حط الحل في خانة الأوامر"
         } else {
@@ -572,7 +572,7 @@ pub fn block_ai_overlay(
             shadow: None,
         });
         let text = if btn.w >= style.px(180.0) {
-            crate::ui::chrome::tr("Suggest a fix", "اقترح حل")
+            twitty_ui::ui::chrome::tr("Suggest a fix", "اقترح حل")
         } else if view.language == UiLanguage::Arabic {
             "اقترح حل"
         } else {

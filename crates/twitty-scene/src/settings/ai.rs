@@ -4,7 +4,7 @@ use super::*;
 
 impl SettingsDrawer<'_, '_> {
     pub(super) fn draw_ai(&mut self) {
-        use crate::ui::settings_ai::{
+        use twitty_ui::ui::settings_ai::{
             AiTextField, API_PROVIDERS, DEFAULT_PROVIDER_CHOICES, HARD_DENY_SUMMARY,
         };
         // Draw the top Project Memory action row (n21) first.

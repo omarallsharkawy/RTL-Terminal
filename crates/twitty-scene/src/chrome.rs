@@ -3,17 +3,17 @@
 use cosmic_text::Buffer;
 
 use super::context::DrawContext;
-use crate::layout::{truncate_title, Rect};
-use crate::render::style::Quad;
-use crate::render::TabLabel;
+use crate::TabLabel;
+use twitty_core::layout::{truncate_title, Rect};
+use twitty_render::style::Quad;
 
 /// Where each tab goes in a window `width` wide; empty with fewer than two tabs (no tab bar).
-pub(crate) fn tab_geometry(ctx: &DrawContext, tab_count: usize, width: f32) -> Vec<Rect> {
+pub fn tab_geometry(ctx: &DrawContext, tab_count: usize, width: f32) -> Vec<Rect> {
     ctx.metrics.tab_rects(tab_count, width)
 }
 
 /// The tab bar background and the active tab's highlight and accent line.
-pub(crate) fn tab_bar_quads(
+pub fn tab_bar_quads(
     ctx: &DrawContext,
     tabs: &[TabLabel],
     geometry: &[Rect],
@@ -40,7 +40,7 @@ pub(crate) fn tab_bar_quads(
 }
 
 /// Tab titles, shaped with full shaping so Arabic titles render, and their colors.
-pub(crate) fn tab_titles(
+pub fn tab_titles(
     ctx: &mut DrawContext,
     tabs: &[TabLabel],
     geometry: &[Rect],
@@ -62,7 +62,7 @@ pub(crate) fn tab_titles(
 
 /// Background quad, shaped text and top y of a pane's status line, over the last of its
 /// `rows` rows.
-pub(crate) fn status_line(
+pub fn status_line(
     ctx: &mut DrawContext,
     rect: Rect,
     rows: usize,
@@ -76,11 +76,11 @@ pub(crate) fn status_line(
 }
 
 /// The dividers between panes.
-pub(crate) fn divider_quads<'a>(
+pub fn divider_quads<'a>(
     ctx: &DrawContext,
     dividers: &'a [Rect],
 ) -> impl Iterator<Item = Quad> + 'a {
     let color = ctx
-        .color(crate::render::ui_style::UiStyle::new(ctx.palette, None, ctx.metrics.scale).border);
+        .color(twitty_render::ui_style::UiStyle::new(ctx.palette, None, ctx.metrics.scale).border);
     dividers.iter().map(move |d| (d.x, d.y, d.w, d.h, color))
 }

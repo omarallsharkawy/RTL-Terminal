@@ -10,6 +10,7 @@ pub mod commands;
 pub mod composer;
 pub mod config;
 pub mod input;
+pub mod ports;
 pub mod projects;
 pub mod remote;
 pub mod review;

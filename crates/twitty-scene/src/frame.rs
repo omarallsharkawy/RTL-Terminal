@@ -19,19 +19,19 @@ use super::preedit::{bounds_outside, ImeArea, PreeditState};
 use super::settings::{settings_overlay, SettingsView};
 use super::welcome::{welcome_overlay, WelcomeView};
 use super::window_chrome::{self, ChromeView};
-use crate::blocks::cards::BlockHover;
-use crate::layout::{PaneId, Rect};
-use crate::render::metrics::CellMetrics;
-use crate::render::row::cache::RowCache;
-use crate::render::row::RowCursor;
-use crate::render::shapes::ShapeLayers;
-use crate::render::style::Quad;
-use crate::render::text::labels::UiLabels;
-use crate::render::text::ui::{UiFont, UiLabel};
-use crate::render::ui_style::UiStyle;
-use crate::render::{PaneFrame, TabLabel};
-use crate::ui::chrome::UiLanguage;
-use crate::ui::motion::ChromeMotion;
+use crate::{PaneFrame, TabLabel};
+use twitty_core::layout::{PaneId, Rect};
+use twitty_render::metrics::CellMetrics;
+use twitty_render::row::cache::RowCache;
+use twitty_render::row::RowCursor;
+use twitty_render::shapes::ShapeLayers;
+use twitty_render::style::Quad;
+use twitty_render::text::labels::UiLabels;
+use twitty_render::text::ui::{UiFont, UiLabel};
+use twitty_render::ui_style::UiStyle;
+use twitty_ui::blocks::cards::BlockHover;
+use twitty_ui::ui::chrome::UiLanguage;
+use twitty_ui::ui::motion::ChromeMotion;
 
 use twitty_core::row::hash_row;
 pub use twitty_render::scene::TextRun;
@@ -208,7 +208,7 @@ pub fn build_frame_with_cards(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn build_frame_base(
+pub fn build_frame_base(
     ctx: &mut DrawContext,
     opts: &FrameOptions,
     cache: &mut RowCache,
@@ -377,7 +377,7 @@ impl Frame {
         self.add_block_paint(ctx, style, font, panes, &paint, language);
     }
 
-    pub(crate) fn add_block_paint(
+    pub fn add_block_paint(
         &mut self,
         ctx: &mut DrawContext,
         style: UiStyle,
@@ -414,7 +414,7 @@ impl Frame {
         self.add_chrome_motion(ctx, style, font.into(), view, None);
     }
 
-    pub(crate) fn add_chrome_motion(
+    pub fn add_chrome_motion(
         &mut self,
         ctx: &mut DrawContext,
         style: UiStyle,
@@ -455,7 +455,7 @@ impl Frame {
         self.add_composer_motion(ctx, style, font, view, 1.0, true);
     }
 
-    pub(crate) fn add_composer_motion(
+    pub fn add_composer_motion(
         &mut self,
         ctx: &mut DrawContext,
         style: UiStyle,
@@ -528,9 +528,9 @@ impl Frame {
         ctx: &mut DrawContext,
         style: UiStyle,
         font: &UiFont,
-        menu: &crate::ui::context_menu::ContextMenu,
-        layout: &crate::ui::context_menu::MenuLayout,
-        language: crate::ui::chrome::UiLanguage,
+        menu: &twitty_ui::ui::context_menu::ContextMenu,
+        layout: &twitty_ui::ui::context_menu::MenuLayout,
+        language: twitty_ui::ui::chrome::UiLanguage,
     ) {
         let labels = super::context_menu::draw(
             ctx,
@@ -550,8 +550,8 @@ impl Frame {
         ctx: &mut DrawContext,
         style: UiStyle,
         font: &UiFont,
-        toasts: &[crate::ui::toast::Toast],
-        language: crate::ui::chrome::UiLanguage,
+        toasts: &[twitty_ui::ui::toast::Toast],
+        language: twitty_ui::ui::chrome::UiLanguage,
     ) {
         let (labels, rects) = super::context_menu::draw_toasts(
             ctx,
@@ -713,7 +713,7 @@ impl Frame {
     pub fn add_sidebar(
         &mut self,
         ctx: &mut DrawContext,
-        view: &crate::sidebar::cards::View,
+        view: &twitty_ui::sidebar::cards::View,
         cache: &mut super::sidebar::LabelCache,
         style: UiStyle,
         font: &UiFont,
@@ -729,7 +729,7 @@ impl Frame {
     pub fn add_review(
         &mut self,
         ctx: &mut DrawContext,
-        view: &crate::review::panel::View,
+        view: &twitty_ui::review::panel::View,
         cache: &mut super::review::ReviewCache,
         style: UiStyle,
         font: &UiFont,
@@ -739,10 +739,10 @@ impl Frame {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn add_review_motion(
+    pub fn add_review_motion(
         &mut self,
         ctx: &mut DrawContext,
-        view: &crate::review::panel::View,
+        view: &twitty_ui::review::panel::View,
         cache: &mut super::review::ReviewCache,
         style: UiStyle,
         font: &UiFont,
@@ -760,7 +760,7 @@ impl Frame {
                 .chrome
                 .extend(scene.quads.into_iter().map(|(x, y, w, h, fill)| {
                     let mut shape =
-                        crate::render::shapes::Shape::rounded(Rect::new(x, y, w, h), 0.0, fill);
+                        twitty_render::shapes::Shape::rounded(Rect::new(x, y, w, h), 0.0, fill);
                     slide.shape(&mut shape);
                     shape
                 }));
@@ -786,17 +786,17 @@ impl Frame {
     pub fn add_agent_panel(
         &mut self,
         ctx: &mut DrawContext,
-        view: &crate::ui::agent_panel::AgentPanelView,
+        view: &twitty_ui::ui::agent_panel::AgentPanelView,
         style: UiStyle,
         font: &UiFont,
     ) {
         self.add_agent_panel_motion(ctx, view, style, font, 1.0);
     }
 
-    pub(crate) fn add_agent_panel_motion(
+    pub fn add_agent_panel_motion(
         &mut self,
         ctx: &mut DrawContext,
-        view: &crate::ui::agent_panel::AgentPanelView,
+        view: &twitty_ui::ui::agent_panel::AgentPanelView,
         style: UiStyle,
         font: &UiFont,
         opacity: f32,
@@ -812,7 +812,7 @@ impl Frame {
                 .chrome
                 .extend(scene.quads.into_iter().map(|(x, y, w, h, fill)| {
                     let mut shape =
-                        crate::render::shapes::Shape::rounded(Rect::new(x, y, w, h), 0.0, fill);
+                        twitty_render::shapes::Shape::rounded(Rect::new(x, y, w, h), 0.0, fill);
                     slide.shape(&mut shape);
                     shape
                 }));

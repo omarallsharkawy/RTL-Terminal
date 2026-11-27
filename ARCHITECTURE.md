@@ -79,10 +79,11 @@ All packages inherit their version and Rust edition from the root manifest. The 
 | `twitty-control` | Control sockets, wire formats, CLI, and Claude hook client | `twitty-core` |
 | `twitty-ai` | Agent selection, prompts, subprocess execution, consent, and AI response formats | `twitty-core`, `twitty-control` (UID lookup on Unix) |
 | `twitty-ui` | Everything about the interface that needs no window: config, the command table, key and mouse input, panel state and geometry (`ui`: palette, settings, menus, welcome, agent panel), the composer, review, sidebar, workflows, projects and remote bootstrap. Paths stay `twitty::ui::…` etc. through re-exports | `twitty-core`, `twitty-render` (styles, metrics), `twitty-ai`, `twitty-store`, `twitty-control` (UID lookup) |
-| `twitty` | Windows, sessions, the app (`app/`), the control socket's pane dispatch, frame composition (`render/scene`), and the library facade | All six members |
+| `twitty-scene` | The frame on the CPU (`twitty::render::scene`): panes, chrome, sidebar and every overlay as quads, shapes and text runs | `twitty-core`, `twitty-render`, `twitty-ui`, `twitty-ai`, `twitty-store` |
+| `twitty` | Windows, sessions, the app (`app/`), the control socket's pane dispatch, the GPU `Renderer`, and the library facade | All seven members |
 
-`twitty-ui` never reaches into sessions, the control socket or the window: changing a panel
-rebuilds only it and the app, and the compiler stops UI code from touching a PTY. The app
+`twitty-ui` and `twitty-scene` never reach into sessions, the control socket or the window;
+the compiler stops UI and drawing code from touching a PTY. The app
 composes its frame from live UI state. Its renderer and pane-specific cmux dispatch
 stay with those models. Assets and integration tests live at the repository root.
 
@@ -90,7 +91,8 @@ stay with those models. Assets and integration tests live at the repository root
 
 The module names below follow the root library's module tree. `ai/`, `blocks/`, `commands.rs`,
 `composer/`, `config.rs`, `input/`, `projects/`, `remote/`, `review/`, `sidebar/`, `ui/` and
-`workflows/` live in `crates/twitty-ui/src/`; the rest are in `src/`.
+`workflows/` live in `crates/twitty-ui/src/`, `render/scene/` is `crates/twitty-scene/src/`, and
+the rest are in `src/`.
 
 | Module | Responsibility | Depends on |
 | --- | --- | --- |

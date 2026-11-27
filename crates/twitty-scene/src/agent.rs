@@ -17,27 +17,27 @@ use twitty_ai::engine::model::{ContextKind, StepKind, StepStatus};
 use super::context::DrawContext;
 use super::frame::bounds_around;
 use super::review::text_line;
-use crate::color::Rgba;
-use crate::composer::editor::TextEditor;
-use crate::layout::Rect;
-use crate::render::icons::Icon;
-use crate::render::row::CachedRow;
-use crate::render::shapes::{Border, Shadow, Shape};
-use crate::render::style::Quad;
-use crate::render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
-use crate::render::ui_style::{
+use twitty_core::color::Rgba;
+use twitty_core::layout::Rect;
+use twitty_render::icons::Icon;
+use twitty_render::row::CachedRow;
+use twitty_render::shapes::{Border, Shadow, Shape};
+use twitty_render::style::Quad;
+use twitty_render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
+use twitty_render::ui_style::{
     UiStyle, OVERLAY_BLUR, OVERLAY_OFFSET, OVERLAY_SHADOW, RADIUS_12, RADIUS_6, RADIUS_8, SPACE_4,
     SPACE_8,
 };
-use crate::review::diff::{parse as parse_diff, Limits as DiffLimits, LineKind};
-use crate::ui::agent_panel::{
+use twitty_ui::composer::editor::TextEditor;
+use twitty_ui::review::diff::{parse as parse_diff, Limits as DiffLimits, LineKind};
+use twitty_ui::ui::agent_panel::{
     arabic_count, format_context_strip, format_deny_reason, format_duration_ms, format_usage_pill,
     included_context_tokens, paragraph_is_rtl, read_tool_name, wrap_words, AgentFocus,
     AgentPanelHit, AgentPanelLayout, AgentPanelView, CardButton, CardLayout, StepEntry,
     CARD_EDITOR_MAX_LINES, COMPOSER_MAX_LINES, EMPTY_INTRO_LINE_H, EMPTY_INTRO_TOP, EXAMPLE_CHIPS,
     MAX_PATCH_DIFF_ROWS, PLAN_COLLAPSED_LINES,
 };
-use crate::ui::chrome::UiLanguage;
+use twitty_ui::ui::chrome::UiLanguage;
 
 /// A terminal-shaped monospace line drawn inside the Agent panel (commands, paths, diffs, editors).
 pub struct AgentText {
@@ -1665,7 +1665,7 @@ impl AgentDrawer<'_, '_> {
         if bounds.left >= bounds.right || bounds.top >= bounds.bottom {
             return;
         }
-        let cleaned = crate::shell_integration::clean_text(text, 512);
+        let cleaned = twitty_core::shell_integration::clean_text(text, 512);
         let line = text_line(&cleaned, rgb8(color));
         let row = Rc::new(self.ctx.build_row(line.hash, &line, None));
         self.scene.texts.push(AgentText {

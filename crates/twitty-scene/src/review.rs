@@ -12,21 +12,21 @@ use unicode_bidi::{bidi_class, BidiClass};
 use unicode_width::UnicodeWidthChar;
 
 use super::context::DrawContext;
-use crate::color::Rgba;
-use crate::layout::Rect;
-use crate::render::icons::Icon;
-use crate::render::metrics::CellMetrics;
-use crate::render::row::CachedRow;
-use crate::render::shapes::{Border, Shape};
-use crate::render::style::Quad;
-use crate::render::text::shaper::shape_label;
-use crate::render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
-use crate::render::ui_style::{UiStyle, RADIUS_6};
-use crate::review::diff::FileStatus;
-use crate::review::layout::PanelLayout;
-use crate::review::panel::{RowStyle, View};
-use crate::terminal::{CellData, LineData, MAX_DRAWN_MARKS};
-use crate::ui::chrome::UiLanguage;
+use twitty_core::color::Rgba;
+use twitty_core::layout::Rect;
+use twitty_core::terminal::{CellData, LineData, MAX_DRAWN_MARKS};
+use twitty_render::icons::Icon;
+use twitty_render::metrics::CellMetrics;
+use twitty_render::row::CachedRow;
+use twitty_render::shapes::{Border, Shape};
+use twitty_render::style::Quad;
+use twitty_render::text::shaper::shape_label;
+use twitty_render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
+use twitty_render::ui_style::{UiStyle, RADIUS_6};
+use twitty_ui::review::diff::FileStatus;
+use twitty_ui::review::layout::PanelLayout;
+use twitty_ui::review::panel::{RowStyle, View};
+use twitty_ui::ui::chrome::UiLanguage;
 
 /// A shaped label of the panel and where it goes.
 pub struct ReviewText {
@@ -322,7 +322,7 @@ impl ReviewDrawing<'_, '_> {
         );
     }
 
-    fn row(&mut self, i: usize, row: &crate::review::panel::ViewRow, gutter_cols: usize) {
+    fn row(&mut self, i: usize, row: &twitty_ui::review::panel::ViewRow, gutter_cols: usize) {
         let s = self.style;
         let l = self.layout;
         let y = l.row_top(i);
@@ -418,7 +418,7 @@ impl ReviewDrawing<'_, '_> {
     fn file(
         &mut self,
         area: Rect,
-        row: &crate::review::panel::ViewRow,
+        row: &twitty_ui::review::panel::ViewRow,
         collapsed: bool,
         status: FileStatus,
     ) {

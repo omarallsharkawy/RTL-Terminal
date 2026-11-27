@@ -3519,6 +3519,7 @@ dependencies = [
  "twitty-control",
  "twitty-core",
  "twitty-render",
+ "twitty-scene",
  "twitty-store",
  "twitty-ui",
  "unicode-bidi",
@@ -3585,6 +3586,23 @@ dependencies = [
  "unicode-segmentation",
  "wgpu",
  "winit",
+]
+
+[[package]]
+name = "twitty-scene"
+version = "4.0.0"
+dependencies = [
+ "alacritty_terminal",
+ "cosmic-text",
+ "glyphon",
+ "twitty-ai",
+ "twitty-core",
+ "twitty-render",
+ "twitty-store",
+ "twitty-ui",
+ "unicode-bidi",
+ "unicode-segmentation",
+ "unicode-width",
 ]
 
 [[package]]

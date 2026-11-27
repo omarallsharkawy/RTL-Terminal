@@ -27,6 +27,7 @@ twitty-ai = { path = "crates/twitty-ai" }
 twitty-control = { path = "crates/twitty-control" }
 twitty-core = { path = "crates/twitty-core" }
 twitty-render = { path = "crates/twitty-render" }
+twitty-scene = { path = "crates/twitty-scene" }
 twitty-store = { path = "crates/twitty-store" }
 twitty-ui = { path = "crates/twitty-ui" }
 
@@ -73,6 +74,7 @@ twitty-ai.workspace = true
 twitty-control.workspace = true
 twitty-core.workspace = true
 twitty-render.workspace = true
+twitty-scene.workspace = true
 twitty-store.workspace = true
 twitty-ui.workspace = true
 unicode-bidi.workspace = true

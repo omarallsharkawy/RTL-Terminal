@@ -105,7 +105,7 @@ pub fn format_ports(ports: &[u16]) -> String {
     format_ports_limit(ports, MAX_SHOWN)
 }
 
-pub(crate) fn format_ports_limit(ports: &[u16], limit: usize) -> String {
+pub fn format_ports_limit(ports: &[u16], limit: usize) -> String {
     let mut ports = ports.to_vec();
     ports.sort_unstable();
     ports.dedup();

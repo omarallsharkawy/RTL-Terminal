@@ -9,18 +9,18 @@ use cosmic_text::Buffer;
 use std::time::Instant;
 
 use super::context::DrawContext;
-use crate::blocks::cards::{layout_cards, visible_rows, BlockButton, BlockHover};
-use crate::blocks::BlockStatus;
-use crate::color::Rgba;
-use crate::layout::{PaneId, Rect};
-use crate::render::icons::Icon;
-use crate::render::shapes::{Border, Shadow, Shape, ShapeLayers};
-use crate::render::style::Quad;
-use crate::render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
-use crate::render::ui_style::{UiStyle, RADIUS_6, SPACE_12, SPACE_16, SPACE_4};
-use crate::render::PaneFrame;
-use crate::ui::chrome::UiLanguage;
-use crate::ui::motion::Highlights;
+use crate::PaneFrame;
+use twitty_core::color::Rgba;
+use twitty_core::layout::{PaneId, Rect};
+use twitty_render::icons::Icon;
+use twitty_render::shapes::{Border, Shadow, Shape, ShapeLayers};
+use twitty_render::style::Quad;
+use twitty_render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
+use twitty_render::ui_style::{UiStyle, RADIUS_6, SPACE_12, SPACE_16, SPACE_4};
+use twitty_ui::blocks::cards::{layout_cards, visible_rows, BlockButton, BlockHover};
+use twitty_ui::blocks::BlockStatus;
+use twitty_ui::ui::chrome::UiLanguage;
+use twitty_ui::ui::motion::Highlights;
 
 /// A badge's shaped text and where it goes (legacy mode).
 pub struct Badge {
@@ -38,7 +38,7 @@ pub struct Badge {
 
 /// Text labels and clip rectangles emitted by command block cards for one pane.
 #[derive(Default)]
-pub(crate) struct CardScene {
+pub struct CardScene {
     pub clips: Vec<(PaneId, Rect)>,
     pub labels: Vec<UiLabel>,
 }
@@ -75,13 +75,13 @@ fn button_icon(button: BlockButton) -> Icon {
 }
 
 /// Paint state shared by all visible command blocks in one frame.
-pub(crate) struct BlockPaint<'a> {
+pub struct BlockPaint<'a> {
     pub hover: Option<BlockHover>,
     pub fades: Option<(&'a BlockFades, Instant)>,
 }
 
 #[derive(Default)]
-pub(crate) struct BlockFades {
+pub struct BlockFades {
     pub cards: Highlights<BlockHover>,
     pub buttons: Highlights<BlockHover>,
 }
@@ -115,7 +115,7 @@ impl BlockPaint<'_> {
 /// Draw command block cards into `shapes.underlay` (backgrounds and leading status strips) and
 /// floating toolbars into `shapes.chrome`, returning the dim labels and clip rects for row text.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn draw_cards(
+pub fn draw_cards(
     ctx: &mut DrawContext,
     style: UiStyle,
     font: &UiFont,
@@ -327,7 +327,7 @@ fn localized_meta(text: &str, language: UiLanguage) -> std::borrow::Cow<'_, str>
 
 /// The selected block's background tint, drawn under the rows (cells with a background of
 /// their own cover it).
-pub(crate) fn tint_quads(ctx: &DrawContext, pane: &PaneFrame, out: &mut Vec<Quad>) {
+pub fn tint_quads(ctx: &DrawContext, pane: &PaneFrame, out: &mut Vec<Quad>) {
     let m = ctx.metrics;
     let rows = pane.lines.len();
     let top = pane.rect.y + m.padding_top;
@@ -342,7 +342,7 @@ pub(crate) fn tint_quads(ctx: &DrawContext, pane: &PaneFrame, out: &mut Vec<Quad
 }
 
 /// Separators and gutter strips, drawn over the rows.
-pub(crate) fn mark_quads(ctx: &DrawContext, pane: &PaneFrame, out: &mut Vec<Quad>) {
+pub fn mark_quads(ctx: &DrawContext, pane: &PaneFrame, out: &mut Vec<Quad>) {
     let m = ctx.metrics;
     let rows = pane.lines.len();
     let top = pane.rect.y + m.padding_top;
@@ -378,7 +378,7 @@ pub(crate) fn mark_quads(ctx: &DrawContext, pane: &PaneFrame, out: &mut Vec<Quad
 
 /// Badges at the end of each visible block's first line, with their backgrounds in `out`.
 /// `hidden_row` is a row covered by the pane's status line.
-pub(crate) fn badges(
+pub fn badges(
     ctx: &mut DrawContext,
     pane: &PaneFrame,
     hidden_row: Option<usize>,
