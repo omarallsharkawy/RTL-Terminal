@@ -4,6 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 use std::time::Instant;
 
 use alacritty_terminal::term::TermMode;
@@ -65,6 +66,131 @@ pub(super) struct ComposerHost {
     path_exists_cache: HashMap<PathBuf, bool>,
     path_exists_pending: HashSet<PathBuf>,
     last_has_lints: std::cell::Cell<bool>,
+    /// Persistent fast-filesystem worker lane (dir listings, path stats, history, PATH, slash).
+    fs_worker: Option<mpsc::Sender<FsJob>>,
+    /// Persistent subprocess generator lane (git/docker/systemctl/etc.) so slow commands never
+    /// stall fast filesystem completions.
+    gen_worker: Option<mpsc::Sender<GeneratorKey>>,
+}
+
+enum FsJob {
+    Slash {
+        home: PathBuf,
+        root: Option<PathBuf>,
+    },
+    History,
+    PathCommands,
+    Dir(PathBuf),
+    PathStats(Vec<PathBuf>),
+}
+
+impl ComposerHost {
+    fn send_fs(&mut self, proxy: &winit::event_loop::EventLoopProxy<AppEvent>, job: FsJob) -> bool {
+        if let Some(tx) = &self.fs_worker {
+            if tx.send(job).is_ok() {
+                return true;
+            }
+            self.fs_worker = None;
+            return false;
+        }
+        let (tx, rx) = mpsc::channel::<FsJob>();
+        let proxy = proxy.clone();
+        let spawned = std::thread::Builder::new()
+            .name("twitty-composer-fs".into())
+            .spawn(move || {
+                while let Ok(first) = rx.recv() {
+                    // Drain any queued duplicate/stale Dir jobs to avoid redundant listings.
+                    let mut pending = vec![first];
+                    while let Ok(more) = rx.try_recv() {
+                        pending.push(more);
+                    }
+                    let last_dir = pending.iter().rposition(|j| matches!(j, FsJob::Dir(_)));
+                    for (idx, job) in pending.into_iter().enumerate() {
+                        match job {
+                            FsJob::Slash { home, root } => {
+                                let catalog = slash::discover(
+                                    &home,
+                                    root.as_deref(),
+                                    &slash::installed_agents(),
+                                );
+                                let _ =
+                                    proxy.send_event(AppEvent::ComposerSlash(Box::new(catalog)));
+                            }
+                            FsJob::History => {
+                                let entries = load_shell_history_default();
+                                let _ = proxy.send_event(AppEvent::ComposerHistory(entries));
+                            }
+                            FsJob::PathCommands => {
+                                let cmds = scan_path_executables();
+                                let _ = proxy.send_event(AppEvent::ComposerPathInfo {
+                                    commands: Some(cmds),
+                                    existing: Vec::new(),
+                                });
+                            }
+                            FsJob::Dir(dir) => {
+                                if Some(idx) == last_dir {
+                                    let entries = read_dir_entries(&dir, MAX_DIR_ENTRIES);
+                                    let _ = proxy.send_event(AppEvent::ComposerDir(dir, entries));
+                                }
+                            }
+                            FsJob::PathStats(paths) => {
+                                let existing = paths
+                                    .into_iter()
+                                    .map(|p| {
+                                        let ok = std::fs::symlink_metadata(&p).is_ok();
+                                        (p, ok)
+                                    })
+                                    .collect();
+                                let _ = proxy.send_event(AppEvent::ComposerPathInfo {
+                                    commands: None,
+                                    existing,
+                                });
+                            }
+                        }
+                    }
+                }
+            });
+        if spawned.is_err() {
+            return false;
+        }
+        let ok = tx.send(job).is_ok();
+        if ok {
+            self.fs_worker = Some(tx);
+        }
+        ok
+    }
+
+    fn send_gen(
+        &mut self,
+        proxy: &winit::event_loop::EventLoopProxy<AppEvent>,
+        key: GeneratorKey,
+    ) -> bool {
+        if let Some(tx) = &self.gen_worker {
+            if tx.send(key).is_ok() {
+                return true;
+            }
+            self.gen_worker = None;
+            return false;
+        }
+        let (tx, rx) = mpsc::channel::<GeneratorKey>();
+        let proxy = proxy.clone();
+        let spawned = std::thread::Builder::new()
+            .name("twitty-composer-gen".into())
+            .spawn(move || {
+                while let Ok(key) = rx.recv() {
+                    let items = run_generator(key.kind, key.cwd.as_deref());
+                    let _ = proxy.send_event(AppEvent::ComposerGenerator(key, items));
+                }
+            });
+        if spawned.is_err() {
+            return false;
+        }
+        let ok = tx.send(key).is_ok();
+        if ok {
+            self.gen_worker = Some(tx);
+        }
+        ok
+    }
 }
 
 impl App {
@@ -285,14 +411,9 @@ impl App {
             return;
         };
         self.composer.slash_pending = true;
-        let proxy = self.proxy.clone();
-        if std::thread::Builder::new()
-            .name("twitty-composer-slash".into())
-            .spawn(move || {
-                let catalog = slash::discover(&home, root.as_deref(), &slash::installed_agents());
-                let _ = proxy.send_event(AppEvent::ComposerSlash(Box::new(catalog)));
-            })
-            .is_err()
+        if !self
+            .composer
+            .send_fs(&self.proxy, FsJob::Slash { home, root })
         {
             self.composer.slash_pending = false;
         }
@@ -343,15 +464,7 @@ impl App {
             return;
         }
         self.composer.history_requested = true;
-        let proxy = self.proxy.clone();
-        if std::thread::Builder::new()
-            .name("twitty-composer-history".into())
-            .spawn(move || {
-                let entries = load_shell_history_default();
-                let _ = proxy.send_event(AppEvent::ComposerHistory(entries));
-            })
-            .is_err()
-        {
+        if !self.composer.send_fs(&self.proxy, FsJob::History) {
             self.composer.history_requested = false;
         }
     }
@@ -361,18 +474,7 @@ impl App {
             return;
         }
         self.composer.path_commands_requested = true;
-        let proxy = self.proxy.clone();
-        if std::thread::Builder::new()
-            .name("twitty-composer-path".into())
-            .spawn(move || {
-                let cmds = scan_path_executables();
-                let _ = proxy.send_event(AppEvent::ComposerPathInfo {
-                    commands: Some(cmds),
-                    existing: Vec::new(),
-                });
-            })
-            .is_err()
-        {
+        if !self.composer.send_fs(&self.proxy, FsJob::PathCommands) {
             self.composer.path_commands_requested = false;
         }
     }
@@ -406,15 +508,7 @@ impl App {
 
     fn request_composer_dir(&mut self, dir: PathBuf) {
         self.composer.dir_pending = Some(dir.clone());
-        let proxy = self.proxy.clone();
-        if std::thread::Builder::new()
-            .name("twitty-composer-dir".into())
-            .spawn(move || {
-                let entries = read_dir_entries(&dir, MAX_DIR_ENTRIES);
-                let _ = proxy.send_event(AppEvent::ComposerDir(dir, entries));
-            })
-            .is_err()
-        {
+        if !self.composer.send_fs(&self.proxy, FsJob::Dir(dir)) {
             self.composer.dir_pending = None;
         }
     }
@@ -442,15 +536,7 @@ impl App {
             }
             self.composer.generators_pending.insert(key.clone());
             let key_on_err = key.clone();
-            let proxy = self.proxy.clone();
-            if std::thread::Builder::new()
-                .name("twitty-composer-gen".into())
-                .spawn(move || {
-                    let items = run_generator(key.kind, key.cwd.as_deref());
-                    let _ = proxy.send_event(AppEvent::ComposerGenerator(key, items));
-                })
-                .is_err()
-            {
+            if !self.composer.send_gen(&self.proxy, key) {
                 self.composer.generators_pending.remove(&key_on_err);
             }
         }
@@ -488,23 +574,9 @@ impl App {
             self.composer.path_exists_pending.insert(p.clone());
         }
         let rollback = to_check.clone();
-        let proxy = self.proxy.clone();
-        if std::thread::Builder::new()
-            .name("twitty-composer-stat".into())
-            .spawn(move || {
-                let existing = to_check
-                    .into_iter()
-                    .map(|p| {
-                        let ok = std::fs::symlink_metadata(&p).is_ok();
-                        (p, ok)
-                    })
-                    .collect();
-                let _ = proxy.send_event(AppEvent::ComposerPathInfo {
-                    commands: None,
-                    existing,
-                });
-            })
-            .is_err()
+        if !self
+            .composer
+            .send_fs(&self.proxy, FsJob::PathStats(to_check))
         {
             for p in &rollback {
                 self.composer.path_exists_pending.remove(p);

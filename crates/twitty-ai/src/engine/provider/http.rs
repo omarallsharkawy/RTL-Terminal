@@ -6,7 +6,7 @@ use twitty_store::{SecretStore, SecretValue};
 use ureq::http::{header, HeaderValue, Request, Uri};
 
 use super::{api, Cancellation, ProviderError, ProviderRequest, ProviderTurn};
-use crate::engine::{model::ProviderKind, DEFAULT_OLLAMA_URL};
+use crate::engine::model::ProviderKind;
 
 /// Keyring account names shared with AI settings.
 pub fn secret_account(kind: &ProviderKind) -> Option<&'static str> {
@@ -19,30 +19,8 @@ pub fn secret_account(kind: &ProviderKind) -> Option<&'static str> {
 }
 
 fn endpoint(kind: &ProviderKind, model: &str) -> Result<Uri, ProviderError> {
-    let url = match kind {
-        ProviderKind::Anthropic => "https://api.anthropic.com/v1/messages".to_owned(),
-        ProviderKind::OpenAi => "https://api.openai.com/v1/chat/completions".to_owned(),
-        ProviderKind::Gemini
-            if !model.is_empty()
-                && model
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.')) =>
-        {
-            format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse")
-        }
-        ProviderKind::Ollama { base_url } => {
-            let base = if base_url.is_empty() {
-                DEFAULT_OLLAMA_URL
-            } else {
-                base_url
-            };
-            if base.contains(['?', '#', '@', '\\']) {
-                return Err(ProviderError::Configuration);
-            }
-            format!("{}/api/chat", base.trim_end_matches('/'))
-        }
-        _ => return Err(ProviderError::Configuration),
-    };
+    let wire = api::wire_for(kind)?;
+    let url = wire.endpoint(model)?;
     let uri: Uri = url.parse().map_err(|_| ProviderError::Configuration)?;
     if !matches!(uri.scheme_str(), Some("http" | "https")) || uri.host().is_none() {
         return Err(ProviderError::Configuration);
@@ -87,45 +65,30 @@ fn wire_request(
     request: &ProviderRequest,
     secret: Option<&SecretValue>,
 ) -> Result<Request<String>, ProviderError> {
+    let wire = api::wire_for(&request.kind)?;
     let uri = endpoint(&request.kind, &request.model)?;
     let credential = secret.map(SecretValue::expose);
     if credential.is_some_and(|key| key.is_empty() || uri.to_string().contains(key)) {
         return Err(ProviderError::Configuration);
     }
-    let mut body = api::build_request(request)?;
-    super::scrub(&mut body, credential);
-    let ollama = matches!(request.kind, ProviderKind::Ollama { .. });
-    let mut wire = Request::post(uri)
+    // Single JSON build + scrub traversal with credential redaction included.
+    let body = api::build_request_scrubbed(request, credential)?;
+    let mut http_req = Request::post(uri)
         .header(header::CONTENT_TYPE, "application/json")
-        .header(
-            header::ACCEPT,
-            if ollama {
-                "application/x-ndjson"
-            } else {
-                "text/event-stream"
-            },
-        )
+        .header(header::ACCEPT, wire.accept_header())
         .body(body.to_string())
         .map_err(|_| ProviderError::Configuration)?;
     if let Some(key) = credential {
-        let (name, value) = match request.kind {
-            ProviderKind::Anthropic => {
-                wire.headers_mut()
-                    .insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
-                ("x-api-key", HeaderValue::from_str(key))
+        for (name, raw_value) in wire.auth_headers(key)? {
+            let mut value =
+                HeaderValue::from_str(&raw_value).map_err(|_| ProviderError::Credential)?;
+            if raw_value.contains(key) {
+                value.set_sensitive(true);
             }
-            ProviderKind::OpenAi => (
-                "authorization",
-                HeaderValue::from_str(&format!("Bearer {key}")),
-            ),
-            ProviderKind::Gemini => ("x-goog-api-key", HeaderValue::from_str(key)),
-            _ => return Err(ProviderError::Configuration),
-        };
-        let mut value = value.map_err(|_| ProviderError::Credential)?;
-        value.set_sensitive(true);
-        wire.headers_mut().insert(name, value);
+            http_req.headers_mut().insert(name, value);
+        }
     }
-    Ok(wire)
+    Ok(http_req)
 }
 
 pub(super) fn complete(
