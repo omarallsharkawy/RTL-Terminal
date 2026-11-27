@@ -71,6 +71,7 @@ pub enum ChromeAction {
     Notifications,
     NewTab,
     CloseTab(usize),
+    ReconnectTab(usize),
     FocusPane(PaneId),
     SplitRight(PaneId),
     SplitDown(PaneId),

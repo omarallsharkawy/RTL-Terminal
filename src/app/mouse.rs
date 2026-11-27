@@ -224,6 +224,10 @@ impl App {
             ChromeAction::Notifications => self.run_command("notifications.list"),
             ChromeAction::NewTab => self.run_command("tab.new"),
             ChromeAction::CloseTab(index) => self.close_tab(index),
+            ChromeAction::ReconnectTab(index) => {
+                self.reconnect_ssh_tab(index);
+                false
+            }
             ChromeAction::FocusPane(id) => {
                 self.focus_pane(id);
                 false

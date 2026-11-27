@@ -1529,3 +1529,39 @@ fn workspace_titles_and_badges_follow_ui_direction_on_both_sidebar_sides() {
         }
     }
 }
+
+#[test]
+fn disconnected_ssh_card_exposes_clickable_reconnect_button() {
+    use twitty::remote::ConnectionState;
+    use twitty::ui::tooltip::TipTarget;
+
+    let mut disconnected = Entry::new("dev@prod", None, false, None, []);
+    disconnected.remote_state = Some(ConnectionState::Disconnected);
+    let mut connected = Entry::new("dev@staging", None, false, None, []);
+    connected.remote_state = Some(ConnectionState::Connected);
+
+    let cards = vec![Card::new(disconnected), Card::new(connected)];
+    let area = Rect::new(0.0, 0.0, 240.0, 300.0);
+    for lang in [UiLanguage::English, UiLanguage::Arabic] {
+        let mut view =
+            ScrollState::default().view(&cards, 0, area, 1.0, SidebarPosition::Left, lang);
+        let disc_layout = view.items[0].layout(&view);
+        let conn_layout = view.items[1].layout(&view);
+        assert!(disc_layout.reconnect.w > 0.0 && disc_layout.reconnect.h > 0.0);
+        assert_eq!(conn_layout.reconnect.w, 0.0);
+        let center = (
+            f64::from(disc_layout.reconnect.x + disc_layout.reconnect.w * 0.5),
+            f64::from(disc_layout.reconnect.y + disc_layout.reconnect.h * 0.5),
+        );
+        assert_eq!(
+            view.pointer_hit(center.0, center.1),
+            Some(Hit::Chrome(ChromeAction::ReconnectTab(0)))
+        );
+        view.update_hover(center);
+        assert!(view.reconnect_hover);
+    }
+    assert_eq!(
+        TipTarget::Chrome(ChromeAction::ReconnectTab(0)).label(),
+        Some(("Reconnect SSH", Some("ssh.reconnect")))
+    );
+}

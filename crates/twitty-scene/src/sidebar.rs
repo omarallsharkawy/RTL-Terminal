@@ -392,6 +392,24 @@ impl Cards<'_, '_> {
         };
         self.title(parts.title, parts.unread, title, entry.attention_count);
         self.footer(parts.footer, entry, home, s.text_dim);
+        if parts.reconnect.w > 0.0
+            && parts.reconnect.y >= self.view.area.y
+            && parts.reconnect.bottom() <= self.view.area.bottom()
+        {
+            let hot = self.view.hover == Some(item.index) && self.view.reconnect_hover;
+            let fill = if hot {
+                s.bg3.mix(s.accent, 0.22)
+            } else {
+                s.bg2
+            };
+            self.panel(
+                center_height(parts.reconnect, parts.reconnect.w),
+                RADIUS_6,
+                fill,
+            );
+            let ink = if hot { s.text } else { s.accent };
+            self.icon(parts.reconnect, Icon::Refresh, s.px(SPACE_12), ink);
+        }
         if let Some(state) = entry.display_state() {
             self.state(parts.state, parts.state_has_label, state);
         }

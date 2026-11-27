@@ -1432,3 +1432,89 @@ fn review_panel_stage_and_unstage_keys_work_on_latin_and_arabic_layouts() {
     assert_eq!(remote.state, twitty::remote::ConnectionState::Disconnected);
     assert!(remote.next_retry_deadline().is_none());
 }
+
+#[test]
+fn stage_and_unstage_single_hunk_in_real_git_repo() {
+    use std::process::Command;
+    use twitty::review::diff::format_hunk_patch;
+    use twitty::review::git::{load, stage_hunk, unstage_hunk};
+
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir =
+        std::env::temp_dir().join(format!("twitty-hunk-stage-{}-{unique}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    struct Cleanup(std::path::PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let _cleanup = Cleanup(dir.clone());
+
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(&dir)
+            .output()
+            .expect("git must be available");
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+
+    git(&["init", "-q"]);
+    git(&["config", "user.email", "test@twitty.local"]);
+    git(&["config", "user.name", "Twitty Test"]);
+
+    let initial: String = (1..=20).map(|i| format!("line {i}\n")).collect();
+    std::fs::write(dir.join("notes.txt"), &initial).unwrap();
+    git(&["add", "notes.txt"]);
+    git(&["commit", "-q", "-m", "initial"]);
+
+    let modified: String = (1..=20)
+        .map(|i| match i {
+            2 => "line 2 edited\n".to_string(),
+            19 => "line 19 edited\n".to_string(),
+            _ => format!("line {i}\n"),
+        })
+        .collect();
+    std::fs::write(dir.join("notes.txt"), &modified).unwrap();
+
+    let snapshot = load(&dir).expect("load diff from repo");
+    let files = &snapshot.diff.files;
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].hunks.len(), 2);
+
+    let patch_hunk1 = format_hunk_patch(&files[0], &files[0].hunks[0]).expect("hunk 1 patch");
+    stage_hunk(&dir, &patch_hunk1).expect("stage hunk 1");
+
+    let staged = git(&["diff", "--cached"]);
+    assert!(staged.contains("+line 2 edited"), "hunk 1 must be staged");
+    assert!(
+        !staged.contains("+line 19 edited"),
+        "hunk 2 must stay unstaged"
+    );
+
+    let unstaged = git(&["diff"]);
+    assert!(
+        !unstaged.contains("+line 2 edited"),
+        "hunk 1 must no longer appear in unstaged diff"
+    );
+    assert!(
+        unstaged.contains("+line 19 edited"),
+        "hunk 2 must still be unstaged"
+    );
+
+    unstage_hunk(&dir, &patch_hunk1).expect("unstage hunk 1");
+    let staged_after = git(&["diff", "--cached"]);
+    assert!(
+        staged_after.trim().is_empty(),
+        "index must be clean after unstaging hunk 1, got: {staged_after}"
+    );
+}

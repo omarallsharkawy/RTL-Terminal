@@ -132,4 +132,17 @@ impl App {
         start_remote_pty(&self.proxy, pane);
         self.window.request_redraw();
     }
+
+    /// Reconnect the SSH pane in sidebar tab `index` (focused remote pane first).
+    pub(super) fn reconnect_ssh_tab(&mut self, index: usize) {
+        let Some(tab) = self.ws.tabs().get(index) else {
+            return;
+        };
+        let target_id = std::iter::once(tab.focused)
+            .chain(tab.root.leaves())
+            .find(|&id| self.ws.pane(id).is_some_and(|p| p.remote.is_some()));
+        if let Some(id) = target_id {
+            self.reconnect_ssh_pane(id);
+        }
+    }
 }

@@ -129,6 +129,7 @@ pub(super) struct Window {
     tab_hover: Option<usize>,
     pub(super) language: UiLanguage,
     sidebar_view: Option<SidebarView>,
+    sidebar_cards_cache: Option<(u32, Vec<Entry>, Vec<crate::sidebar::cards::Card>)>,
     sidebar_drag: Option<Drag>,
     motion: ChromeAnimations,
     motion_frame: Option<Instant>,
@@ -171,6 +172,7 @@ impl Window {
                 language
             },
             sidebar_view: None,
+            sidebar_cards_cache: None,
             sidebar_drag: None,
             motion: ChromeAnimations::default(),
             motion_frame: None,
@@ -942,14 +944,23 @@ impl Window {
             .begin_frame(now, ws.active_tab().map(|tab| tab.id), self.chrome_hover);
         self.sidebar_view = layout.sidebar.and_then(|area| {
             let mut entries = sidebar_entries(ws, &self.ports, history, self.language);
-            let directories = entries.iter().filter_map(|e| e.cwd.clone()).collect();
-            self.branches.retain(&directories);
             for entry in &mut entries {
                 entry.branch = entry.cwd.as_deref().and_then(|p| self.branches.cached(p));
             }
-            let cards = self.renderer.as_mut()?.sidebar_cards(entries, area);
+            let scale_bits = metrics.scale.to_bits();
+            let cache_hit = self
+                .sidebar_cards_cache
+                .as_ref()
+                .is_some_and(|(bits, cached, _)| *bits == scale_bits && *cached == entries);
+            if !cache_hit {
+                let directories = entries.iter().filter_map(|e| e.cwd.clone()).collect();
+                self.branches.retain(&directories);
+                let cards = self.renderer.as_mut()?.sidebar_cards(entries.clone(), area);
+                self.sidebar_cards_cache = Some((scale_bits, entries, cards));
+            }
+            let (_, _, cards) = self.sidebar_cards_cache.as_ref()?;
             let mut view = self.sidebar_scroll.view(
-                &cards,
+                cards,
                 ws.active(),
                 area,
                 metrics.scale,
@@ -957,7 +968,7 @@ impl Window {
                 self.language,
             );
             self.motion
-                .reorder(&mut view, &cards, &ids, ws.active(), now);
+                .reorder(&mut view, cards, &ids, ws.active(), now);
             view.update_hover(pointer);
             view.drop_target = self
                 .sidebar_drag
@@ -966,6 +977,7 @@ impl Window {
         });
         if self.sidebar_view.is_none() {
             self.branches.clear();
+            self.sidebar_cards_cache = None;
         }
         let hover_tab = match layout.tab_hit(pointer.0, pointer.1) {
             Some(Hit::Tab(i) | Hit::Chrome(ChromeAction::CloseTab(i))) => Some(i),

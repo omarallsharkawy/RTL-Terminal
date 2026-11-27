@@ -68,6 +68,7 @@ pub struct CardLayout {
     pub state: Rect,
     pub state_has_label: bool,
     pub close: Rect,
+    pub reconnect: Rect,
     pub message: Rect,
     pub footer: Rect,
 }
@@ -168,11 +169,34 @@ impl CardLayout {
             0.0
         };
         let state = row(inner.bottom(), details_h, inner.w - state_w, state_w);
+        let state_slot = if state_w > 0.0 { state_w + gap } else { 0.0 };
+        let disconnected =
+            card.entry.remote_state == Some(twitty_core::remote::ConnectionState::Disconnected);
+        let reconnect_w = if disconnected {
+            (SPACE_16 * scale).min((inner.w - state_slot).max(0.0))
+        } else {
+            0.0
+        };
+        let reconnect = if reconnect_w > 0.0 {
+            row(
+                inner.bottom(),
+                details_h,
+                inner.w - state_slot - reconnect_w,
+                reconnect_w,
+            )
+        } else {
+            Rect::new(0.0, 0.0, 0.0, 0.0)
+        };
+        let reconnect_slot = if reconnect_w > 0.0 {
+            reconnect_w + gap
+        } else {
+            0.0
+        };
         let footer = row(
             inner.bottom(),
             details_h,
             0.0,
-            (inner.w - state_w - if state_w > 0.0 { gap } else { 0.0 }).max(0.0),
+            (inner.w - state_slot - reconnect_slot).max(0.0),
         );
         let message = row(
             footer.bottom(),
@@ -190,6 +214,7 @@ impl CardLayout {
             state,
             state_has_label,
             close,
+            reconnect,
             message,
             footer,
         }
@@ -227,6 +252,7 @@ pub struct View {
     pub language: UiLanguage,
     pub hover: Option<usize>,
     pub close_hover: bool,
+    pub reconnect_hover: bool,
     pub new_tab_hover: bool,
     pub dot_phase: usize,
     pub dot_progress: Option<f32>,
@@ -317,9 +343,16 @@ impl View {
         else {
             return Some(Hit::TabBar);
         };
-        let close = item.layout(self).close;
+        let layout = item.layout(self);
+        let close = layout.close;
         if close.y >= self.area.y && close.bottom() <= self.area.bottom() && close.contains(x, y) {
             Some(Hit::Chrome(ChromeAction::CloseTab(item.index)))
+        } else if layout.reconnect.w > 0.0
+            && layout.reconnect.y >= self.area.y
+            && layout.reconnect.bottom() <= self.area.bottom()
+            && layout.reconnect.contains(x, y)
+        {
+            Some(Hit::Chrome(ChromeAction::ReconnectTab(item.index)))
         } else {
             Some(Hit::Tab(item.index))
         }
@@ -336,11 +369,10 @@ impl View {
     }
 
     pub fn update_hover(&mut self, (x, y): (f64, f64)) {
+        let hit = self.pointer_hit(x, y);
         self.hover = self.hit_test(x, y);
-        self.close_hover = matches!(
-            self.pointer_hit(x, y),
-            Some(Hit::Chrome(ChromeAction::CloseTab(_)))
-        );
+        self.close_hover = matches!(hit, Some(Hit::Chrome(ChromeAction::CloseTab(_))));
+        self.reconnect_hover = matches!(hit, Some(Hit::Chrome(ChromeAction::ReconnectTab(_))));
         self.new_tab_hover = self.area.contains(x, y) && self.new_tab.contains(x, y);
     }
 }
@@ -440,6 +472,7 @@ impl ScrollState {
             language,
             hover: None,
             close_hover: false,
+            reconnect_hover: false,
             new_tab_hover: false,
             dot_phase: 0,
             dot_progress: None,
