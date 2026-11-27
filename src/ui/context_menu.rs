@@ -79,6 +79,39 @@ impl MenuEntry {
     }
 }
 
+/// Keys an open menu understands; the app maps keyboard events to these.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MenuKey {
+    Escape,
+    Next,
+    Previous,
+    /// Enter or Space: run the highlighted row.
+    Activate,
+    /// Anything else; the menu swallows it.
+    Other,
+}
+
+/// Mouse buttons as the menu sees them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MenuButton {
+    Primary,
+    Secondary,
+    Other,
+}
+
+/// What the app does after the menu took an input. The menu changes only itself; running an
+/// action, closing and redrawing are the app's.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MenuEffect {
+    /// Nothing visible changed.
+    None,
+    /// The highlight moved.
+    Redraw,
+    Close,
+    /// Close the menu, then run this action.
+    Run(MenuAction),
+}
+
 /// An open menu.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ContextMenu {
@@ -137,6 +170,46 @@ impl ContextMenu {
                 Some(pos) => items[(pos + items.len() - 1) % items.len()],
             },
         );
+    }
+
+    /// A key while the menu is open: arrows move, Activate runs the highlighted row, Escape
+    /// closes, the rest is swallowed.
+    pub fn key(&mut self, key: MenuKey) -> MenuEffect {
+        match key {
+            MenuKey::Escape => MenuEffect::Close,
+            MenuKey::Next | MenuKey::Previous => {
+                self.move_selection(key == MenuKey::Next);
+                MenuEffect::Redraw
+            }
+            MenuKey::Activate => match self.selected.and_then(|i| self.item(i)) {
+                Some(item) => MenuEffect::Run(item.action.clone()),
+                None => MenuEffect::Close,
+            },
+            MenuKey::Other => MenuEffect::None,
+        }
+    }
+
+    /// The pointer moved onto item `row` (or off the items): highlight it. Moving off keeps the
+    /// last highlight so the keyboard can carry on from it.
+    pub fn hover(&mut self, row: Option<usize>) -> MenuEffect {
+        match row.filter(|&i| self.item(i).is_some()) {
+            Some(i) if self.selected != Some(i) => {
+                self.selected = Some(i);
+                MenuEffect::Redraw
+            }
+            _ => MenuEffect::None,
+        }
+    }
+
+    /// A press while the menu is open. The menu takes every press: on an item it runs it,
+    /// anywhere else it closes.
+    pub fn press(&self, row: Option<usize>, button: MenuButton) -> MenuEffect {
+        match (row.and_then(|i| self.item(i)), button) {
+            (Some(item), MenuButton::Primary | MenuButton::Secondary) => {
+                MenuEffect::Run(item.action.clone())
+            }
+            _ => MenuEffect::Close,
+        }
     }
 
     /// Geometry inside a `window` of physical pixels at `scale`.

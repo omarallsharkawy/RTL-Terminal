@@ -10,7 +10,9 @@ use crate::blocks::cards::BlockButton;
 use crate::blocks::BlockStatus;
 use crate::layout::PaneId;
 use crate::ui::chrome::{tr, UiLanguage};
-use crate::ui::context_menu::{BlockAction, ContextMenu, MenuAction, MenuEntry};
+use crate::ui::context_menu::{
+    BlockAction, ContextMenu, MenuAction, MenuButton, MenuEffect, MenuEntry, MenuKey,
+};
 use crate::ui::hit::Hit;
 
 /// An open menu and the pane it was opened on.
@@ -159,21 +161,40 @@ impl App {
         entries
     }
 
+    /// The item under the pointer in the open menu.
+    fn menu_row_under_pointer(&self) -> Option<usize> {
+        let (x, y) = self.pointer.pos;
+        let host = self.context_menu.as_ref()?;
+        self.window
+            .context_menu_layout(&host.menu)?
+            .hit(&host.menu, x, y)
+    }
+
+    /// Carry out what the menu asked for. Returns true when the window should close.
+    fn apply_menu_effect(&mut self, effect: MenuEffect) -> bool {
+        match effect {
+            MenuEffect::None => false,
+            MenuEffect::Redraw => {
+                self.window.request_redraw();
+                false
+            }
+            MenuEffect::Close => {
+                self.close_context_menu();
+                false
+            }
+            MenuEffect::Run(action) => {
+                let pane = self.context_menu.as_ref().and_then(|h| h.pane);
+                self.close_context_menu();
+                self.run_menu_action(pane, action)
+            }
+        }
+    }
+
     /// Pointer moved while a menu is open: highlight the row under it.
     pub(super) fn context_menu_motion(&mut self) {
-        let (x, y) = self.pointer.pos;
-        let Some(host) = &self.context_menu else {
-            return;
-        };
-        let Some(layout) = self.window.context_menu_layout(&host.menu) else {
-            return;
-        };
-        let hovered = layout.hit(&host.menu, x, y);
-        if let Some(host) = self.context_menu.as_mut() {
-            if hovered.is_some() && host.menu.selected != hovered {
-                host.menu.selected = hovered;
-                self.window.request_redraw();
-            }
+        let row = self.menu_row_under_pointer();
+        if let Some(effect) = self.context_menu.as_mut().map(|h| h.menu.hover(row)) {
+            self.apply_menu_effect(effect);
         }
         self.window
             .set_cursor_icon(winit::window::CursorIcon::Default);
@@ -185,74 +206,55 @@ impl App {
         if !pressed {
             return false;
         }
-        let (x, y) = self.pointer.pos;
-        let Some(host) = self.context_menu.clone() else {
+        let row = self.menu_row_under_pointer();
+        let button = match button {
+            MouseButton::Left => MenuButton::Primary,
+            MouseButton::Right => MenuButton::Secondary,
+            _ => MenuButton::Other,
+        };
+        let Some(effect) = self
+            .context_menu
+            .as_ref()
+            .map(|h| h.menu.press(row, button))
+        else {
             return false;
         };
-        let row = self
-            .window
-            .context_menu_layout(&host.menu)
-            .and_then(|layout| layout.hit(&host.menu, x, y));
-        self.close_context_menu();
-        match (row, button) {
-            (Some(index), MouseButton::Left | MouseButton::Right) => {
-                self.run_menu_row(&host, index)
-            }
-            _ => false,
-        }
+        self.apply_menu_effect(effect)
     }
 
-    /// Keys while a menu is open: arrows move, Enter runs, Esc closes; others are swallowed.
-    /// Returns `Some(close_window)` when the menu took the key.
+    /// Keys while a menu is open. Returns `Some(close_window)` when the menu took the key.
     pub(super) fn context_menu_key(&mut self, event: &KeyEvent) -> Option<bool> {
-        self.context_menu.as_ref()?;
+        let host = self.context_menu.as_mut()?;
         if event.state != ElementState::Pressed {
             return Some(false);
         }
-        match &event.logical_key {
-            Key::Named(NamedKey::Escape) => self.close_context_menu(),
-            Key::Named(NamedKey::ArrowDown | NamedKey::Tab) => {
-                if let Some(host) = self.context_menu.as_mut() {
-                    host.menu.move_selection(true);
-                }
-                self.window.request_redraw();
-            }
-            Key::Named(NamedKey::ArrowUp) => {
-                if let Some(host) = self.context_menu.as_mut() {
-                    host.menu.move_selection(false);
-                }
-                self.window.request_redraw();
-            }
-            Key::Named(NamedKey::Enter | NamedKey::Space) => {
-                let host = self.context_menu.clone()?;
-                self.close_context_menu();
-                if let Some(index) = host.menu.selected {
-                    return Some(self.run_menu_row(&host, index));
-                }
-            }
-            _ => {}
-        }
-        Some(false)
+        let key = match &event.logical_key {
+            Key::Named(NamedKey::Escape) => MenuKey::Escape,
+            Key::Named(NamedKey::ArrowDown | NamedKey::Tab) => MenuKey::Next,
+            Key::Named(NamedKey::ArrowUp) => MenuKey::Previous,
+            Key::Named(NamedKey::Enter | NamedKey::Space) => MenuKey::Activate,
+            _ => MenuKey::Other,
+        };
+        let effect = host.menu.key(key);
+        Some(self.apply_menu_effect(effect))
     }
 
-    fn run_menu_row(&mut self, host: &ContextMenuHost, index: usize) -> bool {
-        let Some(item) = host.menu.item(index) else {
-            return false;
-        };
-        if let Some(id) = host.pane {
+    /// Run a menu row's action for the menu opened on `pane`.
+    fn run_menu_action(&mut self, pane: Option<PaneId>, action: MenuAction) -> bool {
+        if let Some(id) = pane {
             if self.ws.pane(id).is_some() {
                 self.focus_pane(id);
             }
         }
-        match item.action.clone() {
+        match action {
             MenuAction::Command(name) => return self.run_command(name),
             MenuAction::CopySelection => {
-                if host.pane.is_some_and(|id| self.copy_selection(id)) {
+                if pane.is_some_and(|id| self.copy_selection(id)) {
                     self.toast(crate::ui::toast::ToastKind::Success, tr("Copied", "اتنسخ"));
                 }
             }
             MenuAction::Block(action, block) => {
-                let Some(id) = host.pane else {
+                let Some(id) = pane else {
                     return false;
                 };
                 let button = match action {

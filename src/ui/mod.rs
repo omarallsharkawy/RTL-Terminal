@@ -19,4 +19,5 @@ pub mod settings_ai;
 pub mod settings_commands;
 pub mod settings_panel;
 pub mod toast;
+pub mod tooltip;
 pub mod welcome;

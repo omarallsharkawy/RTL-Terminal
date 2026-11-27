@@ -125,3 +125,11 @@ hang, under 200 MB of memory, PTY output batched with a 4 MiB bound and a 12 ms 
 6. String catalog (item 5) before adding any third language.
 
 Each step lands on its own with green CI and no behavior change.
+
+## Progress
+
+- Step 1 done (`ea248ea`): `Layer::STACK` drives key, mouse and motion routing and drawing;
+  `Frame` keeps ordered text layers.
+- Step 2 started: one `OverlayViews` per frame (−16 forwarders), one `Appearance` (−12
+  setters), and the context menu and tooltip as window-free models with effects. Next: the
+  same for consent, palette, memory and welcome, then the larger panels.

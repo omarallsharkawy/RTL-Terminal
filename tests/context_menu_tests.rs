@@ -2,7 +2,9 @@
 //! Arabic, and hit testing.
 use twitty::layout::Rect;
 use twitty::ui::chrome::UiLanguage;
-use twitty::ui::context_menu::{ContextMenu, MenuAction, MenuEntry, MENU_WIDTH};
+use twitty::ui::context_menu::{
+    ContextMenu, MenuAction, MenuButton, MenuEffect, MenuEntry, MenuKey, MENU_WIDTH,
+};
 
 fn entries() -> Vec<MenuEntry> {
     vec![
@@ -75,4 +77,38 @@ fn hit_finds_items_but_not_separators() {
     assert_eq!(layout.hit(&menu, x, y), Some(3));
     assert_eq!(layout.hit(&menu, 10.0, 10.0), None);
     assert!(!layout.contains(10.0, 10.0));
+}
+
+#[test]
+fn keys_move_run_and_close_without_a_window() {
+    let mut menu = ContextMenu::new(entries(), (10.0, 10.0)).unwrap();
+    // Nothing highlighted yet: Enter just closes.
+    assert_eq!(menu.key(MenuKey::Activate), MenuEffect::Close);
+    assert_eq!(menu.key(MenuKey::Next), MenuEffect::Redraw);
+    assert_eq!(menu.key(MenuKey::Next), MenuEffect::Redraw);
+    assert_eq!(
+        menu.key(MenuKey::Activate),
+        MenuEffect::Run(MenuAction::Command("split.right"))
+    );
+    assert_eq!(menu.key(MenuKey::Other), MenuEffect::None);
+    assert_eq!(menu.key(MenuKey::Escape), MenuEffect::Close);
+}
+
+#[test]
+fn pointer_highlights_items_and_presses_run_or_close() {
+    let mut menu = ContextMenu::new(entries(), (10.0, 10.0)).unwrap();
+    assert_eq!(menu.hover(Some(2)), MenuEffect::Redraw);
+    assert_eq!(menu.hover(Some(2)), MenuEffect::None);
+    // A separator or empty space keeps the last highlight.
+    assert_eq!(menu.hover(Some(1)), MenuEffect::None);
+    assert_eq!(menu.hover(None), MenuEffect::None);
+    assert_eq!(menu.selected, Some(2));
+
+    assert_eq!(
+        menu.press(Some(3), MenuButton::Secondary),
+        MenuEffect::Run(MenuAction::Command("pane.close"))
+    );
+    assert_eq!(menu.press(Some(1), MenuButton::Primary), MenuEffect::Close);
+    assert_eq!(menu.press(None, MenuButton::Primary), MenuEffect::Close);
+    assert_eq!(menu.press(Some(0), MenuButton::Other), MenuEffect::Close);
 }

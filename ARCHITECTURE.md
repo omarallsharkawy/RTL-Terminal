@@ -54,6 +54,18 @@ input first. `Frame` keeps each layer's text in the same order, and every layer 
 beneath its area. To add an overlay, add a variant; the compiler then points at each `match`
 that must route or draw it.
 
+Each redraw builds one `render::OverlayViews` with what the overlays show this frame and hands
+it over in one call. How the window looks (fonts, colors, sidebar, top bar) is one
+`Appearance` read from the config and applied whole by `Window::set_appearance`, which passes
+on only what changed.
+
+An overlay's logic lives in a window-free model in `src/ui` that changes only itself and
+answers with an effect for the app to carry out. The right-click menu is the example:
+`ContextMenu::key`, `hover` and `press` return a `MenuEffect` (`None`, `Redraw`, `Close`,
+`Run(action)`), and `app/context_menu.rs` only maps winit events in and runs the effect.
+`ui::tooltip` does the same for the resting delay. Tests drive the model directly
+(`tests/context_menu_tests.rs`, `tests/tooltip_tests.rs`). New overlays follow this shape.
+
 ## Cargo workspace
 
 All packages inherit their version and Rust edition from the root manifest. The root

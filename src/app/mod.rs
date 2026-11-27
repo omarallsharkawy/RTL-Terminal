@@ -125,7 +125,7 @@ pub struct App {
     composer: composer::ComposerHost,
     /// An open right-click menu.
     context_menu: Option<context_menu::ContextMenuHost>,
-    tooltip: tooltip::TooltipState,
+    tooltip: crate::ui::tooltip::TooltipState,
     /// Short notices floating over the window.
     toasts: crate::ui::toast::Toasts,
     /// Built-in non-interactive AI assistant (composer generation, block explain/fix, consent).
@@ -189,7 +189,7 @@ impl App {
             git_diff: git_diff::GitDiffWatch::default(),
             composer: composer::ComposerHost::default(),
             context_menu: None,
-            tooltip: tooltip::TooltipState::default(),
+            tooltip: crate::ui::tooltip::TooltipState::default(),
             toasts: crate::ui::toast::Toasts::default(),
             ai: ai::AiHost::load(),
             projects: projects::ProjectState::load(),
