@@ -285,6 +285,8 @@ impl App {
             }
             PanelCmd::Submit(target) => self.send_review_comment(&target),
             PanelCmd::StartAgent(target) => self.start_review_agent(&target),
+            PanelCmd::StageFile(rel_path) => self.run_review_stage(rel_path, true),
+            PanelCmd::UnstageFile(rel_path) => self.run_review_stage(rel_path, false),
             PanelCmd::Commit => {
                 let Some(id) = self.focused_id() else {
                     return false;
@@ -303,6 +305,37 @@ impl App {
         }
         self.window.request_redraw();
         false
+    }
+
+    /// Stage or unstage `rel_path` in the current review repository off the UI thread and reload.
+    fn run_review_stage(&mut self, rel_path: String, stage: bool) {
+        let Some(root) = self.review.snapshot().map(|s| s.root.clone()) else {
+            return;
+        };
+        let Some(generation) = self.review.begin_refresh() else {
+            return;
+        };
+        let proxy = self.proxy.clone();
+        let spawned = std::thread::Builder::new()
+            .name("twitty-review-stage".into())
+            .spawn(move || {
+                let op = if stage {
+                    crate::review::git::stage_file(&root, &rel_path)
+                } else {
+                    crate::review::git::unstage_file(&root, &rel_path)
+                };
+                let result = match op {
+                    Ok(()) => crate::review::git::load(&root),
+                    Err(err) => Err(err),
+                };
+                let _ = proxy.send_event(AppEvent::Review(generation, result));
+            });
+        if spawned.is_err() {
+            self.review.finish_refresh(
+                generation,
+                Err(LoadError::Failed("could not start a thread".into())),
+            );
+        }
     }
 
     /// Type `text` into pane `id` as a paste, without a newline: nothing runs until the user

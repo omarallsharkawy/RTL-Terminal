@@ -487,11 +487,16 @@ impl Workspace {
         Some((focused, new_id))
     }
 
+    /// Index of the tab holding pane `id`, if any.
+    pub(crate) fn tab_of_pane(&self, id: PaneId) -> Option<usize> {
+        self.tabs.iter().position(|t| t.root.contains(id))
+    }
+
     /// Focus pane `id` in whichever tab holds it, switching tabs in one step without firing
     /// intermediate focus events on that tab's previously focused pane.
     /// Returns `(tab_index, previous_focused, tab_changed)`.
     pub(crate) fn focus_any_pane(&mut self, id: PaneId) -> Option<(usize, Option<PaneId>, bool)> {
-        let tab_index = self.tabs.iter().position(|t| t.root.contains(id))?;
+        let tab_index = self.tab_of_pane(id)?;
         let previous = self.focused_id();
         let tab_changed = tab_index != self.active;
         if previous != Some(id) {
@@ -700,7 +705,7 @@ impl Workspace {
     /// Close pane `id`, and its tab when it was the tab's last pane. Dropping the pane ends its
     /// shell. `None` when no tab holds `id`.
     pub(crate) fn close_pane(&mut self, id: PaneId) -> Option<Closed> {
-        let ti = self.tabs.iter().position(|t| t.root.contains(id))?;
+        let ti = self.tab_of_pane(id)?;
         let previous = self.focused_id();
         let tab = self.tabs.remove(ti);
         let leaves = tab.root.leaves();

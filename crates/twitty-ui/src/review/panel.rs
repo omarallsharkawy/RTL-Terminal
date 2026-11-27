@@ -57,6 +57,10 @@ pub enum PanelCmd {
     StartAgent(CommentTarget),
     /// Type `git commit` into the focused pane.
     Commit,
+    /// Stage the selected file (`git add -- <path>`) off the UI thread and refresh.
+    StageFile(String),
+    /// Unstage the selected file (`git reset HEAD -- <path>`) off the UI thread and refresh.
+    UnstageFile(String),
 }
 
 /// A one-line message under the rows.
@@ -659,9 +663,28 @@ impl ReviewPanel {
                 Some(at) => self.open_comment(at, page),
                 None => PanelCmd::None,
             },
+            (_, Some('s')) => match self.current_file_path() {
+                Some(path) => PanelCmd::StageFile(path),
+                None => PanelCmd::None,
+            },
+            (_, Some('u')) => match self.current_file_path() {
+                Some(path) => PanelCmd::UnstageFile(path),
+                None => PanelCmd::None,
+            },
             (_, Some('r')) => PanelCmd::Refresh,
             _ => PanelCmd::None,
         }
+    }
+
+    /// Repository-relative path of the currently selected file or diff line, if any.
+    fn current_file_path(&self) -> Option<String> {
+        let idx = self.current_file()?;
+        self.snapshot
+            .as_ref()?
+            .diff
+            .files
+            .get(idx)
+            .map(|f| f.path().to_owned())
     }
 
     /// The file of the selected row.
@@ -962,6 +985,8 @@ fn letter_of(key: &Key, physical: Option<KeyCode>) -> Option<char> {
         KeyCode::KeyN => 'n',
         KeyCode::KeyP => 'p',
         KeyCode::KeyR => 'r',
+        KeyCode::KeyS => 's',
+        KeyCode::KeyU => 'u',
         _ => return None,
     })
 }

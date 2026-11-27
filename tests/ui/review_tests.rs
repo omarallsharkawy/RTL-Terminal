@@ -1304,3 +1304,70 @@ fn review_text_is_clipped_under_the_command_palette() {
         .count();
     assert_eq!(review_inside, 0);
 }
+
+#[test]
+fn review_panel_stage_and_unstage_keys_work_on_latin_and_arabic_layouts() {
+    let mut panel = ReviewPanel::default();
+    panel.open();
+    let gen = panel.begin_refresh().unwrap();
+    let diff = parse(
+        b"diff --git a/src/app.rs b/src/app.rs\n--- a/src/app.rs\n+++ b/src/app.rs\n@@ -1,1 +1,2 @@\n fn main() {}\n+// added\n",
+        false,
+        &Limits::default(),
+    );
+    panel.finish_refresh(
+        gen,
+        Ok(Snapshot {
+            root: PathBuf::from("/tmp/repo"),
+            name: "repo".into(),
+            branch: Some("main".into()),
+            diff,
+        }),
+    );
+
+    // Select the first row (file header), then test Latin 's' and Arabic physical KeyS ('س').
+    assert_eq!(
+        panel.key(
+            &Key::Named(NamedKey::ArrowDown),
+            None,
+            None,
+            ModifiersState::empty(),
+            20,
+        ),
+        PanelCmd::Redraw
+    );
+    let cmd = panel.key(
+        &Key::Character("s".into()),
+        Some(KeyCode::KeyS),
+        Some("s"),
+        ModifiersState::empty(),
+        20,
+    );
+    assert_eq!(cmd, PanelCmd::StageFile("src/app.rs".into()));
+
+    let cmd_ar = panel.key(
+        &Key::Character("س".into()),
+        Some(KeyCode::KeyS),
+        Some("س"),
+        ModifiersState::empty(),
+        20,
+    );
+    assert_eq!(cmd_ar, PanelCmd::StageFile("src/app.rs".into()));
+
+    // Latin 'u' and Arabic physical KeyU ('ع') unstage selected file.
+    let cmd_u = panel.key(
+        &Key::Character("ع".into()),
+        Some(KeyCode::KeyU),
+        Some("ع"),
+        ModifiersState::empty(),
+        20,
+    );
+    assert_eq!(cmd_u, PanelCmd::UnstageFile("src/app.rs".into()));
+
+    // Path traversal / absolute paths are rejected by stage_file and unstage_file.
+    assert!(twitty::review::git::stage_file(std::path::Path::new("/tmp"), "../escape").is_err());
+    assert!(
+        twitty::review::git::unstage_file(std::path::Path::new("/tmp"), "/etc/passwd").is_err()
+    );
+    assert!(twitty::review::git::stage_file(std::path::Path::new("/tmp"), "").is_err());
+}

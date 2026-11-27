@@ -16,7 +16,8 @@ use twitty_core::color::{parse_hex, Palette, Rgba};
 use twitty_core::layout::Rect;
 use twitty_render::icons::Icon;
 use twitty_render::shapes::{Border, Shadow, Shape};
-use twitty_render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
+use twitty_render::text::labels::UiLabels;
+use twitty_render::text::ui::{label_width, UiAlign, UiLabel, UiSize, UiWeight};
 use twitty_render::ui_style::{
     UiStyle, OVERLAY_BLUR, OVERLAY_OFFSET, OVERLAY_SHADOW, RADIUS_12, RADIUS_6, RADIUS_8,
 };
@@ -39,10 +40,10 @@ pub struct SettingsView {
 
 /// Draw the settings overlay into `shapes`, returning the outer panel rect (to clip underlying
 /// text) and the shaped UI labels.
-pub fn settings_overlay(
+pub fn settings_overlay<'a>(
     ctx: &mut DrawContext,
     style: UiStyle,
-    font: &UiFont,
+    font: impl Into<UiLabels<'a>>,
     view: &SettingsView,
     surface: (f32, f32),
     shapes: &mut Vec<Shape>,
@@ -54,7 +55,7 @@ pub fn settings_overlay(
     let mut drawer = SettingsDrawer {
         ctx,
         style,
-        font,
+        font: font.into(),
         view,
         layout: &layout,
         shapes,
@@ -67,7 +68,7 @@ pub fn settings_overlay(
 struct SettingsDrawer<'a, 'b> {
     ctx: &'a mut DrawContext<'b>,
     style: UiStyle,
-    font: &'a UiFont,
+    font: UiLabels<'a>,
     view: &'a SettingsView,
     layout: &'a SettingsLayout,
     shapes: &'a mut Vec<Shape>,

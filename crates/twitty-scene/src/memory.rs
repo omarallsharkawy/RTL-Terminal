@@ -13,7 +13,8 @@ use twitty_core::color::Rgba;
 use twitty_core::layout::Rect;
 use twitty_render::icons::Icon;
 use twitty_render::shapes::{Border, Shadow, Shape};
-use twitty_render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
+use twitty_render::text::labels::UiLabels;
+use twitty_render::text::ui::{label_width, UiAlign, UiLabel, UiSize, UiWeight};
 use twitty_render::ui_style::{
     UiStyle, OVERLAY_BLUR, OVERLAY_OFFSET, OVERLAY_SHADOW, RADIUS_12, RADIUS_6, RADIUS_8,
 };
@@ -32,10 +33,10 @@ pub struct MemoryView {
 
 /// Draw the Project Memory overlay into `shapes`, returning its outer rect (to clip underlying
 /// terminal text) and shaped UI labels.
-pub fn memory_overlay(
+pub fn memory_overlay<'a>(
     ctx: &mut DrawContext,
     style: UiStyle,
-    font: &UiFont,
+    font: impl Into<UiLabels<'a>>,
     view: &MemoryView,
     surface: (f32, f32),
     shapes: &mut Vec<Shape>,
@@ -47,7 +48,7 @@ pub fn memory_overlay(
     let mut drawer = MemoryDrawer {
         ctx,
         style,
-        font,
+        font: font.into(),
         state: &view.state,
         layout: &layout,
         shapes,
@@ -60,7 +61,7 @@ pub fn memory_overlay(
 struct MemoryDrawer<'a, 'b> {
     ctx: &'a mut DrawContext<'b>,
     style: UiStyle,
-    font: &'a UiFont,
+    font: UiLabels<'a>,
     state: &'a MemoryPanelState,
     layout: &'a MemoryLayout,
     shapes: &'a mut Vec<Shape>,
@@ -846,8 +847,13 @@ impl MemoryDrawer<'_, '_> {
                 self.draw_caret(text_rect, 0.0);
             }
         } else {
-            let (_, buffer) =
-                fit_query_tail(self.font, self.ctx.font_system, text_rect.w, value, s.scale);
+            let (_, buffer) = fit_query_tail(
+                self.font.font(),
+                self.ctx.font_system,
+                text_rect.w,
+                value,
+                s.scale,
+            );
             let measured = label_width(&buffer);
             let mut label = UiLabel::new(buffer, text_rect, self.start_align(), s.text);
             if let Some(c) = clip {

@@ -328,8 +328,13 @@ impl SettingsDrawer<'_, '_> {
                 ));
             }
         } else {
-            let (_, buffer) =
-                fit_query_tail(self.font, self.ctx.font_system, s.scale, value, text_rect.w);
+            let (_, buffer) = fit_query_tail(
+                self.font.font(),
+                self.ctx.font_system,
+                s.scale,
+                value,
+                text_rect.w,
+            );
             let w = label_width(&buffer);
             let mut label = UiLabel::new(buffer, text_rect, UiAlign::Start, s.text);
             label.bounds = intersect_bounds(label.bounds, clip);
@@ -734,8 +739,13 @@ impl SettingsDrawer<'_, '_> {
                 Some(clip),
             );
         } else {
-            let (_, buffer) =
-                fit_query_tail(self.font, self.ctx.font_system, s.scale, query, text_rect.w);
+            let (_, buffer) = fit_query_tail(
+                self.font.font(),
+                self.ctx.font_system,
+                s.scale,
+                query,
+                text_rect.w,
+            );
             let mut label = UiLabel::new(buffer, text_rect, UiAlign::Start, s.text);
             label.bounds = intersect_bounds(label.bounds, clip);
             self.labels.push(label);

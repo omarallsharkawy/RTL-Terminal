@@ -10,7 +10,8 @@ use twitty_core::color::{Palette, Rgba};
 use twitty_core::layout::Rect;
 use twitty_render::icons::Icon;
 use twitty_render::shapes::{Border, Shadow, Shape};
-use twitty_render::text::ui::{UiAlign, UiFont, UiLabel, UiSize, UiWeight};
+use twitty_render::text::labels::UiLabels;
+use twitty_render::text::ui::{UiAlign, UiLabel, UiSize, UiWeight};
 use twitty_render::ui_style::{
     UiStyle, OVERLAY_BLUR, OVERLAY_OFFSET, OVERLAY_SHADOW, RADIUS_12, RADIUS_6, RADIUS_8, SPACE_12,
     SPACE_4, SPACE_8,
@@ -30,10 +31,10 @@ pub struct WelcomeView {
 
 /// Draw the Welcome wizard overlay into `shapes`, returning its outer rect (to clip underlying
 /// text) and shaped UI labels.
-pub fn welcome_overlay(
+pub fn welcome_overlay<'a>(
     ctx: &mut DrawContext,
     style: UiStyle,
-    font: &UiFont,
+    font: impl Into<UiLabels<'a>>,
     view: &WelcomeView,
     surface: (f32, f32),
     shapes: &mut Vec<Shape>,
@@ -45,7 +46,7 @@ pub fn welcome_overlay(
     let mut drawer = WelcomeDrawer {
         ctx,
         style,
-        font,
+        font: font.into(),
         view,
         layout: &layout,
         shapes,
@@ -58,7 +59,7 @@ pub fn welcome_overlay(
 struct WelcomeDrawer<'a, 'b> {
     ctx: &'a mut DrawContext<'b>,
     style: UiStyle,
-    font: &'a UiFont,
+    font: UiLabels<'a>,
     view: &'a WelcomeView,
     layout: &'a WelcomeLayout,
     shapes: &'a mut Vec<Shape>,
@@ -1179,7 +1180,7 @@ impl WelcomeDrawer<'_, '_> {
         }
         let line_h = (size.px(self.style.scale) * 1.45).ceil().max(1.0);
         let lines = wrap_lines(
-            self.font,
+            self.font.font(),
             self.ctx.font_system,
             size,
             weight,

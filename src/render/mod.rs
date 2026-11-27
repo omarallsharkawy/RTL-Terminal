@@ -597,7 +597,7 @@ impl Renderer {
                             view,
                             &mut self.review_labels,
                             style,
-                            &self.ui_font,
+                            UiLabels::cached(&self.ui_font, &mut self.ui_labels),
                             chrome.language,
                             opacity,
                         );
@@ -607,7 +607,13 @@ impl Renderer {
                 }
                 Layer::AgentPanel => {
                     if let Some((view, opacity, _)) = self.agent_panel_view.sample(motion.now) {
-                        frame.add_agent_panel_motion(&mut ctx, view, style, &self.ui_font, opacity);
+                        frame.add_agent_panel_motion(
+                            &mut ctx,
+                            view,
+                            style,
+                            UiLabels::cached(&self.ui_font, &mut self.ui_labels),
+                            opacity,
+                        );
                     }
                 }
                 Layer::Composer => {
@@ -629,12 +635,22 @@ impl Renderer {
                 }
                 Layer::Settings => {
                     if let Some(view) = &self.settings_view {
-                        frame.add_settings(&mut ctx, style, &self.ui_font, view);
+                        frame.add_settings(
+                            &mut ctx,
+                            style,
+                            UiLabels::cached(&self.ui_font, &mut self.ui_labels),
+                            view,
+                        );
                     }
                 }
                 Layer::Memory => {
                     if let Some(view) = &self.memory_view {
-                        frame.add_memory(&mut ctx, style, &self.ui_font, view);
+                        frame.add_memory(
+                            &mut ctx,
+                            style,
+                            UiLabels::cached(&self.ui_font, &mut self.ui_labels),
+                            view,
+                        );
                     }
                 }
                 Layer::Palette => {
@@ -652,7 +668,12 @@ impl Renderer {
                 }
                 Layer::Welcome => {
                     if let Some(view) = &self.welcome_view {
-                        frame.add_welcome(&mut ctx, style, &self.ui_font, view);
+                        frame.add_welcome(
+                            &mut ctx,
+                            style,
+                            UiLabels::cached(&self.ui_font, &mut self.ui_labels),
+                            view,
+                        );
                     }
                 }
                 Layer::AiConsent => {

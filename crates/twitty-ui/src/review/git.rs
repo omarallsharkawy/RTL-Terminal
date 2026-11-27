@@ -165,6 +165,42 @@ pub fn load(cwd: &Path) -> Result<Snapshot, LoadError> {
     })
 }
 
+/// Stage one repository-relative file path (`git add -- <path>`). Rejects non-relative or
+/// traversal paths so nothing outside `root` or looking like a flag can be touched.
+pub fn stage_file(root: &Path, rel_path: &str) -> Result<(), LoadError> {
+    if rel_path.is_empty() || !is_plain_relative(Path::new(rel_path)) {
+        return Err(LoadError::Failed("invalid repository path".into()));
+    }
+    let out = git(root, &["add", "--", rel_path], 16 * 1024)?;
+    if out.success() {
+        Ok(())
+    } else {
+        Err(LoadError::Failed("git add failed".into()))
+    }
+}
+
+/// Unstage one repository-relative file path (`git reset -q HEAD -- <path>`, falling back to
+/// `git rm --cached -q -- <path>` in repositories with no commits yet).
+pub fn unstage_file(root: &Path, rel_path: &str) -> Result<(), LoadError> {
+    if rel_path.is_empty() || !is_plain_relative(Path::new(rel_path)) {
+        return Err(LoadError::Failed("invalid repository path".into()));
+    }
+    let out = git(root, &["reset", "-q", "HEAD", "--", rel_path], 16 * 1024)?;
+    if out.success() {
+        return Ok(());
+    }
+    let unborn = git(
+        root,
+        &["rm", "--cached", "-q", "--ignore-unmatch", "--", rel_path],
+        16 * 1024,
+    )?;
+    if unborn.success() {
+        Ok(())
+    } else {
+        Err(LoadError::Failed("git unstage failed".into()))
+    }
+}
+
 /// Add the untracked (not ignored) files as added files, reading at most `budget` bytes.
 fn add_untracked(
     root: &Path,

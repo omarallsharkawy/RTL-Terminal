@@ -653,11 +653,11 @@ impl Frame {
     }
 
     /// Draw the settings panel above everything else, clipping underlying text behind it.
-    pub fn add_settings(
+    pub fn add_settings<'a>(
         &mut self,
         ctx: &mut DrawContext,
         style: UiStyle,
-        font: &UiFont,
+        font: impl Into<UiLabels<'a>>,
         view: &SettingsView,
     ) {
         let (outer, texts) = settings_overlay(
@@ -672,11 +672,11 @@ impl Frame {
     }
 
     /// Draw the first-run welcome wizard above everything else, clipping underlying text behind it.
-    pub fn add_welcome(
+    pub fn add_welcome<'a>(
         &mut self,
         ctx: &mut DrawContext,
         style: UiStyle,
-        font: &UiFont,
+        font: impl Into<UiLabels<'a>>,
         view: &WelcomeView,
     ) {
         let (outer, texts) = welcome_overlay(
@@ -691,11 +691,11 @@ impl Frame {
     }
 
     /// Draw the Project Memory overlay above everything else, clipping underlying text behind it.
-    pub fn add_memory(
+    pub fn add_memory<'a>(
         &mut self,
         ctx: &mut DrawContext,
         style: UiStyle,
-        font: &UiFont,
+        font: impl Into<UiLabels<'a>>,
         view: &MemoryView,
     ) {
         let (outer, texts) = memory_overlay(
@@ -726,26 +726,26 @@ impl Frame {
     }
 
     /// The code review panel, beside the panes (they are laid out to leave it room).
-    pub fn add_review(
+    pub fn add_review<'a>(
         &mut self,
         ctx: &mut DrawContext,
         view: &twitty_ui::review::panel::View,
         cache: &mut super::review::ReviewCache,
         style: UiStyle,
-        font: &UiFont,
+        font: impl Into<UiLabels<'a>>,
         language: UiLanguage,
     ) {
         self.add_review_motion(ctx, view, cache, style, font, language, 1.0);
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn add_review_motion(
+    pub fn add_review_motion<'a>(
         &mut self,
         ctx: &mut DrawContext,
         view: &twitty_ui::review::panel::View,
         cache: &mut super::review::ReviewCache,
         style: UiStyle,
-        font: &UiFont,
+        font: impl Into<UiLabels<'a>>,
         language: UiLanguage,
         opacity: f32,
     ) {
@@ -783,22 +783,22 @@ impl Frame {
     }
 
     /// The Agent side panel, docked beside the panes (clipping underlying terminal text).
-    pub fn add_agent_panel(
+    pub fn add_agent_panel<'a>(
         &mut self,
         ctx: &mut DrawContext,
         view: &twitty_ui::ui::agent_panel::AgentPanelView,
         style: UiStyle,
-        font: &UiFont,
+        font: impl Into<UiLabels<'a>>,
     ) {
         self.add_agent_panel_motion(ctx, view, style, font, 1.0);
     }
 
-    pub fn add_agent_panel_motion(
+    pub fn add_agent_panel_motion<'a>(
         &mut self,
         ctx: &mut DrawContext,
         view: &twitty_ui::ui::agent_panel::AgentPanelView,
         style: UiStyle,
-        font: &UiFont,
+        font: impl Into<UiLabels<'a>>,
         opacity: f32,
     ) {
         if opacity <= 0.0 {

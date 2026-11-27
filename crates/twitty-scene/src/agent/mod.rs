@@ -25,7 +25,8 @@ use twitty_render::icons::Icon;
 use twitty_render::row::CachedRow;
 use twitty_render::shapes::{Border, Shadow, Shape};
 use twitty_render::style::Quad;
-use twitty_render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
+use twitty_render::text::labels::UiLabels;
+use twitty_render::text::ui::{label_width, UiAlign, UiLabel, UiSize, UiWeight};
 use twitty_render::ui_style::{UiStyle, OVERLAY_SHADOW, RADIUS_12, RADIUS_6, RADIUS_8};
 use twitty_ui::composer::editor::TextEditor;
 use twitty_ui::ui::agent_panel::{
@@ -51,17 +52,17 @@ pub struct AgentScene {
 }
 
 /// Build the Agent panel scene for `view`.
-pub fn build(
+pub fn build<'a>(
     ctx: &mut DrawContext,
     view: &AgentPanelView,
     style: UiStyle,
-    font: &UiFont,
+    font: impl Into<UiLabels<'a>>,
 ) -> AgentScene {
     let layout = AgentPanelLayout::build(view, ctx.metrics);
     let mut drawer = AgentDrawer {
         ctx,
         style,
-        font,
+        font: font.into(),
         view,
         layout: &layout,
         scene: AgentScene {
@@ -78,7 +79,7 @@ pub fn build(
 pub(super) struct AgentDrawer<'a, 'b> {
     ctx: &'a mut DrawContext<'b>,
     style: UiStyle,
-    font: &'a UiFont,
+    font: UiLabels<'a>,
     view: &'a AgentPanelView,
     layout: &'a AgentPanelLayout,
     scene: AgentScene,

@@ -7,7 +7,7 @@ use cosmic_text::{Buffer, FontSystem};
 
 use super::ui::{fit_query_tail, UiFont, UiSize, UiWeight};
 
-const MAX_LABELS: usize = 512;
+const MAX_LABELS: usize = 1024;
 const MAX_TEXT_BYTES: usize = 1024;
 
 /// Owned alongside one UI font and font system. Replace it when the font changes.
@@ -66,6 +66,11 @@ impl<'a> UiLabels<'a> {
             font,
             cache: Some(cache),
         }
+    }
+
+    /// Borrow the underlying [`UiFont`] (e.g. for helpers that shape directly).
+    pub fn font(&self) -> &'a UiFont {
+        self.font
     }
 
     #[doc(hidden)]

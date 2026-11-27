@@ -45,10 +45,16 @@ fi
 __twitty_marked_elsewhere() {
     [[ -n "${ITERM_SHELL_INTEGRATION_INSTALLED-}${VSCODE_SHELL_INTEGRATION-}" ]] && return 0
     [[ "${PS1-}${PS0-}" == *'133;'* ]] && return 0
-    [[ "$(builtin declare -p PROMPT_COMMAND 2>/dev/null)" == *'133;'* ]] && return 0
-    # Any function that prints a mark (written so this one does not match itself).
-    local mark=']13''3;'
-    [[ "$(builtin declare -f)" == *"$mark"* ]]
+    local pc
+    pc=$(builtin declare -p PROMPT_COMMAND 2>/dev/null)
+    [[ "$pc" == *'133;'* ]] && return 0
+    # Inspect only functions referenced by PROMPT_COMMAND (avoiding bare `declare -f`, which
+    # dumps every bash-completion function in memory on each new shell).
+    local mark=']13''3;' word
+    for word in ${PROMPT_COMMAND[*]//[^A-Za-z0-9_-]/ }; do
+        [[ -n "$word" ]] && [[ "$(builtin declare -f "$word" 2>/dev/null)" == *"$mark"* ]] && return 0
+    done
+    return 1
 }
 
 if [[ $- == *i* && -z "${__twitty_si_loaded-}" ]] && __twitty_marked_elsewhere; then

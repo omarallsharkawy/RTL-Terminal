@@ -12,6 +12,7 @@ use unicode_bidi::{bidi_class, BidiClass};
 use unicode_width::UnicodeWidthChar;
 
 use super::context::DrawContext;
+use std::sync::Arc;
 use twitty_core::color::Rgba;
 use twitty_core::layout::Rect;
 use twitty_core::terminal::{CellData, LineData, MAX_DRAWN_MARKS};
@@ -20,8 +21,9 @@ use twitty_render::metrics::CellMetrics;
 use twitty_render::row::CachedRow;
 use twitty_render::shapes::{Border, Shape};
 use twitty_render::style::Quad;
+use twitty_render::text::labels::UiLabels;
 use twitty_render::text::shaper::shape_label;
-use twitty_render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
+use twitty_render::text::ui::{label_width, UiAlign, UiLabel, UiSize, UiWeight};
 use twitty_render::ui_style::{UiStyle, RADIUS_6};
 use twitty_ui::review::diff::FileStatus;
 use twitty_ui::review::layout::PanelLayout;
@@ -151,12 +153,12 @@ fn fg_bytes(fg: &AnsiColor) -> [u8; 3] {
     }
 }
 
-pub fn build(
+pub fn build<'a>(
     ctx: &mut DrawContext,
     view: &View,
     cache: &mut ReviewCache,
     style: UiStyle,
-    font: &UiFont,
+    font: impl Into<UiLabels<'a>>,
     language: UiLanguage,
 ) -> ReviewScene {
     cache.begin_frame(ctx);
@@ -173,7 +175,7 @@ pub fn build(
         ctx,
         cache,
         style,
-        font,
+        font: font.into(),
         layout,
         language,
         scene: ReviewScene {
@@ -213,7 +215,7 @@ struct ReviewDrawing<'a, 'b> {
     ctx: &'a mut DrawContext<'b>,
     cache: &'a mut ReviewCache,
     style: UiStyle,
-    font: &'a UiFont,
+    font: UiLabels<'a>,
     layout: PanelLayout,
     language: UiLanguage,
     scene: ReviewScene,
@@ -507,7 +509,7 @@ impl ReviewDrawing<'_, '_> {
         total + gap
     }
 
-    fn shape(&mut self, text: &str, size: UiSize, weight: UiWeight) -> cosmic_text::Buffer {
+    fn shape(&mut self, text: &str, size: UiSize, weight: UiWeight) -> Arc<cosmic_text::Buffer> {
         self.font
             .shape(self.ctx.font_system, size, weight, self.style.scale, text)
     }
