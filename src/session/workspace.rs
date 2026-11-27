@@ -3,9 +3,10 @@
 //! Window-free: the grid geometry comes in through [`GridGeometry`] and new shells through
 //! [`PaneFactory`], so tab and pane lifecycles can be tested with fake panes.
 
-use crate::ui::chrome::{t, UiLanguage};
+use crate::ui::chrome::t;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use twitty_core::language::fill;
 
 use crate::layout::{dividers, layout, neighbor, Divider, FocusDir, Node, PaneId, Rect, SplitDir};
 use crate::pty::Pty;
@@ -38,30 +39,21 @@ impl SplitFailure {
         match dir {
             SplitDir::Horizontal if cols < min_cols => Self {
                 code: "pane_too_small",
-                message: match UiLanguage::current() {
-                    UiLanguage::English => format!(
-                        "This pane is too narrow to split side by side ({cols} columns; needs {min_cols})"
-                    ),
-                    UiLanguage::Arabic => format!(
-                        "اللوحة ضيقة على التقسيم جنب بعض ({cols} عمود؛ محتاجة {min_cols})"
-                    ),
-                },
+                message: fill(
+                    t("This pane is too narrow to split side by side ({} columns; needs {})"),
+                    &[&cols, &min_cols],
+                ),
             },
             SplitDir::Vertical if rows < min_rows => Self {
                 code: "pane_too_small",
-                message: match UiLanguage::current() {
-                    UiLanguage::English => format!(
-                        "This pane is too short to split top and bottom ({rows} rows; needs {min_rows})"
-                    ),
-                    UiLanguage::Arabic => format!(
-                        "اللوحة قصيرة على التقسيم فوق وتحت ({rows} سطر؛ محتاجة {min_rows})"
-                    ),
-                },
+                message: fill(
+                    t("This pane is too short to split top and bottom ({} rows; needs {})"),
+                    &[&rows, &min_rows],
+                ),
             },
             _ => Self {
                 code: "internal",
-                message: t("Could not split the pane: the shell failed to start")
-                .into(),
+                message: t("Could not split the pane: the shell failed to start").into(),
             },
         }
     }

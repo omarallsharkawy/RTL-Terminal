@@ -29,6 +29,7 @@ use crate::terminal::{Terminal, TextChar, TextLinePos};
 use crate::ui::notifications::is_rtl;
 use crate::ui::palette::fold_into;
 use crate::ui::palette::PaletteItem;
+use twitty_core::en;
 
 /// Most results listed, over all panes.
 pub const MAX_HITS: usize = 200;
@@ -506,13 +507,8 @@ pub fn palette_item(hit: &SearchHit) -> PaletteItem {
     }
 }
 
-fn note(title_en: &str, title_ar: &str) -> PaletteItem {
-    PaletteItem {
-        title_en: title_en.into(),
-        title_ar: title_ar.into(),
-        shortcut: None,
-        dimmed: true,
-    }
+fn note(english: &str) -> PaletteItem {
+    PaletteItem::text(english, true)
 }
 
 /// Shown in the query line while it is empty.
@@ -608,18 +604,17 @@ impl SearchAll {
     /// The rows to list for `query`: the results, or a hint when there are none.
     pub fn rows(&self, query: &str) -> Vec<PaletteItem> {
         if Query::new(query).is_none() {
-            return vec![note(
-                "Type at least 2 characters to search every terminal",
-                "اكتب حرفين على الأقل",
-            )];
+            return vec![note(en!(
+                "Type at least 2 characters to search every terminal"
+            ))];
         }
         if !self.hits.is_empty() {
             return self.hits.iter().map(palette_item).collect();
         }
         if self.is_pending() || self.searched.is_none() {
-            vec![note("Searching…", "بيدوّر…")]
+            vec![note(en!("Searching…"))]
         } else {
-            vec![note("No matches", "مفيش نتايج")]
+            vec![note(en!("No matches"))]
         }
     }
 }

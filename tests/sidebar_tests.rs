@@ -28,7 +28,7 @@ use twitty::sidebar::{
 };
 use twitty::terminal::Terminal;
 use twitty::ui::chrome::{
-    ChromeAction, PaneHeaderLayout, TopBarLayout, UiLanguage, WindowLayout, SEARCH_AR, SEARCH_EN,
+    ChromeAction, PaneHeaderLayout, TopBarLayout, UiLanguage, WindowLayout, SEARCH,
 };
 use twitty::ui::hit::{hit_test, Hit, HitGeometry};
 use unicode_segmentation::UnicodeSegmentation;
@@ -1187,8 +1187,8 @@ fn narrow_toolbar_and_tab_pills_use_words_and_grapheme_fallbacks() {
         },
     ];
     for (language, local) in [
-        (UiLanguage::English, SEARCH_EN),
-        (UiLanguage::Arabic, SEARCH_AR),
+        (UiLanguage::English, SEARCH),
+        (UiLanguage::Arabic, UiLanguage::Arabic.t(SEARCH)),
     ] {
         let layout = WindowLayout::new(metrics, surface, 2, (SidebarPosition::Hidden, 220.0), true)
             .with_language(language);

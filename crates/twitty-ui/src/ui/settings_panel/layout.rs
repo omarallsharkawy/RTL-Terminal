@@ -359,7 +359,7 @@ impl SettingsLayout {
 
     /// Height of a plain control row (taller when it has a note line).
     fn row_height(id: SettingId, scale: f32) -> f32 {
-        let logical = if id.descriptor().note_en.is_some() {
+        let logical = if id.descriptor().note.is_some() {
             48.0
         } else {
             40.0
@@ -382,7 +382,7 @@ impl SettingsLayout {
         let mut total_h = 0.0_f32;
         for (i, &id) in controls.iter().enumerate() {
             let desc = id.descriptor();
-            let row_h = if desc.note_en.is_some() {
+            let row_h = if desc.note.is_some() {
                 px(48.0).round()
             } else {
                 px(40.0).round()
@@ -407,7 +407,7 @@ impl SettingsLayout {
 
         for &id in controls {
             let desc = id.descriptor();
-            let row_h = if desc.note_en.is_some() {
+            let row_h = if desc.note.is_some() {
                 px(48.0).round()
             } else {
                 px(40.0).round()

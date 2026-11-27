@@ -617,10 +617,7 @@ impl WelcomeDrawer<'_, '_> {
         self.draw_row_shell(l.transparency_row, trans_focused, trans_hover);
         let opacity_pct = (self.view.config.background_opacity * 100.0).round() as i32;
         let trans_note = if trans_on {
-            match lang {
-                UiLanguage::English => format!("Translucent background ({opacity_pct}%)"),
-                UiLanguage::Arabic => format!("خلفية شفافة ({opacity_pct}%)"),
-            }
+            twitty_core::language::fill(lang.t("Translucent background ({}%)"), &[&opacity_pct])
         } else {
             lang.t("Solid opaque background (100%)").to_owned()
         };
@@ -687,10 +684,8 @@ impl WelcomeDrawer<'_, '_> {
         let shell_title_rect = lang.mirror(shell_title_ltr, top_bar);
 
         Icon::Terminal.draw(icon_rect, self.ctx.color(s.accent), self.shapes);
-        let detected_title = match lang {
-            UiLanguage::English => format!("Detected shell: {}", shell.name),
-            UiLanguage::Arabic => format!("الشيل المكتشف: {}", shell.name),
-        };
+        let detected_title =
+            twitty_core::language::fill(lang.t("Detected shell: {}"), &[&shell.name]);
         self.push_label(
             shell_title_rect,
             &detected_title,
@@ -874,14 +869,14 @@ impl WelcomeDrawer<'_, '_> {
 
         // Summary of which agent will be used.
         let summary = match &info.selected {
-            Some(name) if info.from_config => match lang {
-                UiLanguage::English => format!("Configured agent to use: {name} (read-only)"),
-                UiLanguage::Arabic => format!("الوكيل المضبوط للاستخدام: {name} (قراءة فقط)"),
-            },
-            Some(name) => match lang {
-                UiLanguage::English => format!("Agent that will be used: {name} (read-only)"),
-                UiLanguage::Arabic => format!("الوكيل الذي سيُستخدم: {name} (قراءة فقط)"),
-            },
+            Some(name) if info.from_config => twitty_core::language::fill(
+                lang.t("Configured agent to use: {} (read-only)"),
+                &[&name],
+            ),
+            Some(name) => twitty_core::language::fill(
+                lang.t("Agent that will be used: {} (read-only)"),
+                &[&name],
+            ),
             None => lang
                 .t("No coding agent found on PATH yet — install claude, codex, gemini, or opencode anytime.")
                 .to_owned(),

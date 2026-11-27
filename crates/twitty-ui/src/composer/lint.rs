@@ -14,6 +14,7 @@ use crate::composer::highlight::{
 };
 use crate::composer::specs::CommandSpec;
 use crate::ui::chrome::UiLanguage;
+use twitty_core::language::fill;
 
 /// Severity of a composer lint mark.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,32 +43,28 @@ pub struct LintMark {
 }
 
 impl LintMark {
-    pub fn message_en(&self) -> String {
+    /// The mark's message in `language`.
+    pub fn message_in(&self, language: UiLanguage) -> String {
         match &self.kind {
-            LintKind::UnknownCommand(cmd) => format!("Unknown command: `{cmd}`"),
-            LintKind::UnclosedQuote('\'') => "Unclosed single quote (')".into(),
-            LintKind::UnclosedQuote('"') => "Unclosed double quote (\")".into(),
-            LintKind::UnclosedQuote('`') => "Unclosed backtick (`)".into(),
-            LintKind::UnclosedQuote(q) => format!("Unclosed quote ({q})"),
-            LintKind::UnclosedBracket(c) => format!("Unclosed bracket `{c}`"),
-            LintKind::UnexpectedClose(c) => format!("Unexpected closing `{c}`"),
+            LintKind::UnknownCommand(cmd) => fill(language.t("Unknown command: `{}`"), &[&cmd]),
+            LintKind::UnclosedQuote('\'') => language.t("Unclosed single quote (')").into(),
+            LintKind::UnclosedQuote('"') => language.t("Unclosed double quote (\")").into(),
+            LintKind::UnclosedQuote('`') => language.t("Unclosed backtick (`)").into(),
+            LintKind::UnclosedQuote(q) => fill(language.t("Unclosed quote ({})"), &[&q]),
+            LintKind::UnclosedBracket(c) => fill(language.t("Unclosed bracket `{}`"), &[&c]),
+            LintKind::UnexpectedClose(c) => fill(language.t("Unexpected closing `{}`"), &[&c]),
             LintKind::TrailingOperator(op) => {
-                format!("Trailing `{op}` expects another command")
+                fill(language.t("Trailing `{}` expects another command"), &[&op])
             }
         }
     }
 
+    pub fn message_en(&self) -> String {
+        self.message_in(UiLanguage::English)
+    }
+
     pub fn message_ar(&self) -> String {
-        match &self.kind {
-            LintKind::UnknownCommand(cmd) => format!("أمر غير معروف: {cmd}"),
-            LintKind::UnclosedQuote('\'') => "علامة اقتباس مفردة غير مغلقة (')".into(),
-            LintKind::UnclosedQuote('"') => "علامة اقتباس مزدوجة غير مغلقة (\")".into(),
-            LintKind::UnclosedQuote('`') => "علامة اقتباس خلفية غير مغلقة (`)".into(),
-            LintKind::UnclosedQuote(q) => format!("علامة اقتباس غير مغلقة ({q})"),
-            LintKind::UnclosedBracket(c) => format!("قوس غير مغلق ({c})"),
-            LintKind::UnexpectedClose(c) => format!("قوس إغلاق غير متوقع ({c})"),
-            LintKind::TrailingOperator(op) => format!("العامل {op} في النهاية يتطلب أمراً تالياً"),
-        }
+        self.message_in(UiLanguage::Arabic)
     }
 
     pub fn message(&self, lang: UiLanguage) -> String {

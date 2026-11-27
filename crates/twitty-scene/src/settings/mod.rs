@@ -390,14 +390,8 @@ impl SettingsDrawer<'_, '_> {
             (ControlKind::Swatches, ControlGeometry::Swatches { swatches }) => {
                 self.draw_swatches(swatches);
             }
-            (
-                ControlKind::TextField {
-                    placeholder_en,
-                    placeholder_ar,
-                },
-                ControlGeometry::TextField { input },
-            ) => {
-                let placeholder = self.lang().text(placeholder_en, placeholder_ar);
+            (ControlKind::TextField { placeholder }, ControlGeometry::TextField { input }) => {
+                let placeholder = self.lang().t(placeholder);
                 self.draw_text_field(row.id, *input, placeholder, focused, clip);
             }
             (ControlKind::ListPicker { .. }, ControlGeometry::ListPicker { button }) => {

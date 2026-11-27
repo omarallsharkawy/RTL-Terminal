@@ -74,7 +74,10 @@ fn commands_section_sits_between_ai_and_keys_with_bilingual_labels() {
     assert_eq!(SettingsSection::ALL.len(), 6);
     assert_eq!(SettingsSection::ALL[3], SettingsSection::Commands);
     assert_eq!(SettingsSection::Commands.label_en(), "Commands");
-    assert_eq!(SettingsSection::Commands.label_ar(), "الأوامر");
+    assert_eq!(
+        SettingsSection::Commands.label(UiLanguage::Arabic),
+        "الأوامر"
+    );
     // Arrow navigation in the sidebar reaches it from AI.
     let mut cfg = TwittyConfig::default();
     let mut state = SettingsPanelState::default();

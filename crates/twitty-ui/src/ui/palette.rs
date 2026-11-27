@@ -14,6 +14,7 @@ use winit::keyboard::{Key, ModifiersState, NamedKey};
 
 use crate::commands::Command;
 use crate::input::keybindings::KeyBindings;
+use twitty_core::language::UiLanguage;
 
 /// Most results shown at once.
 pub const MAX_RESULTS: usize = 10;
@@ -21,7 +22,7 @@ pub const MAX_RESULTS: usize = 10;
 /// Longest query kept, in characters.
 const MAX_QUERY_CHARS: usize = 200;
 
-pub const RENAME_TAB_PLACEHOLDER: &str = "Rename tab…";
+pub const RENAME_TAB_PLACEHOLDER: &str = twitty_core::en!("Rename tab…");
 
 /// What the palette lists.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -381,4 +382,16 @@ pub struct PaletteItem {
     pub shortcut: Option<String>,
     /// Listed but cannot be chosen (a notification from a closed pane).
     pub dimmed: bool,
+}
+
+impl PaletteItem {
+    /// A row of interface text (English, see [`twitty_core::language`]) in both languages.
+    pub fn text(english: &str, dimmed: bool) -> Self {
+        Self {
+            title_en: UiLanguage::English.t(english).to_owned(),
+            title_ar: UiLanguage::Arabic.t(english).to_owned(),
+            shortcut: None,
+            dimmed,
+        }
+    }
 }

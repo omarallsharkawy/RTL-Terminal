@@ -2,7 +2,8 @@
 //! interface text the code shows has a translation, nothing in a catalog is left unused, and
 //! placeholders match.
 //!
-//! Interface text is found where it is marked: `t("…")`, `.t("…")` and `en!("…")`.
+//! Interface text is found where it is marked: `t("…")`, `.t("…")` and `en!("…")`. Arabic
+//! written straight into the code is allowed only in the places listed in [`ARABIC_IN_CODE`].
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -92,6 +93,11 @@ fn used_texts() -> BTreeMap<String, String> {
                 if marker == "t(" && before.is_some_and(|c| c.is_alphanumeric() || c == '_') {
                     continue;
                 }
+                // Skip comments (doc examples).
+                let line_start = src[..start].rfind('\n').map_or(0, |i| i + 1);
+                if src[line_start..start].trim_start().starts_with("//") {
+                    continue;
+                }
                 let rest = src[from..].trim_start();
                 if !rest.starts_with('"') {
                     continue;
@@ -135,6 +141,111 @@ fn every_shown_text_is_translated_and_every_translation_is_used() {
         unused.is_empty(),
         "translations nothing uses (remove them from ar.json): {unused:#?}"
     );
+}
+
+/// Files that keep Arabic in the code, how many lines, and why. Tests are not counted.
+const ARABIC_IN_CODE: &[(&str, usize, &str)] = &[
+    (
+        "crates/twitty-ai/src/ai/parse.rs",
+        1,
+        "labels an agent writes in Arabic answers",
+    ),
+    (
+        "crates/twitty-ai/src/ai/prompt.rs",
+        2,
+        "the answer language named to the agent",
+    ),
+    (
+        "crates/twitty-scene/src/agent.rs",
+        5,
+        "Arabic counted nouns (one, two, few, many)",
+    ),
+    (
+        "crates/twitty-scene/src/settings/commands.rs",
+        1,
+        "an Arabic sample name",
+    ),
+    (
+        "crates/twitty-scene/src/welcome.rs",
+        2,
+        "Arabic sample text and the name العربية",
+    ),
+    (
+        "crates/twitty-ui/src/input/broadcast.rs",
+        2,
+        "a badge shown in both languages",
+    ),
+    (
+        "crates/twitty-ui/src/input/keybindings.rs",
+        14,
+        "startup warnings in both languages",
+    ),
+    (
+        "crates/twitty-ui/src/ui/agent_panel.rs",
+        17,
+        "Arabic counted nouns (one, two, few, many)",
+    ),
+    (
+        "crates/twitty-ui/src/ui/settings_panel/table.rs",
+        1,
+        "the name العربية",
+    ),
+];
+
+fn is_arabic(c: char) -> bool {
+    ('\u{0600}'..='\u{06FF}').contains(&c)
+}
+
+/// Lines outside comments and test modules with Arabic after a `"`.
+fn arabic_lines(src: &str) -> usize {
+    let lines: Vec<&str> = src.lines().collect();
+    let mut count = 0;
+    for (i, line) in lines.iter().enumerate() {
+        if line.starts_with("#[cfg(test)]")
+            && lines.get(i + 1).is_some_and(|l| l.starts_with("mod "))
+        {
+            break;
+        }
+        if line.trim_start().starts_with("//") {
+            continue;
+        }
+        if let Some(at) = line.find(is_arabic) {
+            count += usize::from(line[..at].contains('"'));
+        }
+    }
+    count
+}
+
+#[test]
+fn arabic_lives_in_the_catalog() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut found = BTreeMap::new();
+    for file in sources() {
+        let count = arabic_lines(&std::fs::read_to_string(&file).unwrap());
+        if count > 0 {
+            let name = file
+                .strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            found.insert(name, count);
+        }
+    }
+    let allowed: BTreeMap<String, usize> = ARABIC_IN_CODE
+        .iter()
+        .map(|(file, count, _)| (file.to_string(), *count))
+        .collect();
+    assert_eq!(
+        found, allowed,
+        "Arabic text belongs in crates/twitty-core/i18n/ar.json: write the English in the code \
+         and translate it with t(..); update ARABIC_IN_CODE only for a real exception"
+    );
+    for english in catalog().keys() {
+        assert!(
+            !english.chars().any(is_arabic),
+            "catalog key {english:?} is not English"
+        );
+    }
 }
 
 #[test]

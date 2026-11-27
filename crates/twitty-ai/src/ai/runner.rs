@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use twitty_core::language::fill;
 
 use twitty_core::language::UiLanguage;
 use twitty_core::shell_integration::clean_text;
@@ -58,54 +59,38 @@ pub enum AiError {
 }
 
 impl AiError {
-    pub fn message_en(&self) -> String {
+    /// The error in `language`.
+    pub fn message_in(&self, language: UiLanguage) -> String {
         match self {
-            Self::Disabled => "Built-in AI is disabled in config.json (\"ai\": false).".into(),
+            Self::Disabled => language.t("Built-in AI is disabled in config.json (\"ai\": false).").into(),
             Self::NoAgent => {
-                "No coding agent found (claude, codex, gemini, opencode). Set \"ai_agent\" in config.json."
+                language.t("No coding agent found (claude, codex, gemini, opencode). Set \"ai_agent\" in config.json.")
                     .into()
             }
-            Self::SpawnFailed(err) => format!("Failed to start agent: {err}"),
-            Self::TimedOut(secs) => format!("AI timed out after {secs}s."),
-            Self::Cancelled => "AI request cancelled.".into(),
+            Self::SpawnFailed(err) => fill(language.t("Failed to start agent: {}"), &[&err]),
+            Self::TimedOut(secs) => fill(language.t("AI timed out after {}s."), &[&secs]),
+            Self::Cancelled => language.t("AI request cancelled.").into(),
             Self::NonZeroExit { code, stderr } => {
                 let detail = first_non_empty_line(stderr);
                 match (code, detail) {
-                    (Some(c), Some(msg)) => format!("Agent failed (exit {c}): {msg}"),
-                    (Some(c), None) => format!("Agent failed with exit code {c}."),
-                    (None, Some(msg)) => format!("Agent failed: {msg}"),
-                    (None, None) => "Agent failed unexpectedly.".into(),
+                    (Some(c), Some(msg)) => fill(language.t("Agent failed (exit {}): {}"), &[&c, &msg]),
+                    (Some(c), None) => fill(language.t("Agent failed with exit code {}."), &[&c]),
+                    (None, Some(msg)) => fill(language.t("Agent failed: {}"), &[&msg]),
+                    (None, None) => language.t("Agent failed unexpectedly.").into(),
                 }
             }
-            Self::OutputTooLarge => "Agent output exceeded size limit.".into(),
-            Self::EmptyReply => "Agent returned an empty reply.".into(),
-            Self::UnparseableReply => "Could not extract a command from the agent reply.".into(),
+            Self::OutputTooLarge => language.t("Agent output exceeded size limit.").into(),
+            Self::EmptyReply => language.t("Agent returned an empty reply.").into(),
+            Self::UnparseableReply => language.t("Could not extract a command from the agent reply.").into(),
         }
     }
 
+    pub fn message_en(&self) -> String {
+        self.message_in(UiLanguage::English)
+    }
+
     pub fn message_ar(&self) -> String {
-        match self {
-            Self::Disabled => "الذكاء الاصطناعي معطّل في config.json (\"ai\": false).".into(),
-            Self::NoAgent => {
-                "مفيش وكيل برمجة متسطّب (claude, codex, gemini, opencode). اضبط \"ai_agent\" في config.json."
-                    .into()
-            }
-            Self::SpawnFailed(err) => format!("فشل تشغيل الوكيل: {err}"),
-            Self::TimedOut(secs) => format!("انتهت مهلة الذكاء الاصطناعي بعد {secs} ثانية."),
-            Self::Cancelled => "تم إلغاء طلب الذكاء الاصطناعي.".into(),
-            Self::NonZeroExit { code, stderr } => {
-                let detail = first_non_empty_line(stderr);
-                match (code, detail) {
-                    (Some(c), Some(msg)) => format!("الوكيل فشل (خروج {c}): {msg}"),
-                    (Some(c), None) => format!("الوكيل فشل بكود خروج {c}."),
-                    (None, Some(msg)) => format!("الوكيل فشل: {msg}"),
-                    (None, None) => "الوكيل فشل بشكل غير متوقع.".into(),
-                }
-            }
-            Self::OutputTooLarge => "ناتج الوكيل تجاوز الحد الأقصى للحجم.".into(),
-            Self::EmptyReply => "الوكيل رجّع رد فاضي.".into(),
-            Self::UnparseableReply => "مقدرناش نستخرج أمر من رد الوكيل.".into(),
-        }
+        self.message_in(UiLanguage::Arabic)
     }
 
     pub fn message_for(&self, language: UiLanguage) -> String {

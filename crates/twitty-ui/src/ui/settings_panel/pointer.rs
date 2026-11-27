@@ -242,8 +242,7 @@ impl SettingsPanelState {
             SettingsHit::AiDefaultProvider(idx) => {
                 self.focus = FocusZone::Content;
                 self.ai.active_field = None;
-                if let Some(&(id, _, _)) = crate::ui::settings_ai::DEFAULT_PROVIDER_CHOICES.get(idx)
-                {
+                if let Some(&(id, _)) = crate::ui::settings_ai::DEFAULT_PROVIDER_CHOICES.get(idx) {
                     let next = (!id.is_empty()).then(|| id.to_owned());
                     if config.ai_default_provider != next {
                         config.ai_default_provider = next;

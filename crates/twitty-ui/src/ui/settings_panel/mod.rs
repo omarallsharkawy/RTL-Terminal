@@ -285,7 +285,7 @@ impl SettingsPanelState {
                 opts.push(PickerOption {
                     value: None,
                     label_en: "System monospace".to_owned(),
-                    label_ar: "خط النظام أحادي العرض".to_owned(),
+                    label_ar: UiLanguage::Arabic.t("System monospace").to_owned(),
                 });
                 for fam in &self.monospace_fonts {
                     opts.push(PickerOption {
@@ -301,7 +301,7 @@ impl SettingsPanelState {
                 opts.push(PickerOption {
                     value: None,
                     label_en: "System sans-serif".to_owned(),
-                    label_ar: "خط النظام الافتراضي".to_owned(),
+                    label_ar: UiLanguage::Arabic.t("System sans-serif").to_owned(),
                 });
                 for fam in &self.ui_fonts {
                     opts.push(PickerOption {

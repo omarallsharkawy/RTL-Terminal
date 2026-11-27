@@ -20,6 +20,7 @@ use crate::pty::default_shell;
 use crate::shell_integration::clean_text;
 use crate::ui::palette::{PaletteEntry, PaletteId};
 use crate::ui::palette::{PaletteItem, PaletteView};
+use twitty_core::language::{fill, UiLanguage};
 
 pub use discover::{discover_project_file, discover_project_file_default};
 pub use parse::{
@@ -500,14 +501,16 @@ impl TrustConfirmState {
 /// Build the [`PaletteView`] for confirming trust of an untrusted project file, showing the
 /// bilingual confirmation item ("Trust commands in `<dir>`? / تثق في أوامر `<dir>`؟") followed by
 /// the file's full command list.
+const TRUST: &str = twitty_core::en!("Trust commands in {}?");
+
 pub fn trust_confirm_view(project: &ProjectFile, scroll: usize) -> PaletteView {
     let dir_display = clean_text(&project.root.to_string_lossy(), 96);
     let query = format!("⚠ {dir_display} — Enter = trust · Esc = cancel");
 
     let mut items = Vec::with_capacity(1 + project.commands.len());
     items.push(PaletteItem {
-        title_en: format!("Trust commands in {}?", project.tag),
-        title_ar: format!("تثق في أوامر {}؟", project.tag),
+        title_en: fill(TRUST, &[&project.tag]),
+        title_ar: fill(UiLanguage::Arabic.t(TRUST), &[&project.tag]),
         shortcut: Some("Enter / Esc".into()),
         dimmed: false,
     });

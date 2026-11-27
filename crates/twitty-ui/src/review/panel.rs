@@ -17,6 +17,7 @@ use super::rows::{
     build_rows, clamp_top, comment_line, nearest, next_file, reveal, step, LineRef, Note, Row,
 };
 use crate::layout::Rect;
+use crate::ui::chrome::UiLanguage;
 
 /// The commit button's label.
 pub fn commit_label() -> &'static str {
@@ -420,14 +421,10 @@ impl ReviewPanel {
     pub fn comment_sent(&mut self, agent: Option<&str>) {
         self.close_comment();
         let text = match agent {
-            Some(agent) => match crate::ui::chrome::UiLanguage::current() {
-                crate::ui::chrome::UiLanguage::English => {
-                    format!("Sent to {agent}: review it there and press Enter")
-                }
-                crate::ui::chrome::UiLanguage::Arabic => {
-                    format!("اتبعت لـ{agent}: راجعه هناك واضغط Enter")
-                }
-            },
+            Some(agent) => twitty_core::language::fill(
+                crate::ui::chrome::t("Sent to {}: review it there and press Enter"),
+                &[&agent],
+            ),
             None => crate::ui::chrome::t("Sent to the agent pane: review it there and press Enter")
                 .to_owned(),
         };
@@ -445,12 +442,10 @@ impl ReviewPanel {
     pub fn agent_started(&mut self, agent: &str) {
         self.close_comment();
         self.notice = notice(
-            match crate::ui::chrome::UiLanguage::current() {
-                crate::ui::chrome::UiLanguage::English => {
-                    format!("Started {agent} with the comment")
-                }
-                crate::ui::chrome::UiLanguage::Arabic => format!("شغّلنا {agent} بالتعليق"),
-            },
+            twitty_core::language::fill(
+                crate::ui::chrome::t("Started {} with the comment"),
+                &[&agent],
+            ),
             false,
         );
     }
@@ -752,7 +747,11 @@ impl ReviewPanel {
                 let summary = format!(
                     "{n} {} / {n} {}",
                     if n == 1 { "file" } else { "files" },
-                    if n == 1 { "ملف" } else { "ملفات" }
+                    if n == 1 {
+                        UiLanguage::Arabic.t("file")
+                    } else {
+                        UiLanguage::Arabic.t("files")
+                    }
                 );
                 (
                     display_text(&title, MAX_ROW_COLS),

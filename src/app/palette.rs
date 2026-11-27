@@ -16,6 +16,8 @@
 
 use std::path::PathBuf;
 use std::time::{Instant, SystemTime};
+use twitty_core::en;
+use twitty_core::language::fill;
 
 use alacritty_terminal::term::TermMode;
 use winit::event::{KeyEvent, MouseButton};
@@ -227,28 +229,16 @@ impl App {
                 )
             }
             PaletteMode::RenameTab => (
-                vec![PaletteItem {
-                    title_en: "Save tab name (blank clears it)".into(),
-                    title_ar: "احفظ اسم التاب (الاسم الفاضي بيمسحه)".into(),
-                    shortcut: None,
-                    dimmed: false,
-                }],
-                Some(crate::ui::chrome::tr(RENAME_TAB_PLACEHOLDER, "غيّر اسم التاب…").into()),
+                vec![PaletteItem::text(
+                    en!("Save tab name (blank clears it)"),
+                    false,
+                )],
+                Some(crate::ui::chrome::t(RENAME_TAB_PLACEHOLDER).into()),
             ),
             PaletteMode::CloseOtherPanes => (
                 vec![
-                    PaletteItem {
-                        title_en: "Close other panes".into(),
-                        title_ar: "اقفل باقي اللوحات".into(),
-                        shortcut: None,
-                        dimmed: false,
-                    },
-                    PaletteItem {
-                        title_en: "Cancel".into(),
-                        title_ar: "إلغاء".into(),
-                        shortcut: None,
-                        dimmed: false,
-                    },
+                    PaletteItem::text(en!("Close other panes"), false),
+                    PaletteItem::text(en!("Cancel"), false),
                 ],
                 Some(crate::ui::chrome::t("Close panes with running programs?").into()),
             ),
@@ -269,26 +259,24 @@ impl App {
                 let exists = cleaned
                     .as_deref()
                     .is_some_and(|name| self.layouts.get(name).is_some());
-                let (title_en, title_ar) = match cleaned {
-                    Some(name) if exists => (
-                        format!("Overwrite layout \"{name}\""),
-                        format!("استبدل التخطيط \"{name}\""),
-                    ),
-                    Some(name) => (
-                        format!("Save layout \"{name}\""),
-                        format!("احفظ التخطيط \"{name}\""),
-                    ),
-                    None => (
-                        "Type a name for the current tab layout".into(),
-                        "اكتب اسماً لتخطيط التاب الحالي".into(),
-                    ),
+                let item = match cleaned {
+                    Some(name) => {
+                        let template = if exists {
+                            en!("Overwrite layout \"{}\"")
+                        } else {
+                            en!("Save layout \"{}\"")
+                        };
+                        let mut item = PaletteItem::text(template, false);
+                        item.title_en = fill(&item.title_en, &[&name]);
+                        item.title_ar = fill(&item.title_ar, &[&name]);
+                        item
+                    }
+                    None => PaletteItem::text(en!("Type a name for the current tab layout"), false),
                 };
                 (
                     vec![PaletteItem {
-                        title_en,
-                        title_ar,
-                        shortcut: None,
                         dimmed: state.query.trim().is_empty(),
+                        ..item
                     }],
                     Some(crate::layouts::save_layout_placeholder().into()),
                 )
@@ -321,33 +309,17 @@ impl App {
         let mut items: Vec<PaletteItem> = rows[shown].to_vec();
         if items.is_empty() && state.query.is_empty() {
             match state.mode {
-                PaletteMode::Notifications => items.push(PaletteItem {
-                    title_en: "No notifications yet".into(),
-                    title_ar: "مفيش إشعارات لسه".into(),
-                    shortcut: None,
-                    dimmed: true,
-                }),
+                PaletteMode::Notifications => {
+                    items.push(PaletteItem::text(en!("No notifications yet"), true))
+                }
                 PaletteMode::Projects => items.push(if self.projects.is_scanning() {
-                    PaletteItem {
-                        title_en: "Scanning projects…".into(),
-                        title_ar: "جاري البحث عن المشاريع…".into(),
-                        shortcut: None,
-                        dimmed: true,
-                    }
+                    PaletteItem::text(en!("Scanning projects…"), true)
                 } else {
-                    PaletteItem {
-                        title_en: "No projects found".into(),
-                        title_ar: "مفيش مشاريع".into(),
-                        shortcut: None,
-                        dimmed: true,
-                    }
+                    PaletteItem::text(en!("No projects found"), true)
                 }),
-                PaletteMode::OpenLayout | PaletteMode::DeleteLayout => items.push(PaletteItem {
-                    title_en: "No saved layouts yet".into(),
-                    title_ar: "مفيش تخطيطات محفوظة لسه".into(),
-                    shortcut: None,
-                    dimmed: true,
-                }),
+                PaletteMode::OpenLayout | PaletteMode::DeleteLayout => {
+                    items.push(PaletteItem::text(en!("No saved layouts yet"), true))
+                }
                 _ => {}
             }
         }

@@ -121,8 +121,8 @@ the rest are in `src/`.
 | `sidebar/` | The vertical tab sidebar model: one entry per tab with cwd, git branch (read from `.git/HEAD`, bounded), running state, last exit and the latest notification. | `session` |
 | `notify.rs` | Desktop notifications through `notify-send` (argv, never a shell), throttled per pane. | — |
 | `ui/notifications.rs` | Bounded per-window notification history backing the top-bar unread badge, notification list, and `notification.list`/`clear` control methods. | `layout`, `shell_integration` |
-| `commands.rs`, `ui/palette.rs` | The command table (name, English and Arabic titles, shortcut, action) and the palette state with Arabic-aware matching. | `input` |
-| `ui/settings_panel/`, `render/scene/settings/` | The Settings panel. `table.rs` lists every setting once (section, config key, English and Arabic labels, control, and the field a toggle flips); `values.rs` reads and writes the config; `keys.rs`, `pointer.rs` and `layout.rs` handle input and geometry. The drawing side has one file per section. A new setting is a `SettingId` variant, one table entry and, for live effects, one arm in `app/settings.rs`. | `config`, `commands` |
+| `commands.rs`, `ui/palette.rs` | The command table (name, English title, shortcut, action) and the palette state with Arabic-aware matching. | `input` |
+| `ui/settings_panel/`, `render/scene/settings/` | The Settings panel. `table.rs` lists every setting once (section, config key, English label, control, and the field a toggle flips); `values.rs` reads and writes the config; `keys.rs`, `pointer.rs` and `layout.rs` handle input and geometry. The drawing side has one file per section. A new setting is a `SettingId` variant, one table entry and, for live effects, one arm in `app/settings.rs`. | `config`, `commands` |
 | `workflows/` | User (`config.json`) and project (`.twitty/commands.json`) custom commands, bounded discovery, SHA-256 trust store (`trust.json`), and insert/run execution helpers. | `commands`, `config`, `input`, `pty`, `shell_integration`, `ui/palette` |
 | `ui/search_all.rs` | "Search all terminals", the palette's search mode: scans each pane's text lines (`Terminal::for_each_text_line`, newest first, bounded), folds them like the palette, shares at most 200 results between panes, cuts each line around its match. The scan runs in 8 ms slices from `about_to_wait`, resuming each pane by absolute line; the jump goes through `Terminal::focus_search_at` to the scrollback search highlight. | `terminal`, `ui/palette` |
 | `control/` | The control socket (`$XDG_RUNTIME_DIR/twitty/twitty-<pid>.sock`, 0600 in a 0700 dir) speaking newline-delimited JSON (`twitty ctl` + cmux v2 JSON-RPC + minimal v1 text hook commands), `twitty claude-hook`, and the `twitty ctl/send/notify/list/read` client. | `session`, `sidebar`, `input`, `ui` |
@@ -222,6 +222,21 @@ GoldenScene::new("thing_ar_light", 640, 400, "twitty-light")
     .terminal(b"$ cargo test\r\n")
     .check(|frame, ctx, style, ui_font| frame.add_thing(ctx, style, ui_font, &view));
 ```
+
+## Interface text and translations
+
+Interface text is written in English in the code; the English text is the key into
+`crates/twitty-core/i18n/ar.json`. Show it with `t("…")` (current language) or
+`language.t("…")`; mark text in a compile-time table with `en!("…")` and translate it where it
+is shown. Fill numbers and names with `fill(t("Saved {} files"), &[&n])`, so a translation can
+move them. One English word with two meanings gets a context: `"Block|cursor"` (the context is
+never shown).
+
+`tests/i18n_catalog_tests.rs` fails when a marked text has no translation, a translation is
+unused, placeholders differ, or Arabic is written in the code outside the short
+`ARABIC_IN_CODE` list (Arabic counted nouns, sample text, messages meant for both languages).
+Text that comes with the data, such as a user's `name_ar` or a spec's `desc_ar`, stays with the
+data. A new language is one more catalog file and one more arm in `UiLanguage::t`.
 
 ## Where to start
 

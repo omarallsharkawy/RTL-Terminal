@@ -7,6 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use twitty_core::en;
 
 use crate::composer::generators::{GeneratedItem, GeneratorKey, GeneratorKind};
 use crate::composer::highlight::{
@@ -55,54 +56,32 @@ pub enum CompletionKind {
 impl CompletionKind {
     pub fn badge_en(self) -> &'static str {
         match self {
-            Self::Command => "command",
-            Self::Subcommand => "subcommand",
-            Self::Option => "option",
-            Self::Branch => "branch",
-            Self::Remote => "remote",
-            Self::Tag => "tag",
-            Self::Script => "script",
-            Self::Target => "target",
-            Self::Feature => "feature",
-            Self::Container => "container",
-            Self::Image => "image",
-            Self::Unit => "unit",
-            Self::Host => "host",
-            Self::Value => "value",
-            Self::Path => "path",
-            Self::Workflow => "workflow",
-            Self::History => "history",
-            Self::Action => "twitty",
-            Self::Skill => "skill",
-            Self::AgentCommand => "command",
+            Self::Command => en!("command"),
+            Self::Subcommand => en!("subcommand"),
+            Self::Option => en!("option"),
+            Self::Branch => en!("branch"),
+            Self::Remote => en!("remote"),
+            Self::Tag => en!("tag"),
+            Self::Script => en!("script"),
+            Self::Target => en!("target"),
+            Self::Feature => en!("feature"),
+            Self::Container => en!("container"),
+            Self::Image => en!("image"),
+            Self::Unit => en!("unit"),
+            Self::Host => en!("host"),
+            Self::Value => en!("value"),
+            Self::Path => en!("path"),
+            Self::Workflow => en!("workflow"),
+            Self::History => en!("history"),
+            Self::Action => en!("twitty"),
+            Self::Skill => en!("skill"),
+            Self::AgentCommand => en!("command"),
             Self::Mcp => "MCP",
         }
     }
 
     pub fn badge_ar(self) -> &'static str {
-        match self {
-            Self::Command => "أمر",
-            Self::Subcommand => "فرعي",
-            Self::Option => "خيار",
-            Self::Branch => "فرع",
-            Self::Remote => "مستودع",
-            Self::Tag => "وسم",
-            Self::Script => "سكربت",
-            Self::Target => "هدف",
-            Self::Feature => "ميزة",
-            Self::Container => "حاوية",
-            Self::Image => "صورة",
-            Self::Unit => "وحدة",
-            Self::Host => "مضيف",
-            Self::Value => "قيمة",
-            Self::Path => "مسار",
-            Self::Workflow => "سير عمل",
-            Self::History => "سجل",
-            Self::Action => "تويتي",
-            Self::Skill => "مهارة",
-            Self::AgentCommand => "أمر",
-            Self::Mcp => "MCP",
-        }
+        UiLanguage::Arabic.t(self.badge_en())
     }
 }
 

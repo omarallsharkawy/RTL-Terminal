@@ -314,11 +314,12 @@ fn localized_meta(text: &str, language: UiLanguage) -> std::borrow::Cow<'_, str>
     text.split(" · ")
         .map(|part| {
             if let Some(exit) = part.strip_prefix("exit ") {
-                return format!("خروج {exit}");
+                return twitty_core::language::fill(language.t("exit {}"), &[&exit]);
             }
-            part.replace('h', " س")
-                .replace('m', " د")
-                .replace('s', " ث")
+            let unit = |text: &str| format!(" {}", language.t(text));
+            part.replace('h', &unit(twitty_core::en!("h|hours")))
+                .replace('m', &unit(twitty_core::en!("m|minutes")))
+                .replace('s', &unit(twitty_core::en!("s|seconds")))
         })
         .collect::<Vec<_>>()
         .join(" · ")

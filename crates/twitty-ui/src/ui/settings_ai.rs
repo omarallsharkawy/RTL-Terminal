@@ -41,49 +41,26 @@ pub const API_PROVIDERS: [ApiProviderSpec; 3] = [
 ];
 
 /// Default provider selector choices.
-pub const DEFAULT_PROVIDER_CHOICES: [(&str, &str, &str); 6] = [
-    ("", "Auto", "تلقائي"),
-    ("cli", "CLI", "CLI"),
-    ("anthropic", "Anthropic", "Anthropic"),
-    ("openai", "OpenAI", "OpenAI"),
-    ("gemini", "Gemini", "Gemini"),
-    ("ollama", "Ollama", "Ollama"),
+/// (id, label); only "Auto" is translated, the rest are product names.
+pub const DEFAULT_PROVIDER_CHOICES: [(&str, &str); 6] = [
+    ("", twitty_core::en!("Auto")),
+    ("cli", "CLI"),
+    ("anthropic", "Anthropic"),
+    ("openai", "OpenAI"),
+    ("gemini", "Gemini"),
+    ("ollama", "Ollama"),
 ];
 
 /// Read-only hard-deny list displayed in Settings → AI (AGENT.md §1.6 & §2.2).
-pub const HARD_DENY_SUMMARY: [(&str, &str); 8] = [
-    (
-        "sudo / doas / pkexec / su",
-        "sudo / doas / pkexec / su (رفع الصلاحيات)",
-    ),
-    (
-        "curl | sh, wget | bash (network pipe to shell)",
-        "curl | sh, wget | bash (تمرير الشبكة إلى الشيل)",
-    ),
-    (
-        "rm -rf outside project root, /, ~, $HOME, ..",
-        "rm -rf خارج مجلد المشروع أو / أو ~ أو ..",
-    ),
-    (
-        "chmod -R / chown -R outside project root",
-        "chmod -R / chown -R خارج مجلد المشروع",
-    ),
-    (
-        "dd of=/dev/…, mkfs, fork bombs",
-        "dd of=/dev/… و mkfs وقنابل العمليات",
-    ),
-    (
-        "Writes to shell rc, ~/.ssh, ~/.gnupg, ~/.config/twitty, git hooks, /etc",
-        "الكتابة في ملفات الشيل و ~/.ssh و ~/.gnupg وإعدادات twitty و /etc",
-    ),
-    (
-        "Reads from ~/.ssh, ~/.gnupg, ~/.aws, ~/.config/gh, .netrc, keyrings",
-        "قراءة ~/.ssh و ~/.gnupg و ~/.aws و ~/.config/gh و .netrc ومخازن المفاتيح",
-    ),
-    (
-        "git push / --force / config --global, package installs (pip, npm -g, cargo install, apt, pacman, brew)",
-        "git push وتعديل git العام وتثبيت الحزم (pip و npm -g و cargo install و apt و pacman و brew)",
-    ),
+pub const HARD_DENY_SUMMARY: [&str; 8] = [
+    twitty_core::en!("sudo / doas / pkexec / su"),
+    twitty_core::en!("curl | sh, wget | bash (network pipe to shell)"),
+    twitty_core::en!("rm -rf outside project root, /, ~, $HOME, .."),
+    twitty_core::en!("chmod -R / chown -R outside project root"),
+    twitty_core::en!("dd of=/dev/…, mkfs, fork bombs"),
+    twitty_core::en!("Writes to shell rc, ~/.ssh, ~/.gnupg, ~/.config/twitty, git hooks, /etc"),
+    twitty_core::en!("Reads from ~/.ssh, ~/.gnupg, ~/.aws, ~/.config/gh, .netrc, keyrings"),
+    twitty_core::en!("git push / --force / config --global, package installs (pip, npm -g, cargo install, apt, pacman, brew)"),
 ];
 
 /// Active text input inside Settings → AI.

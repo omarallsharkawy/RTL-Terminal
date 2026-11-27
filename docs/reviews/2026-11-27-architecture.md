@@ -147,3 +147,7 @@ Each step lands on its own with green CI and no behavior change.
   file (dev profile, no debug info): app 5.9 s → 2.5 s, scene 5.7 s → 3.2 s, UI 5.6 s → 5.4 s.
   Release builds (thin LTO, one codegen unit) got slower: 32 s → 37 s for an app change and
   31 s → 42 s for a UI change, since LTO now works across more crates.
+- Step 6 done: one Arabic catalog (`crates/twitty-core/i18n/ar.json`, English text as the key)
+  replaces `tr("…", "…")`, `language.text(..)` pairs and `title_ar` tables (about 550 texts).
+  Eight texts that had two Arabic wordings now have one. A test checks that every shown text
+  is translated, nothing in the catalog is unused, and no new Arabic is written in the code.

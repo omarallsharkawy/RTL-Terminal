@@ -29,25 +29,18 @@ pub enum BlockAiMode {
 impl BlockAiMode {
     pub fn title_en(self) -> &'static str {
         match self {
-            Self::Explain => "Explain error",
-            Self::SuggestFix => "Suggest a fix",
+            Self::Explain => twitty_core::en!("Explain error"),
+            Self::SuggestFix => twitty_core::en!("Suggest a fix"),
         }
     }
 
     pub fn title_ar(self) -> &'static str {
-        match self {
-            Self::Explain => "اشرح الخطأ",
-            Self::SuggestFix => "اقترح حل",
-        }
+        UiLanguage::Arabic.t(self.title_en())
     }
 
     /// The title in the current interface language.
     pub fn title_localized(self) -> &'static str {
-        use twitty_core::language::t;
-        match self {
-            Self::Explain => t("Explain error"),
-            Self::SuggestFix => t("Suggest a fix"),
-        }
+        twitty_core::language::t(self.title_en())
     }
 }
 

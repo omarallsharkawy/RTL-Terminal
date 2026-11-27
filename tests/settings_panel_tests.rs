@@ -122,7 +122,7 @@ fn model_sections_labels_and_every_control_round_trips_through_save_and_load() {
     assert_eq!(SettingsSection::ALL.len(), 6);
     for section in SettingsSection::ALL {
         assert!(!section.label_en().is_empty());
-        assert!(!section.label_ar().is_empty());
+        assert_ne!(section.label(UiLanguage::Arabic), section.label_en());
     }
 
     // Every config setting has bilingual labels and maps to a real JSON key in TwittyConfig.
@@ -130,13 +130,17 @@ fn model_sections_labels_and_every_control_round_trips_through_save_and_load() {
     let default_json = serde_json::to_value(&cfg).unwrap();
     for id in SettingId::config_settings() {
         let desc = id.descriptor();
-        assert!(!desc.label_en.is_empty(), "{id:?}");
-        assert!(!desc.label_ar.is_empty(), "{id:?}");
+        assert!(!desc.label.is_empty(), "{id:?}");
+        assert_ne!(desc.label(UiLanguage::Arabic), desc.label, "{id:?}");
         let key = id.config_key().expect("config setting must have key");
         // Optional fields with skip_serializing_if may be absent when None, so verify below after setting them.
         assert!(!key.is_empty());
-        if desc.note_en.is_some() {
-            assert!(desc.note_ar.is_some(), "{id:?} missing Arabic note");
+        if let Some(note) = desc.note {
+            assert_ne!(
+                desc.note(UiLanguage::Arabic),
+                Some(note),
+                "{id:?} missing Arabic note"
+            );
         }
         let _ = &default_json;
     }
@@ -150,7 +154,7 @@ fn model_sections_labels_and_every_control_round_trips_through_save_and_load() {
         SettingId::CmuxCompat,
     ] {
         let desc = id.descriptor();
-        assert!(desc.note_en.is_some() && desc.note_ar.is_some(), "{id:?}");
+        assert!(desc.note.is_some(), "{id:?}");
     }
 
     // Mutate EVERY SINGLE one of the 21 config settings via SettingsPanelState interactions.
@@ -1133,8 +1137,7 @@ fn interface_language_choices_labels_and_auto_resolution() {
     let desc = SettingId::UiLanguage.descriptor();
     assert_eq!(desc.label(UiLanguage::English), "Interface language");
     assert_eq!(desc.label(UiLanguage::Arabic), "لغة الواجهة");
-    assert!(desc.note_en.is_none());
-    assert!(desc.note_ar.is_none());
+    assert!(desc.note.is_none());
 
     assert_eq!(UI_LANGUAGE_OPTIONS.len(), 3);
     assert_eq!(UI_LANGUAGE_OPTIONS[0].value, "auto");

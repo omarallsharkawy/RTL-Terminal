@@ -7,7 +7,7 @@ use crate::ui::git_diff::DiffStat;
 use twitty_render::metrics::CellMetrics;
 use twitty_render::ui_style::{SPACE_4, SPACE_8};
 
-pub use twitty_core::language::{t, tr, UiLanguage, UiLanguagePref};
+pub use twitty_core::language::{t, UiLanguage, UiLanguagePref};
 
 pub const TOP_BAR_HEIGHT: f32 = 36.0;
 pub const PANE_HEADER_HEIGHT: f32 = 24.0;
@@ -280,8 +280,8 @@ impl TopBarLayout {
     }
 }
 
-pub const SEARCH_EN: &str = "Search or run a command…";
-pub const SEARCH_AR: &str = "دوّر أو شغّل أمر…";
+/// The search box placeholder (English; translate with [`UiLanguage::t`]).
+pub const SEARCH: &str = twitty_core::en!("Search or run a command…");
 pub const SEARCH_KEYCAP: &str = "Ctrl+Shift+P";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

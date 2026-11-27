@@ -263,12 +263,13 @@ impl SettingsDrawer<'_, '_> {
             let primary = self.lang().text(cmd.title_en, cmd.title_ar);
             if let Some(info) = conflict {
                 let (other_en, other_ar) = command_titles(info.other);
-                let note = match (self.lang(), info.is_winner) {
-                    (UiLanguage::English, true) => format!("⚠ Conflicts with {other_en}"),
-                    (UiLanguage::English, false) => format!("⚠ Overridden by {other_en}"),
-                    (UiLanguage::Arabic, true) => format!("⚠ يتعارض مع {other_ar}"),
-                    (UiLanguage::Arabic, false) => format!("⚠ مُستبدل بواسطة {other_ar}"),
+                let template = if info.is_winner {
+                    self.lang().t("⚠ Conflicts with {}")
+                } else {
+                    self.lang().t("⚠ Overridden by {}")
                 };
+                let other = self.lang().text(other_en, other_ar);
+                let note = twitty_core::language::fill(template, &[&other]);
                 let top_h = (title_rect.h * 0.56).round();
                 let top = Rect::new(title_rect.x, title_rect.y + s.px(1.0), title_rect.w, top_h);
                 let bot = Rect::new(

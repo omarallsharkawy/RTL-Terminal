@@ -5,6 +5,9 @@
 //! is never renamed or reused. Shortcuts live in `input::keys`; the code that runs a command
 //! is `App::run_action`.
 
+use twitty_core::en;
+use twitty_core::language::UiLanguage;
+
 use crate::input::InputAction;
 use crate::layout::FocusDir;
 
@@ -14,16 +17,22 @@ pub struct Command {
     /// Stable name, e.g. `split.right`.
     pub name: &'static str,
     pub title_en: &'static str,
+    /// From the Arabic catalog (the palette shows both).
     pub title_ar: &'static str,
     /// Shortcut as shown to the user, if it has one.
     pub shortcut: Option<&'static str>,
 }
 
 macro_rules! commands {
-    ($( $name:literal, $en:literal, $ar:literal, $keys:expr => $action:expr; )*) => {
+    ($( $name:literal, $en:expr, $keys:expr => $action:expr; )*) => {
         /// Every command, in palette order.
         pub fn all() -> Vec<Command> {
-            vec![$(Command { name: $name, title_en: $en, title_ar: $ar, shortcut: $keys }),*]
+            vec![$(Command {
+                name: $name,
+                title_en: $en,
+                title_ar: UiLanguage::Arabic.t($en),
+                shortcut: $keys,
+            }),*]
         }
 
         /// The action a command name runs.
@@ -37,50 +46,50 @@ macro_rules! commands {
 }
 
 commands! {
-    "palette.open", "Command palette", "لوحة الأوامر", Some("Ctrl+Shift+P") => InputAction::CommandPalette;
-    "composer.open", "Compose command", "اكتب أمر", Some("Ctrl+Shift+Space") => InputAction::ToggleComposer;
-    "settings.open", "Settings", "الإعدادات", Some("Ctrl+,") => InputAction::Settings;
-    "memory.open", "Project memory", "ذاكرة المشروع", None => InputAction::ProjectMemory;
-    "welcome.open", "Welcome", "الترحيب", None => InputAction::Welcome;
-    "tab.new", "New tab", "تاب جديد", Some("Ctrl+Shift+T") => InputAction::NewTab;
-    "tab.next", "Next tab", "التاب التالي", Some("Ctrl+Tab") => InputAction::NextTab;
-    "tab.prev", "Previous tab", "التاب السابق", Some("Ctrl+Shift+Tab") => InputAction::PrevTab;
-    "tab.move-left", "Move tab left", "حرّك التاب شمال", Some("Ctrl+Shift+PageUp") => InputAction::MoveTabLeft;
-    "tab.move-right", "Move tab right", "حرّك التاب يمين", Some("Ctrl+Shift+PageDown") => InputAction::MoveTabRight;
-    "tab.reopen", "Reopen closed tab", "رجّع آخر تاب اتقفل", Some("Ctrl+Shift+Alt+T") => InputAction::ReopenClosedTab;
-    "tab.rename", "Rename tab…", "غيّر اسم التاب…", Some("Ctrl+Shift+N") => InputAction::RenameTab;
-    "project.open", "Open project", "افتح مشروع", Some("Ctrl+Shift+L") => InputAction::OpenProject;
-    "layout.save", "Save layout…", "احفظ التخطيط…", None => InputAction::SaveLayout;
-    "layout.open", "Open layout…", "افتح تخطيط…", None => InputAction::OpenLayout;
-    "layout.delete", "Delete layout…", "احذف تخطيط…", None => InputAction::DeleteLayout;
-    "input.broadcast", "Type in all panes of this tab", "اكتب في كل اللوحات", None => InputAction::ToggleBroadcast;
-    "pane.zoom", "Toggle pane zoom", "كبّر اللوحة أو رجّع حجمها", Some("Ctrl+Shift+Z") => InputAction::TogglePaneZoom;
-    "pane.flash", "Flash focused pane", "ومّض إطار اللوحة النشطة", Some("Ctrl+Shift+H") => InputAction::FlashPane;
-    "pane.close-others", "Close other panes", "اقفل باقي اللوحات", Some("Ctrl+Shift+K") => InputAction::CloseOtherPanes;
-    "pane.close", "Close pane", "قفل اللوحة", Some("Ctrl+Shift+W") => InputAction::ClosePane;
-    "split.right", "Split right", "قسّم يمين", Some("Ctrl+Shift+E") => InputAction::SplitRight;
-    "split.down", "Split down", "قسّم تحت", Some("Ctrl+Shift+O") => InputAction::SplitDown;
-    "focus.left", "Focus pane on the left", "روح للوحة الشمال", Some("Alt+Left") => InputAction::Focus(FocusDir::Left);
-    "focus.right", "Focus pane on the right", "روح للوحة اليمين", Some("Alt+Right") => InputAction::Focus(FocusDir::Right);
-    "focus.up", "Focus pane above", "روح للوحة اللي فوق", Some("Alt+Up") => InputAction::Focus(FocusDir::Up);
-    "focus.down", "Focus pane below", "روح للوحة اللي تحت", Some("Alt+Down") => InputAction::Focus(FocusDir::Down);
-    "sidebar.toggle", "Toggle sidebar", "إظهار/إخفاء الشريط الجانبي", Some("Ctrl+Shift+B") => InputAction::ToggleSidebar;
-    "attention.next", "Go to next notification", "روح للإشعار اللي بعده", Some("Ctrl+Shift+U") => InputAction::NextAttention;
-    "notifications.list", "Notifications", "الإشعارات", Some("Ctrl+Shift+I") => InputAction::NotificationList;
-    "notifications.jump-unread", "Jump to newest unread notification", "روح لأحدث إشعار غير مقروء", Some("Ctrl+Shift+J") => InputAction::JumpUnread;
-    "block.prev", "Previous command block", "البلوك اللي قبله", Some("Ctrl+Shift+Up") => InputAction::PrevBlock;
-    "block.next", "Next command block", "البلوك اللي بعده", Some("Ctrl+Shift+Down") => InputAction::NextBlock;
-    "block.copy-output", "Copy command output", "انسخ ناتج الأمر", Some("Ctrl+Shift+Y") => InputAction::CopyBlockOutput;
-    "ai.explain-error", "Explain error", "اشرح الخطأ", None => InputAction::ExplainBlockError;
-    "ai.suggest-fix", "Suggest a fix", "اقترح حل", None => InputAction::SuggestBlockFix;
-    "agent.ask", "Ask an agent about this output", "اسأل وكيل عن الناتج ده", Some("Ctrl+Shift+A") => InputAction::AskAgent;
-    "agent.panel", "Agent panel", "لوحة الوكيل", Some("Ctrl+Shift+.") => InputAction::ToggleAgentPanel;
-    "review.toggle", "Review changes", "راجع التغييرات", Some("Ctrl+Shift+R") => InputAction::ToggleReview;
-    "edit.copy", "Copy", "نسخ", Some("Ctrl+Shift+C") => InputAction::Copy;
-    "edit.paste", "Paste", "لصق", Some("Ctrl+Shift+V") => InputAction::Paste;
-    "search.open", "Find in scrollback", "بحث", Some("Ctrl+Shift+F") => InputAction::Search;
-    "search.all", "Search all terminals", "دوّر في كل الترمينالات", Some("Ctrl+Shift+G") => InputAction::SearchAll;
-    "zoom.in", "Zoom in", "تكبير", Some("Ctrl+=") => InputAction::ZoomIn;
-    "zoom.out", "Zoom out", "تصغير", Some("Ctrl+-") => InputAction::ZoomOut;
-    "zoom.reset", "Reset zoom", "الحجم الأصلي", Some("Ctrl+0") => InputAction::ZoomReset;
+    "palette.open", en!("Command palette"), Some("Ctrl+Shift+P") => InputAction::CommandPalette;
+    "composer.open", en!("Compose command"), Some("Ctrl+Shift+Space") => InputAction::ToggleComposer;
+    "settings.open", en!("Settings"), Some("Ctrl+,") => InputAction::Settings;
+    "memory.open", en!("Project memory"), None => InputAction::ProjectMemory;
+    "welcome.open", en!("Welcome"), None => InputAction::Welcome;
+    "tab.new", en!("New tab"), Some("Ctrl+Shift+T") => InputAction::NewTab;
+    "tab.next", en!("Next tab"), Some("Ctrl+Tab") => InputAction::NextTab;
+    "tab.prev", en!("Previous tab"), Some("Ctrl+Shift+Tab") => InputAction::PrevTab;
+    "tab.move-left", en!("Move tab left"), Some("Ctrl+Shift+PageUp") => InputAction::MoveTabLeft;
+    "tab.move-right", en!("Move tab right"), Some("Ctrl+Shift+PageDown") => InputAction::MoveTabRight;
+    "tab.reopen", en!("Reopen closed tab"), Some("Ctrl+Shift+Alt+T") => InputAction::ReopenClosedTab;
+    "tab.rename", en!("Rename tab…"), Some("Ctrl+Shift+N") => InputAction::RenameTab;
+    "project.open", en!("Open project"), Some("Ctrl+Shift+L") => InputAction::OpenProject;
+    "layout.save", en!("Save layout…"), None => InputAction::SaveLayout;
+    "layout.open", en!("Open layout…"), None => InputAction::OpenLayout;
+    "layout.delete", en!("Delete layout…"), None => InputAction::DeleteLayout;
+    "input.broadcast", en!("Type in all panes of this tab"), None => InputAction::ToggleBroadcast;
+    "pane.zoom", en!("Toggle pane zoom"), Some("Ctrl+Shift+Z") => InputAction::TogglePaneZoom;
+    "pane.flash", en!("Flash focused pane"), Some("Ctrl+Shift+H") => InputAction::FlashPane;
+    "pane.close-others", en!("Close other panes"), Some("Ctrl+Shift+K") => InputAction::CloseOtherPanes;
+    "pane.close", en!("Close pane"), Some("Ctrl+Shift+W") => InputAction::ClosePane;
+    "split.right", en!("Split right"), Some("Ctrl+Shift+E") => InputAction::SplitRight;
+    "split.down", en!("Split down"), Some("Ctrl+Shift+O") => InputAction::SplitDown;
+    "focus.left", en!("Focus pane on the left"), Some("Alt+Left") => InputAction::Focus(FocusDir::Left);
+    "focus.right", en!("Focus pane on the right"), Some("Alt+Right") => InputAction::Focus(FocusDir::Right);
+    "focus.up", en!("Focus pane above"), Some("Alt+Up") => InputAction::Focus(FocusDir::Up);
+    "focus.down", en!("Focus pane below"), Some("Alt+Down") => InputAction::Focus(FocusDir::Down);
+    "sidebar.toggle", en!("Toggle sidebar"), Some("Ctrl+Shift+B") => InputAction::ToggleSidebar;
+    "attention.next", en!("Go to next notification"), Some("Ctrl+Shift+U") => InputAction::NextAttention;
+    "notifications.list", en!("Notifications"), Some("Ctrl+Shift+I") => InputAction::NotificationList;
+    "notifications.jump-unread", en!("Jump to newest unread notification"), Some("Ctrl+Shift+J") => InputAction::JumpUnread;
+    "block.prev", en!("Previous command block"), Some("Ctrl+Shift+Up") => InputAction::PrevBlock;
+    "block.next", en!("Next command block"), Some("Ctrl+Shift+Down") => InputAction::NextBlock;
+    "block.copy-output", en!("Copy command output"), Some("Ctrl+Shift+Y") => InputAction::CopyBlockOutput;
+    "ai.explain-error", en!("Explain error"), None => InputAction::ExplainBlockError;
+    "ai.suggest-fix", en!("Suggest a fix"), None => InputAction::SuggestBlockFix;
+    "agent.ask", en!("Ask an agent about this output"), Some("Ctrl+Shift+A") => InputAction::AskAgent;
+    "agent.panel", en!("Agent panel"), Some("Ctrl+Shift+.") => InputAction::ToggleAgentPanel;
+    "review.toggle", en!("Review changes"), Some("Ctrl+Shift+R") => InputAction::ToggleReview;
+    "edit.copy", en!("Copy"), Some("Ctrl+Shift+C") => InputAction::Copy;
+    "edit.paste", en!("Paste"), Some("Ctrl+Shift+V") => InputAction::Paste;
+    "search.open", en!("Find in scrollback"), Some("Ctrl+Shift+F") => InputAction::Search;
+    "search.all", en!("Search all terminals"), Some("Ctrl+Shift+G") => InputAction::SearchAll;
+    "zoom.in", en!("Zoom in"), Some("Ctrl+=") => InputAction::ZoomIn;
+    "zoom.out", en!("Zoom out"), Some("Ctrl+-") => InputAction::ZoomOut;
+    "zoom.reset", en!("Reset zoom"), Some("Ctrl+0") => InputAction::ZoomReset;
 }

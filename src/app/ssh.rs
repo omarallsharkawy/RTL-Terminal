@@ -1,7 +1,8 @@
 //! Route SSH process and timer events to the pane's reconnect state.
 
-use crate::ui::chrome::UiLanguage;
+use crate::ui::chrome::t;
 use std::time::Instant;
+use twitty_core::language::fill;
 
 use super::App;
 use crate::layout::PaneId;
@@ -36,26 +37,12 @@ impl App {
             remote.schedule_retry(Instant::now(), delay);
         }
         let destination = clean_text(remote.target.destination(), 256);
-        let status = match (lost, delay) {
-            (_, Some(_)) => match UiLanguage::current() {
-                UiLanguage::English => format!("Disconnected from {destination}, reconnecting…"),
-                UiLanguage::Arabic => format!("اتقطع الاتصال بـ {destination}، بنوصل تاني…"),
-            },
-            (lost, None) => match (UiLanguage::current(), lost) {
-                (UiLanguage::English, true) => {
-                    format!("Disconnected from {destination}. Press Enter to retry")
-                }
-                (UiLanguage::English, false) => {
-                    format!("Could not connect to {destination}. Press Enter to retry")
-                }
-                (UiLanguage::Arabic, true) => {
-                    format!("اتقطع الاتصال بـ {destination}. اضغط Enter للمحاولة تاني")
-                }
-                (UiLanguage::Arabic, false) => {
-                    format!("مقدرناش نوصل لـ {destination}. اضغط Enter للمحاولة تاني")
-                }
-            },
+        let template = match (lost, delay) {
+            (_, Some(_)) => t("Disconnected from {}, reconnecting…"),
+            (true, None) => t("Disconnected from {}. Press Enter to retry"),
+            (false, None) => t("Could not connect to {}. Press Enter to retry"),
         };
+        let status = fill(template, &[&destination]);
         pane.terminal
             .process_bytes(format!("\x18\x1b[0m\r\n{status}\r\n").as_bytes());
         self.window.request_redraw();

@@ -1,6 +1,7 @@
 //! Every setting the panel shows: sections, ids, the settings table and control kinds.
 
 use super::*;
+use twitty_core::en;
 
 /// Sections shown in the settings navigation sidebar.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -39,30 +40,20 @@ impl SettingsSection {
         Self::ALL[index % Self::ALL.len()]
     }
 
+    /// The section's name in English; `label` translates it.
     pub fn label_en(self) -> &'static str {
         match self {
-            Self::Appearance => "Appearance",
-            Self::Behaviour => "Behaviour",
-            Self::Ai => "AI",
-            Self::Commands => "Commands",
-            Self::Keys => "Keys",
-            Self::About => "About",
-        }
-    }
-
-    pub fn label_ar(self) -> &'static str {
-        match self {
-            Self::Appearance => "المظهر",
-            Self::Behaviour => "السلوك",
-            Self::Ai => "الذكاء الاصطناعي",
-            Self::Commands => "الأوامر",
-            Self::Keys => "الاختصارات",
-            Self::About => "حول",
+            Self::Appearance => en!("Appearance"),
+            Self::Behaviour => en!("Behaviour"),
+            Self::Ai => en!("AI"),
+            Self::Commands => en!("Commands"),
+            Self::Keys => en!("Keys"),
+            Self::About => en!("About"),
         }
     }
 
     pub fn label(self, language: UiLanguage) -> &'static str {
-        language.text(self.label_en(), self.label_ar())
+        language.t(self.label_en())
     }
 }
 
@@ -171,30 +162,24 @@ const TABLE: [SettingDescriptor; SETTING_COUNT] = [
         id: SettingId::Theme,
         section: SettingsSection::Appearance,
         config_key: Some("theme"),
-        label_en: "Theme",
-        label_ar: "السمة",
-        note_en: None,
-        note_ar: None,
+        label: en!("Theme"),
+        note: None,
         kind: ControlKind::ListPicker { searchable: false },
     },
     SettingDescriptor {
         id: SettingId::FontFamily,
         section: SettingsSection::Appearance,
         config_key: Some("font_family"),
-        label_en: "Terminal font",
-        label_ar: "خط الطرفية",
-        note_en: None,
-        note_ar: None,
+        label: en!("Terminal font"),
+        note: None,
         kind: ControlKind::ListPicker { searchable: true },
     },
     SettingDescriptor {
         id: SettingId::FontSize,
         section: SettingsSection::Appearance,
         config_key: Some("font_size"),
-        label_en: "Font size",
-        label_ar: "حجم الخط",
-        note_en: None,
-        note_ar: None,
+        label: en!("Font size"),
+        note: None,
         kind: ControlKind::Slider(SliderSpec {
             min: MIN_FONT_SIZE,
             max: MAX_FONT_SIZE,
@@ -206,40 +191,32 @@ const TABLE: [SettingDescriptor; SETTING_COUNT] = [
         id: SettingId::UiFontFamily,
         section: SettingsSection::Appearance,
         config_key: Some("ui_font_family"),
-        label_en: "UI font",
-        label_ar: "خط الواجهة",
-        note_en: None,
-        note_ar: None,
+        label: en!("UI font"),
+        note: None,
         kind: ControlKind::ListPicker { searchable: true },
     },
     SettingDescriptor {
         id: SettingId::UiLanguage,
         section: SettingsSection::Appearance,
         config_key: Some("ui_language"),
-        label_en: "Interface language",
-        label_ar: "لغة الواجهة",
-        note_en: None,
-        note_ar: None,
+        label: en!("Interface language"),
+        note: None,
         kind: ControlKind::Segmented(UI_LANGUAGE_OPTIONS),
     },
     SettingDescriptor {
         id: SettingId::UiAccent,
         section: SettingsSection::Appearance,
         config_key: Some("ui_accent"),
-        label_en: "Accent colour",
-        label_ar: "لون التمييز",
-        note_en: None,
-        note_ar: None,
+        label: en!("Accent colour"),
+        note: None,
         kind: ControlKind::Swatches,
     },
     SettingDescriptor {
         id: SettingId::BackgroundOpacity,
         section: SettingsSection::Appearance,
         config_key: Some("background_opacity"),
-        label_en: "Background opacity",
-        label_ar: "شفافية الخلفية",
-        note_en: None,
-        note_ar: None,
+        label: en!("Background opacity"),
+        note: None,
         kind: ControlKind::Slider(SliderSpec {
             min: MIN_OPACITY,
             max: 1.0,
@@ -251,20 +228,16 @@ const TABLE: [SettingDescriptor; SETTING_COUNT] = [
         id: SettingId::CursorStyle,
         section: SettingsSection::Appearance,
         config_key: Some("cursor_style"),
-        label_en: "Cursor style",
-        label_ar: "شكل المؤشر",
-        note_en: None,
-        note_ar: None,
+        label: en!("Cursor style"),
+        note: None,
         kind: ControlKind::Segmented(CURSOR_STYLE_OPTIONS),
     },
     SettingDescriptor {
         id: SettingId::CursorBlink,
         section: SettingsSection::Appearance,
         config_key: Some("cursor_blink"),
-        label_en: "Cursor blink",
-        label_ar: "وميض المؤشر",
-        note_en: None,
-        note_ar: None,
+        label: en!("Cursor blink"),
+        note: None,
         kind: ControlKind::Toggle(Flag {
             get: |c| c.cursor_blink,
             slot: |c| &mut c.cursor_blink,
@@ -274,20 +247,16 @@ const TABLE: [SettingDescriptor; SETTING_COUNT] = [
         id: SettingId::SidebarPosition,
         section: SettingsSection::Appearance,
         config_key: Some("sidebar"),
-        label_en: "Sidebar position",
-        label_ar: "موضع الشريط الجانبي",
-        note_en: None,
-        note_ar: None,
+        label: en!("Sidebar position"),
+        note: None,
         kind: ControlKind::Segmented(SIDEBAR_POSITION_OPTIONS),
     },
     SettingDescriptor {
         id: SettingId::SidebarWidth,
         section: SettingsSection::Appearance,
         config_key: Some("sidebar_width"),
-        label_en: "Sidebar width",
-        label_ar: "عرض الشريط الجانبي",
-        note_en: None,
-        note_ar: None,
+        label: en!("Sidebar width"),
+        note: None,
         kind: ControlKind::Slider(SliderSpec {
             min: 140.0,
             max: 480.0,
@@ -299,10 +268,8 @@ const TABLE: [SettingDescriptor; SETTING_COUNT] = [
         id: SettingId::TopBar,
         section: SettingsSection::Appearance,
         config_key: Some("top_bar"),
-        label_en: "Top bar",
-        label_ar: "الشريط العلوي",
-        note_en: None,
-        note_ar: None,
+        label: en!("Top bar"),
+        note: None,
         kind: ControlKind::Toggle(Flag {
             get: |c| c.top_bar,
             slot: |c| &mut c.top_bar,
@@ -312,10 +279,8 @@ const TABLE: [SettingDescriptor; SETTING_COUNT] = [
         id: SettingId::PaneHeaders,
         section: SettingsSection::Appearance,
         config_key: Some("pane_headers"),
-        label_en: "Pane headers",
-        label_ar: "عناوين اللوحات",
-        note_en: None,
-        note_ar: None,
+        label: en!("Pane headers"),
+        note: None,
         kind: ControlKind::Toggle(Flag {
             get: |c| c.pane_headers,
             slot: |c| &mut c.pane_headers,
@@ -325,10 +290,8 @@ const TABLE: [SettingDescriptor; SETTING_COUNT] = [
         id: SettingId::BlockCards,
         section: SettingsSection::Appearance,
         config_key: Some("block_cards"),
-        label_en: "Block cards",
-        label_ar: "بطاقات الأوامر",
-        note_en: None,
-        note_ar: None,
+        label: en!("Block cards"),
+        note: None,
         kind: ControlKind::Toggle(Flag {
             get: |c| c.block_cards,
             slot: |c| &mut c.block_cards,
@@ -338,10 +301,8 @@ const TABLE: [SettingDescriptor; SETTING_COUNT] = [
         id: SettingId::ReduceMotion,
         section: SettingsSection::Appearance,
         config_key: Some("reduce_motion"),
-        label_en: "Reduce motion",
-        label_ar: "تقليل الحركة",
-        note_en: Some("No animations; the cursor does not blink"),
-        note_ar: Some("بدون حركات، والمؤشر ما بيومضش"),
+        label: en!("Reduce motion"),
+        note: Some(en!("No animations; the cursor does not blink")),
         kind: ControlKind::Toggle(Flag {
             get: |c| c.reduce_motion,
             slot: |c| &mut c.reduce_motion,
@@ -351,75 +312,60 @@ const TABLE: [SettingDescriptor; SETTING_COUNT] = [
         id: SettingId::ColorBackground,
         section: SettingsSection::Appearance,
         config_key: Some("colors"),
-        label_en: "Background color",
-        label_ar: "لون الخلفية",
-        note_en: None,
-        note_ar: None,
+        label: en!("Background color"),
+        note: None,
         kind: ControlKind::TextField {
-            placeholder_en: "Theme color, e.g. #1e1e2e",
-            placeholder_ar: "لون السمة، مثلاً #1e1e2e",
+            placeholder: en!("Theme color, e.g. #1e1e2e"),
         },
     },
     SettingDescriptor {
         id: SettingId::ColorForeground,
         section: SettingsSection::Appearance,
         config_key: Some("colors"),
-        label_en: "Text color",
-        label_ar: "لون النص",
-        note_en: None,
-        note_ar: None,
+        label: en!("Text color"),
+        note: None,
         kind: ControlKind::TextField {
-            placeholder_en: "Theme color, e.g. #1e1e2e",
-            placeholder_ar: "لون السمة، مثلاً #1e1e2e",
+            placeholder: en!("Theme color, e.g. #1e1e2e"),
         },
     },
     SettingDescriptor {
         id: SettingId::ColorCursor,
         section: SettingsSection::Appearance,
         config_key: Some("colors"),
-        label_en: "Cursor color",
-        label_ar: "لون المؤشر",
-        note_en: None,
-        note_ar: None,
+        label: en!("Cursor color"),
+        note: None,
         kind: ControlKind::TextField {
-            placeholder_en: "Theme color, e.g. #1e1e2e",
-            placeholder_ar: "لون السمة، مثلاً #1e1e2e",
+            placeholder: en!("Theme color, e.g. #1e1e2e"),
         },
     },
     SettingDescriptor {
         id: SettingId::ColorSelection,
         section: SettingsSection::Appearance,
         config_key: Some("colors"),
-        label_en: "Selection color",
-        label_ar: "لون التحديد",
-        note_en: None,
-        note_ar: None,
+        label: en!("Selection color"),
+        note: None,
         kind: ControlKind::TextField {
-            placeholder_en: "Theme color, e.g. #1e1e2e",
-            placeholder_ar: "لون السمة، مثلاً #1e1e2e",
+            placeholder: en!("Theme color, e.g. #1e1e2e"),
         },
     },
     SettingDescriptor {
         id: SettingId::ColorAnsi,
         section: SettingsSection::Appearance,
         config_key: Some("colors"),
-        label_en: "Terminal colors",
-        label_ar: "ألوان الطرفية",
-        note_en: Some("Up to 16 hex colors (black, red, … bright white), separated by spaces"),
-        note_ar: Some("لحد 16 لون hex (أسود، أحمر، … أبيض فاتح) بينهم مسافات"),
+        label: en!("Terminal colors"),
+        note: Some(en!(
+            "Up to 16 hex colors (black, red, … bright white), separated by spaces"
+        )),
         kind: ControlKind::TextField {
-            placeholder_en: "Theme colors",
-            placeholder_ar: "ألوان السمة",
+            placeholder: en!("Theme colors"),
         },
     },
     SettingDescriptor {
         id: SettingId::DesktopNotifications,
         section: SettingsSection::Behaviour,
         config_key: Some("desktop_notifications"),
-        label_en: "Desktop notifications",
-        label_ar: "إشعارات سطح المكتب",
-        note_en: None,
-        note_ar: None,
+        label: en!("Desktop notifications"),
+        note: None,
         kind: ControlKind::Toggle(Flag {
             get: |c| c.desktop_notifications,
             slot: |c| &mut c.desktop_notifications,
@@ -429,10 +375,8 @@ const TABLE: [SettingDescriptor; SETTING_COUNT] = [
         id: SettingId::RestoreSession,
         section: SettingsSection::Behaviour,
         config_key: Some("restore_session"),
-        label_en: "Restore session",
-        label_ar: "استعادة الجلسة",
-        note_en: Some("Applies after restart"),
-        note_ar: Some("يطبّق بعد إعادة التشغيل"),
+        label: en!("Restore session"),
+        note: Some(en!("Applies after restart")),
         kind: ControlKind::Toggle(Flag {
             get: |c| c.restore_session,
             slot: |c| &mut c.restore_session,
@@ -442,10 +386,8 @@ const TABLE: [SettingDescriptor; SETTING_COUNT] = [
         id: SettingId::ShellIntegration,
         section: SettingsSection::Behaviour,
         config_key: Some("shell_integration"),
-        label_en: "Shell integration",
-        label_ar: "تكامل الشيل",
-        note_en: Some("Applies to new shells"),
-        note_ar: Some("يطبّق على الشيل الجديد"),
+        label: en!("Shell integration"),
+        note: Some(en!("Applies to new shells")),
         kind: ControlKind::Toggle(Flag {
             get: |c| c.shell_integration,
             slot: |c| &mut c.shell_integration,
@@ -455,10 +397,8 @@ const TABLE: [SettingDescriptor; SETTING_COUNT] = [
         id: SettingId::RecordHistory,
         section: SettingsSection::Behaviour,
         config_key: Some("record_history"),
-        label_en: "Record command history",
-        label_ar: "حفظ سجل الأوامر",
-        note_en: None,
-        note_ar: None,
+        label: en!("Record command history"),
+        note: None,
         kind: ControlKind::Toggle(Flag {
             get: |c| c.record_history,
             slot: |c| &mut c.record_history,
@@ -468,10 +408,8 @@ const TABLE: [SettingDescriptor; SETTING_COUNT] = [
         id: SettingId::ClaudeHooks,
         section: SettingsSection::Behaviour,
         config_key: Some("claude_hooks"),
-        label_en: "Claude hooks",
-        label_ar: "خطافات كلود",
-        note_en: Some("Applies to new shells"),
-        note_ar: Some("يطبّق على الشيل الجديد"),
+        label: en!("Claude hooks"),
+        note: Some(en!("Applies to new shells")),
         kind: ControlKind::Toggle(Flag {
             get: |c| c.claude_hooks,
             slot: |c| &mut c.claude_hooks,
@@ -481,10 +419,8 @@ const TABLE: [SettingDescriptor; SETTING_COUNT] = [
         id: SettingId::ControlSocket,
         section: SettingsSection::Behaviour,
         config_key: Some("control_socket"),
-        label_en: "Control socket",
-        label_ar: "مقبس التحكم",
-        note_en: Some("Applies after restart"),
-        note_ar: Some("يطبّق بعد إعادة التشغيل"),
+        label: en!("Control socket"),
+        note: Some(en!("Applies after restart")),
         kind: ControlKind::Toggle(Flag {
             get: |c| c.control_socket,
             slot: |c| &mut c.control_socket,
@@ -494,10 +430,8 @@ const TABLE: [SettingDescriptor; SETTING_COUNT] = [
         id: SettingId::CmuxCompat,
         section: SettingsSection::Behaviour,
         config_key: Some("cmux_compat"),
-        label_en: "External socket compatibility",
-        label_ar: "توافق مقبس التحكم الخارجي",
-        note_en: Some("Applies to new shells"),
-        note_ar: Some("يطبّق على الشيل الجديد"),
+        label: en!("External socket compatibility"),
+        note: Some(en!("Applies to new shells")),
         kind: ControlKind::Toggle(Flag {
             get: |c| c.cmux_compat,
             slot: |c| &mut c.cmux_compat,
@@ -507,56 +441,46 @@ const TABLE: [SettingDescriptor; SETTING_COUNT] = [
         id: SettingId::AgentCommand,
         section: SettingsSection::Behaviour,
         config_key: Some("agent_command"),
-        label_en: "Agent command",
-        label_ar: "أمر الوكيل",
-        note_en: Some("Leave blank to auto-detect"),
-        note_ar: Some("اتركه فارغاً للاكتشاف التلقائي"),
+        label: en!("Agent command"),
+        note: Some(en!("Leave blank to auto-detect")),
         kind: ControlKind::TextField {
-            placeholder_en: "Auto (claude, codex…)",
-            placeholder_ar: "تلقائي: claude أو codex",
+            placeholder: en!("Auto (claude, codex…)"),
         },
     },
     SettingDescriptor {
         id: SettingId::ComposerMode,
         section: SettingsSection::Behaviour,
         config_key: Some("composer"),
-        label_en: "Command composer",
-        label_ar: "محرر الأوامر",
-        note_en: Some("The editor box under the terminal (Ctrl+Shift+Space)"),
-        note_ar: Some("خانة كتابة الأوامر تحت الطرفية (Ctrl+Shift+Space)"),
+        label: en!("Command composer"),
+        note: Some(en!("The editor box under the terminal (Ctrl+Shift+Space)")),
         kind: ControlKind::Segmented(COMPOSER_MODE_OPTIONS),
     },
     SettingDescriptor {
         id: SettingId::ProjectRoots,
         section: SettingsSection::Behaviour,
         config_key: Some("project_roots"),
-        label_en: "Project folders",
-        label_ar: "مجلدات المشاريع",
-        note_en: Some("Scanned for git projects; separate with commas"),
-        note_ar: Some("بيتدوّر فيها على مشاريع git؛ افصل بينها بفاصلة"),
+        label: en!("Project folders"),
+        note: Some(en!("Scanned for git projects; separate with commas")),
         kind: ControlKind::TextField {
-            placeholder_en: "~/Projects, ~/src",
-            placeholder_ar: "~/Projects, ~/src",
+            placeholder: "~/Projects, ~/src",
         },
     },
     SettingDescriptor {
         id: SettingId::ProjectMemory,
         section: SettingsSection::Ai,
         config_key: None,
-        label_en: "Project memory",
-        label_ar: "ذاكرة المشروع",
-        note_en: Some("Rules files, facts, frequent commands, environment notes, and exclusions"),
-        note_ar: Some("ملفات القواعد والحقائق والأوامر المتكررة وملاحظات البيئة والاستثناءات"),
+        label: en!("Project memory"),
+        note: Some(en!(
+            "Rules files, facts, frequent commands, environment notes, and exclusions"
+        )),
         kind: ControlKind::ActionButton,
     },
     SettingDescriptor {
         id: SettingId::BuiltInAi,
         section: SettingsSection::Ai,
         config_key: Some("ai"),
-        label_en: "Built-in AI",
-        label_ar: "الذكاء الاصطناعي المدمج",
-        note_en: Some("Generate commands (#) and explain failed blocks"),
-        note_ar: Some("توليد الأوامر (#) وشرح الأوامر اللي فشلت"),
+        label: en!("Built-in AI"),
+        note: Some(en!("Generate commands (#) and explain failed blocks")),
         kind: ControlKind::Toggle(Flag {
             get: |c| c.ai,
             slot: |c| &mut c.ai,
@@ -566,10 +490,8 @@ const TABLE: [SettingDescriptor; SETTING_COUNT] = [
         id: SettingId::AiTimeout,
         section: SettingsSection::Ai,
         config_key: Some("ai_timeout_secs"),
-        label_en: "AI request timeout",
-        label_ar: "مهلة طلب الذكاء الاصطناعي",
-        note_en: None,
-        note_ar: None,
+        label: en!("AI request timeout"),
+        note: None,
         kind: ControlKind::Slider(SliderSpec {
             min: 5.0,
             max: 300.0,
@@ -581,10 +503,8 @@ const TABLE: [SettingDescriptor; SETTING_COUNT] = [
         id: SettingId::CopyConfigPath,
         section: SettingsSection::About,
         config_key: None,
-        label_en: "Config file",
-        label_ar: "ملف الإعدادات",
-        note_en: None,
-        note_ar: None,
+        label: en!("Config file"),
+        note: None,
         kind: ControlKind::ActionButton,
     },
 ];
@@ -643,153 +563,130 @@ pub struct SettingDescriptor {
     pub section: SettingsSection,
     /// JSON key in `config.json`; `None` for actions.
     pub config_key: Option<&'static str>,
-    pub label_en: &'static str,
-    pub label_ar: &'static str,
-    pub note_en: Option<&'static str>,
-    pub note_ar: Option<&'static str>,
+    /// English; `label` and `note` translate.
+    pub label: &'static str,
+    pub note: Option<&'static str>,
     pub kind: ControlKind,
 }
 
 impl SettingDescriptor {
     pub fn label(&self, language: UiLanguage) -> &'static str {
-        language.text(self.label_en, self.label_ar)
+        language.t(self.label)
     }
 
     pub fn note(&self, language: UiLanguage) -> Option<&'static str> {
-        match language {
-            UiLanguage::English => self.note_en,
-            UiLanguage::Arabic => self.note_ar,
-        }
+        self.note.map(|note| language.t(note))
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SegmentedOption {
     pub value: &'static str,
-    pub label_en: &'static str,
-    pub label_ar: &'static str,
+    /// English (or a language's own name, shown as is).
+    pub label: &'static str,
 }
 
 impl SegmentedOption {
     pub fn label(self, language: UiLanguage) -> &'static str {
-        language.text(self.label_en, self.label_ar)
+        language.t(self.label)
     }
 }
 
 pub const UI_LANGUAGE_OPTIONS: &[SegmentedOption] = &[
     SegmentedOption {
         value: "auto",
-        label_en: "Auto",
-        label_ar: "تلقائي",
+        label: en!("Auto"),
     },
     SegmentedOption {
         value: "en",
-        label_en: "English",
-        label_ar: "English",
+        label: "English",
     },
     SegmentedOption {
         value: "ar",
-        label_en: "العربية",
-        label_ar: "العربية",
+        label: "العربية",
     },
 ];
 
 pub const COMPOSER_MODE_OPTIONS: &[SegmentedOption] = &[
     SegmentedOption {
         value: "off",
-        label_en: "Off",
-        label_ar: "مقفول",
+        label: en!("Off"),
     },
     SegmentedOption {
         value: "on-demand",
-        label_en: "On demand",
-        label_ar: "عند الطلب",
+        label: en!("On demand"),
     },
     SegmentedOption {
         value: "always",
-        label_en: "Always",
-        label_ar: "دايماً",
+        label: en!("Always"),
     },
 ];
 
 pub const CURSOR_STYLE_OPTIONS: &[SegmentedOption] = &[
     SegmentedOption {
         value: "block",
-        label_en: "Block",
-        label_ar: "مربع",
+        label: en!("Block|cursor"),
     },
     SegmentedOption {
         value: "beam",
-        label_en: "Beam",
-        label_ar: "شريط",
+        label: en!("Beam"),
     },
     SegmentedOption {
         value: "underline",
-        label_en: "Underline",
-        label_ar: "خط سفلي",
+        label: en!("Underline"),
     },
 ];
 
 pub const SIDEBAR_POSITION_OPTIONS: &[SegmentedOption] = &[
     SegmentedOption {
         value: "left",
-        label_en: "Left",
-        label_ar: "يسار",
+        label: en!("Left"),
     },
     SegmentedOption {
         value: "right",
-        label_en: "Right",
-        label_ar: "يمين",
+        label: en!("Right"),
     },
     SegmentedOption {
         value: "hidden",
-        label_en: "Hidden",
-        label_ar: "مخفي",
+        label: en!("Hidden"),
     },
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AccentSwatch {
     pub hex: Option<&'static str>,
-    pub label_en: &'static str,
-    pub label_ar: &'static str,
+    /// English; translate with `UiLanguage::t`.
+    pub label: &'static str,
 }
 
 pub const ACCENT_SWATCHES: &[AccentSwatch] = &[
     AccentSwatch {
         hex: None,
-        label_en: "Default",
-        label_ar: "افتراضي",
+        label: en!("Default"),
     },
     AccentSwatch {
         hex: Some("#7aa2f7"),
-        label_en: "Blue",
-        label_ar: "أزرق",
+        label: en!("Blue"),
     },
     AccentSwatch {
         hex: Some("#bb9af7"),
-        label_en: "Purple",
-        label_ar: "بنفسجي",
+        label: en!("Purple"),
     },
     AccentSwatch {
         hex: Some("#9ece6a"),
-        label_en: "Green",
-        label_ar: "أخضر",
+        label: en!("Green"),
     },
     AccentSwatch {
         hex: Some("#e0af68"),
-        label_en: "Amber",
-        label_ar: "كهرماني",
+        label: en!("Amber"),
     },
     AccentSwatch {
         hex: Some("#f7768e"),
-        label_en: "Rose",
-        label_ar: "وردي",
+        label: en!("Rose"),
     },
     AccentSwatch {
         hex: Some("#2ac3de"),
-        label_en: "Cyan",
-        label_ar: "سماوي",
+        label: en!("Cyan"),
     },
 ];
 
@@ -850,8 +747,8 @@ pub enum ControlKind {
     Slider(SliderSpec),
     Swatches,
     TextField {
-        placeholder_en: &'static str,
-        placeholder_ar: &'static str,
+        /// English; translate with `UiLanguage::t`.
+        placeholder: &'static str,
     },
     ListPicker {
         searchable: bool,

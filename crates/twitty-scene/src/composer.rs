@@ -874,25 +874,17 @@ pub fn build(
             None => layout.header.right(),
         };
 
-        let title_text = match view.language {
-            UiLanguage::Arabic => "اكتب أمر",
-            UiLanguage::English => "Compose command",
-        };
+        let title_text = view.language.t("Compose command");
         let full_title = view.context.as_deref().unwrap_or(title_text);
         let title_x = icon_rect.right() + style.px(6.0);
         let avail_w = (header_right - title_x).max(0.0);
 
-        let hint_text = match (view.language, view.ai.enabled) {
-            (UiLanguage::Arabic, true) => {
-                "Enter تشغيل · # أو Ctrl+Enter ذكاء · Tab إكمال · Esc إغلاق"
-            }
-            (UiLanguage::English, true) => {
-                "Enter Run · # / Ctrl+Enter AI · Tab Complete · Esc Close"
-            }
-            (UiLanguage::Arabic, false) => "Enter تشغيل · Shift+Enter سطر · Tab إكمال · Esc إغلاق",
-            (UiLanguage::English, false) => {
-                "Enter Run · Shift+Enter Newline · Tab Complete · Esc Close"
-            }
+        let hint_text = if view.ai.enabled {
+            view.language
+                .t("Enter Run · # / Ctrl+Enter AI · Tab Complete · Esc Close")
+        } else {
+            view.language
+                .t("Enter Run · Shift+Enter Newline · Tab Complete · Esc Close")
         };
         let hint_buf = font.shape(
             ctx.font_system,
@@ -976,11 +968,10 @@ pub fn build(
 
     let caret_w = style.px(2.0).max(1.5).round();
     if all_empty {
-        let placeholder = match (view.language, view.ai.enabled) {
-            (UiLanguage::Arabic, true) => "اكتب أمرك أو # للذكاء الاصطناعي…",
-            (UiLanguage::English, true) => "Type a command or # for AI…",
-            (UiLanguage::Arabic, false) => "اكتب أمرك هنا…",
-            (UiLanguage::English, false) => "Type a command…",
+        let placeholder = if view.ai.enabled {
+            view.language.t("Type a command or # for AI…")
+        } else {
+            view.language.t("Type a command…|composer")
         };
         // Start at the input's text inset and leave room for the empty editor's beam.
         // Reserve it during both blink phases so the placeholder never shifts.
@@ -1299,10 +1290,7 @@ pub fn build(
                 );
                 Icon::Agent.draw(icon_rect, ctx.color(style.accent), &mut scene.shapes);
 
-                let review_hint = match view.language {
-                    UiLanguage::Arabic => "Enter تشغيل · Esc إلغاء",
-                    UiLanguage::English => "Enter Run · Esc Discard",
-                };
+                let review_hint = view.language.t("Enter Run · Esc Discard");
                 let hint_buf = font.shape(
                     ctx.font_system,
                     UiSize::Small,

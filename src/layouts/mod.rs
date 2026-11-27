@@ -18,6 +18,7 @@ use crate::render::scene::palette::PaletteItem;
 use crate::session::workspace::{GridGeometry, PaneFactory, Workspace};
 use crate::shell_integration::clean_text;
 use crate::ui::palette::Searchable;
+use twitty_core::language::{fill, UiLanguage};
 
 /// Current on-disk schema version for `layouts.json`.
 pub const LAYOUTS_VERSION: u32 = 1;
@@ -159,9 +160,10 @@ impl NamedLayout {
     pub fn to_palette_item(&self) -> PaletteItem {
         let count = self.pane_count();
         let title_ar = if count == 1 {
-            "1 pane · لوحة واحدة".into()
+            format!("1 pane · {}", UiLanguage::Arabic.t("1 pane"))
         } else {
-            format!("{count} panes · {count} لوحات")
+            let panes = fill(UiLanguage::Arabic.t("{} panes"), &[&count]);
+            format!("{count} panes · {panes}")
         };
         PaletteItem {
             title_en: self.name.clone(),

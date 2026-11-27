@@ -13,6 +13,7 @@ use crate::shell_integration::clean_text;
 use crate::sidebar::git::branch as git_branch;
 use crate::ui::palette::PaletteItem;
 use crate::ui::palette::Searchable;
+use twitty_core::language::UiLanguage;
 
 use self::scan::ScannedRepo;
 
@@ -66,9 +67,9 @@ impl ProjectItem {
             format!("{}  {}", self.name, self.display_path)
         };
         let title_ar = match (&self.branch, self.recent) {
-            (Some(branch), true) => format!("حديث · {branch}"),
+            (Some(branch), true) => format!("{} · {branch}", UiLanguage::Arabic.t("Recent")),
             (Some(branch), false) => branch.clone(),
-            (None, true) => "حديث".into(),
+            (None, true) => UiLanguage::Arabic.t("Recent").into(),
             (None, false) => String::new(),
         };
         PaletteItem {

@@ -227,8 +227,13 @@ fn record_history_config_default_and_settings_behaviour_toggle() {
     assert!(SettingId::config_settings().any(|id| id == SettingId::RecordHistory));
 
     let desc = SettingId::RecordHistory.descriptor();
-    assert!(!desc.label_en.is_empty());
-    assert!(!desc.label_ar.is_empty());
+    assert!(!desc
+        .label(twitty::ui::chrome::UiLanguage::English)
+        .is_empty());
+    assert_ne!(
+        desc.label(twitty::ui::chrome::UiLanguage::Arabic),
+        desc.label(twitty::ui::chrome::UiLanguage::English)
+    );
 
     assert!(read_bool(SettingId::RecordHistory, &cfg));
     assert!(write_bool(SettingId::RecordHistory, false, &mut cfg));

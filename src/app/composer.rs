@@ -129,12 +129,11 @@ impl App {
         self.composer.focused = true;
         self.composer.state.ai_enabled = self.config.ai;
         self.composer.state.apply_ai_command(command);
-        let explanation = match self.window.ui_language() {
-            crate::ui::chrome::UiLanguage::Arabic => "حل مقترح — راجع الأمر قبل التشغيل".to_owned(),
-            crate::ui::chrome::UiLanguage::English => {
-                "Suggested fix — review before running".to_owned()
-            }
-        };
+        let explanation = self
+            .window
+            .ui_language()
+            .t("Suggested fix — review before running")
+            .to_owned();
         self.ai.composer_ai = crate::ai::ComposerAiState::Ready {
             explanation,
             original_prompt: String::new(),

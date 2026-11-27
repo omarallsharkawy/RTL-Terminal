@@ -16,7 +16,7 @@ use twitty::render::ui_style::UiStyle;
 use twitty::render::{CellMetrics, RowCache, TabLabel};
 use twitty::ui::chrome::{
     count_badge, ChromeAction, PaneHeaderLayout, SearchContents, SearchPlaceholder, TopBarLayout,
-    UiLanguage, WindowLayout, SEARCH_AR, SEARCH_EN, SEARCH_KEYCAP,
+    UiLanguage, WindowLayout, SEARCH, SEARCH_KEYCAP,
 };
 use twitty::ui::git_diff::{parse_numstat, DiffStat, MAX_FILES, MAX_LINES, MAX_OUTPUT};
 use twitty::ui::hit::{hit_test, Hit, HitGeometry};
@@ -456,17 +456,22 @@ fn rendered_search_prefers_complete_labels_and_bell_count_is_conditional() {
         ))
         .ceil()
     };
-    let en_w = placeholder_w(&mut ctx, SEARCH_EN);
-    let ar_w = placeholder_w(&mut ctx, SEARCH_AR);
+    let en_w = placeholder_w(&mut ctx, SEARCH);
+    let ar_w = placeholder_w(&mut ctx, UiLanguage::Arabic.t(SEARCH));
     for (field_width, language, unread, expected) in [
         (
             456.0,
             UiLanguage::English,
             99,
-            vec![SEARCH_KEYCAP, SEARCH_EN, "99"],
+            vec![SEARCH_KEYCAP, SEARCH, "99"],
         ),
-        (en_w + 39.0, UiLanguage::English, 0, vec![SEARCH_EN]),
-        (ar_w + 39.0, UiLanguage::Arabic, 0, vec![SEARCH_AR]),
+        (en_w + 39.0, UiLanguage::English, 0, vec![SEARCH]),
+        (
+            ar_w + 39.0,
+            UiLanguage::Arabic,
+            0,
+            vec![UiLanguage::Arabic.t(SEARCH)],
+        ),
         (47.0, UiLanguage::Arabic, 0, vec![]),
     ] {
         let surface = (900.0, 300.0);

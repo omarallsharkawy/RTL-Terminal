@@ -23,7 +23,6 @@ use crate::composer::ComposerMode;
 use crate::layout::PaneId;
 use crate::render::scene::ai::{BlockAiHit, BlockAiView, ConsentHit, ConsentOverlayView};
 use crate::render::scene::composer::{ComposerAiBanner, ComposerAiView};
-use crate::ui::chrome::UiLanguage;
 
 /// Spinner dot step interval while waiting on a local coding agent.
 const SPINNER_INTERVAL: Duration = Duration::from_millis(240);
@@ -415,12 +414,10 @@ impl App {
                     Ok(generated) => {
                         // NEVER run the generated command automatically: populate editor for review.
                         let explanation = generated.explanation.unwrap_or_else(|| {
-                            match self.window.ui_language() {
-                                UiLanguage::Arabic => "أمر مقترح — راجعه قبل التشغيل".to_owned(),
-                                UiLanguage::English => {
-                                    "Suggested command — review before running".to_owned()
-                                }
-                            }
+                            self.window
+                                .ui_language()
+                                .t("Suggested command — review before running")
+                                .to_owned()
                         });
                         self.composer.state.apply_ai_command(&generated.command);
                         self.ai.composer_ai = ComposerAiState::Ready {

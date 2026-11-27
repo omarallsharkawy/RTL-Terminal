@@ -54,8 +54,9 @@ impl SettingsDrawer<'_, '_> {
                     continue;
                 }
                 let placeholder = match field {
-                    FormField::Name => lang.t("e.g. Run tests"),
-                    FormField::NameAr => lang.t("e.g. شغّل الاختبارات"),
+                    // An Arabic sample for the Arabic name, also in the English interface.
+                    FormField::NameAr if lang == UiLanguage::English => "e.g. شغّل الاختبارات",
+                    FormField::Name | FormField::NameAr => lang.t("e.g. Run tests"),
                     _ => lang.t("e.g. cargo test"),
                 };
                 self.draw_text_input(input, form.text(field), placeholder, focused, clip);

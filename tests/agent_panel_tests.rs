@@ -377,7 +377,7 @@ fn scripted_engine_drives_full_approval_edit_deny_and_result_lifecycle() {
     };
     assert!(matches!(
         &cmd,
-        AgentCommand::Start { request, .. } if request == EXAMPLE_CHIPS[0].prompt_en
+        AgentCommand::Start { request, .. } if request == EXAMPLE_CHIPS[0].prompt
     ));
     handle.commands.send(cmd).unwrap();
 

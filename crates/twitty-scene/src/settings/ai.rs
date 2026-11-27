@@ -65,7 +65,7 @@ impl SettingsDrawer<'_, '_> {
             if !in_vp(rect) {
                 continue;
             }
-            let (id, en, ar) = DEFAULT_PROVIDER_CHOICES[idx];
+            let (id, label) = DEFAULT_PROVIDER_CHOICES[idx];
             let selected = active_provider.eq_ignore_ascii_case(id);
             let hovered = self.view.state.hover == Some(SettingsHit::AiDefaultProvider(idx));
             self.shapes.push(Shape::RoundedRect {
@@ -86,7 +86,7 @@ impl SettingsDrawer<'_, '_> {
             });
             self.push_label(
                 rect,
-                self.lang().text(en, ar),
+                self.lang().t(label),
                 UiSize::Small,
                 if selected {
                     UiWeight::Semibold
@@ -546,7 +546,7 @@ impl SettingsDrawer<'_, '_> {
                 Some(clip),
             );
             ry += s.px(20.0);
-            for &(en, ar) in &HARD_DENY_SUMMARY {
+            for &rule in &HARD_DENY_SUMMARY {
                 let row = Rect::new(
                     ai.deny_box.x + pad,
                     ry,
@@ -554,7 +554,7 @@ impl SettingsDrawer<'_, '_> {
                     s.px(17.0),
                 );
                 if in_vp(row) {
-                    let bullet = format!("• {}", self.lang().text(en, ar));
+                    let bullet = format!("• {}", self.lang().t(rule));
                     self.push_label(
                         row,
                         &bullet,

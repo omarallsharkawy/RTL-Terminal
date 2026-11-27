@@ -9,6 +9,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread;
+use twitty_core::en;
+use twitty_core::language::fill;
 
 use twitty_ai::engine::model::{
     AgentCommand, AgentEvent, AgentHandle, ContextBundle, ContextKind, Decision, DenyReason,
@@ -57,20 +59,19 @@ const MAX_HISTORY: usize = 100;
 /// One empty-state example chip (AGENT.md §1.1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ExampleChip {
-    pub prompt_en: &'static str,
-    pub prompt_ar: &'static str,
+    /// English; `label` translates it.
+    pub prompt: &'static str,
 }
 
 impl ExampleChip {
     pub fn label(self, language: UiLanguage) -> &'static str {
-        language.text(self.prompt_en, self.prompt_ar)
+        language.t(self.prompt)
     }
 }
 
 /// Empty-state intro text (AGENT.md §1.1), wrapped by the layout so the chips sit below it.
-pub const EMPTY_INTRO: (&str, &str) = (
-    "Ask the agent to read files, run commands, or edit code. Every command and patch asks first.",
-    "اطلب من الوكيل قراءة الملفات أو تشغيل الأوامر أو تعديل الكود. كل أمر وتعديل يطلب موافقتك أولاً.",
+pub const EMPTY_INTRO: &str = en!(
+    "Ask the agent to read files, run commands, or edit code. Every command and patch asks first."
 );
 /// Logical px from the body top to the first intro line, and between intro lines.
 pub const EMPTY_INTRO_TOP: f32 = 44.0;
@@ -80,16 +81,13 @@ const EMPTY_INTRO_MAX_LINES: usize = 5;
 /// Three bilingual empty-state starter chips (AGENT.md §1.1).
 pub const EXAMPLE_CHIPS: [ExampleChip; 3] = [
     ExampleChip {
-        prompt_en: "Run the tests and fix the first failure",
-        prompt_ar: "شغّل الاختبارات وصلّح أول فشل",
+        prompt: en!("Run the tests and fix the first failure"),
     },
     ExampleChip {
-        prompt_en: "Explain the last error",
-        prompt_ar: "اشرح آخر خطأ",
+        prompt: en!("Explain the last error"),
     },
     ExampleChip {
-        prompt_en: "Summarize uncommitted changes",
-        prompt_ar: "لخّص التغييرات غير المثبتة",
+        prompt: en!("Summarize uncommitted changes"),
     },
 ];
 
@@ -368,14 +366,10 @@ pub fn read_tool_name(tool: ReadTool) -> &'static str {
 /// Bilingual description of a [`DenyReason`].
 pub fn format_deny_reason(reason: &DenyReason, language: UiLanguage) -> String {
     match reason {
-        DenyReason::HardDeny { rule } => match language {
-            UiLanguage::English => format!("Denied by policy ({rule})"),
-            UiLanguage::Arabic => format!("مرفوض بواسطة السياسة ({rule})"),
-        },
-        DenyReason::OutsideProject { path } => match language {
-            UiLanguage::English => format!("Outside project root: {}", path.display()),
-            UiLanguage::Arabic => format!("خارج مجلد المشروع: {}", path.display()),
-        },
+        DenyReason::HardDeny { rule } => fill(language.t("Denied by policy ({})"), &[rule]),
+        DenyReason::OutsideProject { path } => {
+            fill(language.t("Outside project root: {}"), &[&path.display()])
+        }
         DenyReason::User => language.t("Denied by user").to_owned(),
     }
 }
@@ -2234,7 +2228,7 @@ impl AgentPanelLayout {
             let chip_gap = px(8.0).round();
             let chip_w = (body.w - 2.0 * pad).max(0.0);
             empty_intro = wrap_words(
-                view.language.text(EMPTY_INTRO.0, EMPTY_INTRO.1),
+                view.language.t(EMPTY_INTRO),
                 chip_w,
                 px(7.0),
                 EMPTY_INTRO_MAX_LINES,

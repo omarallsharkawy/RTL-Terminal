@@ -4,7 +4,8 @@
 //! [`UiLanguage::t`]); the English text is the key into one catalog per language in
 //! `crates/twitty-core/i18n/` (`ar.json`). Text in a table that is built at compile time is
 //! marked with [`en!`](crate::en) so the catalog check finds it, and translated where it is
-//! shown. `tests/i18n_catalog_tests.rs` fails when the code uses a text the catalog lacks or
+//! shown. A key may carry `|context` when one English word has two meanings.
+//! `tests/i18n_catalog_tests.rs` fails when the code uses a text the catalog lacks or
 //! the catalog keeps one nothing uses.
 
 use std::collections::HashMap;
@@ -30,6 +31,24 @@ pub fn t(english: &str) -> &str {
     UiLanguage::current().t(english)
 }
 
+/// `template` with each `{}` replaced by the next of `args`, in order. Templates go through the
+/// catalog like any text: `fill(t("Unknown key {}"), &[&key])`.
+pub fn fill(template: &str, args: &[&dyn std::fmt::Display]) -> String {
+    let mut out = String::with_capacity(template.len());
+    let mut args = args.iter();
+    let mut rest = template;
+    while let Some(at) = rest.find("{}") {
+        out.push_str(&rest[..at]);
+        match args.next() {
+            Some(arg) => out.push_str(&arg.to_string()),
+            None => out.push_str("{}"),
+        }
+        rest = &rest[at + 2..];
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Mark English interface text in a table built at compile time, so the catalog check finds
 /// it. It is the literal itself; translate it with [`t`] where it is shown.
 #[macro_export]
@@ -37,14 +56,6 @@ macro_rules! en {
     ($text:literal) => {
         $text
     };
-}
-
-/// `english` or `arabic`, whichever matches the current interface language.
-pub fn tr<'a>(english: &'a str, arabic: &'a str) -> &'a str {
-    match UiLanguage::current() {
-        UiLanguage::English => english,
-        UiLanguage::Arabic => arabic,
-    }
 }
 
 /// Configured interface language preference (`config.json` key `"ui_language"`).
@@ -150,14 +161,18 @@ impl UiLanguage {
     }
 
     /// `english` in this language: itself, or its translation from the catalog (English when
-    /// the catalog has none).
+    /// the catalog has none). A key may end in `|context` to tell apart one English word with
+    /// two meanings (`"Block|cursor"`); the context is never shown.
     pub fn t(self, english: &str) -> &str {
+        let shown = english.split_once('|').map_or(english, |(text, _)| text);
         match self {
-            Self::English => english,
-            Self::Arabic => arabic().get(english).map_or(english, String::as_str),
+            Self::English => shown,
+            Self::Arabic => arabic().get(english).map_or(shown, String::as_str),
         }
     }
 
+    /// One of two texts that come with the data (a command's own Arabic name, say). Interface
+    /// text uses [`t`](Self::t).
     pub fn text(self, english: &'static str, arabic: &'static str) -> &'static str {
         match self {
             Self::English => english,

@@ -6,6 +6,8 @@
 //! a name and a command are required, text is cleaned and bounded, names are unique.
 
 use serde_json::json;
+use twitty_core::en;
+use twitty_core::language::fill;
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
 use crate::config::TwittyConfig;
@@ -167,12 +169,8 @@ impl CommandsEditorState {
             Ok(spec) => spec,
             Err(reason) => {
                 form.error = Some(match reason.as_str() {
-                    r if r.contains("\"name\"") => {
-                        ("Give the command a name".into(), "اكتب اسم للأمر".into())
-                    }
-                    r if r.contains("\"command\"") => {
-                        ("Write the command to run".into(), "اكتب الأمر نفسه".into())
-                    }
+                    r if r.contains("\"name\"") => both(en!("Give the command a name"), &[]),
+                    r if r.contains("\"command\"") => both(en!("Write the command to run"), &[]),
                     _ => (reason.clone(), reason),
                 });
                 return false;
@@ -182,9 +180,9 @@ impl CommandsEditorState {
             Some(i) != form.editing && c.name.to_lowercase() == spec.name.to_lowercase()
         });
         if duplicate {
-            form.error = Some((
-                format!("A command named \"{}\" already exists", spec.name),
-                format!("فيه أمر اسمه \"{}\" بالفعل", spec.name),
+            form.error = Some(both(
+                en!("A command named \"{}\" already exists"),
+                &[&spec.name],
             ));
             return false;
         }
@@ -199,9 +197,9 @@ impl CommandsEditorState {
             }
             _ => {
                 if config.commands.len() >= MAX_COMMANDS_PER_SOURCE {
-                    form.error = Some((
-                        format!("At most {MAX_COMMANDS_PER_SOURCE} commands"),
-                        format!("الحد الأقصى {MAX_COMMANDS_PER_SOURCE} أمر"),
+                    form.error = Some(both(
+                        en!("At most {} commands"),
+                        &[&MAX_COMMANDS_PER_SOURCE],
                     ));
                     return false;
                 }
@@ -524,4 +522,12 @@ pub fn mode_label(mode: CommandMode, lang: UiLanguage) -> &'static str {
         CommandMode::Insert => lang.t("Insert for review"),
         CommandMode::Run => lang.t("Run in a split"),
     }
+}
+
+/// `template` filled in English and in Arabic, for a message shown in either language.
+fn both(template: &str, args: &[&dyn std::fmt::Display]) -> (String, String) {
+    (
+        fill(template, args),
+        fill(twitty_core::language::UiLanguage::Arabic.t(template), args),
+    )
 }

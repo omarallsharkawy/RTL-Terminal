@@ -14,6 +14,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+use twitty_core::en;
+use twitty_core::language::{fill, UiLanguage};
 use twitty_core::shell_integration::clean_text;
 use twitty_core::warnings::warn;
 
@@ -48,27 +50,28 @@ pub struct ConsentNotice {
     pub cancel_label_ar: &'static str,
 }
 
+const TITLE: &str = en!("Built-in AI Privacy Notice");
+const BODY: &str = en!(
+    "Selected text, your prompt, working directory, or command output will be passed to your \
+     local \"{}\" CLI and sent to its provider. Twitty stores no API keys and makes no network \
+     requests itself."
+);
+const ALLOW: &str = en!("Allow & Continue");
+const CANCEL: &str = en!("Cancel");
+
 impl ConsentNotice {
     pub fn for_agent(agent_name: &str) -> Self {
         let agent = clean_text(agent_name, 64);
         let agent = if agent.is_empty() { "agent" } else { &agent };
         Self {
-            title_en: "Built-in AI Privacy Notice".into(),
-            title_ar: "تنبيه خصوصية الذكاء الاصطناعي".into(),
-            body_en: format!(
-                "Selected text, your prompt, working directory, or command output will be passed \
-                 to your local \"{agent}\" CLI and sent to its provider. Twitty stores no API keys \
-                 and makes no network requests itself."
-            ),
-            body_ar: format!(
-                "النص المختار أو طلبك أو مجلد العمل أو ناتج الأمر هيتبعت لأداة \"{agent}\" المثبّتة \
-                 على جهازك، وهي اللي بتبعته لمزوّد الخدمة بتاعها. Twitty مش بيحفظ مفاتيح API ومش \
-                 بيتصل بالشبكة بنفسه."
-            ),
-            allow_label_en: "Allow & Continue",
-            allow_label_ar: "موافق وكمّل",
-            cancel_label_en: "Cancel",
-            cancel_label_ar: "إلغاء",
+            title_en: TITLE.into(),
+            title_ar: UiLanguage::Arabic.t(TITLE).into(),
+            body_en: fill(BODY, &[&agent]),
+            body_ar: fill(UiLanguage::Arabic.t(BODY), &[&agent]),
+            allow_label_en: ALLOW,
+            allow_label_ar: UiLanguage::Arabic.t(ALLOW),
+            cancel_label_en: CANCEL,
+            cancel_label_ar: UiLanguage::Arabic.t(CANCEL),
         }
     }
 }

@@ -9,7 +9,7 @@ use twitty_render::text::ui::{label_width, UiAlign, UiLabel, UiSize, UiWeight};
 use twitty_render::ui_style::{UiStyle, RADIUS_6, RADIUS_8, SPACE_12, SPACE_16, SPACE_4, SPACE_8};
 use twitty_ui::ui::chrome::{
     count_badge, ChromeAction, PaneHeaderLayout, SearchContents, SearchPlaceholder, TopBarLayout,
-    UiLanguage, WindowLayout, SEARCH_AR, SEARCH_EN, SEARCH_KEYCAP,
+    UiLanguage, WindowLayout, SEARCH, SEARCH_KEYCAP,
 };
 use twitty_ui::ui::git_diff::DiffStat;
 use twitty_ui::ui::motion::ChromeMotion;
@@ -227,7 +227,7 @@ impl Chrome<'_, '_> {
             UiSize::Caption,
             UiWeight::Regular,
             s.scale,
-            language.text(SEARCH_EN, SEARCH_AR),
+            language.t(SEARCH),
         );
         let key = self.font.shape(
             self.ctx.font_system,
@@ -259,7 +259,7 @@ impl Chrome<'_, '_> {
             )),
             SearchPlaceholder::LocalShortened => self.word_label(
                 language.mirror(remaining, rect),
-                language.text(SEARCH_EN, SEARCH_AR),
+                language.t(SEARCH),
                 UiSize::Caption,
                 UiWeight::Regular,
                 UiAlign::Start,
@@ -454,7 +454,13 @@ impl Chrome<'_, '_> {
                 let pill_y = title.y + (title.h - pill_h) * 0.5;
                 let pill_pad = s.px(SPACE_4);
                 let icon_side = s.px(SPACE_12).min(pill_h);
-                let full_text = language.t("Zoom · مكبّرة");
+                // Both names, the interface language first.
+                let arabic = UiLanguage::Arabic.t("Zoom");
+                let full_text = match language {
+                    UiLanguage::English => format!("Zoom · {arabic}"),
+                    UiLanguage::Arabic => format!("{arabic} · Zoom"),
+                };
+                let full_text = full_text.as_str();
                 let short_text = language.t("Zoom");
                 let full_buf = self.font.shape(
                     self.ctx.font_system,

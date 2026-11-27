@@ -286,10 +286,7 @@ pub fn block_ai_overlay(
     );
     Icon::Close.draw(close_icon_rect, ctx.color(style.text_dim), shapes);
 
-    let exit_text = match view.language {
-        UiLanguage::Arabic => format!("خروج {}", view.exit_code),
-        UiLanguage::English => format!("exit {}", view.exit_code),
-    };
+    let exit_text = twitty_core::language::fill(view.language.t("exit {}"), &[&view.exit_code]);
     let exit_buf = font.shape(
         ctx.font_system,
         UiSize::Small,
@@ -411,10 +408,7 @@ pub fn block_ai_overlay(
                 (layout.body.right() - text_x).max(0.0),
                 layout.body_line_height,
             );
-            let msg = match view.language {
-                UiLanguage::Arabic => "جاري تحليل الخطأ… (Esc للإلغاء)",
-                UiLanguage::English => "Analyzing error… (Esc to cancel)",
-            };
+            let msg = view.language.t("Analyzing error… (Esc to cancel)");
             let buf = font.fit(
                 ctx.font_system,
                 UiSize::Caption,
@@ -531,13 +525,7 @@ pub fn block_ai_overlay(
             border: None,
             shadow: None,
         });
-        let text = if btn.w >= style.px(290.0) {
-            twitty_ui::ui::chrome::t("Insert fix into composer")
-        } else if view.language == UiLanguage::Arabic {
-            "حط الحل في خانة الأوامر"
-        } else {
-            "Insert fix into composer"
-        };
+        let text = view.language.t("Insert fix into composer");
         let inner = Rect::new(
             btn.x + style.px(SPACE_8),
             btn.y,
@@ -571,13 +559,7 @@ pub fn block_ai_overlay(
             }),
             shadow: None,
         });
-        let text = if btn.w >= style.px(180.0) {
-            twitty_ui::ui::chrome::t("Suggest a fix")
-        } else if view.language == UiLanguage::Arabic {
-            "اقترح حل"
-        } else {
-            "Suggest a fix"
-        };
+        let text = view.language.t("Suggest a fix");
         let inner = Rect::new(
             btn.x + style.px(SPACE_8),
             btn.y,

@@ -10,6 +10,7 @@ use std::fs::{self, DirBuilder, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use twitty_core::en;
 
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
@@ -280,13 +281,13 @@ fn create_temp_flag_file(parent: &Path, pid: u32) -> io::Result<(PathBuf, fs::Fi
 pub struct ThemeSwatchSpec {
     /// Built-in theme key accepted by `Palette::named` and `config.theme`.
     pub id: &'static str,
-    pub label_en: &'static str,
-    pub label_ar: &'static str,
+    /// English; `label` translates it.
+    pub name: &'static str,
 }
 
 impl ThemeSwatchSpec {
     pub fn label(self, language: UiLanguage) -> &'static str {
-        language.text(self.label_en, self.label_ar)
+        language.t(self.name)
     }
 }
 
@@ -294,28 +295,23 @@ impl ThemeSwatchSpec {
 pub const WELCOME_THEMES: &[ThemeSwatchSpec] = &[
     ThemeSwatchSpec {
         id: "twitty-dark",
-        label_en: "Twitty Dark",
-        label_ar: "تويتي داكن",
+        name: en!("Twitty Dark"),
     },
     ThemeSwatchSpec {
         id: "twitty-light",
-        label_en: "Twitty Light",
-        label_ar: "تويتي فاتح",
+        name: en!("Twitty Light"),
     },
     ThemeSwatchSpec {
         id: "tokyo-night",
-        label_en: "Tokyo Night",
-        label_ar: "طوكيو نايت",
+        name: en!("Tokyo Night"),
     },
     ThemeSwatchSpec {
         id: "catppuccin-mocha",
-        label_en: "Catppuccin",
-        label_ar: "كاتبوتشين",
+        name: en!("Catppuccin"),
     },
     ThemeSwatchSpec {
         id: "nord",
-        label_en: "Nord",
-        label_ar: "نورد",
+        name: en!("Nord"),
     },
 ];
 
@@ -544,64 +540,38 @@ impl WelcomeStep {
 
     pub fn title_en(self) -> &'static str {
         match self {
-            Self::Welcome => "Welcome to Twitty",
-            Self::Look => "Look & Theme",
-            Self::Shell => "Shell Integration",
-            Self::Ai => "AI & Coding Agents",
-            Self::Shortcuts => "Essential Shortcuts",
+            Self::Welcome => en!("Welcome to Twitty"),
+            Self::Look => en!("Look & Theme"),
+            Self::Shell => en!("Shell Integration"),
+            Self::Ai => en!("AI & Coding Agents"),
+            Self::Shortcuts => en!("Essential Shortcuts"),
         }
     }
 
     pub fn title_ar(self) -> &'static str {
-        match self {
-            Self::Welcome => "مرحباً بك في تويتي",
-            Self::Look => "المظهر والسمة",
-            Self::Shell => "تكامل الشيل",
-            Self::Ai => "الذكاء الاصطناعي والوكلاء",
-            Self::Shortcuts => "أهم الاختصارات",
-        }
+        UiLanguage::Arabic.t(self.title_en())
     }
 
     pub fn title(self, language: UiLanguage) -> &'static str {
-        language.text(self.title_en(), self.title_ar())
+        language.t(self.title_en())
     }
 
     pub fn subtitle_en(self) -> &'static str {
         match self {
-            Self::Welcome => {
-                "An Arabic-first native terminal: the grid stays logical while drawing handles RTL and Arabic shaping."
-            }
-            Self::Look => "Pick a theme, font size, and transparency — changes preview live.",
-            Self::Shell => {
-                "Enables command blocks, the smart composer, and finish notifications."
-            }
-            Self::Ai => {
-                "Built-in AI runs through your local coding agent CLI in read-only mode — no API keys or network calls in Twitty."
-            }
-            Self::Shortcuts => {
-                "The fastest ways to move around Twitty. Press Ctrl+Shift+P anytime for every command."
-            }
+            Self::Welcome => en!("An Arabic-first native terminal: the grid stays logical while drawing handles RTL and Arabic shaping."),
+            Self::Look => en!("Pick a theme, font size, and transparency — changes preview live."),
+            Self::Shell => en!("Enables command blocks, the smart composer, and finish notifications."),
+            Self::Ai => en!("Built-in AI runs through your local coding agent CLI in read-only mode — no API keys or network calls in Twitty."),
+            Self::Shortcuts => en!("The fastest ways to move around Twitty. Press Ctrl+Shift+P anytime for every command."),
         }
     }
 
     pub fn subtitle_ar(self) -> &'static str {
-        match self {
-            Self::Welcome => {
-                "طرفية أصلية مصممة للعربية أولاً: الشبكة تبقى منطقية بينما الرسم يعالج الاتجاه والربط العربي بدقة."
-            }
-            Self::Look => "اختر السمة وحجم الخط والشفافية — التغييرات تظهر فوراً.",
-            Self::Shell => "يفعّل بطاقات الأوامر، محرر الأوامر الذكي، وإشعارات انتهاء التشغيل.",
-            Self::Ai => {
-                "الذكاء الاصطناعي المدمج يعمل عبر وكيل البرمجة المحلي بوضع القراءة فقط — بدون مفاتيح API أو اتصالات شبكة في تويتي."
-            }
-            Self::Shortcuts => {
-                "أسرع الاختصارات للتنقل في تويتي. اضغط Ctrl+Shift+P في أي وقت لعرض كل الأوامر."
-            }
-        }
+        UiLanguage::Arabic.t(self.subtitle_en())
     }
 
     pub fn subtitle(self, language: UiLanguage) -> &'static str {
-        language.text(self.subtitle_en(), self.subtitle_ar())
+        language.t(self.subtitle_en())
     }
 
     /// Number of focusable controls inside the body of this step.

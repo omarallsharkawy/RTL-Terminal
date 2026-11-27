@@ -12,6 +12,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use winit::keyboard::{KeyCode, ModifiersState};
 
+use twitty_core::en;
+use twitty_core::language::{fill, UiLanguage};
+
 use crate::commands;
 use crate::input::InputAction;
 use crate::shell_integration::clean_text;
@@ -46,24 +49,26 @@ pub enum ChordParseError {
 }
 
 impl ChordParseError {
-    pub fn message_en(&self) -> String {
+    /// The error in `language`.
+    pub fn message(&self, language: UiLanguage) -> String {
         match self {
-            Self::Empty => "empty chord".to_owned(),
-            Self::MissingKey => "missing key after modifier".to_owned(),
-            Self::DuplicateModifier(m) => format!("duplicate modifier {m}"),
-            Self::MultipleKeys => "multiple keys in a single chord".to_owned(),
-            Self::UnknownToken(tok) => format!("unknown key or modifier {tok:?}"),
+            Self::Empty => language.t("empty chord").to_owned(),
+            Self::MissingKey => language.t("missing key after modifier").to_owned(),
+            Self::DuplicateModifier(m) => fill(language.t("duplicate modifier {}"), &[m]),
+            Self::MultipleKeys => language.t("multiple keys in a single chord").to_owned(),
+            Self::UnknownToken(tok) => fill(
+                language.t("unknown key or modifier {}"),
+                &[&format!("{tok:?}")],
+            ),
         }
     }
 
+    pub fn message_en(&self) -> String {
+        self.message(UiLanguage::English)
+    }
+
     pub fn message_ar(&self) -> String {
-        match self {
-            Self::Empty => "اختصار فارغ".to_owned(),
-            Self::MissingKey => "ينقص مفتاح بعد مفتاح التعديل".to_owned(),
-            Self::DuplicateModifier(m) => format!("مفتاح تعديل مكرر {m}"),
-            Self::MultipleKeys => "أكثر من مفتاح في اختصار واحد".to_owned(),
-            Self::UnknownToken(tok) => format!("مفتاح غير معروف {tok:?}"),
-        }
+        self.message(UiLanguage::Arabic)
     }
 }
 
@@ -797,18 +802,28 @@ pub fn command_titles(id: &str) -> (&'static str, &'static str) {
     if let Some(cmd) = commands::all().into_iter().find(|c| c.name == id) {
         return (cmd.title_en, cmd.title_ar);
     }
-    match id {
-        "tab.select-1" => ("Switch to tab 1", "التاب 1"),
-        "tab.select-2" => ("Switch to tab 2", "التاب 2"),
-        "tab.select-3" => ("Switch to tab 3", "التاب 3"),
-        "tab.select-4" => ("Switch to tab 4", "التاب 4"),
-        "tab.select-5" => ("Switch to tab 5", "التاب 5"),
-        "tab.select-6" => ("Switch to tab 6", "التاب 6"),
-        "tab.select-7" => ("Switch to tab 7", "التاب 7"),
-        "tab.select-8" => ("Switch to tab 8", "التاب 8"),
-        "tab.select-9" => ("Switch to tab 9", "التاب 9"),
-        _ => ("Unknown command", "أمر غير معروف"),
-    }
+    let Some(n) = id
+        .strip_prefix("tab.select-")
+        .and_then(|n| n.parse::<usize>().ok())
+        .filter(|n| (1..=9).contains(n))
+    else {
+        return (
+            en!("Unknown command"),
+            UiLanguage::Arabic.t("Unknown command"),
+        );
+    };
+    // "Switch to tab N" in both languages, built once.
+    static TAB_TITLES: OnceLock<Vec<(&'static str, &'static str)>> = OnceLock::new();
+    TAB_TITLES.get_or_init(|| {
+        (1..=9)
+            .map(|n| {
+                let title = |language: UiLanguage| -> &'static str {
+                    Box::leak(fill(language.t(en!("Switch to tab {}")), &[&n]).into_boxed_str())
+                };
+                (title(UiLanguage::English), title(UiLanguage::Arabic))
+            })
+            .collect()
+    })[n - 1]
 }
 
 // ---- Conflict & resolution ----

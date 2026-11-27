@@ -19,6 +19,8 @@ use std::path::{Path, PathBuf};
 use crate::composer::complete::{CompletionItem, CompletionKind, MAX_COMPLETIONS};
 use crate::ui::palette::fold;
 use crate::workflows::Workflow;
+use twitty_core::en;
+use twitty_core::language::{fill, UiLanguage};
 
 /// Bytes read from the top of a skill/command file to find its frontmatter.
 const MAX_HEADER_BYTES: usize = 8 * 1024;
@@ -548,7 +550,7 @@ fn mcp_item(agent: Agent, name: &str, detail: String) -> SlashItem {
         name: name.to_owned(),
         source: SlashSource::Mcp(agent),
         description: format!("MCP · {detail}"),
-        description_ar: Some(format!("خادم MCP · {detail}")),
+        description_ar: Some(fill(UiLanguage::Arabic.t("MCP · {}"), &[&detail])),
     }
 }
 
@@ -669,98 +671,74 @@ fn agy_plugins(config_dir: &Path) -> Vec<String> {
     names
 }
 
-fn builtins(agent: Agent) -> &'static [(&'static str, &'static str, &'static str)] {
+fn builtins(agent: Agent) -> &'static [(&'static str, &'static str)] {
     match agent {
         Agent::Claude => &[
-            ("help", "Show help", "المساعدة"),
-            ("clear", "Clear the conversation", "امسح المحادثة"),
-            (
-                "compact",
-                "Compact the conversation",
-                "لخّص المحادثة لتوفير السياق",
-            ),
-            ("context", "Show context usage", "اعرض استهلاك السياق"),
-            ("model", "Choose the model", "اختار الموديل"),
-            (
-                "init",
-                "Create CLAUDE.md for this project",
-                "اعمل CLAUDE.md للمشروع",
-            ),
-            ("memory", "Edit memory files", "عدّل ملفات الذاكرة"),
-            ("mcp", "Manage MCP servers", "إدارة خوادم MCP"),
-            ("agents", "Manage subagents", "إدارة الوكلاء الفرعيين"),
-            ("permissions", "View or change permissions", "الصلاحيات"),
-            ("hooks", "Manage hooks", "إدارة الـ hooks"),
-            ("plugin", "Manage plugins", "إدارة الإضافات"),
-            ("resume", "Resume a conversation", "كمّل محادثة قديمة"),
-            ("review", "Review a pull request", "راجع pull request"),
-            ("cost", "Show cost and duration", "التكلفة والمدة"),
-            ("status", "Show status", "الحالة"),
-            ("config", "Open settings", "الإعدادات"),
-            ("doctor", "Check the installation", "افحص التثبيت"),
-            ("export", "Export the conversation", "صدّر المحادثة"),
-            ("add-dir", "Add a working directory", "أضف مجلد عمل"),
+            ("help", en!("Show help")),
+            ("clear", en!("Clear the conversation")),
+            ("compact", en!("Compact the conversation")),
+            ("context", en!("Show context usage")),
+            ("model", en!("Choose the model")),
+            ("init", en!("Create CLAUDE.md for this project")),
+            ("memory", en!("Edit memory files")),
+            ("mcp", en!("Manage MCP servers")),
+            ("agents", en!("Manage subagents")),
+            ("permissions", en!("View or change permissions")),
+            ("hooks", en!("Manage hooks")),
+            ("plugin", en!("Manage plugins")),
+            ("resume", en!("Resume a conversation")),
+            ("review", en!("Review a pull request")),
+            ("cost", en!("Show cost and duration")),
+            ("status", en!("Show status")),
+            ("config", en!("Open settings")),
+            ("doctor", en!("Check the installation")),
+            ("export", en!("Export the conversation")),
+            ("add-dir", en!("Add a working directory")),
         ],
         Agent::Codex => &[
-            ("model", "Choose the model and effort", "اختار الموديل"),
-            (
-                "approvals",
-                "Choose what runs without asking",
-                "اختار اللي يشتغل من غير سؤال",
-            ),
-            (
-                "review",
-                "Review the current changes",
-                "راجع التغييرات الحالية",
-            ),
-            ("new", "Start a new chat", "محادثة جديدة"),
-            ("init", "Create AGENTS.md", "اعمل AGENTS.md"),
-            ("compact", "Summarize the conversation", "لخّص المحادثة"),
-            ("diff", "Show the git diff", "اعرض الـ diff"),
-            ("mention", "Mention a file", "اذكر ملف"),
-            ("status", "Show session status", "حالة الجلسة"),
-            ("mcp", "List MCP tools", "أدوات MCP"),
-            ("quit", "Exit Codex", "اخرج"),
+            ("model", en!("Choose the model and effort")),
+            ("approvals", en!("Choose what runs without asking")),
+            ("review", en!("Review the current changes")),
+            ("new", en!("Start a new chat")),
+            ("init", en!("Create AGENTS.md")),
+            ("compact", en!("Summarize the conversation")),
+            ("diff", en!("Show the git diff")),
+            ("mention", en!("Mention a file")),
+            ("status", en!("Show session status")),
+            ("mcp", en!("List MCP tools")),
+            ("quit", en!("Exit Codex")),
         ],
         Agent::Antigravity => &[
-            ("help", "Show help", "المساعدة"),
-            ("clear", "Clear the conversation", "امسح المحادثة"),
-            ("compact", "Summarize the conversation", "لخّص المحادثة"),
-            ("context", "Show context usage", "اعرض استهلاك السياق"),
-            ("model", "Choose the model", "اختار الموديل"),
-            ("effort", "Choose reasoning effort", "اختار مستوى التفكير"),
-            ("skills", "List skills", "المهارات"),
-            ("mcp", "Manage MCP servers", "إدارة خوادم MCP"),
-            ("agents", "Manage agents", "إدارة الوكلاء"),
-            ("plugin", "Manage plugins", "إدارة الإضافات"),
-            ("permissions", "View or change permissions", "الصلاحيات"),
-            ("resume", "Resume a conversation", "كمّل محادثة قديمة"),
-            (
-                "rewind",
-                "Go back to an earlier point",
-                "ارجع لنقطة قبل كده",
-            ),
-            ("diff", "Show the changes", "اعرض التغييرات"),
-            ("plan", "Plan before acting", "خطّط قبل التنفيذ"),
-            ("usage", "Show usage", "الاستهلاك"),
-            ("settings", "Open settings", "الإعدادات"),
-            ("quit", "Exit Antigravity", "اخرج"),
+            ("help", en!("Show help")),
+            ("clear", en!("Clear the conversation")),
+            ("compact", en!("Summarize the conversation")),
+            ("context", en!("Show context usage")),
+            ("model", en!("Choose the model")),
+            ("effort", en!("Choose reasoning effort")),
+            ("skills", en!("List skills")),
+            ("mcp", en!("Manage MCP servers")),
+            ("agents", en!("Manage agents")),
+            ("plugin", en!("Manage plugins")),
+            ("permissions", en!("View or change permissions")),
+            ("resume", en!("Resume a conversation")),
+            ("rewind", en!("Go back to an earlier point")),
+            ("diff", en!("Show the changes")),
+            ("plan", en!("Plan before acting")),
+            ("usage", en!("Show usage")),
+            ("settings", en!("Open settings")),
+            ("quit", en!("Exit Antigravity")),
         ],
         Agent::Gemini => &[
-            ("help", "Show help", "المساعدة"),
-            ("chat", "Save or resume chats", "احفظ أو كمّل محادثة"),
-            (
-                "clear",
-                "Clear the screen and context",
-                "امسح الشاشة والسياق",
-            ),
-            ("compress", "Summarize the context", "لخّص السياق"),
-            ("memory", "Manage memory", "إدارة الذاكرة"),
-            ("mcp", "List MCP servers", "خوادم MCP"),
-            ("tools", "List tools", "الأدوات"),
-            ("stats", "Show session stats", "إحصائيات الجلسة"),
-            ("settings", "Open settings", "الإعدادات"),
-            ("quit", "Exit Gemini CLI", "اخرج"),
+            ("help", en!("Show help")),
+            ("chat", en!("Save or resume chats")),
+            ("clear", en!("Clear the screen and context")),
+            ("compress", en!("Summarize the context")),
+            ("memory", en!("Manage memory")),
+            ("mcp", en!("List MCP servers")),
+            ("tools", en!("List tools")),
+            ("stats", en!("Show session stats")),
+            ("settings", en!("Open settings")),
+            ("quit", en!("Exit Gemini CLI")),
         ],
     }
 }
@@ -858,12 +836,12 @@ pub fn discover(home: &Path, project_root: Option<&Path>, installed: &[Agent]) -
     }
 
     for agent in installed {
-        for (name, en, ar) in builtins(*agent) {
+        for (name, en) in builtins(*agent) {
             items.push(SlashItem {
                 name: (*name).to_owned(),
                 source: SlashSource::BuiltIn(*agent),
                 description: (*en).to_owned(),
-                description_ar: Some((*ar).to_owned()),
+                description_ar: Some(UiLanguage::Arabic.t(en).to_owned()),
             });
         }
     }
