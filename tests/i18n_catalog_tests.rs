@@ -49,7 +49,8 @@ fn literal(src: &str) -> Option<(String, usize)> {
                 '\\' => out.push('\\'),
                 '"' => out.push('"'),
                 '\'' => out.push('\''),
-                '\n' => {
+                // A line continuation; `\r` when Git checks out Windows line endings.
+                '\n' | '\r' => {
                     while chars.peek().is_some_and(|(_, c)| c.is_whitespace()) {
                         chars.next();
                     }
