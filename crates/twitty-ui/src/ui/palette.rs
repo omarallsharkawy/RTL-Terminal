@@ -43,6 +43,8 @@ pub enum PaletteMode {
     OpenLayout,
     /// Pick a saved layout to delete.
     DeleteLayout,
+    /// Pick an installed local coding-agent CLI to launch in a split or new tab.
+    LaunchAgent,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]

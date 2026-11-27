@@ -71,7 +71,10 @@ pub enum AppEvent {
     AgentEngineConfigReady {
         generation: u64,
         config: Box<twitty_ai::engine::EngineConfig>,
+        detected_cli_agents: Vec<String>,
     },
+    /// Off-thread `$PATH` probe of installed local coding-agent CLIs.
+    AgentClisProbed(Vec<String>),
     /// Assembled context ready to start an agent session without blocking the UI thread.
     AgentStartReady {
         generation: u64,

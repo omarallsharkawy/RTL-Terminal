@@ -114,6 +114,35 @@ impl App {
         };
         spawned.map(|_| name).ok_or(AgentStartError::Failed)
     }
+
+    /// Launch an interactive coding-agent CLI (`codex`, `claude`, `agy`, `opencode`, `gemini`, …)
+    /// directly in a split of the focused pane (or a new tab when `new_tab` is true or there is no
+    /// room for a split).
+    pub(super) fn launch_agent_cli(&mut self, program: &str, new_tab: bool) {
+        let cwd = self.focused_id().and_then(|id| self.pane_cwd(id));
+        let options = SpawnOptions {
+            cwd,
+            command: vec![program.to_owned()],
+            env: Vec::new(),
+            shell: false,
+        };
+        let spawned = if new_tab {
+            self.new_tab_with(options)
+        } else if self.can_split_focused(SplitDir::Horizontal) {
+            self.split_focused_with(SplitDir::Horizontal, options).ok()
+        } else if self.can_split_focused(SplitDir::Vertical) {
+            self.split_focused_with(SplitDir::Vertical, options).ok()
+        } else {
+            self.new_tab_with(options)
+        };
+        if spawned.is_none() {
+            let msg = twitty_core::language::fill(
+                self.window.ui_language().t("Agent failed: {}"),
+                &[&program],
+            );
+            self.toast(crate::ui::toast::ToastKind::Error, &msg);
+        }
+    }
 }
 
 /// Why no agent was started.

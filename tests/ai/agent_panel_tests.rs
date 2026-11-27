@@ -1201,3 +1201,60 @@ fn arabic_harakat_word_wrap_matches_height_and_view_shares_arc_session() {
         v2.session.as_ref().expect("active session")
     ));
 }
+
+#[test]
+fn cli_first_switcher_pills_in_settings_and_agent_panel() {
+    use twitty::config::TwittyConfig;
+    use twitty::ui::settings_panel::{
+        SettingsHit, SettingsLayout, SettingsPanelState, SettingsSection,
+    };
+
+    // 1. Settings → AI renders clickable CLI pills for every detected local CLI and updates config.
+    let mut cfg = TwittyConfig::default();
+    let mut state = SettingsPanelState::new(Vec::new(), Vec::new(), None, UiLanguage::English);
+    state.select_section(SettingsSection::Ai, &cfg);
+    state.ai.detected_cli_agents = vec!["codex".into(), "claude".into(), "agy".into()];
+    let surface = (960.0, 720.0);
+    let layout = SettingsLayout::build(surface, 1.0, &state, &cfg);
+    let ai = layout.ai.as_ref().expect("AI layout");
+    assert_eq!(ai.cli_agent_buttons.len(), 3);
+    let (_, agy_rect) = ai.cli_agent_buttons[2];
+    assert_eq!(
+        layout.hit((agy_rect.x + 4.0) as f64, (agy_rect.y + 4.0) as f64),
+        SettingsHit::AiCliAgent(2)
+    );
+    let out = state.on_mouse_down(
+        (agy_rect.x + 4.0) as f64,
+        (agy_rect.y + 4.0) as f64,
+        &mut cfg,
+        surface,
+        1.0,
+    );
+    assert!(out.ai_config_changed);
+    assert_eq!(cfg.ai_agent.as_deref(), Some("agy"));
+    assert_eq!(cfg.agent_command.as_deref(), Some("agy"));
+    assert_eq!(cfg.ai_default_provider.as_deref(), Some("cli"));
+
+    // 2. Agent panel header shows the CLI switcher pill only when >1 CLIs exist and idle.
+    let mut panel = AgentPanelState::new();
+    panel.open();
+    panel.available_clis = vec!["codex".into(), "claude".into(), "agy".into()];
+    panel.active_cli = Some("codex".into());
+    let rect = Rect::new(0.0, 0.0, 420.0, 600.0);
+    let mut font_system = test_font_system();
+    let metrics = CellMetrics::measure(&mut font_system, None, 14.5, 1.0);
+    let view = panel.view(rect, UiLanguage::English, true);
+    let panel_layout = AgentPanelLayout::build(&view, metrics);
+    let pill = panel_layout
+        .cli_pill
+        .expect("CLI switcher pill visible when idle with >=2 CLIs");
+    let hit = panel_layout.hit((pill.x + 4.0) as f64, (pill.y + 4.0) as f64);
+    assert_eq!(hit, AgentPanelHit::SwitchCli);
+    assert_eq!(panel.on_click(hit), AgentPanelAction::CycleCliAgent);
+
+    // 3. `agent.launch` command resolves to InputAction::LaunchAgent.
+    assert_eq!(
+        twitty::commands::action("agent.launch"),
+        Some(twitty::input::InputAction::LaunchAgent)
+    );
+}

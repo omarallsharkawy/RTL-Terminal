@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Lightweight wrapper for Google Antigravity CLI (`agy`) so interactive sessions inside
+# Twitty report working / needs-input / done status and notifications over Twitty's
+# control socket without modifying user settings files.
+
+find_real_agy() {
+    local self_dir
+    self_dir="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)"
+    local IFS=:
+    local dirs=()
+    read -ra dirs <<< "${PATH:-}"
+    local d resolved
+    for d in "${dirs[@]}"; do
+        [[ -z "$d" ]] && continue
+        resolved="$(CDPATH='' cd -- "$d" 2>/dev/null && pwd -P)" || continue
+        [[ "$resolved" == "$self_dir" ]] && continue
+        if [[ -f "$d/agy" && -x "$d/agy" ]]; then
+            printf '%s' "$d/agy"
+            return 0
+        fi
+    done
+    return 1
+}
+
+twitty_socket_available() {
+    local socket="${TWITTY_SOCKET:-${CMUX_SOCKET_PATH:-}}"
+    [[ -n "$socket" && -S "$socket" ]] || return 1
+
+    local twitty_bin="${TWITTY_BIN:-}"
+    if [[ -z "$twitty_bin" || ! -x "$twitty_bin" ]]; then
+        twitty_bin="$(command -v twitty 2>/dev/null || true)"
+    fi
+    [[ -n "$twitty_bin" && -x "$twitty_bin" ]] || return 1
+
+    TWITTY_CLI_TIMEOUT_MS=750 \
+        "$twitty_bin" ctl system.ping >/dev/null 2>&1
+}
+
+IN_TWITTY=0
+if [[ -n "${TWITTY_PANE_ID:-}" || -n "${CMUX_SURFACE_ID:-}" ]]; then
+    IN_TWITTY=1
+fi
+
+REAL_AGY="$(find_real_agy)" || {
+    echo "Error: agy not found in PATH" >&2
+    exit 127
+}
+
+if [[ "$IN_TWITTY" == "0" \
+    || "${TWITTY_CLAUDE_HOOKS_DISABLED:-}" == "1" \
+    || "${CMUX_CLAUDE_HOOKS_DISABLED:-}" == "1" ]] \
+    || ! twitty_socket_available; then
+    exec "$REAL_AGY" "$@"
+fi
+
+# Pass through non-interactive / meta invocations unchanged.
+for arg in "$@"; do
+    case "$arg" in
+        -p|--print|--prompt|--help|-h|--version|-v|-V|--settings)
+            exec "$REAL_AGY" "$@"
+            ;;
+    esac
+done
+
+HOOKS_JSON='{"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"\"${TWITTY_BIN:-twitty}\" claude-hook session-start","timeout":10}]}],"Stop":[{"matcher":"","hooks":[{"type":"command","command":"\"${TWITTY_BIN:-twitty}\" claude-hook stop","timeout":10}]}],"SessionEnd":[{"matcher":"","hooks":[{"type":"command","command":"\"${TWITTY_BIN:-twitty}\" claude-hook session-end","timeout":1}]}],"Notification":[{"matcher":"","hooks":[{"type":"command","command":"\"${TWITTY_BIN:-twitty}\" claude-hook notification","timeout":10}]}],"UserPromptSubmit":[{"matcher":"","hooks":[{"type":"command","command":"\"${TWITTY_BIN:-twitty}\" claude-hook prompt-submit","timeout":10}]}],"PreToolUse":[{"matcher":"","hooks":[{"type":"command","command":"\"${TWITTY_BIN:-twitty}\" claude-hook pre-tool-use","timeout":5,"async":true}]}]}}'
+
+exec "$REAL_AGY" --settings "$HOOKS_JSON" "$@"

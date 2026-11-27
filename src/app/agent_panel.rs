@@ -111,6 +111,10 @@ impl App {
             self.agent_panel.state.set_project_context(cwd);
         }
         self.agent_panel.state.language = self.window.ui_language();
+        self.sync_agent_panel_active_cli();
+        if self.agent_panel.state.available_clis.is_empty() {
+            self.spawn_cli_agents_probe();
+        }
         self.agent_panel.state.open();
         self.window
             .set_agent_panel_open(true, self.agent_panel.state.custom_width);
@@ -119,6 +123,92 @@ impl App {
         self.sync_agent_needs_input();
         self.cursor_blink.reset(Instant::now());
         self.window.request_redraw();
+    }
+
+    /// Probe installed local coding-agent CLIs on `$PATH` off the UI thread.
+    pub(super) fn spawn_cli_agents_probe(&self) {
+        let proxy = self.proxy.clone();
+        if let Err(err) = thread::Builder::new()
+            .name("twitty-cli-probe".into())
+            .spawn(move || {
+                let clis = crate::ui::settings_ai::detect_cli_agents_on_path();
+                let _ = proxy.send_event(AppEvent::AgentClisProbed(clis));
+            })
+        {
+            tracing::warn!("twitty cli probe thread failed to start: {err}");
+        }
+    }
+
+    /// Receive detected local coding-agent CLIs from the background probe.
+    pub(super) fn on_agent_clis_probed(&mut self, clis: Vec<String>) {
+        self.agent_panel.state.available_clis = clis;
+        self.sync_agent_panel_active_cli();
+        if self.agent_panel.state.is_open() {
+            self.window.request_redraw();
+        }
+        if self.launch_agent_palette_open() {
+            self.sync_palette();
+        }
+    }
+
+    /// Keep the Agent panel header's active CLI pill synced with `config` and detected CLIs.
+    pub(super) fn sync_agent_panel_active_cli(&mut self) {
+        let active = self
+            .config
+            .ai_agent
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                self.config
+                    .agent_command
+                    .as_deref()
+                    .and_then(|s| s.split_whitespace().next())
+                    .and_then(|cmd| std::path::Path::new(cmd).file_name())
+                    .and_then(|n| n.to_str())
+                    .filter(|s| !s.is_empty())
+            })
+            .or_else(|| {
+                self.agent_panel
+                    .state
+                    .available_clis
+                    .first()
+                    .map(String::as_str)
+            })
+            .map(str::to_owned);
+        self.agent_panel.state.active_cli = active;
+    }
+
+    /// Cycle the active local coding CLI in `available_clis`, saving to config and restarting
+    /// the idle Agent engine so the next request runs through the newly selected CLI.
+    fn cycle_active_cli_agent(&mut self) {
+        let clis = &self.agent_panel.state.available_clis;
+        if clis.len() < 2 {
+            return;
+        }
+        let next_idx = self
+            .agent_panel
+            .state
+            .active_cli
+            .as_deref()
+            .and_then(|cur| clis.iter().position(|c| c == cur))
+            .map_or(0, |i| (i + 1) % clis.len());
+        let next = clis[next_idx].clone();
+        self.config.ai_agent = Some(next.clone());
+        self.config.agent_command = Some(next.clone());
+        self.config.ai_default_provider = Some("cli".to_owned());
+        self.agent_panel.state.active_cli = Some(next.clone());
+        if let Some(settings) = self.settings.as_mut() {
+            settings.ai.sync_from_config(&self.config);
+            self.sync_settings();
+        }
+        self.schedule_config_save();
+        self.restart_agent_engine_when_idle();
+        let msg = twitty_core::language::fill(
+            self.window.ui_language().t("Active CLI agent: {}"),
+            &[&next],
+        );
+        self.toast(crate::ui::toast::ToastKind::Info, &msg);
     }
 
     /// Open Twitty's built-in Agent panel (closing Review if open) and pre-fill the composer with
@@ -194,6 +284,7 @@ impl App {
                 let _ = proxy.send_event(AppEvent::AgentEngineConfigReady {
                     generation,
                     config: Box::new(config),
+                    detected_cli_agents: detected,
                 });
             })
         {
@@ -204,7 +295,14 @@ impl App {
     }
 
     /// Receive the off-thread [`EngineConfig`], spawn the engine, and flush any queued commands.
-    pub(super) fn on_agent_engine_config_ready(&mut self, generation: u64, config: EngineConfig) {
+    pub(super) fn on_agent_engine_config_ready(
+        &mut self,
+        generation: u64,
+        config: EngineConfig,
+        detected_cli_agents: Vec<String>,
+    ) {
+        self.agent_panel.state.available_clis = detected_cli_agents;
+        self.sync_agent_panel_active_cli();
         if generation != self.agent_panel.engine_generation {
             return;
         }
@@ -549,6 +647,7 @@ impl App {
             AgentPanelHit::Composer => Some(CursorIcon::Text),
             AgentPanelHit::Close
             | AgentPanelHit::Stop
+            | AgentPanelHit::SwitchCli
             | AgentPanelHit::JumpToLatest
             | AgentPanelHit::ExampleChip(_)
             | AgentPanelHit::ContextStrip
@@ -674,6 +773,9 @@ impl App {
                 if self.remember_fact(root.as_deref(), &text) {
                     self.refresh_agent_context();
                 }
+            }
+            AgentPanelAction::CycleCliAgent => {
+                self.cycle_active_cli_agent();
             }
         }
         self.window.request_redraw();

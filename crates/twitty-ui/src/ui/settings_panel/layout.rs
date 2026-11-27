@@ -26,6 +26,7 @@ pub enum SettingsHit {
     KeyReset(usize),
     CopyConfigPath,
     AiDefaultProvider(usize),
+    AiCliAgent(usize),
     AiSetKey(usize),
     AiSaveKey(usize),
     AiClearKey(usize),
@@ -635,12 +636,17 @@ impl SettingsLayout {
             .iter()
             .map(|&id| Self::row_height(id, scale) + gap)
             .sum();
+        let cli_h = if state.ai.detected_cli_agents.is_empty() {
+            px(44.0)
+        } else {
+            px(56.0)
+        };
         let deny_h = px(26.0) + HARD_DENY_SUMMARY.len() as f32 * px(18.0) + px(12.0);
         let total_h = notice_h
             + rows_h
             + px(56.0) // default provider
             + gap
-            + px(44.0) // cli agents
+            + cli_h // cli agents
             + gap
             + API_PROVIDERS.len() as f32 * (px(36.0) + px(4.0))
             + key_open_extra
@@ -702,9 +708,31 @@ impl SettingsLayout {
         }
         y += px(34.0) + gap;
 
-        // CLI agents box.
-        ai.cli_section = Rect::new(vp.x, y, vp.w, px(44.0));
-        y += px(44.0) + gap;
+        // CLI agents box with interactive 1-click CLI selection pills.
+        ai.cli_section = Rect::new(vp.x, y, vp.w, cli_h);
+        if !state.ai.detected_cli_agents.is_empty() {
+            let pad = px(10.0);
+            let pill_y = y + px(24.0);
+            let pill_h = px(24.0);
+            let pill_gap = px(6.0);
+            let inner_w = (vp.w - 2.0 * pad).max(0.0);
+            let count = state.ai.detected_cli_agents.len();
+            let pill_w = ((inner_w - pill_gap * count.saturating_sub(1) as f32) / count as f32)
+                .clamp(px(52.0), px(96.0));
+            for i in 0..count {
+                let vis = if self.mirrored { count - 1 - i } else { i };
+                let x = if self.mirrored {
+                    ai.cli_section.right() - pad - (vis + 1) as f32 * pill_w - vis as f32 * pill_gap
+                } else {
+                    ai.cli_section.x + pad + vis as f32 * (pill_w + pill_gap)
+                };
+                if x >= ai.cli_section.x && x + pill_w <= ai.cli_section.right() + 1.0 {
+                    ai.cli_agent_buttons
+                        .push((i, Rect::new(x, pill_y, pill_w, pill_h)));
+                }
+            }
+        }
+        y += cli_h + gap;
 
         // API providers with Set key… / Clear + inline masked input.
         for (i, _) in API_PROVIDERS.iter().enumerate() {
@@ -924,6 +952,11 @@ impl SettingsLayout {
                 for &(idx, r) in &ai.default_provider_buttons {
                     if r.contains(x, y) {
                         return SettingsHit::AiDefaultProvider(idx);
+                    }
+                }
+                for &(idx, r) in &ai.cli_agent_buttons {
+                    if r.contains(x, y) {
+                        return SettingsHit::AiCliAgent(idx);
                     }
                 }
                 for row in &ai.api_rows {

@@ -458,9 +458,12 @@ impl ApplicationHandler<AppEvent> for App {
                 notice,
                 restart_engine,
             ),
-            AppEvent::AgentEngineConfigReady { generation, config } => {
-                self.on_agent_engine_config_ready(generation, *config)
-            }
+            AppEvent::AgentEngineConfigReady {
+                generation,
+                config,
+                detected_cli_agents,
+            } => self.on_agent_engine_config_ready(generation, *config, detected_cli_agents),
+            AppEvent::AgentClisProbed(clis) => self.on_agent_clis_probed(clis),
             AppEvent::AgentStartReady {
                 generation,
                 session,

@@ -39,7 +39,7 @@ impl Icon {
     pub fn for_command(name: &str) -> Option<Self> {
         match name {
             "composer.open" => Some(Self::Composer),
-            "agent.panel" => Some(Self::Agent),
+            "agent.panel" | "agent.launch" => Some(Self::Agent),
             "project.open" => Some(Self::Project),
             "layout.save" | "layout.open" | "layout.delete" => Some(Self::Layout),
             "input.broadcast" => Some(Self::Broadcast),

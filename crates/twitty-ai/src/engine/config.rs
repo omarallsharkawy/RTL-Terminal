@@ -82,7 +82,7 @@ impl Default for EngineConfig {
     fn default() -> Self {
         Self {
             provider: ProviderKind::Cli {
-                program: "claude".into(),
+                program: "codex".into(),
             },
             models: ProviderModels::default(),
             timeout: Duration::from_secs(60),

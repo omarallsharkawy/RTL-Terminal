@@ -201,6 +201,11 @@ fn shell_setup_enforces_private_modes_and_refuses_wrapper_symlinks() {
         fs::symlink_metadata(&installed).unwrap().mode() & 0o7777,
         0o700
     );
+    let agy_installed = bin_dir.join("agy");
+    assert_eq!(
+        fs::symlink_metadata(&agy_installed).unwrap().mode() & 0o7777,
+        0o700
+    );
 }
 
 #[test]

@@ -98,6 +98,8 @@ impl App {
         if generation != self.settings_probe_gen {
             return;
         }
+        self.agent_panel.state.available_clis = detected_cli_agents.clone();
+        self.sync_agent_panel_active_cli();
         if let Some(state) = self.settings.as_mut() {
             state.ai.detected_cli_agents = detected_cli_agents;
             state.ai.saved_keys = saved_keys;
@@ -367,6 +369,7 @@ impl App {
             }
         }
         if outcome.ai_config_changed {
+            self.sync_agent_panel_active_cli();
             self.restart_agent_engine_when_idle();
         }
         if outcome.clear_agent_history {

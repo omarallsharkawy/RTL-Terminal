@@ -98,7 +98,8 @@ pub const NON_INTERACTIVE_AGENTS: &[NonInteractiveAgentSpec] = &[
 ];
 
 /// Agents probed on `PATH` (in order) when neither `ai_agent` nor `agent_command` is configured.
-pub const AI_KNOWN_AGENTS: &[&str] = &["claude", "codex", "gemini", "opencode", "agy"];
+/// Prefers `codex` first, while remaining freely switchable across all installed local CLIs.
+pub const AI_KNOWN_AGENTS: &[&str] = &["codex", "claude", "gemini", "opencode", "agy"];
 
 /// Why no coding agent could be resolved for a built-in AI request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

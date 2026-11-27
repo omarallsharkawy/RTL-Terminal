@@ -259,7 +259,7 @@ impl AiSettingsState {
     }
 }
 
-/// Detect installed coding-agent CLIs on `$PATH` (non-blocking, bounded).
+/// Detect installed executable coding-agent CLIs on `$PATH` (non-blocking, bounded).
 pub fn detect_cli_agents_on_path() -> Vec<String> {
     let candidates = twitty_ai::ai::AI_KNOWN_AGENTS;
     let Some(path_var) = std::env::var_os("PATH") else {
@@ -270,13 +270,31 @@ pub fn detect_cli_agents_on_path() -> Vec<String> {
     for &name in candidates {
         let present = dirs.iter().any(|dir| {
             let candidate = dir.join(name);
-            candidate.is_file()
+            is_executable(&candidate)
         });
         if present {
             found.push(name.to_owned());
         }
     }
     found
+}
+
+fn is_executable(path: &std::path::Path) -> bool {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !meta.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        meta.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 fn contains_shell_metachar(s: &str) -> bool {
@@ -297,6 +315,8 @@ fn contains_shell_metachar(s: &str) -> bool {
 pub struct AiSectionLayout {
     pub default_provider_buttons: Vec<(usize, Rect)>,
     pub cli_section: Rect,
+    /// Clickable pills for each detected local CLI agent (`(index into detected_cli_agents, rect)`).
+    pub cli_agent_buttons: Vec<(usize, Rect)>,
     pub api_rows: Vec<AiApiRowLayout>,
     pub ollama_input: Rect,
     pub cost_cap_input: Rect,
@@ -314,6 +334,7 @@ impl Default for AiSectionLayout {
         Self {
             default_provider_buttons: Vec::new(),
             cli_section: zero,
+            cli_agent_buttons: Vec::new(),
             api_rows: Vec::new(),
             ollama_input: zero,
             cost_cap_input: zero,
@@ -365,7 +386,7 @@ pub fn engine_config(
     };
     let provider = match config.ai_default_provider.as_deref().unwrap_or("") {
         "cli" => ProviderKind::Cli {
-            program: cli_program.unwrap_or_else(|| "claude".into()),
+            program: cli_program.unwrap_or_else(|| "codex".into()),
         },
         "ollama" => ollama(),
         id if api(id).is_some() => api(id).unwrap_or_else(ollama),

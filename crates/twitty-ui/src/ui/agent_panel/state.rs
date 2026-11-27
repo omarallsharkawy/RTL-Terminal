@@ -52,6 +52,8 @@ pub enum AgentPanelAction {
     /// User toggled a context inspector item; ask the app to re-assemble via `twitty_ai::context::assemble`.
     RefreshContext,
     StartDividerDrag,
+    /// User clicked the header CLI pill to switch to the next installed local coding CLI.
+    CycleCliAgent,
 }
 
 /// Complete window-free state machine for the Agent panel.
@@ -100,6 +102,10 @@ pub struct AgentPanelState {
     pub hover: AgentPanelHit,
     /// Current UI language for formatting and mirroring.
     pub language: UiLanguage,
+    /// Installed local coding-agent CLIs on PATH (`codex`, `claude`, `agy`, ...).
+    pub available_clis: Vec<String>,
+    /// Currently active local CLI name shown in the header switcher pill.
+    pub active_cli: Option<String>,
 }
 
 impl Default for AgentPanelState {
@@ -136,6 +142,8 @@ impl AgentPanelState {
             pinned_to_bottom: true,
             hover: AgentPanelHit::Outside,
             language: UiLanguage::English,
+            available_clis: Vec::new(),
+            active_cli: None,
         }
     }
 
@@ -1076,6 +1084,7 @@ impl AgentPanelState {
             }
             AgentPanelHit::Close => AgentPanelAction::Close,
             AgentPanelHit::Stop => self.stop_run(),
+            AgentPanelHit::SwitchCli => AgentPanelAction::CycleCliAgent,
             AgentPanelHit::JumpToLatest => self.jump_to_latest(),
             AgentPanelHit::ContextStrip => {
                 self.focused = true;
@@ -1155,6 +1164,8 @@ impl AgentPanelState {
             scroll_y: self.scroll_y,
             pinned_to_bottom: self.pinned_to_bottom,
             hover: self.hover,
+            available_clis: self.available_clis.clone(),
+            active_cli: self.active_cli.clone(),
         }
     }
 }

@@ -102,6 +102,8 @@ pub enum InputAction {
     Welcome,
     /// Force an immediate reconnect on the focused SSH pane (cancelling backoff or stalled PTY).
     ReconnectSsh,
+    /// Open the coding-agent launcher palette to start an installed CLI in a split or tab.
+    LaunchAgent,
 }
 
 /// One key event with everything the encoders look at. Window-free, so the `*_raw` entry

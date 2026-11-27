@@ -62,6 +62,31 @@ struct PendingTrust {
     confirm: TrustConfirmState,
 }
 
+struct LaunchAgentEntry {
+    program: String,
+    active: bool,
+}
+
+impl crate::ui::palette::Searchable for LaunchAgentEntry {
+    fn search_fields(&self) -> Vec<&str> {
+        vec![self.program.as_str()]
+    }
+}
+
+fn launch_agent_entries_for(
+    agent_panel: &crate::ui::agent_panel::AgentPanelState,
+) -> Vec<LaunchAgentEntry> {
+    let active = agent_panel.active_cli.as_deref();
+    agent_panel
+        .available_clis
+        .iter()
+        .map(|program| LaunchAgentEntry {
+            active: active == Some(program.as_str()),
+            program: program.clone(),
+        })
+        .collect()
+}
+
 impl App {
     pub(super) fn palette_open(&self) -> bool {
         self.palette.is_some()
@@ -101,6 +126,9 @@ impl App {
         };
         if mode == PaletteMode::Projects {
             self.start_project_scan();
+        } else if mode == PaletteMode::LaunchAgent {
+            self.sync_agent_panel_active_cli();
+            self.spawn_cli_agents_probe();
         } else if matches!(
             mode,
             PaletteMode::SaveLayout | PaletteMode::OpenLayout | PaletteMode::DeleteLayout
@@ -176,6 +204,17 @@ impl App {
             .is_some_and(|p| p.state.mode == PaletteMode::Projects)
     }
 
+    /// The coding-agent launcher is on screen (refreshed when the background PATH probe finishes).
+    pub(super) fn launch_agent_palette_open(&self) -> bool {
+        self.palette
+            .as_ref()
+            .is_some_and(|p| p.state.mode == PaletteMode::LaunchAgent)
+    }
+
+    fn launch_agent_entries(&self) -> Vec<LaunchAgentEntry> {
+        launch_agent_entries_for(&self.agent_panel.state)
+    }
+
     fn palette_capacity(&self) -> usize {
         self.window.palette_rows(crate::ui::palette::MAX_RESULTS)
     }
@@ -203,6 +242,7 @@ impl App {
         let mut icons = PaletteIcons {
             leading: match state.mode {
                 PaletteMode::Projects => Icon::Project,
+                PaletteMode::LaunchAgent => Icon::Agent,
                 PaletteMode::SaveLayout | PaletteMode::OpenLayout | PaletteMode::DeleteLayout => {
                     Icon::Layout
                 }
@@ -314,6 +354,29 @@ impl App {
                     Some(crate::layouts::delete_layout_placeholder().into()),
                 )
             }
+            PaletteMode::LaunchAgent => {
+                let entries = self.launch_agent_entries();
+                let default_tag = self.window.ui_language().t("Default");
+                let rows = matches(&entries, &state.query)
+                    .into_iter()
+                    .map(|i| {
+                        let e = &entries[i];
+                        PaletteItem {
+                            title_en: e.program.clone(),
+                            title_ar: e.program.clone(),
+                            shortcut: e.active.then(|| default_tag.to_owned()),
+                            dimmed: false,
+                        }
+                    })
+                    .collect();
+                (
+                    rows,
+                    Some(
+                        crate::ui::chrome::t("Launch coding agent (Enter: split, Alt+Enter: tab)…")
+                            .into(),
+                    ),
+                )
+            }
         };
         let shown = visible_window_in(rows.len(), state.selected, self.palette_capacity());
         let selected = state.selected.min(rows.len().saturating_sub(1)) - shown.start;
@@ -334,6 +397,10 @@ impl App {
                 PaletteMode::OpenLayout | PaletteMode::DeleteLayout => {
                     items.push(PaletteItem::text(en!("No saved layouts yet"), true))
                 }
+                PaletteMode::LaunchAgent => items.push(PaletteItem::text(
+                    en!("No coding agents found on PATH"),
+                    true,
+                )),
                 _ => {}
             }
         }
@@ -497,6 +564,19 @@ impl App {
                     PaletteCmd::None | PaletteCmd::Run(_) => self.sync_palette(),
                 }
             }
+            PaletteMode::LaunchAgent => {
+                let entries = launch_agent_entries_for(&self.agent_panel.state);
+                match open.state.key_in(&entries, key, text, modifiers) {
+                    PaletteCmd::Choose(i) => {
+                        if let Some(program) = entries.get(i).map(|e| e.program.clone()) {
+                            self.close_palette();
+                            self.launch_agent_cli(&program, modifiers.alt_key());
+                        }
+                    }
+                    PaletteCmd::Close => self.close_palette(),
+                    PaletteCmd::None | PaletteCmd::Run(_) => self.sync_palette(),
+                }
+            }
         }
         false
     }
@@ -619,6 +699,22 @@ impl App {
                 {
                     self.close_palette();
                     self.delete_named_layout(&name);
+                }
+                false
+            }
+            PaletteMode::LaunchAgent => {
+                let entries = self.launch_agent_entries();
+                let results = matches(&entries, &state.query);
+                let shown =
+                    visible_window_in(results.len(), state.selected, self.palette_capacity());
+                if let Some(program) = results
+                    .get(shown.start + row)
+                    .and_then(|&i| entries.get(i))
+                    .map(|e| e.program.clone())
+                {
+                    let new_tab = self.modifiers.alt_key();
+                    self.close_palette();
+                    self.launch_agent_cli(&program, new_tab);
                 }
                 false
             }

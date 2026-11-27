@@ -17,7 +17,7 @@
 use std::path::{Path, PathBuf};
 
 /// Agents tried in order when `agent_command` is not set.
-pub const KNOWN_AGENTS: &[&str] = &["claude", "codex", "gemini", "opencode", "grok", "agy"];
+pub const KNOWN_AGENTS: &[&str] = &["codex", "claude", "gemini", "opencode", "agy", "grok"];
 
 /// Most terminal text put into a prompt, in bytes (the tail is kept). Linux limits one
 /// argument to 128 KiB.

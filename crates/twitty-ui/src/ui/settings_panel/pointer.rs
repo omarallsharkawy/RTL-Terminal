@@ -251,6 +251,24 @@ impl SettingsPanelState {
                     outcome.redraw = true;
                 }
             }
+            SettingsHit::AiCliAgent(idx) => {
+                self.focus = FocusZone::Content;
+                self.ai.active_field = None;
+                if let Some(name) = self.ai.detected_cli_agents.get(idx).cloned() {
+                    config.ai_agent = Some(name.clone());
+                    config.agent_command = Some(name.clone());
+                    config.ai_default_provider = Some("cli".to_owned());
+                    self.ai.notice = Some((
+                        false,
+                        twitty_core::language::fill(
+                            self.language.t("Active CLI agent: {}"),
+                            &[&name],
+                        ),
+                    ));
+                    outcome.ai_config_changed = true;
+                    outcome.redraw = true;
+                }
+            }
             SettingsHit::AiSetKey(idx) => {
                 use crate::ui::settings_ai::AiTextField;
                 self.focus = FocusZone::Content;

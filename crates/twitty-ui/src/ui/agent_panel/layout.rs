@@ -41,6 +41,8 @@ pub struct AgentPanelView {
     pub scroll_y: f32,
     pub pinned_to_bottom: bool,
     pub hover: AgentPanelHit,
+    pub available_clis: Vec<String>,
+    pub active_cli: Option<String>,
 }
 
 impl AgentPanelView {
@@ -66,6 +68,7 @@ pub enum AgentPanelHit {
     Divider,
     Close,
     Stop,
+    SwitchCli,
     JumpToLatest,
     ExampleChip(usize),
     ContextStrip,
@@ -116,6 +119,7 @@ pub struct AgentPanelLayout {
     pub header: Rect,
     pub close_button: Rect,
     pub stop_button: Option<Rect>,
+    pub cli_pill: Option<Rect>,
     pub usage_pill: Option<Rect>,
     pub title_area: Rect,
     pub body: Rect,
@@ -197,6 +201,25 @@ impl AgentPanelLayout {
             r
         });
 
+        let cli_logical = if !view.is_running() && view.available_clis.len() > 1 {
+            let label = view
+                .active_cli
+                .as_deref()
+                .or_else(|| view.available_clis.first().map(String::as_str))
+                .unwrap_or("cli");
+            let w = ((label.chars().count() as f32 + 2.0) * px(6.4) + px(14.0))
+                .clamp(px(54.0), (header.w * 0.28).max(px(54.0)));
+            if trail_left - w > header.x + pad + px(64.0) {
+                let r = Rect::new(trail_left - w, btn_y, w, btn_side);
+                trail_left = r.x - px(6.0);
+                Some(r)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let title_logical = Rect::new(
             header.x + pad,
             header.y,
@@ -207,6 +230,7 @@ impl AgentPanelLayout {
         let close_button = view.language.mirror(close_logical, header);
         let stop_button = stop_logical.map(|r| view.language.mirror(r, header));
         let usage_pill = usage_logical.map(|r| view.language.mirror(r, header));
+        let cli_pill = cli_logical.map(|r| view.language.mirror(r, header));
         let title_area = view.language.mirror(title_logical, header);
 
         // Footer: context strip (24 px) + composer box (dynamic 1..5 lines) + padding.
@@ -448,6 +472,7 @@ impl AgentPanelLayout {
             header,
             close_button,
             stop_button,
+            cli_pill,
             usage_pill,
             title_area,
             body,
@@ -478,6 +503,9 @@ impl AgentPanelLayout {
         }
         if self.stop_button.is_some_and(|r| r.contains(x, y)) {
             return AgentPanelHit::Stop;
+        }
+        if self.cli_pill.is_some_and(|r| r.contains(x, y)) {
+            return AgentPanelHit::SwitchCli;
         }
         if let Some(insp) = &self.inspector {
             if insp.close_button.contains(x, y) {

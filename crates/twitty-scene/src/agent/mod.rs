@@ -202,6 +202,33 @@ impl AgentDrawer<'_, '_> {
             None,
         );
 
+        // CLI switcher pill (when multiple local CLIs are installed and panel is idle).
+        if let Some(pill) = l.cli_pill {
+            let hovered = self.view.hover == AgentPanelHit::SwitchCli;
+            let name = self
+                .view
+                .active_cli
+                .as_deref()
+                .or_else(|| self.view.available_clis.first().map(String::as_str))
+                .unwrap_or("cli");
+            let label = format!("{name} ⇄");
+            self.rect_fill(
+                pill,
+                RADIUS_6,
+                if hovered { s.bg3 } else { s.bg2 },
+                Some(if hovered { s.accent } else { s.border }),
+            );
+            self.push_label(
+                inset(pill, s.px(4.0), 0.0),
+                &label,
+                UiSize::Small,
+                UiWeight::Semibold,
+                UiAlign::Center,
+                if hovered { s.text } else { s.accent },
+                None,
+            );
+        }
+
         // Usage / cost pill.
         if let (Some(pill), Some(sess)) = (l.usage_pill, &self.view.session) {
             if let Some(txt) = format_usage_pill(sess.usage, self.lang()) {

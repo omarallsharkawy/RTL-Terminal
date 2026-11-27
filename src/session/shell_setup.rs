@@ -33,6 +33,7 @@ const BASH: &str = include_str!("../../assets/shell/twitty.bash");
 const ZSH: &str = include_str!("../../assets/shell/twitty.zsh");
 const FISH: &str = include_str!("../../assets/shell/twitty.fish");
 const CLAUDE_WRAPPER: &str = include_str!("../../assets/bin/claude");
+const AGY_WRAPPER: &str = include_str!("../../assets/bin/agy");
 
 /// The zsh startup files placed in Twitty's ZDOTDIR: each hands over to `twitty.zsh`, which
 /// reads the user's file of the same name.
@@ -338,14 +339,20 @@ pub fn default_bin_dir() -> Option<PathBuf> {
 /// executable file, atomic replace). Returns the path to `dir/claude`.
 pub fn install_claude_wrapper(dir: &Path) -> io::Result<PathBuf> {
     create_private_dir(dir)?;
-    let path = dir.join("claude");
+    let claude = install_wrapper_file(dir, "claude", CLAUDE_WRAPPER.as_bytes())?;
+    let _ = install_wrapper_file(dir, "agy", AGY_WRAPPER.as_bytes());
+    Ok(claude)
+}
+
+fn install_wrapper_file(dir: &Path, name: &str, bytes: &[u8]) -> io::Result<PathBuf> {
+    let path = dir.join(name);
     if let Ok(meta) = fs::symlink_metadata(&path) {
         if !meta.file_type().is_file() {
             return Err(io::Error::other("wrapper path is not a regular file"));
         }
     }
-    if !matches_private_file(&path, CLAUDE_WRAPPER.as_bytes(), 0o700) {
-        write_private_file(&path, "claude", CLAUDE_WRAPPER.as_bytes(), 0o700)?;
+    if !matches_private_file(&path, bytes, 0o700) {
+        write_private_file(&path, name, bytes, 0o700)?;
     }
     Ok(path)
 }

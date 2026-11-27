@@ -83,6 +83,7 @@ commands! {
     "ai.explain-error", en!("Explain error"), None => InputAction::ExplainBlockError;
     "ai.suggest-fix", en!("Suggest a fix"), None => InputAction::SuggestBlockFix;
     "agent.ask", en!("Ask an agent about this output"), Some("Ctrl+Shift+A") => InputAction::AskAgent;
+    "agent.launch", en!("Launch coding agent…"), None => InputAction::LaunchAgent;
     "agent.panel", en!("Agent panel"), Some("Ctrl+Shift+.") => InputAction::ToggleAgentPanel;
     "review.toggle", en!("Review changes"), Some("Ctrl+Shift+R") => InputAction::ToggleReview;
     "ssh.reconnect", en!("Reconnect SSH"), None => InputAction::ReconnectSsh;

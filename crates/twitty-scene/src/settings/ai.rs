@@ -127,22 +127,70 @@ impl SettingsDrawer<'_, '_> {
                 s.text_dim,
                 Some(clip),
             );
-            let cli_list = if state.detected_cli_agents.is_empty() {
-                self.lang()
+            if ai.cli_agent_buttons.is_empty() {
+                let cli_list = self
+                    .lang()
                     .t("None detected (claude, codex, gemini, opencode)")
-                    .to_owned()
+                    .to_owned();
+                self.push_label(
+                    Rect::new(top.x, top.bottom(), top.w, s.px(18.0)),
+                    &cli_list,
+                    UiSize::Caption,
+                    UiWeight::Regular,
+                    self.start_align(),
+                    s.text,
+                    Some(clip),
+                );
             } else {
-                state.detected_cli_agents.join(" · ")
-            };
-            self.push_label(
-                Rect::new(top.x, top.bottom(), top.w, s.px(18.0)),
-                &cli_list,
-                UiSize::Caption,
-                UiWeight::Regular,
-                self.start_align(),
-                s.text,
-                Some(clip),
-            );
+                let configured_cli = cfg
+                    .ai_agent
+                    .as_deref()
+                    .or(cfg.agent_command.as_deref())
+                    .and_then(|cmd| cmd.split_whitespace().next())
+                    .or_else(|| state.detected_cli_agents.first().map(String::as_str))
+                    .unwrap_or("");
+                let using_cli =
+                    matches!(cfg.ai_default_provider.as_deref().unwrap_or(""), "" | "cli");
+                for &(idx, rect) in &ai.cli_agent_buttons {
+                    if !in_vp(rect) {
+                        continue;
+                    }
+                    let Some(name) = state.detected_cli_agents.get(idx) else {
+                        continue;
+                    };
+                    let selected = using_cli && configured_cli.eq_ignore_ascii_case(name);
+                    let hovered = self.view.state.hover == Some(SettingsHit::AiCliAgent(idx));
+                    self.shapes.push(Shape::RoundedRect {
+                        rect,
+                        radii: [s.px(RADIUS_6); 4],
+                        fill: self.ctx.color(if selected {
+                            s.accent
+                        } else if hovered {
+                            s.bg3
+                        } else {
+                            s.bg0
+                        }),
+                        border: Some(Border {
+                            width: s.hairline(),
+                            color: self.ctx.color(if selected { s.accent } else { s.border }),
+                        }),
+                        shadow: None,
+                    });
+                    self.push_label(
+                        rect,
+                        name,
+                        UiSize::Small,
+                        if selected {
+                            UiWeight::Semibold
+                        } else {
+                            UiWeight::Regular
+                        },
+                        UiAlign::Center,
+                        if selected { s.accent_text() } else { s.text },
+                        Some(clip),
+                    );
+                }
+            }
         }
 
         // API providers with keyring "Set key…".

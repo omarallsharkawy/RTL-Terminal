@@ -95,6 +95,48 @@ pub(super) fn prompt(request: &ProviderRequest) -> String {
     super::sanitized(&prompt, None)
 }
 
+struct TempOutputFile(std::path::PathBuf);
+
+impl TempOutputFile {
+    fn create() -> Option<Self> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "twitty-codex-out-{}-{nanos}-{}.txt",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        opts.open(&path).ok()?;
+        Some(Self(path))
+    }
+
+    fn read_bounded(&self, limit: usize) -> Option<String> {
+        use std::io::Read;
+        let file = std::fs::File::open(&self.0).ok()?;
+        let mut buf = Vec::new();
+        file.take(limit as u64).read_to_end(&mut buf).ok()?;
+        let text = String::from_utf8_lossy(&buf).into_owned();
+        (!text.trim().is_empty()).then_some(text)
+    }
+}
+
+impl Drop for TempOutputFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 pub(super) fn complete(
     program: &str,
     request: &ProviderRequest,
@@ -111,6 +153,7 @@ pub(super) fn complete(
         return Err(ProviderError::Configuration);
     }
     let mut argv = vec![program.to_owned()];
+    let mut codex_out: Option<TempOutputFile> = None;
     let confinement: &[&str] = match stem.as_deref() {
         Some("claude") => &[
             "--tools",
@@ -124,6 +167,8 @@ pub(super) fn complete(
             "--ignore-user-config",
             "--ignore-rules",
             "--ephemeral",
+            "--color",
+            "never",
             "-c",
             "web_search=\"disabled\"",
             "-c",
@@ -131,9 +176,17 @@ pub(super) fn complete(
             "-c",
             "features.shell_snapshot=false",
         ],
+        Some("agy") => &["--output-format", "text"],
         _ => &[],
     };
     argv.extend(confinement.iter().map(|flag| (*flag).to_owned()));
+    if stem.as_deref() == Some("codex") {
+        if let Some(tmp) = TempOutputFile::create() {
+            argv.push("-o".to_owned());
+            argv.push(tmp.0.to_string_lossy().into_owned());
+            codex_out = Some(tmp);
+        }
+    }
     if !request.model.is_empty() {
         argv.push(format!("--model={}", request.model));
     }
@@ -142,7 +195,7 @@ pub(super) fn complete(
     // argv for maximum compatibility, and pipe larger multi-turn prompts via stdin to avoid E2BIG.
     const CLI_ARGV_PROMPT_LIMIT: usize = 64 * 1024;
     let output_limit = MAX_AI_OUTPUT_BYTES.min(request.max_output_tokens as usize * 4);
-    let output = if prompt.len() > CLI_ARGV_PROMPT_LIMIT {
+    let stdout = if prompt.len() > CLI_ARGV_PROMPT_LIMIT {
         let placeholder = match stem.as_deref() {
             Some("codex") => "-",
             _ => "",
@@ -170,6 +223,10 @@ pub(super) fn complete(
         AiError::OutputTooLarge => ProviderError::TooLarge,
         _ => ProviderError::Unavailable,
     })?;
+    let output = codex_out
+        .as_ref()
+        .and_then(|tmp| tmp.read_bounded(output_limit))
+        .unwrap_or(stdout);
     let mut turn = parse_cli(&output);
     turn.usage = Usage {
         input_tokens: (prompt.len() as u64).div_ceil(4),
