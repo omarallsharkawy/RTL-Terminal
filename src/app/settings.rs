@@ -68,10 +68,12 @@ impl App {
                 let detected_cli_agents = detect_cli_agents_on_path();
                 let keyring = twitty_store::SystemSecretStore::new();
                 let saved_keys = probe_keyring_flags(&keyring);
+                let external_themes = Some(crate::config::available_external_theme_names());
                 let _ = proxy.send_event(AppEvent::SettingsAiProbed {
                     generation,
                     detected_cli_agents,
                     saved_keys,
+                    external_themes,
                     notice: None,
                     restart_engine: false,
                 });
@@ -86,6 +88,7 @@ impl App {
         generation: u64,
         detected_cli_agents: Vec<String>,
         saved_keys: [bool; 3],
+        external_themes: Option<Vec<String>>,
         notice: Option<(bool, String)>,
         restart_engine: bool,
     ) {
@@ -98,6 +101,9 @@ impl App {
         if let Some(state) = self.settings.as_mut() {
             state.ai.detected_cli_agents = detected_cli_agents;
             state.ai.saved_keys = saved_keys;
+            if let Some(themes) = external_themes {
+                state.external_themes = themes;
+            }
             if let Some(msg) = notice {
                 state.ai.notice = Some(msg);
             }
@@ -319,6 +325,7 @@ impl App {
                         generation,
                         detected_cli_agents: detected,
                         saved_keys,
+                        external_themes: None,
                         notice,
                         restart_engine: true,
                     });
@@ -350,6 +357,7 @@ impl App {
                         generation,
                         detected_cli_agents: detected,
                         saved_keys,
+                        external_themes: None,
                         notice,
                         restart_engine: true,
                     });

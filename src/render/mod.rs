@@ -621,7 +621,7 @@ impl Renderer {
                         frame.add_composer_motion(
                             &mut ctx,
                             style,
-                            &self.ui_font,
+                            UiLabels::cached(&self.ui_font, &mut self.ui_labels),
                             view,
                             opacity,
                             open,
@@ -630,7 +630,12 @@ impl Renderer {
                 }
                 Layer::BlockAi => {
                     if let Some(view) = &self.block_ai_view {
-                        frame.add_block_ai(&mut ctx, style, &self.ui_font, view);
+                        frame.add_block_ai(
+                            &mut ctx,
+                            style,
+                            UiLabels::cached(&self.ui_font, &mut self.ui_labels),
+                            view,
+                        );
                     }
                 }
                 Layer::Settings => {
@@ -678,7 +683,12 @@ impl Renderer {
                 }
                 Layer::AiConsent => {
                     if let Some(view) = &self.ai_consent_view {
-                        frame.add_ai_consent(&mut ctx, style, &self.ui_font, view);
+                        frame.add_ai_consent(
+                            &mut ctx,
+                            style,
+                            UiLabels::cached(&self.ui_font, &mut self.ui_labels),
+                            view,
+                        );
                     }
                 }
                 Layer::ContextMenu => {
@@ -692,7 +702,7 @@ impl Renderer {
                         frame.add_context_menu(
                             &mut ctx,
                             style,
-                            &self.ui_font,
+                            UiLabels::cached(&self.ui_font, &mut self.ui_labels),
                             menu,
                             &layout,
                             chrome.language,
@@ -704,7 +714,7 @@ impl Renderer {
                         frame.add_toasts(
                             &mut ctx,
                             style,
-                            &self.ui_font,
+                            UiLabels::cached(&self.ui_font, &mut self.ui_labels),
                             &self.toasts,
                             chrome.language,
                         );
@@ -712,7 +722,13 @@ impl Renderer {
                 }
                 Layer::Tooltip => {
                     if let Some((text, at)) = &self.tooltip {
-                        frame.add_tooltip(&mut ctx, style, &self.ui_font, text, *at);
+                        frame.add_tooltip(
+                            &mut ctx,
+                            style,
+                            UiLabels::cached(&self.ui_font, &mut self.ui_labels),
+                            text,
+                            *at,
+                        );
                     }
                 }
             }

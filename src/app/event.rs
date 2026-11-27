@@ -58,11 +58,12 @@ pub enum AppEvent {
     AgentContext(u64, twitty_ai::engine::model::ContextBundle),
     /// Project memory snapshot loaded off the UI thread for the Memory screen.
     MemorySnapshot(u64, twitty_store::ProjectMemorySnapshot),
-    /// Off-thread Settings → AI keyring & CLI PATH probe result.
+    /// Off-thread Settings → AI keyring, CLI PATH, and external themes probe result.
     SettingsAiProbed {
         generation: u64,
         detected_cli_agents: Vec<String>,
         saved_keys: [bool; 3],
+        external_themes: Option<Vec<String>>,
         notice: Option<(bool, String)>,
         restart_engine: bool,
     },

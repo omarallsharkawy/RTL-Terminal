@@ -287,6 +287,10 @@ impl App {
             PanelCmd::StartAgent(target) => self.start_review_agent(&target),
             PanelCmd::StageFile(rel_path) => self.run_review_stage(rel_path, true),
             PanelCmd::UnstageFile(rel_path) => self.run_review_stage(rel_path, false),
+            PanelCmd::SendToAgentPanel(prompt) => {
+                self.open_agent_panel_with_draft(prompt);
+                return false;
+            }
             PanelCmd::Commit => {
                 let Some(id) = self.focused_id() else {
                     return false;

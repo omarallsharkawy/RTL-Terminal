@@ -445,21 +445,21 @@ impl Frame {
     }
 
     /// Draw the docked command composer above terminal content and below overlays.
-    pub fn add_composer(
+    pub fn add_composer<'a>(
         &mut self,
         ctx: &mut DrawContext,
         style: UiStyle,
-        font: &UiFont,
+        font: impl Into<UiLabels<'a>>,
         view: &super::composer::ComposerView,
     ) {
         self.add_composer_motion(ctx, style, font, view, 1.0, true);
     }
 
-    pub fn add_composer_motion(
+    pub fn add_composer_motion<'a>(
         &mut self,
         ctx: &mut DrawContext,
         style: UiStyle,
-        font: &UiFont,
+        font: impl Into<UiLabels<'a>>,
         view: &super::composer::ComposerView,
         opacity: f32,
         open: bool,
@@ -496,11 +496,11 @@ impl Frame {
     }
 
     /// Draw the failed-block AI explanation / fix popover above terminal content and below overlays.
-    pub fn add_block_ai(
+    pub fn add_block_ai<'a>(
         &mut self,
         ctx: &mut DrawContext,
         style: UiStyle,
-        font: &UiFont,
+        font: impl Into<UiLabels<'a>>,
         view: &super::ai::BlockAiView,
     ) {
         let (rect, labels) = super::ai::block_ai_overlay(
@@ -523,11 +523,11 @@ impl Frame {
     }
 
     /// Draw an open right-click menu above everything else.
-    pub fn add_context_menu(
+    pub fn add_context_menu<'a>(
         &mut self,
         ctx: &mut DrawContext,
         style: UiStyle,
-        font: &UiFont,
+        font: impl Into<UiLabels<'a>>,
         menu: &twitty_ui::ui::context_menu::ContextMenu,
         layout: &twitty_ui::ui::context_menu::MenuLayout,
         language: twitty_ui::ui::chrome::UiLanguage,
@@ -545,11 +545,11 @@ impl Frame {
     }
 
     /// Draw short notices at the top center of the window.
-    pub fn add_toasts(
+    pub fn add_toasts<'a>(
         &mut self,
         ctx: &mut DrawContext,
         style: UiStyle,
-        font: &UiFont,
+        font: impl Into<UiLabels<'a>>,
         toasts: &[twitty_ui::ui::toast::Toast],
         language: twitty_ui::ui::chrome::UiLanguage,
     ) {
@@ -569,11 +569,11 @@ impl Frame {
     }
 
     /// Draw a hover tooltip near pointer `at`, above everything else.
-    pub fn add_tooltip(
+    pub fn add_tooltip<'a>(
         &mut self,
         ctx: &mut DrawContext,
         style: UiStyle,
-        font: &UiFont,
+        font: impl Into<UiLabels<'a>>,
         text: &str,
         at: (f32, f32),
     ) {
@@ -590,11 +590,11 @@ impl Frame {
     }
 
     /// Draw the one-time AI privacy consent modal above everything else.
-    pub fn add_ai_consent(
+    pub fn add_ai_consent<'a>(
         &mut self,
         ctx: &mut DrawContext,
         style: UiStyle,
-        font: &UiFont,
+        font: impl Into<UiLabels<'a>>,
         view: &super::ai::ConsentOverlayView,
     ) {
         let (rect, labels) = super::ai::consent_overlay(

@@ -163,6 +163,8 @@ pub struct SettingsPanelState {
     pub hover: Option<SettingsHit>,
     /// Cached built-in commands for the `Keys` section.
     commands: Vec<Command>,
+    /// Optional user-supplied external themes discovered from `~/.config/twitty/themes/*.json`.
+    pub external_themes: Vec<String>,
     /// State for the Settings → AI section (AGENT.md §1.6).
     pub ai: crate::ui::settings_ai::AiSettingsState,
     /// Raw text of the text field being edited, e.g. `~/a, ` before the next folder is typed.
@@ -206,6 +208,7 @@ impl SettingsPanelState {
             env_language: language,
             hover: None,
             commands: commands::all(),
+            external_themes: Vec::new(),
             ai: crate::ui::settings_ai::AiSettingsState::default(),
             commands_editor: Default::default(),
         }
@@ -279,6 +282,11 @@ impl SettingsPanelState {
                     label_en: name.to_owned(),
                     label_ar: name.to_owned(),
                 })
+                .chain(self.external_themes.iter().map(|name| PickerOption {
+                    value: Some(name.clone()),
+                    label_en: name.clone(),
+                    label_ar: name.clone(),
+                }))
                 .collect(),
             SettingId::FontFamily => {
                 let mut opts = Vec::with_capacity(self.monospace_fonts.len() + 1);

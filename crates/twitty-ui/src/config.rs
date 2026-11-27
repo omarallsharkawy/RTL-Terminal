@@ -255,14 +255,19 @@ impl TwittyConfig {
             .and_then(|value| parse_config_color(value, "ui_accent"))
     }
 
-    /// The palette for the configured `theme`, with any `colors` overrides applied.
+    /// The palette for the configured `theme` (built-in or `~/.config/twitty/themes/<name>.json`),
+    /// with any `colors` overrides applied.
     pub fn palette(&self) -> Palette {
         let mut palette = match self.theme.as_deref() {
             None => Palette::default(),
-            Some(name) => Palette::named(name).unwrap_or_else(|| {
-                warn(format!("twitty: unknown theme {name:?}, using twitty-dark"));
-                Palette::default()
-            }),
+            Some(name) => Palette::named(name)
+                .or_else(|| {
+                    Self::themes_dir().and_then(|dir| load_external_theme_from_dir(&dir, name))
+                })
+                .unwrap_or_else(|| {
+                    warn(format!("twitty: unknown theme {name:?}, using twitty-dark"));
+                    Palette::default()
+                }),
         };
         let Some(colors) = &self.colors else {
             return palette;
@@ -311,6 +316,11 @@ impl TwittyConfig {
         path.push("twitty");
         path.push("config.json");
         Some(path)
+    }
+
+    /// Directory holding optional user-supplied external theme JSON files (`themes/` beside `config.json`).
+    pub fn themes_dir() -> Option<PathBuf> {
+        Some(Self::config_path()?.parent()?.join("themes"))
     }
 
     pub fn load() -> Self {
@@ -549,4 +559,122 @@ fn create_temp_config(dir: &Path) -> io::Result<(PathBuf, fs::File)> {
         }
     }
     Err(io::Error::other("could not create temporary config file"))
+}
+
+/// Maximum size in bytes accepted for a single external theme JSON file (32 KiB).
+const MAX_THEME_BYTES: usize = 32 * 1024;
+/// Maximum number of external theme files scanned from `themes/`.
+const MAX_EXTERNAL_THEMES: usize = 64;
+
+/// Optional external JSON theme file placed in `~/.config/twitty/themes/<name>.json`.
+#[derive(Debug, Default, Deserialize)]
+struct ExternalThemeFile {
+    /// Optional built-in base theme to inherit unset slots from (defaults to `twitty-dark`).
+    base: Option<String>,
+    background: Option<String>,
+    foreground: Option<String>,
+    cursor: Option<String>,
+    selection: Option<String>,
+    ansi: Option<Vec<String>>,
+}
+
+/// True when `name` is a single safe theme identifier (ASCII alphanumerics, `-`, `_`, `.`; no path separators or `..`).
+pub fn is_valid_theme_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && !name.starts_with('.')
+        && !name.contains("..")
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+/// Load a user-supplied JSON theme named `name` from `dir/<name>.json`.
+pub fn load_external_theme_from_dir(dir: &Path, name: &str) -> Option<Palette> {
+    if !is_valid_theme_name(name) {
+        return None;
+    }
+    let path = dir.join(format!("{name}.json"));
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let file = options.open(&path).ok()?;
+    let meta = file.metadata().ok()?;
+    if !meta.is_file() || meta.len() > MAX_THEME_BYTES as u64 {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_THEME_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() > MAX_THEME_BYTES {
+        return None;
+    }
+    let parsed: ExternalThemeFile = serde_json::from_slice(&bytes).ok()?;
+    let mut palette = parsed
+        .base
+        .as_deref()
+        .and_then(Palette::named)
+        .unwrap_or_default();
+    let fields = [
+        (&parsed.background, &mut palette.background, "background"),
+        (&parsed.foreground, &mut palette.foreground, "foreground"),
+        (&parsed.cursor, &mut palette.cursor, "cursor"),
+        (&parsed.selection, &mut palette.selection, "selection"),
+    ];
+    for (value, slot, key) in fields {
+        if let Some(color) = value.as_deref().and_then(|v| parse_config_color(v, key)) {
+            *slot = color;
+        }
+    }
+    if let Some(ansi) = &parsed.ansi {
+        for (i, value) in ansi.iter().take(16).enumerate() {
+            let key = format!("theme.ansi[{i}]");
+            if let Some(color) = parse_config_color(value, &key) {
+                palette.ansi[i] = color;
+            }
+        }
+    }
+    Some(palette)
+}
+
+/// List valid external theme names (`*.json` stems) inside `dir`, sorted and deduplicated against
+/// built-in theme names.
+pub fn external_theme_names_in(dir: &Path) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut names = Vec::new();
+    for entry in entries.flatten() {
+        if names.len() >= MAX_EXTERNAL_THEMES {
+            break;
+        }
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if !is_valid_theme_name(stem) || Palette::named(stem).is_some() {
+            continue;
+        }
+        if load_external_theme_from_dir(dir, stem).is_some() {
+            names.push(stem.to_owned());
+        }
+    }
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// List valid external theme names found in [`TwittyConfig::themes_dir`].
+pub fn available_external_theme_names() -> Vec<String> {
+    TwittyConfig::themes_dir()
+        .map(|dir| external_theme_names_in(&dir))
+        .unwrap_or_default()
 }

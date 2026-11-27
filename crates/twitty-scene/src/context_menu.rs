@@ -4,7 +4,8 @@
 use super::context::DrawContext;
 use twitty_core::layout::Rect;
 use twitty_render::shapes::{Border, Shadow, Shape};
-use twitty_render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
+use twitty_render::text::labels::UiLabels;
+use twitty_render::text::ui::{label_width, UiAlign, UiLabel, UiSize, UiWeight};
 use twitty_render::ui_style::{
     UiStyle, OVERLAY_BLUR, OVERLAY_OFFSET, OVERLAY_SHADOW, RADIUS_6, RADIUS_8, SPACE_12, SPACE_8,
 };
@@ -12,15 +13,16 @@ use twitty_ui::ui::chrome::UiLanguage;
 use twitty_ui::ui::context_menu::{ContextMenu, MenuEntry, MenuLayout};
 
 /// Push the menu's shapes into `shapes` and return its labels.
-pub fn draw(
+pub fn draw<'a>(
     ctx: &mut DrawContext,
     style: UiStyle,
-    font: &UiFont,
+    font: impl Into<UiLabels<'a>>,
     menu: &ContextMenu,
     layout: &MenuLayout,
     language: UiLanguage,
     shapes: &mut Vec<Shape>,
 ) -> Vec<UiLabel> {
+    let mut font = font.into();
     let mut labels = Vec::new();
     shapes.push(Shape::RoundedRect {
         rect: layout.rect,
@@ -106,15 +108,16 @@ pub fn draw(
 
 /// Draw a one-line tooltip just below and after pointer `at`, kept inside `surface`. Returns its
 /// label and rect.
-pub fn draw_tooltip(
+pub fn draw_tooltip<'a>(
     ctx: &mut DrawContext,
     style: UiStyle,
-    font: &UiFont,
+    font: impl Into<UiLabels<'a>>,
     text: &str,
     at: (f32, f32),
     surface: (f32, f32),
     shapes: &mut Vec<Shape>,
 ) -> (UiLabel, Rect) {
+    let mut font = font.into();
     let buffer = font.shape(
         ctx.font_system,
         UiSize::Small,
@@ -158,15 +161,16 @@ pub fn draw_tooltip(
 
 /// Draw notices stacked down from just under the top bar, centered, newest on top. Returns their
 /// labels and rects.
-pub fn draw_toasts(
+pub fn draw_toasts<'a>(
     ctx: &mut DrawContext,
     style: UiStyle,
-    font: &UiFont,
+    font: impl Into<UiLabels<'a>>,
     toasts: &[twitty_ui::ui::toast::Toast],
     surface: (f32, f32),
     language: UiLanguage,
     shapes: &mut Vec<Shape>,
 ) -> (Vec<UiLabel>, Vec<Rect>) {
+    let mut font = font.into();
     use twitty_render::icons::Icon;
     use twitty_ui::ui::toast::ToastKind;
     let mut labels = Vec::new();

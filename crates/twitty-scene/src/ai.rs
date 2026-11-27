@@ -10,7 +10,8 @@ use super::context::DrawContext;
 use twitty_core::layout::Rect;
 use twitty_render::icons::Icon;
 use twitty_render::shapes::{Border, Shadow, Shape};
-use twitty_render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
+use twitty_render::text::labels::UiLabels;
+use twitty_render::text::ui::{label_width, UiAlign, UiLabel, UiSize, UiWeight};
 use twitty_render::ui_style::{
     UiStyle, OVERLAY_BLUR, OVERLAY_OFFSET, OVERLAY_SHADOW, RADIUS_12, RADIUS_6, RADIUS_8, SPACE_12,
     SPACE_16, SPACE_4, SPACE_8,
@@ -230,14 +231,15 @@ impl BlockAiLayout {
 }
 
 /// Draw the failed-block AI card into `shapes`, returning its clip rect and UI labels.
-pub fn block_ai_overlay(
+pub fn block_ai_overlay<'a>(
     ctx: &mut DrawContext,
     style: UiStyle,
-    font: &UiFont,
+    font: impl Into<UiLabels<'a>>,
     view: &BlockAiView,
     surface: (f32, f32),
     shapes: &mut Vec<Shape>,
 ) -> (Option<Rect>, Vec<UiLabel>) {
+    let mut font = font.into();
     let has_fix = matches!(
         &view.status,
         BlockAiCardStatus::Ready(reply) if reply.suggested_command.is_some()
@@ -421,7 +423,7 @@ pub fn block_ai_overlay(
         }
         BlockAiCardStatus::Error(err) => {
             let wrapped = wrap_lines(
-                font,
+                &mut font,
                 ctx.font_system,
                 UiSize::Caption,
                 UiWeight::Regular,
@@ -449,7 +451,7 @@ pub fn block_ai_overlay(
         }
         BlockAiCardStatus::Ready(reply) => {
             let wrapped = wrap_lines(
-                font,
+                &mut font,
                 ctx.font_system,
                 UiSize::Caption,
                 UiWeight::Regular,
@@ -685,14 +687,15 @@ impl ConsentLayout {
 
 /// Draw the one-time bilingual privacy consent modal into `shapes`, returning its clip rect and
 /// shaped UI labels.
-pub fn consent_overlay(
+pub fn consent_overlay<'a>(
     ctx: &mut DrawContext,
     style: UiStyle,
-    font: &UiFont,
+    font: impl Into<UiLabels<'a>>,
     view: &ConsentOverlayView,
     surface: (f32, f32),
     shapes: &mut Vec<Shape>,
 ) -> (Option<Rect>, Vec<UiLabel>) {
+    let mut font = font.into();
     let layout = ConsentLayout::new(style.scale, surface, view.language);
     if layout.modal.w <= 0.0 || layout.modal.h <= 0.0 {
         return (None, Vec::new());
@@ -752,7 +755,7 @@ pub fn consent_overlay(
     // English body.
     let max_lines = ((layout.body_en.h / layout.line_height).floor() as usize).max(1);
     let en_lines = wrap_lines(
-        font,
+        &mut font,
         ctx.font_system,
         UiSize::Caption,
         UiWeight::Regular,
@@ -792,7 +795,7 @@ pub fn consent_overlay(
 
     // Arabic body (right-aligned).
     let ar_lines = wrap_lines(
-        font,
+        &mut font,
         ctx.font_system,
         UiSize::Caption,
         UiWeight::Regular,
@@ -892,7 +895,7 @@ pub fn consent_overlay(
 
 /// Greedy word-wrapping helper using `UiFont` measurements, preserving explicit newlines.
 pub fn wrap_lines(
-    font: &UiFont,
+    font: &mut UiLabels<'_>,
     fonts: &mut cosmic_text::FontSystem,
     size: UiSize,
     weight: UiWeight,

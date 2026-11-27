@@ -98,3 +98,41 @@ fn unknown_keys_survive_save() {
     assert_eq!(saved["theme"], "nord");
     assert!(saved.get("colors").is_none());
 }
+
+#[test]
+fn external_themes_load_safely_and_reject_traversal() {
+    use twitty::config::{external_theme_names_in, load_external_theme_from_dir};
+
+    let dir = std::env::temp_dir().join(format!(
+        "twitty-ext-themes-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // Valid custom theme inheriting from `nord` with custom background & cursor.
+    std::fs::write(
+        dir.join("desert-night.json"),
+        r##"{"base":"nord","background":"#10141a","cursor":"#ff8800"}"##,
+    )
+    .unwrap();
+    // Duplicate of a built-in theme name should not duplicate in discovery list.
+    std::fs::write(dir.join("nord.json"), r##"{"background":"#000000"}"##).unwrap();
+    // Malformed JSON should be skipped.
+    std::fs::write(dir.join("broken.json"), b"{not valid json").unwrap();
+
+    let loaded = load_external_theme_from_dir(&dir, "desert-night").expect("load custom theme");
+    let nord = Palette::named("nord").unwrap();
+    assert_eq!(loaded.foreground, nord.foreground);
+    assert_ne!(loaded.background, nord.background);
+
+    // Path traversal names must be rejected.
+    assert!(load_external_theme_from_dir(&dir, "../escape").is_none());
+    assert!(load_external_theme_from_dir(&dir, ".hidden").is_none());
+
+    let listed = external_theme_names_in(&dir);
+    assert_eq!(listed, vec!["desert-night".to_owned()]);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

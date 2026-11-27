@@ -61,6 +61,8 @@ pub enum PanelCmd {
     StageFile(String),
     /// Unstage the selected file (`git reset HEAD -- <path>`) off the UI thread and refresh.
     UnstageFile(String),
+    /// Open Twitty's built-in Agent Panel pre-filled with a review prompt for the user to review/send.
+    SendToAgentPanel(String),
 }
 
 /// A one-line message under the rows.
@@ -548,6 +550,9 @@ impl ReviewPanel {
         let page = page.max(1);
         if self.editor.is_some() {
             return match key {
+                Key::Named(NamedKey::Enter) if modifiers.shift_key() || modifiers.control_key() => {
+                    self.submit_to_agent_panel()
+                }
                 Key::Named(NamedKey::Enter) => self.submit(),
                 Key::Named(NamedKey::Escape) => {
                     self.close_comment();
@@ -663,6 +668,10 @@ impl ReviewPanel {
                 Some(at) => self.open_comment(at, page),
                 None => PanelCmd::None,
             },
+            (_, Some('a')) => match self.selected_agent_prompt() {
+                Some(prompt) => PanelCmd::SendToAgentPanel(prompt),
+                None => PanelCmd::None,
+            },
             (_, Some('s')) => match self.current_file_path() {
                 Some(path) => PanelCmd::StageFile(path),
                 None => PanelCmd::None,
@@ -673,6 +682,65 @@ impl ReviewPanel {
             },
             (_, Some('r')) => PanelCmd::Refresh,
             _ => PanelCmd::None,
+        }
+    }
+
+    /// Submit the active review comment directly to Twitty's built-in Agent Panel.
+    fn submit_to_agent_panel(&mut self) -> PanelCmd {
+        let Some(editor) = &self.editor else {
+            return PanelCmd::None;
+        };
+        let comment = super::comment::clean_comment(&editor.text);
+        if comment.is_empty() {
+            return PanelCmd::None;
+        }
+        let Some(snapshot) = &self.snapshot else {
+            return PanelCmd::None;
+        };
+        let r = editor.anchor;
+        let Some((line, kind)) = comment_line(&snapshot.diff, r) else {
+            return PanelCmd::None;
+        };
+        let file = &snapshot.diff.files[r.file];
+        let target = CommentTarget {
+            path: file.path().to_owned(),
+            line,
+            kind,
+            code: file.hunks[r.hunk].lines[r.line].text.clone(),
+            comment,
+        };
+        let prompt = super::comment::format_agent_prompt(&target);
+        self.close_comment();
+        if prompt.is_empty() {
+            PanelCmd::Redraw
+        } else {
+            PanelCmd::SendToAgentPanel(prompt)
+        }
+    }
+
+    /// Build a draft prompt for Twitty's built-in Agent Panel from the selected file or diff line.
+    fn selected_agent_prompt(&self) -> Option<String> {
+        let snapshot = self.snapshot.as_ref()?;
+        let row = *self.rows.get(self.selected?)?;
+        match row {
+            Row::Line(r) => {
+                let (line, _) = comment_line(&snapshot.diff, r)?;
+                let file = snapshot.diff.files.get(r.file)?;
+                let code = file.hunks[r.hunk].lines[r.line].text.trim();
+                if code.is_empty() {
+                    Some(format!("Regarding {}:{line}: ", file.path()))
+                } else {
+                    Some(format!("Regarding {}:{line} (`{code}`): ", file.path()))
+                }
+            }
+            Row::File(f) => {
+                let file = snapshot.diff.files.get(f)?;
+                Some(format!("Review changes in {}: ", file.path()))
+            }
+            _ => {
+                let path = self.current_file_path()?;
+                Some(format!("Review changes in {path}: "))
+            }
         }
     }
 
@@ -979,6 +1047,7 @@ fn letter_of(key: &Key, physical: Option<KeyCode>) -> Option<char> {
         return None;
     }
     Some(match physical? {
+        KeyCode::KeyA => 'a',
         KeyCode::KeyC => 'c',
         KeyCode::KeyJ => 'j',
         KeyCode::KeyK => 'k',

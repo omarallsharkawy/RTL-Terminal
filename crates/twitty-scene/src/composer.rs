@@ -24,7 +24,8 @@ use twitty_render::icons::Icon;
 use twitty_render::metrics::CellMetrics;
 use twitty_render::row::{CachedRow, RowCursor};
 use twitty_render::shapes::{Border, Shadow, Shape};
-use twitty_render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
+use twitty_render::text::labels::UiLabels;
+use twitty_render::text::ui::{label_width, UiAlign, UiLabel, UiSize, UiWeight};
 use twitty_render::ui_style::{
     UiStyle, OVERLAY_BLUR, OVERLAY_OFFSET, OVERLAY_SHADOW, RADIUS_12, RADIUS_6, RADIUS_8, SPACE_12,
     SPACE_4, SPACE_8,
@@ -731,12 +732,13 @@ fn push_wavy_underline(
 
 /// Build the full CPU-side scene for the composer card, syntax-highlighted text lines, caret,
 /// selection, lint underlines + tooltip line, preedit, ghost suggestion, and completion popup.
-pub fn build(
+pub fn build<'a>(
     ctx: &mut DrawContext,
     style: UiStyle,
-    font: &UiFont,
+    font: impl Into<UiLabels<'a>>,
     view: &ComposerView,
 ) -> ComposerScene {
+    let mut font = font.into();
     let popup_count = view.popup.as_ref().map_or(0, |p| p.items.len());
     let has_lint = !view.lints.is_empty();
     let layout = ComposerLayout::with_ai_and_lint(

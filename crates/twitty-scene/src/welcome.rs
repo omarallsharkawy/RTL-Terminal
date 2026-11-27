@@ -1180,7 +1180,7 @@ impl WelcomeDrawer<'_, '_> {
         }
         let line_h = (size.px(self.style.scale) * 1.45).ceil().max(1.0);
         let lines = wrap_lines(
-            self.font.font(),
+            &mut self.font,
             self.ctx.font_system,
             size,
             weight,

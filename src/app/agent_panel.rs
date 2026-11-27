@@ -121,6 +121,20 @@ impl App {
         self.window.request_redraw();
     }
 
+    /// Open Twitty's built-in Agent panel (closing Review if open) and pre-fill the composer with
+    /// `draft` for the user to review/edit before submitting.
+    pub(super) fn open_agent_panel_with_draft(&mut self, draft: String) {
+        if !self.agent_panel.state.is_open() {
+            self.toggle_agent_panel();
+        }
+        self.agent_panel.state.composer.set_text(draft);
+        self.agent_panel.state.focus = crate::ui::agent_panel::AgentFocus::Composer;
+        self.agent_panel.state.inspector_open = false;
+        self.agent_panel.state.edit_mode = None;
+        self.cursor_blink.reset(Instant::now());
+        self.window.request_redraw();
+    }
+
     pub(super) fn close_agent_panel(&mut self) {
         if !self.agent_panel.state.is_open() {
             return;
