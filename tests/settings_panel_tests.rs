@@ -128,7 +128,7 @@ fn model_sections_labels_and_every_control_round_trips_through_save_and_load() {
     // Every config setting has bilingual labels and maps to a real JSON key in TwittyConfig.
     let mut cfg = TwittyConfig::default();
     let default_json = serde_json::to_value(&cfg).unwrap();
-    for &id in &SettingId::CONFIG_SETTINGS {
+    for id in SettingId::config_settings() {
         let desc = id.descriptor();
         assert!(!desc.label_en.is_empty(), "{id:?}");
         assert!(!desc.label_ar.is_empty(), "{id:?}");
@@ -451,7 +451,10 @@ fn model_sections_labels_and_every_control_round_trips_through_save_and_load() {
 
     // Switch to Behaviour section and toggle all 7 booleans + edit AgentCommand.
     state.select_section(SettingsSection::Behaviour, &cfg);
-    for (i, &expected) in SettingId::BEHAVIOUR[..7].iter().enumerate() {
+    for (i, &expected) in SettingId::in_section(SettingsSection::Behaviour)[..7]
+        .iter()
+        .enumerate()
+    {
         if i > 0 {
             state.on_key(
                 &Key::Named(NamedKey::ArrowDown),
@@ -496,7 +499,7 @@ fn model_sections_labels_and_every_control_round_trips_through_save_and_load() {
 
     // Verify every config_key appears in the serialized JSON!
     let json = serde_json::to_value(&cfg).unwrap();
-    for &id in &SettingId::CONFIG_SETTINGS {
+    for id in SettingId::config_settings() {
         let key = id.config_key().unwrap();
         assert!(
             json.get(key).is_some(),
@@ -774,7 +777,7 @@ fn arabic_ime_input_works_in_agent_command_font_search_and_keys_search() {
     // 2. Arabic IME in Behaviour -> Agent command text field.
     state.select_section(SettingsSection::Behaviour, &cfg);
     state.focus = FocusZone::Content;
-    state.selected = SettingId::BEHAVIOUR
+    state.selected = SettingId::in_section(SettingsSection::Behaviour)
         .iter()
         .position(|&s| s == SettingId::AgentCommand)
         .unwrap();
@@ -1122,8 +1125,8 @@ fn overlay_renders_and_clips_underlying_terminal_text_in_dark_light_en_ar() {
 
 #[test]
 fn interface_language_choices_labels_and_auto_resolution() {
-    assert!(SettingId::APPEARANCE.contains(&SettingId::UiLanguage));
-    assert!(SettingId::CONFIG_SETTINGS.contains(&SettingId::UiLanguage));
+    assert!(SettingId::in_section(SettingsSection::Appearance).contains(&SettingId::UiLanguage));
+    assert!(SettingId::config_settings().any(|id| id == SettingId::UiLanguage));
     assert_eq!(SettingId::UiLanguage.section(), SettingsSection::Appearance);
     assert_eq!(SettingId::UiLanguage.config_key(), Some("ui_language"));
 
@@ -1161,7 +1164,7 @@ fn interface_language_choices_labels_and_auto_resolution() {
     // Auto resolves using env_language (both English and Arabic environments).
     cfg.ui_language = "en".into();
     let mut ar_env_panel = sample_panel(UiLanguage::English).with_env_language(UiLanguage::Arabic);
-    ar_env_panel.selected = SettingId::APPEARANCE
+    ar_env_panel.selected = SettingId::in_section(SettingsSection::Appearance)
         .iter()
         .position(|&id| id == SettingId::UiLanguage)
         .unwrap();
@@ -1316,7 +1319,7 @@ fn interface_language_persists_preserving_unknown_keys_and_pretty_json() {
     let mut cfg = TwittyConfig::load_from(&path);
     assert_eq!(cfg.ui_language, "en");
     let mut state = sample_panel(UiLanguage::English);
-    state.selected = SettingId::APPEARANCE
+    state.selected = SettingId::in_section(SettingsSection::Appearance)
         .iter()
         .position(|&id| id == SettingId::UiLanguage)
         .unwrap();
@@ -1432,7 +1435,7 @@ fn interface_language_overlay_renders_bilingual_labels_and_flips_live() {
     }
 
     // 2. Switch live to Arabic via SettingsPanelState and re-render.
-    state.selected = SettingId::APPEARANCE
+    state.selected = SettingId::in_section(SettingsSection::Appearance)
         .iter()
         .position(|&id| id == SettingId::UiLanguage)
         .unwrap();
@@ -1496,8 +1499,7 @@ fn every_config_key_except_structured_lists_has_a_settings_control() {
         "ai_project_allow_list",
     ];
     let value = serde_json::to_value(TwittyConfig::default()).unwrap();
-    let covered: Vec<&str> = SettingId::CONFIG_SETTINGS
-        .iter()
+    let covered: Vec<&str> = SettingId::config_settings()
         .filter_map(|s| s.config_key())
         .collect();
     for key in value.as_object().unwrap().keys() {
@@ -1625,4 +1627,44 @@ fn theme_color_overrides_are_editable_and_half_typed_colors_are_not_saved() {
         json["colors"],
         serde_json::json!({"ansi": ["#000000", "#ff0000", "#0f0"]})
     );
+}
+
+#[test]
+fn every_toggle_writes_only_its_own_config_key() {
+    use twitty::ui::settings_panel::{write_bool, ControlKind};
+    for &id in SettingId::all() {
+        if !matches!(id.descriptor().kind, ControlKind::Toggle(_)) {
+            continue;
+        }
+        let mut cfg = TwittyConfig::default();
+        let before = serde_json::to_value(&cfg).unwrap();
+        let value = read_bool(id, &cfg);
+        assert!(write_bool(id, !value, &mut cfg), "{id:?}");
+        assert_eq!(read_bool(id, &cfg), !value, "{id:?}");
+        assert!(
+            !write_bool(id, !value, &mut cfg),
+            "{id:?} reports a change that is not one"
+        );
+        let after = serde_json::to_value(&cfg).unwrap();
+        let changed: Vec<&String> = after
+            .as_object()
+            .unwrap()
+            .iter()
+            .filter(|(k, v)| before.get(k.as_str()) != Some(v))
+            .map(|(k, _)| k)
+            .collect();
+        assert_eq!(changed, vec![id.config_key().unwrap()], "{id:?}");
+    }
+}
+
+#[test]
+fn sections_list_the_table_in_order() {
+    let listed: Vec<SettingId> = SettingsSection::ALL
+        .iter()
+        .flat_map(|&s| SettingId::in_section(s).iter().copied())
+        .collect();
+    assert_eq!(listed, SettingId::all());
+    for &id in SettingId::all() {
+        assert!(SettingId::in_section(id.section()).contains(&id));
+    }
 }

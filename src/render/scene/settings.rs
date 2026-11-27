@@ -358,7 +358,7 @@ impl SettingsDrawer<'_, '_> {
 
         // Control widget.
         match (&desc.kind, &row.geometry) {
-            (ControlKind::Toggle, ControlGeometry::Toggle { track }) => {
+            (ControlKind::Toggle(_), ControlGeometry::Toggle { track }) => {
                 self.draw_toggle(row.id, *track);
             }
             (

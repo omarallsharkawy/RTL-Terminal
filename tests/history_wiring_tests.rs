@@ -223,8 +223,8 @@ fn record_history_config_default_and_settings_behaviour_toggle() {
         SettingId::RecordHistory.config_key(),
         Some("record_history")
     );
-    assert!(SettingId::BEHAVIOUR.contains(&SettingId::RecordHistory));
-    assert!(SettingId::CONFIG_SETTINGS.contains(&SettingId::RecordHistory));
+    assert!(SettingId::in_section(SettingsSection::Behaviour).contains(&SettingId::RecordHistory));
+    assert!(SettingId::config_settings().any(|id| id == SettingId::RecordHistory));
 
     let desc = SettingId::RecordHistory.descriptor();
     assert!(!desc.label_en.is_empty());
