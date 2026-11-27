@@ -1,6 +1,10 @@
 //! Render snapshot, physical-pixel layout geometry, word-wrapping, and hit testing for the Agent panel.
 
+use std::sync::Arc;
+
 use twitty_ai::engine::model::{ContextBundle, StepId, StepKind};
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthChar;
 
 use super::session::{AgentSession, CardButton, CardEditMode, StepEntry};
 use super::state::AgentFocus;
@@ -26,7 +30,7 @@ pub struct AgentPanelView {
     pub focus: AgentFocus,
     pub cursor_blink_on: bool,
     pub project_name: String,
-    pub session: Option<AgentSession>,
+    pub session: Option<Arc<AgentSession>>,
     pub selected_step: Option<StepId>,
     pub focused_button: usize,
     pub edit_mode: Option<CardEditMode>,
@@ -572,10 +576,50 @@ fn patch_files_height(kind: &StepKind, row_h: f32) -> f32 {
     }
 }
 
-/// Estimate wrapped line count for a piece of text inside `max_w` physical pixels.
-/// Greedy word wrap by an estimated character width (UI text, not terminal cells).
+/// Estimated visual column units of a single Unicode grapheme cluster in proportional UI text:
+/// - Zero-width combining marks (including Arabic harakat/tashkeel) and bidi controls add `0.0`.
+/// - Arabic base letters use a `1.12` factor so connected Arabic glyphs in UI fonts do not clip.
+/// - Wide CJK / emoji glyphs (`unicode_width == 2`) use `1.9`.
+/// - Ordinary Latin/digits/punctuation use `1.0`.
+fn grapheme_width_units(grapheme: &str) -> f32 {
+    let mut base = 0.0f32;
+    for ch in grapheme.chars() {
+        let w = ch.width().unwrap_or(0);
+        if w == 0 {
+            continue;
+        }
+        let unit = if w >= 2 {
+            1.9
+        } else if matches!(
+            ch,
+            '\u{0600}'..='\u{06FF}'
+                | '\u{0750}'..='\u{077F}'
+                | '\u{08A0}'..='\u{08FF}'
+                | '\u{FB50}'..='\u{FDFF}'
+                | '\u{FE70}'..='\u{FEFF}'
+        ) {
+            1.12
+        } else {
+            1.0
+        };
+        base = base.max(unit);
+    }
+    base
+}
+
+fn word_width_units(word: &str) -> f32 {
+    word.graphemes(true).map(grapheme_width_units).sum()
+}
+
+/// Greedy Unicode/Arabic-aware word wrap inside `max_w` physical pixels.
+///
+/// Accounts for zero-width Arabic diacritics (harakat), wider Arabic/CJK glyphs, and hard-breaks
+/// single overlong tokens (URLs, paths) at grapheme boundaries so no grapheme cluster is split.
 pub fn wrap_words(text: &str, max_w: f32, char_w: f32, max_lines: usize) -> Vec<String> {
-    let cols = (max_w / char_w.max(6.0)).floor().max(12.0) as usize;
+    if max_lines == 0 {
+        return Vec::new();
+    }
+    let cols = (max_w / char_w.max(6.0)).floor().max(12.0);
     let mut out = Vec::new();
     for para in text.lines() {
         if para.trim().is_empty() {
@@ -586,22 +630,45 @@ pub fn wrap_words(text: &str, max_w: f32, char_w: f32, max_lines: usize) -> Vec<
             continue;
         }
         let mut cur = String::new();
-        let mut cur_len = 0usize;
+        let mut cur_w = 0.0f32;
         for word in para.split_whitespace() {
-            let wlen = word.chars().count();
-            if cur_len > 0 && cur_len + 1 + wlen > cols {
+            let ww = word_width_units(word);
+            if cur_w > 0.0 && cur_w + 1.0 + ww > cols {
                 out.push(std::mem::take(&mut cur));
-                cur_len = 0;
+                cur_w = 0.0;
                 if out.len() >= max_lines {
                     return out;
                 }
             }
-            if cur_len > 0 {
+            if ww > cols {
+                // Hard-wrap a single token wider than the line at grapheme boundaries.
+                if cur_w > 0.0 {
+                    out.push(std::mem::take(&mut cur));
+                    cur_w = 0.0;
+                    if out.len() >= max_lines {
+                        return out;
+                    }
+                }
+                for g in word.graphemes(true) {
+                    let gw = grapheme_width_units(g);
+                    if cur_w > 0.0 && cur_w + gw > cols {
+                        out.push(std::mem::take(&mut cur));
+                        cur_w = 0.0;
+                        if out.len() >= max_lines {
+                            return out;
+                        }
+                    }
+                    cur.push_str(g);
+                    cur_w += gw;
+                }
+                continue;
+            }
+            if cur_w > 0.0 {
                 cur.push(' ');
-                cur_len += 1;
+                cur_w += 1.0;
             }
             cur.push_str(word);
-            cur_len += wlen;
+            cur_w += ww;
         }
         if !cur.is_empty() {
             out.push(cur);
@@ -616,17 +683,12 @@ pub fn wrap_words(text: &str, max_w: f32, char_w: f32, max_lines: usize) -> Vec<
     out
 }
 
+/// Exact wrapped line count matching [`wrap_words`] so card height measurement never diverges
+/// from rendered paragraph lines (including Arabic with harakat and long unbroken tokens).
 pub fn estimate_wrapped_lines(text: &str, max_w: f32, char_w: f32, max_lines: usize) -> usize {
-    let cols = (max_w / char_w.max(6.0)).floor().max(12.0) as usize;
-    let mut total = 0usize;
-    for raw_line in text.lines() {
-        let len = raw_line.chars().count();
-        total += (len.max(1)).div_ceil(cols);
-        if total >= max_lines {
-            return max_lines;
-        }
-    }
-    total.max(1).min(max_lines)
+    wrap_words(text, max_w, char_w, max_lines)
+        .len()
+        .clamp(1, max_lines.max(1))
 }
 
 fn measure_card_height(

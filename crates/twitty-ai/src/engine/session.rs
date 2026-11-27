@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use serde_json::{json, Value};
 
-use super::config::{estimated_cost_micros, total_usage};
+use super::config::total_usage;
 use super::journal::Journal;
 use super::model::*;
 use super::patch::Patch;
@@ -344,7 +344,9 @@ impl Session {
         if let Some(cap) = config.cost_cap_micros_usd {
             // Only enforce cost-cap clamping when the model has known pricing; unlisted or custom
             // models are still governed by `token_cap` instead of being permanently blocked.
-            if estimated_cost_micros(&self.provider.kind, &self.provider.model, input, 1).is_some()
+            if config
+                .estimate_cost_micros(&self.provider.kind, &self.provider.model, input, 1)
+                .is_some()
             {
                 let used = self
                     .usage
@@ -353,7 +355,13 @@ impl Session {
                     .saturating_sub(self.budget_base.cost_micros_usd.unwrap_or_default());
                 let remaining = cap.saturating_sub(used);
                 let fits = |tokens| {
-                    estimated_cost_micros(&self.provider.kind, &self.provider.model, input, tokens)
+                    config
+                        .estimate_cost_micros(
+                            &self.provider.kind,
+                            &self.provider.model,
+                            input,
+                            tokens,
+                        )
                         .is_some_and(|cost| cost <= remaining)
                 };
                 if !fits(1) {
@@ -434,7 +442,7 @@ impl Session {
         turn.sanitize(None);
         turn.text = bounded(&clean(&turn.text), MAX_TEXT_BYTES).into();
         if turn.usage.cost_micros_usd.is_none() {
-            turn.usage.cost_micros_usd = estimated_cost_micros(
+            turn.usage.cost_micros_usd = config.estimate_cost_micros(
                 &self.provider.kind,
                 &self.provider.model,
                 turn.usage.input_tokens,

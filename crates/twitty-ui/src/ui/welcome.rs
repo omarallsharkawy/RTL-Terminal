@@ -345,7 +345,27 @@ impl ShortcutEntry {
 }
 
 /// Build the shortcuts cheat sheet from `commands`, keeping the curated order and
-/// effective shortcut chords from the command table.
+/// effective shortcut chords from `keybindings` (reflecting user overrides and unbinds).
+pub fn build_shortcut_entries_with(
+    commands: &[Command],
+    keybindings: &crate::input::keybindings::KeyBindings,
+) -> Vec<ShortcutEntry> {
+    WELCOME_SHORTCUT_COMMANDS
+        .iter()
+        .filter_map(|&name| {
+            let cmd = commands.iter().find(|c| c.name == name)?;
+            Some(ShortcutEntry {
+                name: cmd.name,
+                title_en: cmd.title_en,
+                title_ar: cmd.title_ar,
+                chord: keybindings.display_shortcut(cmd.name),
+            })
+        })
+        .collect()
+}
+
+/// Build the shortcuts cheat sheet from `commands`, keeping the curated order and
+/// default shortcut chords from the command table.
 pub fn build_shortcut_entries(commands: &[Command]) -> Vec<ShortcutEntry> {
     WELCOME_SHORTCUT_COMMANDS
         .iter()
@@ -699,6 +719,21 @@ impl WelcomeState {
     ) -> Self {
         let all = commands::all();
         Self::new(config, env_language, shell, agents, &all)
+    }
+
+    /// Construct with the live command table and the user's effective
+    /// [`crate::input::keybindings::KeyBindings`].
+    pub fn with_keybindings(
+        config: &TwittyConfig,
+        keybindings: &crate::input::keybindings::KeyBindings,
+        env_language: UiLanguage,
+        shell: ShellStatus,
+        agents: AgentsInfo,
+    ) -> Self {
+        let all = commands::all();
+        let mut state = Self::new(config, env_language, shell, agents, &all);
+        state.shortcuts = build_shortcut_entries_with(&all, keybindings);
+        state
     }
 
     pub fn mirrored(&self) -> bool {

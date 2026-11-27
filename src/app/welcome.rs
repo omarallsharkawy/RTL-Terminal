@@ -53,8 +53,9 @@ impl App {
         let agents = AgentsInfo::detect_env(&self.config);
         let env_language = UiLanguage::from_environment();
 
-        self.welcome = Some(WelcomeState::with_default_commands(
+        self.welcome = Some(WelcomeState::with_keybindings(
             &self.config,
+            &self.keybindings,
             env_language,
             shell,
             agents,

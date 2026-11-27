@@ -28,6 +28,37 @@ impl Default for ProviderModels {
     }
 }
 
+/// Token pricing rates for a model in thousandths of one micro-USD per token
+/// (equivalently, USD per billion tokens, or `usd_per_million * 1000`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ModelRates {
+    pub input_milli_micros: u64,
+    pub output_milli_micros: u64,
+}
+
+impl ModelRates {
+    /// Construct rates from USD per 1M input/output tokens (e.g. `per_million_usd(3.0, 15.0)`).
+    pub fn per_million_usd(input_usd: f64, output_usd: f64) -> Self {
+        let to_rate = |usd: f64| {
+            if usd.is_finite() && usd >= 0.0 {
+                (usd * 1000.0).round() as u64
+            } else {
+                0
+            }
+        };
+        Self {
+            input_milli_micros: to_rate(input_usd),
+            output_milli_micros: to_rate(output_usd),
+        }
+    }
+
+    pub fn cost_micros(self, input: u64, output: u64) -> u64 {
+        let total = u128::from(input) * u128::from(self.input_milli_micros)
+            + u128::from(output) * u128::from(self.output_milli_micros);
+        u64::try_from(total.div_ceil(1000)).unwrap_or(u64::MAX)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct EngineConfig {
     pub provider: ProviderKind,
@@ -40,6 +71,8 @@ pub struct EngineConfig {
     pub token_cap: Option<u64>,
     /// Estimated micro-USD budget per request, extended only after approval.
     pub cost_cap_micros_usd: Option<u64>,
+    /// Optional per-model rate overrides keyed by exact model name or prefix.
+    pub custom_pricing: HashMap<String, ModelRates>,
     /// Canonical project roots mapped to exact argv prefixes. Empty by default.
     pub allow_lists: HashMap<PathBuf, Vec<Vec<String>>>,
     pub journal_dir: PathBuf,
@@ -58,6 +91,7 @@ impl Default for EngineConfig {
             max_output_tokens: 4096,
             token_cap: None,
             cost_cap_micros_usd: None,
+            custom_pricing: HashMap::new(),
             allow_lists: HashMap::new(),
             journal_dir: super::journal::default_dir(),
         }
@@ -97,6 +131,31 @@ impl EngineConfig {
             display,
         }
     }
+    /// Estimate micro-USD cost using `self.custom_pricing` overrides first, then the built-in table.
+    pub fn estimate_cost_micros(
+        &self,
+        kind: &ProviderKind,
+        model: &str,
+        input: u64,
+        output: u64,
+    ) -> Option<u64> {
+        if let Some(rates) = self.custom_pricing.get(model) {
+            return Some(rates.cost_micros(input, output));
+        }
+        let mut best_prefix: Option<(usize, ModelRates)> = None;
+        for (prefix, &rates) in &self.custom_pricing {
+            if !prefix.is_empty()
+                && model.starts_with(prefix)
+                && best_prefix.is_none_or(|(len, _)| prefix.len() > len)
+            {
+                best_prefix = Some((prefix.len(), rates));
+            }
+        }
+        if let Some((_, rates)) = best_prefix {
+            return Some(rates.cost_micros(input, output));
+        }
+        estimated_cost_micros(kind, model, input, output)
+    }
 }
 
 /// Approximate standard list rates in thousandths of one micro-USD per token. Cached tokens,
@@ -107,21 +166,42 @@ pub fn estimated_cost_micros(
     input: u64,
     output: u64,
 ) -> Option<u64> {
-    let (input_rate, output_rate) = match (kind, model) {
-        (ProviderKind::Anthropic, m) if m.starts_with("claude-opus-") => (15000_u64, 75000_u64),
-        (ProviderKind::Anthropic, m) if m.starts_with("claude-sonnet-") => (3000, 15000),
-        (ProviderKind::Anthropic, m) if m.starts_with("claude-haiku-") => (800, 4000),
+    let m = model.to_ascii_lowercase();
+    let (input_rate, output_rate) = match (kind, m.as_str()) {
+        (ProviderKind::Anthropic, m) if m.starts_with("claude-opus-") || m.contains("-opus") => {
+            (15000_u64, 75000_u64)
+        }
+        (ProviderKind::Anthropic, m)
+            if m.starts_with("claude-sonnet-") || m.contains("-sonnet") =>
+        {
+            (3000, 15000)
+        }
+        (ProviderKind::Anthropic, m) if m.starts_with("claude-haiku-") || m.contains("-haiku") => {
+            (800, 4000)
+        }
         (ProviderKind::OpenAi, m) if m.starts_with("gpt-4.1-mini") => (400, 1600),
         (ProviderKind::OpenAi, m) if m.starts_with("gpt-4.1-nano") => (100, 400),
         (ProviderKind::OpenAi, m) if m.starts_with("gpt-4.1") => (2000, 8000),
+        (ProviderKind::OpenAi, m) if m.starts_with("gpt-4o-mini") => (150, 600),
+        (ProviderKind::OpenAi, m) if m.starts_with("gpt-4o") => (2500, 10000),
+        (ProviderKind::OpenAi, m) if m.starts_with("gpt-5-mini") => (250, 2000),
+        (ProviderKind::OpenAi, m) if m.starts_with("gpt-5") => (1250, 10000),
+        (ProviderKind::OpenAi, m) if m.starts_with("o4-mini") || m.starts_with("o3-mini") => {
+            (1100, 4400)
+        }
+        (ProviderKind::OpenAi, m) if m.starts_with("o3") => (2000, 8000),
         (ProviderKind::Gemini, m) if m.starts_with("gemini-") && m.contains("flash") => (300, 2500),
         (ProviderKind::Gemini, m) if m.starts_with("gemini-") && m.contains("pro") => (1250, 10000),
         (ProviderKind::Ollama { .. }, _) => (0, 0),
         _ => return None,
     };
-    let total =
-        u128::from(input) * u128::from(input_rate) + u128::from(output) * u128::from(output_rate);
-    Some(u64::try_from(total.div_ceil(1000)).unwrap_or(u64::MAX))
+    Some(
+        ModelRates {
+            input_milli_micros: input_rate,
+            output_milli_micros: output_rate,
+        }
+        .cost_micros(input, output),
+    )
 }
 
 pub(super) fn total_usage(previous: Usage, next: Usage) -> Usage {

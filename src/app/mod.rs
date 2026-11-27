@@ -95,7 +95,7 @@ pub struct App {
     /// True while a background `WorkflowSet::load` worker is running.
     workflows_pending: bool,
     /// Compiled keyboard shortcut table (defaults + `config.keybindings`), updated live.
-    keybindings: crate::input::keybindings::KeyBindings,
+    keybindings: std::sync::Arc<crate::input::keybindings::KeyBindings>,
     session: SessionStore,
     startup_session: Option<PreparedSession>,
     startup_ssh: Option<crate::remote::Target>,
@@ -158,7 +158,9 @@ impl App {
     pub fn new(proxy: EventLoopProxy<AppEvent>) -> Self {
         let perf = crate::perf::Perf::from_env();
         let config = TwittyConfig::load();
-        let keybindings = crate::input::keybindings::KeyBindings::from_config(&config.keybindings);
+        let keybindings = std::sync::Arc::new(crate::input::keybindings::KeyBindings::from_config(
+            &config.keybindings,
+        ));
         let session = SessionStore::new();
         let startup_session = if config.restore_session {
             session.load()
@@ -180,7 +182,7 @@ impl App {
             settings_probe_gen: 0,
             workflows_cache: None,
             workflows_pending: false,
-            keybindings,
+            keybindings: std::sync::Arc::clone(&keybindings),
             session,
             startup_session,
             startup_ssh: None,
@@ -202,7 +204,11 @@ impl App {
             review: Default::default(),
             agent_panel: agent_panel::AgentPanelHost::default(),
             git_diff: git_diff::GitDiffWatch::default(),
-            composer: composer::ComposerHost::default(),
+            composer: {
+                let mut host = composer::ComposerHost::default();
+                host.state.keybindings = Some(std::sync::Arc::clone(&keybindings));
+                host
+            },
             context_menu: None,
             tooltip: crate::ui::tooltip::TooltipState::default(),
             toasts: crate::ui::toast::Toasts::default(),
@@ -451,7 +457,7 @@ impl ApplicationHandler<AppEvent> for App {
                 restart_engine,
             ),
             AppEvent::AgentEngineConfigReady { generation, config } => {
-                self.on_agent_engine_config_ready(generation, config)
+                self.on_agent_engine_config_ready(generation, *config)
             }
             AppEvent::AgentStartReady {
                 generation,

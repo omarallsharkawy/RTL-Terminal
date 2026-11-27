@@ -21,9 +21,11 @@ use std::time::Duration;
 
 use twitty_store::SecretStore;
 
-pub use config::{estimated_cost_micros, EngineConfig, ProviderModels, DEFAULT_OLLAMA_URL};
+pub use config::{
+    estimated_cost_micros, EngineConfig, ModelRates, ProviderModels, DEFAULT_OLLAMA_URL,
+};
 pub use model::AgentHandle;
-pub use provider::Provider;
+pub use provider::{Provider, ProviderError, ProviderRequest, ProviderTurn};
 
 use model::{AgentCommand, AgentEvent, FinishReason, SessionId};
 use provider::BuiltInProvider;

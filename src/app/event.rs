@@ -69,7 +69,7 @@ pub enum AppEvent {
     /// Off-thread Agent engine config built from `$PATH` + system keyring.
     AgentEngineConfigReady {
         generation: u64,
-        config: twitty_ai::engine::EngineConfig,
+        config: Box<twitty_ai::engine::EngineConfig>,
     },
     /// Assembled context ready to start an agent session without blocking the UI thread.
     AgentStartReady {

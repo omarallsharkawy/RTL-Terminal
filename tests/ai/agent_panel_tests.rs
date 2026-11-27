@@ -1166,3 +1166,38 @@ fn context_assembly_honors_inspector_toggles_and_remember_fact_integration() {
 
     let _ = std::fs::remove_dir_all(&tmp_dir);
 }
+
+#[test]
+fn arabic_harakat_word_wrap_matches_height_and_view_shares_arc_session() {
+    use std::sync::Arc;
+    use twitty::ui::agent_panel::wrap_words;
+
+    // Arabic paragraph with dense harakat (combining marks) and a long unbroken URL token.
+    let arabic = "الْعَرَبِيَّةُ لُغَةٌ جَمِيلَةٌ وَتَحْتَاجُ إِلَى قِيَاسٍ دَقِيقٍ لِلأَسْطُرِ https://example.com/very/long/unbroken/path/segment/that/exceeds/width";
+    let wrapped = wrap_words(arabic, 180.0, 7.2, 20);
+    assert!(
+        wrapped.len() >= 3,
+        "expected Arabic + long URL to wrap into multiple lines, got {wrapped:?}"
+    );
+    // No wrapped line may start with a detached Arabic combining mark (haraka).
+    for line in &wrapped {
+        if let Some(first) = line.chars().next() {
+            assert!(
+                !('\u{064B}'..='\u{065F}').contains(&first),
+                "combining mark detached onto line start: {line:?}"
+            );
+        }
+    }
+
+    // View snapshots share the active AgentSession via Arc::clone in O(1).
+    let mut panel = AgentPanelState::new();
+    panel.open();
+    panel.submit_prompt("Hello".into());
+    let rect = Rect::new(0.0, 0.0, 420.0, 600.0);
+    let v1 = panel.view(rect, UiLanguage::English, true);
+    let v2 = panel.view(rect, UiLanguage::English, false);
+    assert!(Arc::ptr_eq(
+        v1.session.as_ref().expect("active session"),
+        v2.session.as_ref().expect("active session")
+    ));
+}

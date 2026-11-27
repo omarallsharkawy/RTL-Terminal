@@ -241,6 +241,8 @@ pub struct ComposerState {
     pub ai_reviewing: bool,
     /// Agent slash items found for the pane's project (filled off the UI thread).
     pub slash: std::sync::Arc<slash::SlashCatalog>,
+    /// Effective keybindings used for live `/command` shortcut hints in the slash popup.
+    pub keybindings: Option<std::sync::Arc<crate::input::keybindings::KeyBindings>>,
     /// The coding agent running in the pane, if any (decides what a slash pick inserts).
     pub slash_foreground: slash::Foreground,
     /// The open popup is the slash menu (picks of Twitty commands run instead of inserting).
@@ -259,6 +261,7 @@ impl Default for ComposerState {
             ai_loading: false,
             ai_reviewing: false,
             slash: Default::default(),
+            keybindings: None,
             slash_foreground: slash::Foreground::Shell,
             slash_popup: false,
         }
@@ -410,7 +413,12 @@ impl ComposerState {
             workflows,
             foreground: self.slash_foreground,
         };
-        let items = slash::suggestions(query, text.len(), &inputs);
+        let items = slash::suggestions_with_keybindings(
+            query,
+            text.len(),
+            &inputs,
+            self.keybindings.as_deref(),
+        );
         if !items.is_empty() {
             self.ghost = None;
             self.popup = Some(PopupState { items, selected: 0 });

@@ -366,7 +366,9 @@ impl App {
             self.sync_agent_needs_input();
         }
         if outcome.keybindings_changed {
-            self.keybindings = KeyBindings::from_config(&self.config.keybindings);
+            self.keybindings =
+                std::sync::Arc::new(KeyBindings::from_config(&self.config.keybindings));
+            self.composer.state.keybindings = Some(std::sync::Arc::clone(&self.keybindings));
         }
         if outcome.commands_changed {
             self.invalidate_composer_workflows();

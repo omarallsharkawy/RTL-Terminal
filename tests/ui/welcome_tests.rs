@@ -835,3 +835,36 @@ fn welcome_overlay_renders_all_steps_in_both_themes_and_clips_underlying_termina
         }
     }
 }
+
+#[test]
+fn welcome_with_keybindings_reflects_custom_rebinds_and_unbinds() {
+    use twitty::input::keybindings::{KeyBindings, KeybindingValue};
+
+    let mut cfg = TwittyConfig::default();
+    cfg.keybindings
+        .set("palette.open", KeybindingValue::Single("Ctrl+Alt+P".into()));
+    cfg.keybindings
+        .set("sidebar.toggle", KeybindingValue::Unbind);
+    let kb = KeyBindings::from_config(&cfg.keybindings);
+    let state = WelcomeState::with_keybindings(
+        &cfg,
+        &kb,
+        UiLanguage::English,
+        ShellStatus {
+            name: "bash".into(),
+            supported: true,
+            marks_seen: true,
+        },
+        AgentsInfo::default(),
+    );
+    let palette = state
+        .shortcuts
+        .iter()
+        .find(|s| s.name == "palette.open")
+        .expect("palette.open listed");
+    assert_eq!(palette.chord.as_deref(), Some("Ctrl+Alt+P"));
+
+    if let Some(sidebar) = state.shortcuts.iter().find(|s| s.name == "sidebar.toggle") {
+        assert_eq!(sidebar.chord, None);
+    }
+}

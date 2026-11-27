@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use twitty_ai::engine::model::{
     AgentCommand, AgentEvent, ContextBundle, Decision, SessionId, StepId, StepKind, StepStatus,
@@ -65,8 +66,8 @@ pub struct AgentPanelState {
     pub project_name: String,
     /// Working directory sent on `AgentCommand::Start`.
     pub cwd: PathBuf,
-    /// Sessions keyed by id so multiple runs remain addressable.
-    pub sessions: HashMap<SessionId, AgentSession>,
+    /// Sessions keyed by id so multiple runs remain addressable (`Arc` for O(1) render snapshots).
+    pub sessions: HashMap<SessionId, Arc<AgentSession>>,
     pub active_session: Option<SessionId>,
     next_session_id: u64,
     /// Selected step card in the active session.
@@ -179,12 +180,14 @@ impl AgentPanelState {
     }
 
     pub fn active_session(&self) -> Option<&AgentSession> {
-        self.active_session.and_then(|id| self.sessions.get(&id))
+        self.active_session
+            .and_then(|id| self.sessions.get(&id))
+            .map(Arc::as_ref)
     }
 
     pub fn active_session_mut(&mut self) -> Option<&mut AgentSession> {
         let id = self.active_session?;
-        self.sessions.get_mut(&id)
+        self.sessions.get_mut(&id).map(Arc::make_mut)
     }
 
     pub fn is_running(&self) -> bool {
@@ -257,7 +260,7 @@ impl AgentPanelState {
         pane: PaneId,
         block: u64,
     ) {
-        if let Some(sess) = self.sessions.get_mut(&session) {
+        if let Some(sess) = self.sessions.get_mut(&session).map(Arc::make_mut) {
             if let Some(entry) = sess.step_mut(step) {
                 entry.block_link = Some((pane, block));
                 return;
@@ -289,10 +292,11 @@ impl AgentPanelState {
     pub fn apply_event(&mut self, event: AgentEvent) -> AgentPanelAction {
         match event {
             AgentEvent::Started { session, provider } => {
-                let entry = self
-                    .sessions
-                    .entry(session)
-                    .or_insert_with(|| AgentSession::new(session));
+                let entry = Arc::make_mut(
+                    self.sessions
+                        .entry(session)
+                        .or_insert_with(|| Arc::new(AgentSession::new(session))),
+                );
                 entry.provider = Some(provider);
                 entry.running = true;
                 entry.finish_reason = None;
@@ -303,10 +307,11 @@ impl AgentPanelState {
                 let id = step.id;
                 let waiting =
                     step.status == StepStatus::WaitingApproval && is_approval_kind(&step.kind);
-                let entry = self
-                    .sessions
-                    .entry(session)
-                    .or_insert_with(|| AgentSession::new(session));
+                let entry = Arc::make_mut(
+                    self.sessions
+                        .entry(session)
+                        .or_insert_with(|| Arc::new(AgentSession::new(session))),
+                );
                 entry.push_step(StepEntry::new(step));
                 self.active_session = Some(session);
                 if waiting {
@@ -328,10 +333,11 @@ impl AgentPanelState {
                 let id = step.id;
                 let waiting =
                     step.status == StepStatus::WaitingApproval && is_approval_kind(&step.kind);
-                let sess = self
-                    .sessions
-                    .entry(session)
-                    .or_insert_with(|| AgentSession::new(session));
+                let sess = Arc::make_mut(
+                    self.sessions
+                        .entry(session)
+                        .or_insert_with(|| Arc::new(AgentSession::new(session))),
+                );
                 if let Some(existing) = sess.step_mut(id) {
                     existing.set_step(step);
                 } else {
@@ -373,15 +379,16 @@ impl AgentPanelState {
                 text,
             },
             AgentEvent::Usage { session, usage } => {
-                let sess = self
-                    .sessions
-                    .entry(session)
-                    .or_insert_with(|| AgentSession::new(session));
+                let sess = Arc::make_mut(
+                    self.sessions
+                        .entry(session)
+                        .or_insert_with(|| Arc::new(AgentSession::new(session))),
+                );
                 sess.usage = usage;
                 AgentPanelAction::Redraw
             }
             AgentEvent::Finished { session, reason } => {
-                if let Some(sess) = self.sessions.get_mut(&session) {
+                if let Some(sess) = self.sessions.get_mut(&session).map(Arc::make_mut) {
                     sess.running = false;
                     sess.finish_reason = Some(reason);
                 }
@@ -416,7 +423,7 @@ impl AgentPanelState {
         self.scroll_y = f32::MAX;
 
         if let Some(session) = self.active_session {
-            if let Some(sess) = self.sessions.get_mut(&session) {
+            if let Some(sess) = self.sessions.get_mut(&session).map(Arc::make_mut) {
                 sess.running = true;
                 sess.finish_reason = None;
             }
@@ -427,7 +434,8 @@ impl AgentPanelState {
         } else {
             let session = SessionId(self.next_session_id);
             self.next_session_id += 1;
-            self.sessions.insert(session, AgentSession::new(session));
+            self.sessions
+                .insert(session, Arc::new(AgentSession::new(session)));
             self.active_session = Some(session);
             AgentPanelAction::SendCommand(AgentCommand::Start {
                 session,
@@ -544,7 +552,7 @@ impl AgentPanelState {
             self.edit_mode = Some(edit);
             return AgentPanelAction::Redraw;
         }
-        if let Some(sess) = self.sessions.get_mut(&session) {
+        if let Some(sess) = self.sessions.get_mut(&session).map(Arc::make_mut) {
             if let Some(entry) = sess.step_mut(step) {
                 entry.user_edited = true;
                 match &mut entry.step.kind {
@@ -1123,8 +1131,12 @@ impl AgentPanelState {
     }
 
     /// Build a snapshot view for rendering without borrowing `App`.
+    /// Clones the active [`AgentSession`] via `Arc::clone` in O(1) instead of deep-cloning steps.
     pub fn view(&self, rect: Rect, language: UiLanguage, cursor_blink_on: bool) -> AgentPanelView {
-        let session = self.active_session().cloned();
+        let session = self
+            .active_session
+            .and_then(|id| self.sessions.get(&id))
+            .cloned();
         AgentPanelView {
             rect,
             language,

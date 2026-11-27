@@ -241,7 +241,19 @@ pub struct SlashInputs<'a> {
 }
 
 /// Popup items for `/query` (the whole composer buffer, `text_len` bytes long).
+/// Suggestions for `/query` across the active agent's skills/commands/MCPs, Twitty commands, and
+/// trusted user workflows.
 pub fn suggestions(query: &str, text_len: usize, inputs: &SlashInputs<'_>) -> Vec<CompletionItem> {
+    suggestions_with_keybindings(query, text_len, inputs, None)
+}
+
+/// Like [`suggestions`], but renders Twitty command shortcut hints from `keybindings` when given.
+pub fn suggestions_with_keybindings(
+    query: &str,
+    text_len: usize,
+    inputs: &SlashInputs<'_>,
+    keybindings: Option<&crate::input::keybindings::KeyBindings>,
+) -> Vec<CompletionItem> {
     if inputs.foreground == Foreground::Other {
         return Vec::new();
     }
@@ -325,7 +337,10 @@ pub fn suggestions(query: &str, text_len: usize, inputs: &SlashInputs<'_>) -> Ve
         else {
             continue;
         };
-        let detail_for = |title: &str| match command.shortcut {
+        let effective_shortcut = keybindings
+            .map(|kb| kb.display_shortcut(command.name))
+            .unwrap_or_else(|| command.shortcut.map(str::to_owned));
+        let detail_for = |title: &str| match effective_shortcut.as_deref() {
             Some(keys) => format!("Twitty · {title} · {keys}"),
             None => format!("Twitty · {title}"),
         };

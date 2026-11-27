@@ -177,7 +177,10 @@ impl App {
                     &detected,
                     |account| matches!(keyring.get(account), Ok(Some(v)) if !v.is_empty()),
                 );
-                let _ = proxy.send_event(AppEvent::AgentEngineConfigReady { generation, config });
+                let _ = proxy.send_event(AppEvent::AgentEngineConfigReady {
+                    generation,
+                    config: Box::new(config),
+                });
             })
         {
             tracing::warn!("twitty agent init thread failed to start: {err}");

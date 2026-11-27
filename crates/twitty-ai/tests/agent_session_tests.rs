@@ -672,11 +672,39 @@ fn cost_cap_does_not_block_unlisted_models() {
     let provider = ScriptedProvider::new([answer("Completed with custom model")]);
     let mut settings = config(root);
     settings.provider = ProviderKind::OpenAi;
-    settings.models.openai = "gpt-5-custom-unlisted".into();
+    settings.models.openai = "custom-unlisted-v1".into();
     settings.cost_cap_micros_usd = Some(1);
     let handle = provider.spawn(settings);
     let id = SessionId(1);
     start(&handle, id, root, vec![]);
     finish(&handle, id, FinishReason::Completed);
     assert_eq!(provider.requests().len(), 1);
+}
+
+#[test]
+fn custom_pricing_overrides_and_expanded_model_table() {
+    use twitty_ai::engine::{EngineConfig, ModelRates};
+
+    let mut cfg = EngineConfig::default();
+    // Built-in expanded models return Some(cost).
+    assert!(cfg
+        .estimate_cost_micros(&ProviderKind::OpenAi, "gpt-4o-mini", 1_000, 1_000)
+        .is_some());
+    assert!(cfg
+        .estimate_cost_micros(&ProviderKind::OpenAi, "gpt-5", 1_000, 1_000)
+        .is_some());
+    assert!(cfg
+        .estimate_cost_micros(&ProviderKind::OpenAi, "custom-unlisted-v1", 1_000, 1_000)
+        .is_none());
+
+    // Custom exact and prefix overrides take precedence.
+    cfg.custom_pricing.insert(
+        "custom-unlisted".into(),
+        ModelRates::per_million_usd(2.0, 10.0),
+    );
+    // 1000 input @ $2/M = $0.002 (2,000 micro-USD), 1000 output @ $10/M = $0.010 (10,000 micro-USD) => 12,000 micro-USD.
+    assert_eq!(
+        cfg.estimate_cost_micros(&ProviderKind::OpenAi, "custom-unlisted-v1", 1_000, 1_000),
+        Some(12_000)
+    );
 }

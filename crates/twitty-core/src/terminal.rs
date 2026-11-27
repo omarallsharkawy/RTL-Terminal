@@ -378,6 +378,8 @@ pub struct Terminal {
     /// when the shell sent no OSC 633 E.
     command_start: Option<(AbsLine, usize)>,
     scrollback: usize,
+    /// Monotonically incremented whenever terminal grid content or dimensions change.
+    content_generation: u64,
 }
 
 struct SearchState {
@@ -386,6 +388,10 @@ struct SearchState {
     focus: Option<Match>,
     /// 1-based index of the focused match (oldest first) and the total count.
     position: (usize, usize),
+    /// `content_generation` at which `cached_starts` was computed (`0` = stale).
+    cached_generation: u64,
+    /// Sorted start points of all matches (up to `MAX_COUNTED_MATCHES`) for fast Next/Prev jumps.
+    cached_starts: Vec<Point>,
 }
 
 /// Stop counting beyond this many matches.
@@ -486,6 +492,7 @@ impl Terminal {
             lines: LineTracker::new(scrollback),
             command_start: None,
             scrollback,
+            content_generation: 1,
         }
     }
 
@@ -526,6 +533,9 @@ impl Terminal {
             i += 1;
         }
         self.parser.advance(&mut self.term, &bytes[from..]);
+        if !bytes.is_empty() {
+            self.content_generation = self.content_generation.wrapping_add(1).max(1);
+        }
         if self.lines.enabled() {
             self.sync_lines();
         }
@@ -716,6 +726,7 @@ impl Terminal {
         let alt = self.is_alt_screen();
         let prep = self.lines.before_resize(self.term.grid(), alt, cols, rows);
         self.term.resize(TermSize::new(cols, rows));
+        self.content_generation = self.content_generation.wrapping_add(1).max(1);
         self.lines.after_resize(self.term.grid(), alt, prep);
     }
 
@@ -991,6 +1002,8 @@ impl Terminal {
                 regex: RefCell::new(regex),
                 focus,
                 position: (0, 0),
+                cached_generation: 0,
+                cached_starts: Vec::new(),
             });
         }
         let Some(state) = self.search.as_mut() else {
@@ -1031,7 +1044,8 @@ impl Terminal {
         true
     }
 
-    /// Fill `position` for the focused match by walking every match from the oldest line.
+    /// Fill `position` for the focused match, reusing cached match offsets while terminal content
+    /// has not changed (O(log M) binary search on Next/Prev jumps).
     fn count_matches(&mut self) {
         let Some(state) = self.search.as_mut() else {
             return;
@@ -1039,19 +1053,29 @@ impl Terminal {
         let Some(focus) = state.focus.clone() else {
             return;
         };
-        let start = Point::new(self.term.topmost_line(), Column(0));
-        let end = Point::new(self.term.bottommost_line(), self.term.last_column());
-        let mut regex = state.regex.borrow_mut();
-        let (mut index, mut total) = (0, 0);
-        for m in RegexIter::new(start, end, Direction::Right, &self.term, &mut regex)
-            .take(MAX_COUNTED_MATCHES)
-        {
-            total += 1;
-            if m.start() == focus.start() {
-                index = total;
+        if state.cached_generation != self.content_generation {
+            let start = Point::new(self.term.topmost_line(), Column(0));
+            let end = Point::new(self.term.bottommost_line(), self.term.last_column());
+            let mut regex = state.regex.borrow_mut();
+            state.cached_starts.clear();
+            for m in RegexIter::new(start, end, Direction::Right, &self.term, &mut regex)
+                .take(MAX_COUNTED_MATCHES)
+            {
+                state.cached_starts.push(*m.start());
             }
+            drop(regex);
+            state.cached_generation = self.content_generation;
         }
-        drop(regex);
+        let target = *focus.start();
+        let total = state.cached_starts.len();
+        let index = match state.cached_starts.binary_search(&target) {
+            Ok(pos) => pos + 1,
+            Err(_) => state
+                .cached_starts
+                .iter()
+                .position(|&p| p == target)
+                .map_or(0, |pos| pos + 1),
+        };
         state.position = (index, total);
     }
 
@@ -1249,6 +1273,8 @@ impl Terminal {
             regex: RefCell::new(regex),
             focus: Some(found),
             position: (0, 0),
+            cached_generation: 0,
+            cached_starts: Vec::new(),
         });
         self.count_matches();
         true
