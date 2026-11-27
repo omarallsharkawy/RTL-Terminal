@@ -615,18 +615,17 @@ mod script_tests {
             }),
             p if p.starts_with("packaging/aur/") => text.replace(&current, FIXTURE_VERSION),
             p if p.ends_with(".metainfo.xml") && current != FIXTURE_VERSION => {
-                // Drop the live release entry newer than the fixture version.
-                let open = format!("<release version=\"{current}\"");
-                match text.find(&open) {
-                    Some(start) => {
-                        let line_start = text[..start].rfind('\n').map_or(0, |i| i + 1);
-                        let end = text[start..]
-                            .find("</release>\n")
-                            .map(|i| start + i + "</release>\n".len())
-                            .expect("closing </release>");
-                        format!("{}{}", &text[..line_start], &text[end..])
+                // Drop all live release entries newer than FIXTURE_VERSION so the fixture
+                // starts at FIXTURE_VERSION regardless of how many releases have shipped since.
+                let releases_tag = "<releases>\n";
+                let fixture_tag = format!("<release version=\"{FIXTURE_VERSION}\"");
+                match (text.find(releases_tag), text.find(&fixture_tag)) {
+                    (Some(rel_pos), Some(fix_pos)) if fix_pos > rel_pos => {
+                        let after_releases = rel_pos + releases_tag.len();
+                        let fix_line_start = text[..fix_pos].rfind('\n').map_or(fix_pos, |i| i + 1);
+                        format!("{}{}", &text[..after_releases], &text[fix_line_start..])
                     }
-                    None => text,
+                    _ => text,
                 }
             }
             "CHANGELOG.md" => {

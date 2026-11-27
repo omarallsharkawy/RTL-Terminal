@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+## 4.1.0 - 2026-11-27
+
+### AI
+
+- **CLI-first local AI** with zero API key requirement: prefers `codex` by default alongside installed local CLIs (`codex`, `claude`, `gemini`, `opencode`, `agy`).
+- Improved `codex exec` output extraction (`--color never` with private `0600` temp output file) and `agy` text output mode.
+- One-click CLI switcher pills directly in **Settings → AI** and in the **Agent panel** header (`{cli} ⇄`), restarting the idle engine and persisting the choice.
+- New **`agent.launch`** command (*Launch coding agent…*) to start any installed coding CLI in a split (`Enter`) or new tab (`Alt+Enter`) at the focused directory.
+- Private `agy` hook wrapper installed alongside `claude` (`0700`) so live agent status and notifications report to Twitty automatically.
+- Extracted a shared `WireProtocol` trait with single-pass request redaction in `twitty-ai`.
+
+### SSH & Workspaces
+
+- New interactive **SSH connect palette** (`ssh.connect`, `Ctrl+Shift+S`) loading `~/.ssh/config` hosts off-thread, tracking recent destinations, and accepting ad-hoc `user@host` or `user@host:session` input (`Enter` for a persistent SSH tab, `Alt+Enter` for an SSH split).
+- Quick-SSH icon button in the sidebar footer beside *New tab*, clickable **Reconnect SSH** button on disconnected sidebar cards, and `ssh.reconnect` command.
+- SSH right-click context menu actions on SSH panes and tabs: *Reconnect SSH*, *Split on same SSH host*, and *Copy SSH destination*.
+- **Workspace accent color tags** (`blue`, `green`, `amber`, `red`, `purple`, `teal`) shown on sidebar cards, persisted across session restore, controllable from the tab context menu (*Cycle tab color* / *Clear tab color*) and via the control socket (`workspace.set_color` / `tab.color`).
+
+### Workflows & Command Blocks
+
+- **Parameterized workflows** supporting `{{param}}` and `{{param:default}}` placeholders with an interactive palette parameter prompt (`Tab`/`Shift+Tab` between parameters, `Enter` to advance/run, `Alt+Enter` to review in Composer) and sanitized substitution.
+- Background workflow indexing into `twitty-store` (`drive_index`) alongside unified 2-lane persistent Composer background workers.
+- Command block power-ups: **Copy as Markdown** (with safe backtick fences), **Bookmark / Pin** (`block.toggle-bookmark`, `block.next-bookmark`, amber card strip indicator), **Save as workflow…** (opens **Settings → Commands** pre-filled), and **Send to Agent panel**.
+
+### Review, Rendering & Arabic UI
+
+- Interactive **hunk staging and unstaging** (`Shift+S` / `Shift+U`) in the Review panel.
+- **Layered GPU render passes** for overlays and side panels, eliminating CPU text-run clipping across modals, plus viewport culling in Agent panel cards and cached sidebar card measurements.
+- Unified `crates/twitty-core/i18n/ar.json` to consistent Modern Standard Technical Arabic with catalog-driven Arabic plural forms (`format_arabic_plural`).
+- Modularized `twitty-core` terminal implementation (`terminal/{mod,osc,search,snapshot}.rs`) and added a `remote_protocol` fuzz target.
+
 ## 4.0.0 - 2026-11-26
 
 ### Arabic text

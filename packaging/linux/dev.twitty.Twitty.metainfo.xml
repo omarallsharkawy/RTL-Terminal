@@ -50,6 +50,12 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.1.0" date="2026-11-27">
+      <url type="details">https://github.com/omarallsharkawy/RTL-Terminal/releases/tag/v4.1.0</url>
+      <description>
+        <p>Twitty 4.1.0 release with CLI-first local AI switching, interactive SSH connect palette and workspace color tags, parameterized workflows, command block power-ups, layered GPU overlay rendering, and unified Arabic localization.</p>
+      </description>
+    </release>
     <release version="4.0.0" date="2026-11-26">
       <url type="details">https://github.com/omarallsharkawy/RTL-Terminal/releases/tag/v4.0.0</url>
       <description>
