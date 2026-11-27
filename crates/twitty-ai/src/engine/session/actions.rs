@@ -10,11 +10,27 @@ use crate::engine::patch::PatchError;
 use crate::engine::policy::{self, Approval};
 use crate::engine::tools::{Tool, MAX_READ_BYTES};
 
-const READ_FAILED: &str = "Read failed or exceeded its limit / تعذّرت القراءة أو تجاوزت الحد";
-const DENIED: &str = "Denied by policy / رُفض بموجب السياسة";
-const USER_DENIED: &str = "Denied by the user / رفض المستخدم الطلب";
-const EDITED: &str = "User-edited / عدّله المستخدم";
-const CHANGED: &str = "The target changed after approval / تغيّر الهدف بعد الموافقة";
+fn read_failed() -> &'static str {
+    twitty_core::language::tr(
+        "Read failed or exceeded its limit",
+        "تعذّرت القراءة أو تجاوزت الحد",
+    )
+}
+fn denied() -> &'static str {
+    twitty_core::language::tr("Denied by policy", "رُفض بموجب السياسة")
+}
+fn user_denied() -> &'static str {
+    twitty_core::language::tr("Denied by the user", "رفض المستخدم الطلب")
+}
+fn edited_note() -> &'static str {
+    twitty_core::language::tr("User-edited", "عدّله المستخدم")
+}
+fn changed() -> &'static str {
+    twitty_core::language::tr(
+        "The target changed after approval",
+        "تغيّر الهدف بعد الموافقة",
+    )
+}
 
 pub(super) enum Action {
     Read { tool: Tool, resolved: PathBuf },
@@ -35,12 +51,12 @@ impl Session {
         let Some(tool) = call.decode() else {
             self.add(
                 StepKind::Message {
-                    text: INVALID_TOOL.into(),
+                    text: invalid_tool().into(),
                 },
-                StepStatus::Failed(INVALID_TOOL.into()),
+                StepStatus::Failed(invalid_tool().into()),
                 events,
             );
-            self.result(call, INVALID_TOOL);
+            self.result(call, invalid_tool());
             return;
         };
         if let Some((kind, target, path)) = tool.read_kind() {
@@ -89,7 +105,7 @@ impl Session {
             Tool::RememberFact { text } => {
                 let text = bounded(&clean(&text), 4096).trim().to_owned();
                 if text.is_empty() {
-                    self.result(call, INVALID_TOOL);
+                    self.result(call, invalid_tool());
                 } else {
                     self.wait(
                         call,
@@ -153,8 +169,8 @@ impl Session {
                 StepStatus::Done,
             ),
             None => (
-                READ_FAILED.to_owned(),
-                StepStatus::Failed(READ_FAILED.into()),
+                read_failed().to_owned(),
+                StepStatus::Failed(read_failed().into()),
             ),
         };
         self.add(
@@ -193,7 +209,7 @@ impl Session {
             StepStatus::Denied,
             events,
         );
-        self.result(call, DENIED);
+        self.result(call, denied());
     }
 
     fn wait(&mut self, call: ToolCall, kind: StepKind, action: Action, events: &Events) {
@@ -252,7 +268,7 @@ impl Session {
                         StepStatus::Denied,
                         events,
                     );
-                    self.result(call, USER_DENIED);
+                    self.result(call, user_denied());
                 }
                 decision => self.approve(card, call, action, decision, config, events),
             },
@@ -276,7 +292,7 @@ impl Session {
                     .and_then(|(_, _, path)| path)
                     .and_then(|path| policy::path_policy(&self.root, path, false).ok());
                 if !current.is_some_and(|(path, _)| path == resolved) {
-                    self.fail(card, call, CHANGED, events);
+                    self.fail(card, call, changed(), events);
                     return;
                 }
                 card.status = StepStatus::Done;
@@ -306,7 +322,7 @@ impl Session {
                     self.record(json!({"event":"policy","tool":call.name,"decision":"deny","reason":format!("{reason:?}")}));
                     *command = clean(command);
                     self.update(&card, events);
-                    self.result(call, DENIED);
+                    self.result(call, denied());
                     return;
                 }
                 card.status = StepStatus::Running;
@@ -357,12 +373,15 @@ impl Session {
                 });
                 card.status = StepStatus::Done;
                 self.update(&card, events);
-                self.result(call, "Fact approved / وافق المستخدم على المعلومة");
+                self.result(
+                    call,
+                    twitty_core::language::tr("Fact approved", "وافق المستخدم على المعلومة"),
+                );
             }
             _ => self.fail(
                 card,
                 call,
-                "This card cannot be edited / لا يمكن تعديل هذه البطاقة",
+                twitty_core::language::tr("This card cannot be edited", "لا يمكن تعديل هذه البطاقة"),
                 events,
             ),
         }
@@ -376,11 +395,11 @@ impl Session {
 
     fn dispatch(&mut self, card: Step, call: ToolCall, edited: bool, events: &Events) {
         if !self.journal_ok {
-            self.fail(card, call, JOURNAL_ERROR, events);
+            self.fail(card, call, journal_error(), events);
             return;
         }
         if self.cwd.canonicalize().ok().as_ref() != Some(&self.cwd) || !self.cwd.is_dir() {
-            self.fail(card, call, FOLDER_ERROR, events);
+            self.fail(card, call, folder_error(), events);
             return;
         }
         let StepKind::Command { command, cwd, .. } = &card.kind else {
@@ -388,7 +407,7 @@ impl Session {
         };
         self.record(json!({"event":"run_in_pane","step":card.id.0,"command":command,"cwd":cwd.to_string_lossy(),"edited":edited}));
         if !self.journal_ok {
-            self.fail(card, call, JOURNAL_ERROR, events);
+            self.fail(card, call, journal_error(), events);
             return;
         }
         let _ = events.send(AgentEvent::RunInPane {
@@ -423,16 +442,22 @@ impl Session {
         let tail = crate::ai::tail_lines(&output, crate::ai::MAX_BLOCK_OUTPUT_LINES);
         let tail = bounded(&tail, MAX_READ_BYTES).to_owned();
         let (status, summary) = match exit {
-            Some(0) => (StepStatus::Done, "Command succeeded / نجح الأمر"),
-            Some(_) => (
-                StepStatus::Failed("Command failed / فشل الأمر".into()),
-                "Command failed / فشل الأمر",
+            Some(0) => (
+                StepStatus::Done,
+                twitty_core::language::tr("Command succeeded", "نجح الأمر"),
             ),
-            None => (StepStatus::Cancelled, "Command interrupted / توقّف الأمر"),
+            Some(_) => (
+                StepStatus::Failed(twitty_core::language::tr("Command failed", "فشل الأمر").into()),
+                twitty_core::language::tr("Command failed", "فشل الأمر"),
+            ),
+            None => (
+                StepStatus::Cancelled,
+                twitty_core::language::tr("Command interrupted", "توقّف الأمر"),
+            ),
         };
         let edited_text = if edited {
             if let StepKind::Command { command, .. } = &card.kind {
-                format!("\n{EDITED}\n{command}")
+                format!("\n{}\n{command}", edited_note())
             } else {
                 String::new()
             }
@@ -465,7 +490,7 @@ impl Session {
             json!({"event":"patch_undo_data","step":card.id.0,"files":patch.undo_record()}),
         );
         if !self.journal_ok {
-            self.fail(card, call, JOURNAL_ERROR, events);
+            self.fail(card, call, journal_error(), events);
             return;
         }
         if let Err(error) = patch.apply() {
@@ -487,14 +512,20 @@ impl Session {
         self.patches.insert(applied.id, (applied, patch));
         let notes = if edited {
             if let StepKind::Patch { diff, .. } = &card.kind {
-                format!("\n{EDITED}\n{diff}")
+                format!("\n{}\n{diff}", edited_note())
             } else {
                 String::new()
             }
         } else {
             String::new()
         };
-        self.result(call, &format!("Patch applied / طُبّق التعديل{notes}"));
+        self.result(
+            call,
+            &format!(
+                "{}{notes}",
+                twitty_core::language::tr("Patch applied", "طُبّق التعديل")
+            ),
+        );
     }
 
     pub(in crate::engine) fn undo(&mut self, id: StepId, events: &Events) {
@@ -505,9 +536,9 @@ impl Session {
         if !self.journal_ok {
             self.add(
                 StepKind::Message {
-                    text: JOURNAL_ERROR.into(),
+                    text: journal_error().into(),
                 },
-                StepStatus::Failed(JOURNAL_ERROR.into()),
+                StepStatus::Failed(journal_error().into()),
                 events,
             );
             return;
@@ -525,7 +556,7 @@ impl Session {
             *available = undo_available;
         }
         let message = match &result {
-            Ok(()) => "Patch undone / أُلغي التعديل",
+            Ok(()) => twitty_core::language::tr("Patch undone", "أُلغي التعديل"),
             Err(error) => patch_message(error),
         };
         self.record(json!({"event":"undo_result","step":id.0,"message":message}));
@@ -550,12 +581,15 @@ impl Session {
 
 fn patch_message(error: &PatchError) -> &'static str {
     match error {
-        PatchError::Invalid => {
-            "Invalid or oversized unified diff / فرق موحّد غير صالح أو أكبر من الحد"
+        PatchError::Invalid => twitty_core::language::tr(
+            "Invalid or oversized unified diff",
+            "فرق موحّد غير صالح أو أكبر من الحد",
+        ),
+        PatchError::Policy(_) => denied(),
+        PatchError::Conflict => changed(),
+        PatchError::Io => twitty_core::language::tr("Patch write failed", "تعذّرت كتابة التعديل"),
+        PatchError::Rollback => {
+            twitty_core::language::tr("Patch rollback incomplete", "لم يكتمل التراجع عن التعديل")
         }
-        PatchError::Policy(_) => DENIED,
-        PatchError::Conflict => CHANGED,
-        PatchError::Io => "Patch write failed / تعذّرت كتابة التعديل",
-        PatchError::Rollback => "Patch rollback incomplete / لم يكتمل التراجع عن التعديل",
     }
 }

@@ -508,7 +508,7 @@ fn placeholder_engine_loop(cmd_rx: mpsc::Receiver<AgentCommand>, evt_tx: mpsc::S
                     step: Step {
                         id,
                         kind: StepKind::Message {
-                            text: "Agent engine backend is not linked in this build yet. Configure a provider in Settings → AI. / محرك الوكيل غير مرتبط في هذا البناء بعد. اضبط المزوّد في الإعدادات ← الذكاء الاصطناعي.".into(),
+                            text: crate::ui::chrome::tr("Agent engine backend is not linked in this build yet. Configure a provider in Settings → AI.", "محرك الوكيل غير مرتبط في هذا البناء بعد. اضبط المزوّد في الإعدادات ← الذكاء الاصطناعي.").into(),
                         },
                         status: StepStatus::Done,
                     },

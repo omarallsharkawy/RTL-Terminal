@@ -34,7 +34,7 @@ use twitty::render::CellMetrics;
 use twitty::review::comment::{format_agent_prompt, CommentTarget};
 use twitty::review::diff::{parse as parse_diff, Limits, LineKind};
 use twitty::review::layout::PanelLayout;
-use twitty::review::panel::{cwd_in_repo, Load, ReviewPanel, COMMIT_LABEL};
+use twitty::review::panel::{commit_label, cwd_in_repo, Load, ReviewPanel};
 use twitty::review::Snapshot;
 use twitty::session::workspace::SplitFailure;
 #[cfg(unix)]
@@ -506,13 +506,13 @@ fn split_failure_reason_is_explained_and_propagates_through_command_run() {
     );
 }
 
-// 11. Bilingual search bar, bounded/filtered search input, and clean_text on warnings.
+// 11. Search bar text, bounded/filtered search input, and clean_text on warnings.
 #[test]
-fn bilingual_search_bar_bounded_search_input_and_cleaned_warnings() {
-    assert_eq!(search_bar_text("", false, || None), "Find / بحث: ");
+fn search_bar_bounded_search_input_and_cleaned_warnings() {
+    assert_eq!(search_bar_text("", false, || None), "Find: ");
     assert_eq!(
         search_bar_text("abc", false, || None),
-        "Find / بحث: abc  no matches / مفيش نتائج"
+        "Find: abc  no matches"
     );
 
     let mut q = String::new();
@@ -685,7 +685,7 @@ fn review_scene_clips_box_drawing_quads_to_body_bottom() {
         metrics.char_width,
         metrics.scale,
         false,
-        COMMIT_LABEL.chars().count(),
+        commit_label().chars().count(),
     );
     let view = panel.view(rect, layout.page_rows());
     let mut ctx = DrawContext {

@@ -23,11 +23,21 @@ const MAX_CONTEXT_BYTES: usize = 1024 * 1024;
 const MAX_USER_BYTES: usize = 64 * 1024;
 const MAX_TEXT_BYTES: usize = 128 * 1024;
 const MAX_HISTORY_BYTES: usize = 4 * 1024 * 1024;
-const JOURNAL_ERROR: &str = "Session journal unavailable / سجل الجلسة غير متاح";
-const FOLDER_ERROR: &str = "Project folder unavailable / مجلد المشروع غير متاح";
-const NO_TEXT: &str = "The provider returned no message / لم يُرجع المزود رسالة";
-const INVALID_TOOL: &str =
-    "The provider proposed an invalid tool call / اقترح المزود طلب أداة غير صالح";
+fn journal_error() -> &'static str {
+    twitty_core::language::tr("Session journal unavailable", "سجل الجلسة غير متاح")
+}
+fn folder_error() -> &'static str {
+    twitty_core::language::tr("Project folder unavailable", "مجلد المشروع غير متاح")
+}
+fn no_text() -> &'static str {
+    twitty_core::language::tr("The provider returned no message", "لم يُرجع المزود رسالة")
+}
+fn invalid_tool() -> &'static str {
+    twitty_core::language::tr(
+        "The provider proposed an invalid tool call",
+        "اقترح المزود طلب أداة غير صالح",
+    )
+}
 
 type Events = Sender<AgentEvent>;
 
@@ -68,13 +78,15 @@ enum Limit {
 impl Limit {
     fn message(self) -> &'static str {
         match self {
-            Self::Steps => "Step limit reached / بلغ الوكيل حد الخطوات",
-            Self::Tools => {
-                "Consecutive tool limit reached / بلغ الوكيل حد استدعاءات الأدوات المتتالية"
-            }
-            Self::Budget => {
-                "Token or estimated cost limit reached / بلغ الوكيل حد الرموز أو التكلفة المقدرة"
-            }
+            Self::Steps => twitty_core::language::tr("Step limit reached", "بلغ الوكيل حد الخطوات"),
+            Self::Tools => twitty_core::language::tr(
+                "Consecutive tool limit reached",
+                "بلغ الوكيل حد استدعاءات الأدوات المتتالية",
+            ),
+            Self::Budget => twitty_core::language::tr(
+                "Token or estimated cost limit reached",
+                "بلغ الوكيل حد الرموز أو التكلفة المقدرة",
+            ),
         }
     }
 }
@@ -117,7 +129,7 @@ impl Session {
             .canonicalize()
             .ok()
             .filter(|cwd| cwd.is_dir())
-            .ok_or(FOLDER_ERROR)?;
+            .ok_or(folder_error())?;
         let project_root = context
             .project_root
             .as_ref()
@@ -125,11 +137,11 @@ impl Session {
                 path.canonicalize()
                     .ok()
                     .filter(|root| root.is_dir() && cwd.starts_with(root))
-                    .ok_or(FOLDER_ERROR)
+                    .ok_or(folder_error())
             })
             .transpose()?;
         let root = project_root.clone().unwrap_or_else(|| cwd.clone());
-        let journal = Journal::open(&config.journal_dir, id).map_err(|_| JOURNAL_ERROR)?;
+        let journal = Journal::open(&config.journal_dir, id).map_err(|_| journal_error())?;
         let provider = config.provider_info();
         let (system, tainted, context) = assemble(context, &root, &cwd);
         let mut session = Self {
@@ -158,7 +170,7 @@ impl Session {
         };
         session.user_message(&request);
         if !session.journal_ok {
-            return Err(JOURNAL_ERROR);
+            return Err(journal_error());
         }
         let _ = events.send(AgentEvent::Started {
             session: id,
@@ -177,7 +189,7 @@ impl Session {
         }
         if !self.journal_ok {
             self.finished = false;
-            self.finish(FinishReason::Error(JOURNAL_ERROR.into()), events);
+            self.finish(FinishReason::Error(journal_error().into()), events);
             return;
         }
         self.finished = false;
@@ -209,7 +221,7 @@ impl Session {
         }
         if !self.journal_ok {
             self.clear_pending(events, true);
-            self.finish(FinishReason::Error(JOURNAL_ERROR.into()), events);
+            self.finish(FinishReason::Error(journal_error().into()), events);
             return;
         }
         if let Some(Pending::Provider { start, .. }) = &self.pending {
@@ -262,7 +274,11 @@ impl Session {
         if bytes > MAX_HISTORY_BYTES {
             self.finish(
                 FinishReason::Error(
-                    "Conversation exceeds its size limit / المحادثة أكبر من الحد المسموح".into(),
+                    twitty_core::language::tr(
+                        "Conversation exceeds its size limit",
+                        "المحادثة أكبر من الحد المسموح",
+                    )
+                    .into(),
                 ),
                 events,
             );
@@ -439,12 +455,12 @@ impl Session {
         let has_calls = turn.valid_calls();
         if !has_calls {
             if !turn.calls.is_empty() {
-                turn.text = format!("{}\n{INVALID_TOOL}", turn.text);
+                turn.text = format!("{}\n{}", turn.text, invalid_tool());
             }
             turn.calls.clear();
             turn.native_parts.clear();
             if turn.text.trim().is_empty() {
-                turn.text = NO_TEXT.into();
+                turn.text = no_text().into();
             }
         }
         if !turn.text.trim().is_empty() || card.is_some() {
@@ -546,7 +562,10 @@ impl Session {
             self.update(card, events);
         }
         while let Some(call) = self.calls.pop_front() {
-            self.result(call, "Tool cancelled / أُلغيت الأداة");
+            self.result(
+                call,
+                twitty_core::language::tr("Tool cancelled", "أُلغيت الأداة"),
+            );
         }
     }
 
@@ -590,7 +609,7 @@ impl Session {
         };
         self.record(json!({"event":"finished","reason":message}));
         if !self.journal_ok && !matches!(reason, FinishReason::Stopped) {
-            reason = FinishReason::Error(JOURNAL_ERROR.into());
+            reason = FinishReason::Error(journal_error().into());
         }
         self.finished = true;
         let _ = events.send(AgentEvent::Finished {

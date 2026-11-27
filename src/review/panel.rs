@@ -19,7 +19,9 @@ use super::rows::{
 use crate::layout::Rect;
 
 /// The commit button's label.
-pub const COMMIT_LABEL: &str = "Commit / كوميت";
+pub fn commit_label() -> &'static str {
+    crate::ui::chrome::tr("Commit", "كوميت")
+}
 /// Tab stops in diff lines.
 pub const TAB_WIDTH: usize = 4;
 /// Most cells of a row's text drawn (the panel clips the rest anyway).
@@ -418,10 +420,19 @@ impl ReviewPanel {
     pub fn comment_sent(&mut self, agent: Option<&str>) {
         self.close_comment();
         let text = match agent {
-            Some(agent) => format!(
-                "Sent to {agent}: review it there and press Enter / اتبعت لـ{agent}: راجعه هناك واضغط Enter"
-            ),
-            None => "Sent to the agent pane: review it there and press Enter / اتبعت للوكيل: راجعه هناك واضغط Enter".to_owned(),
+            Some(agent) => match crate::ui::chrome::UiLanguage::current() {
+                crate::ui::chrome::UiLanguage::English => {
+                    format!("Sent to {agent}: review it there and press Enter")
+                }
+                crate::ui::chrome::UiLanguage::Arabic => {
+                    format!("اتبعت لـ{agent}: راجعه هناك واضغط Enter")
+                }
+            },
+            None => crate::ui::chrome::tr(
+                "Sent to the agent pane: review it there and press Enter",
+                "اتبعت للوكيل: راجعه هناك واضغط Enter",
+            )
+            .to_owned(),
         };
         self.notice = notice(text, false);
     }
@@ -437,7 +448,12 @@ impl ReviewPanel {
     pub fn agent_started(&mut self, agent: &str) {
         self.close_comment();
         self.notice = notice(
-            format!("Started {agent} with the comment / شغّلنا {agent} بالتعليق"),
+            match crate::ui::chrome::UiLanguage::current() {
+                crate::ui::chrome::UiLanguage::English => {
+                    format!("Started {agent} with the comment")
+                }
+                crate::ui::chrome::UiLanguage::Arabic => format!("شغّلنا {agent} بالتعليق"),
+            },
             false,
         );
     }
@@ -726,7 +742,7 @@ impl ReviewPanel {
         let (title, branch, summary, totals, gutter_cols) = match &self.snapshot {
             Some(s) => {
                 let title = if s.name.is_empty() {
-                    "Repository / المستودع".to_owned()
+                    crate::ui::chrome::tr("Repository", "المستودع").to_owned()
                 } else {
                     s.name.clone()
                 };
@@ -750,7 +766,7 @@ impl ReviewPanel {
                 )
             }
             None => (
-                "Review changes / راجع التغييرات".to_owned(),
+                crate::ui::chrome::tr("Review changes", "راجع التغييرات").to_owned(),
                 None,
                 String::new(),
                 None,
@@ -767,20 +783,30 @@ impl ReviewPanel {
                 rows.push(view);
             }
             if self.rows.is_empty() {
-                rows.push(message("No uncommitted changes / مفيش تغييرات"));
+                rows.push(message(crate::ui::chrome::tr(
+                    "No uncommitted changes",
+                    "مفيش تغييرات",
+                )));
             }
         } else {
             rows.push(message(match &load {
                 Load::Idle | Load::Loading | Load::Ready => {
-                    "Loading changes… / بنحمّل التغييرات…".to_owned()
+                    crate::ui::chrome::tr("Loading changes…", "بنحمّل التغييرات…").to_owned()
                 }
-                Load::NoFolder => {
-                    "This pane has no local folder / اللوحة دي ملهاش فولدر محلي".to_owned()
+                Load::NoFolder => crate::ui::chrome::tr(
+                    "This pane has no local folder",
+                    "اللوحة دي ملهاش فولدر محلي",
+                )
+                .to_owned(),
+                Load::NotRepo => {
+                    crate::ui::chrome::tr("Not a git repository", "ده مش مستودع git").to_owned()
                 }
-                Load::NotRepo => "Not a git repository / ده مش مستودع git".to_owned(),
-                Load::NoGit => "git is not installed / git مش متسطّب".to_owned(),
+                Load::NoGit => {
+                    crate::ui::chrome::tr("git is not installed", "git مش متسطّب").to_owned()
+                }
                 Load::Failed(why) => format!(
-                    "git failed: {} / git فشل",
+                    "{}: {}",
+                    crate::ui::chrome::tr("git failed", "git فشل"),
                     crate::shell_integration::clean_text(why, 200)
                 ),
             }));
@@ -792,7 +818,7 @@ impl ReviewPanel {
             branch,
             summary,
             totals,
-            commit_label: COMMIT_LABEL,
+            commit_label: commit_label(),
             gutter_cols,
             rows,
             notice: self.notice.clone(),
@@ -850,12 +876,13 @@ impl ReviewPanel {
             }
             Row::NoNewline(_) => plain(
                 RowStyle::Note,
-                "\\ No newline at end of file / مفيش سطر جديد في آخر الملف".to_owned(),
+                crate::ui::chrome::tr("\\ No newline at end of file", "مفيش سطر جديد في آخر الملف")
+                    .to_owned(),
             ),
             Row::CommentInput => {
                 let text = self.editor.as_ref().map_or("", |e| e.text.as_str());
                 let shown = if text.is_empty() {
-                    "Comment for the agent… / تعليق للوكيل…".to_owned()
+                    crate::ui::chrome::tr("Comment for the agent…", "تعليق للوكيل…").to_owned()
                 } else {
                     // The end of a long comment stays in view.
                     tail(text, MAX_ROW_COLS)
@@ -867,9 +894,9 @@ impl ReviewPanel {
                 plain(
                     RowStyle::CommentHint,
                     if offer {
-                        "No agent in this tab. Enter: start one with this comment · Esc: cancel / مفيش وكيل في التاب ده. Enter: شغّل واحد بالتعليق ده · Esc: إلغاء"
+                        crate::ui::chrome::tr("No agent in this tab. Enter: start one with this comment · Esc: cancel", "مفيش وكيل في التاب ده. Enter: شغّل واحد بالتعليق ده · Esc: إلغاء")
                     } else {
-                        "Enter: send to the agent · Esc: cancel / Enter: ابعت للوكيل · Esc: إلغاء"
+                        crate::ui::chrome::tr("Enter: send to the agent · Esc: cancel", "Enter: ابعت للوكيل · Esc: إلغاء")
                     }
                     .to_owned(),
                 )
@@ -877,13 +904,15 @@ impl ReviewPanel {
             Row::Omitted => plain(
                 RowStyle::Note,
                 format!(
-                    "{n} more files not shown / {n} ملفات كمان مش معروضة",
-                    n = s.diff.omitted_files
+                    "{} {}",
+                    s.diff.omitted_files,
+                    crate::ui::chrome::tr("more files not shown", "ملفات كمان مش معروضة")
                 ),
             ),
             Row::Truncated => plain(
                 RowStyle::Note,
-                "The diff is too large and was cut / الفرق كبير قوي واتقص".to_owned(),
+                crate::ui::chrome::tr("The diff is too large and was cut", "الفرق كبير قوي واتقص")
+                    .to_owned(),
             ),
         }
     }
@@ -902,27 +931,36 @@ fn message(text: impl Into<String>) -> ViewRow {
 fn note_text(file: &FileDiff, note: Note) -> String {
     match note {
         Note::Mode => format!(
-            "mode {} / تغيير الصلاحيات",
+            "{} {}",
+            crate::ui::chrome::tr("Mode", "الصلاحيات"),
             file.mode_change().unwrap_or_default()
         ),
         Note::Empty => match file.similarity {
-            Some(p) => format!("Renamed, {p}% similar / اتغيّر اسمه"),
-            None => "No content changes / مفيش تغيير في المحتوى".to_owned(),
+            Some(p) => format!(
+                "{} {p}%",
+                crate::ui::chrome::tr("Renamed, similarity", "اتغيّر اسمه، التشابه")
+            ),
+            None => crate::ui::chrome::tr("No content changes", "مفيش تغيير في المحتوى").to_owned(),
         },
-        Note::OneLine(OneLine::Binary) => "Binary file / ملف ثنائي".to_owned(),
+        Note::OneLine(OneLine::Binary) => {
+            crate::ui::chrome::tr("Binary file", "ملف ثنائي").to_owned()
+        }
         Note::OneLine(OneLine::TooLarge) => format!(
-            "Large change: +{} −{}, not shown / تغيير كبير، مش معروض",
-            file.added, file.removed
+            "{} +{} −{}",
+            crate::ui::chrome::tr("Large change, not shown:", "تغيير كبير، مش معروض:"),
+            file.added,
+            file.removed
         ),
         Note::OneLine(OneLine::TooBig(bytes)) => format!(
-            "Large file ({} KiB), not shown / ملف كبير، مش معروض",
+            "{} ({} KiB)",
+            crate::ui::chrome::tr("Large file, not shown", "ملف كبير، مش معروض"),
             bytes.div_ceil(1024)
         ),
         Note::OneLine(OneLine::Special) => {
-            "Not a regular file (link or device) / مش ملف عادي".to_owned()
+            crate::ui::chrome::tr("Not a regular file (link or device)", "مش ملف عادي").to_owned()
         }
         Note::OneLine(OneLine::Unreadable) => {
-            "Cannot read the file / مش قادر أقرا الملف".to_owned()
+            crate::ui::chrome::tr("Cannot read the file", "مش قادر أقرا الملف").to_owned()
         }
     }
 }

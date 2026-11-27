@@ -253,7 +253,13 @@ impl App {
                         dimmed: false,
                     },
                 ],
-                Some("Close panes with running programs? / تقفل لوحات فيها برامج شغّالة؟".into()),
+                Some(
+                    crate::ui::chrome::tr(
+                        "Close panes with running programs?",
+                        "تقفل لوحات فيها برامج شغّالة؟",
+                    )
+                    .into(),
+                ),
             ),
             PaletteMode::Search => (
                 open.search.rows(&state.query),
@@ -717,7 +723,13 @@ impl App {
             if let Some(pane_id) = self.focused_id() {
                 self.show_pane_warning(
                     pane_id,
-                    &format!("could not save trust store: {err} / تعذر حفظ سجل الثقة"),
+                    &format!(
+                        "{}: {err}",
+                        crate::ui::chrome::tr(
+                            "Could not save the trust list",
+                            "تعذر حفظ قائمة الثقة"
+                        )
+                    ),
                 );
             }
             return;
@@ -923,7 +935,11 @@ impl App {
     pub(super) fn run_workflow(&mut self, id: PaneId, workflow: &Workflow) -> Result<(), String> {
         if !workflow.trusted {
             return Err(format!(
-                "refusing to run untrusted project command {:?} / رفض تشغيل أمر مشروع غير موثوق",
+                "{} {:?}",
+                crate::ui::chrome::tr(
+                    "Refusing to run an untrusted project command:",
+                    "رفضنا تشغيل أمر مشروع مش موثوق:"
+                ),
                 workflow.spec.name
             ));
         }
@@ -952,7 +968,11 @@ impl App {
                     self.new_tab_with(options)
                 };
                 if spawned.is_none() {
-                    return Err("failed to start custom command / تعذر تشغيل الأمر المخصص".into());
+                    return Err(crate::ui::chrome::tr(
+                        "failed to start custom command",
+                        "تعذر تشغيل الأمر المخصص",
+                    )
+                    .into());
                 }
                 Ok(())
             }

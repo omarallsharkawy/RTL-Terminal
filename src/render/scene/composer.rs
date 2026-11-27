@@ -1271,7 +1271,7 @@ pub fn build(
                     (banner_rect.right() - text_x - pad).max(0.0),
                     banner_rect.h,
                 );
-                let label = "Thinking… / بيفكر… (Esc to cancel / للإلغاء)";
+                let label = crate::ui::chrome::tr("Thinking…", "بيفكر… (Esc to cancel / للإلغاء)");
                 let buf = font.fit(
                     ctx.font_system,
                     UiSize::Small,

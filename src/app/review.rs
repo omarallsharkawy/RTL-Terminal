@@ -21,7 +21,7 @@ use crate::review::comment::{
     choose_agent_pane, format_agent_prompt, format_comment, CommentTarget, PaneInfo,
 };
 use crate::review::layout::{PanelHit, PanelLayout};
-use crate::review::panel::{cwd_in_repo, View, COMMIT_LABEL};
+use crate::review::panel::{commit_label, cwd_in_repo, View};
 use crate::review::{LoadError, PanelCmd, Snapshot};
 use crate::workflows::encode_insert;
 
@@ -105,7 +105,7 @@ impl App {
             m.char_width,
             m.scale,
             self.review.notice().is_some(),
-            COMMIT_LABEL.chars().count(),
+            commit_label().chars().count(),
         ))
     }
 

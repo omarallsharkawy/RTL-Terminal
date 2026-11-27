@@ -74,11 +74,11 @@ pub fn search_bar_text(
     let status = if query.is_empty() {
         String::new()
     } else if !has_match {
-        "  no matches / مفيش نتائج".to_owned()
+        crate::ui::chrome::tr("  no matches", "  مفيش نتائج").to_owned()
     } else {
         position().map_or(String::new(), |(i, n)| format!("  {i}/{n}"))
     };
-    format!("Find / بحث: {query}{status}")
+    format!("{}: {query}{status}", crate::ui::chrome::tr("Find", "بحث"))
 }
 
 #[cfg(test)]
@@ -132,18 +132,15 @@ mod tests {
 
     #[test]
     fn bar_text() {
-        assert_eq!(
-            search_bar_text("", false, || unreachable!()),
-            "Find / بحث: "
-        );
+        assert_eq!(search_bar_text("", false, || unreachable!()), "Find: ");
         assert_eq!(
             search_bar_text("ab", false, || unreachable!()),
-            "Find / بحث: ab  no matches / مفيش نتائج"
+            "Find: ab  no matches"
         );
         assert_eq!(
             search_bar_text("ab", true, || Some((2, 5))),
-            "Find / بحث: ab  2/5"
+            "Find: ab  2/5"
         );
-        assert_eq!(search_bar_text("ab", true, || None), "Find / بحث: ab");
+        assert_eq!(search_bar_text("ab", true, || None), "Find: ab");
     }
 }
