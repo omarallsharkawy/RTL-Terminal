@@ -15,6 +15,34 @@ use super::{validate_name, BOOTSTRAP_FAILED, SSH_DISCONNECTED};
 
 pub use server::{ReplayBuffer, REPLAY_LIMIT};
 
+/// Exercise the Unix-socket wire protocol decoders on arbitrary untrusted bytes (used by fuzzing).
+#[doc(hidden)]
+pub fn fuzz_protocol_stream(bytes: &[u8]) {
+    let mut cursor = io::Cursor::new(bytes);
+    let mut buf = [0u8; protocol::CHUNK];
+    while let Ok(tag) = protocol::byte(&mut cursor) {
+        match tag {
+            protocol::ATTACH | protocol::RESIZE => {
+                if Size::read(&mut cursor).is_err() {
+                    break;
+                }
+            }
+            protocol::INPUT | protocol::OUTPUT => {
+                if protocol::read_data(&mut cursor, &mut buf).is_err() {
+                    break;
+                }
+            }
+            protocol::EXIT => {
+                if protocol::byte(&mut cursor).is_err() {
+                    break;
+                }
+            }
+            protocol::STATUS | protocol::KILL => {}
+            _ => break,
+        }
+    }
+}
+
 const USAGE: &str =
     "usage: twitty-remote attach <name> [--cols N --rows N] | list | kill <name> | version";
 

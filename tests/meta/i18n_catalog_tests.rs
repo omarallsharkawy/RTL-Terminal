@@ -157,11 +157,6 @@ const ARABIC_IN_CODE: &[(&str, usize, &str)] = &[
         "the answer language named to the agent",
     ),
     (
-        "crates/twitty-scene/src/agent/inspector.rs",
-        5,
-        "Arabic counted nouns (one, two, few, many)",
-    ),
-    (
         "crates/twitty-scene/src/settings/commands.rs",
         1,
         "an Arabic sample name",
@@ -180,11 +175,6 @@ const ARABIC_IN_CODE: &[(&str, usize, &str)] = &[
         "crates/twitty-ui/src/input/keybindings.rs",
         14,
         "startup warnings in both languages",
-    ),
-    (
-        "crates/twitty-ui/src/ui/agent_panel/mod.rs",
-        17,
-        "Arabic counted nouns (one, two, few, many)",
     ),
     (
         "crates/twitty-ui/src/ui/settings_panel/table.rs",
@@ -295,5 +285,24 @@ fn lookup_follows_the_language_and_falls_back_to_english() {
     assert_eq!(
         twitty_core::language::fill("{} of {}", &[&3, &10]),
         "3 of 10"
+    );
+    let tok = UiLanguage::Arabic.t("1 token|plural");
+    assert_eq!(twitty_core::language::format_arabic_plural(0, tok), "0 رمز");
+    assert_eq!(
+        twitty_core::language::format_arabic_plural(1, tok),
+        "رمز واحد"
+    );
+    assert_eq!(twitty_core::language::format_arabic_plural(2, tok), "رمزان");
+    assert_eq!(
+        twitty_core::language::format_arabic_plural(5, tok),
+        "5 رموز"
+    );
+    assert_eq!(
+        twitty_core::language::format_arabic_plural(11, tok),
+        "11 رمز"
+    );
+    assert_eq!(
+        twitty_core::language::format_arabic_plural(103, tok),
+        "103 رموز"
     );
 }

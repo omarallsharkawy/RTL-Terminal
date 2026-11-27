@@ -182,17 +182,13 @@ pub fn paragraph_is_rtl(text: &str) -> bool {
 }
 
 /// Format an Arabic noun with proper number agreement:
-/// - `1` → `one` (e.g. `"ذكرى واحدة"`, `"كتلة واحدة"`)
-/// - `2` → `two` (e.g. `"ذكريان"`, `"كتلتان"`)
-/// - `n % 100` in `3..=10` → `"{n} {few}"` (e.g. `"3 ذكريات"`, `"10 كتل"`)
-/// - otherwise (`0`, `11+`, `100`, `101`, `102`, ...) → `"{n} {many}"` (e.g. `"11 ذكرى"`, `"12 كتلة"`)
+/// Format a counted noun in Arabic using standard plural rules:
+/// - `1` → `one`
+/// - `2` → `two`
+/// - `n % 100` in `3..=10` → `"{n} {few}"`
+/// - otherwise (`0`, `11+`, `100`, `101`, `102`, ...) → `"{n} {many}"`
 pub fn arabic_count(n: usize, one: &str, two: &str, few: &str, many: &str) -> String {
-    match n {
-        1 => one.to_owned(),
-        2 => two.to_owned(),
-        n if (3..=10).contains(&(n % 100)) => format!("{n} {few}"),
-        n => format!("{n} {many}"),
-    }
+    twitty_core::language::arabic_count(n, one, two, few, many)
 }
 
 /// Format token count and optional USD cost for the header pill.
@@ -226,18 +222,21 @@ pub fn format_usage_pill(usage: Usage, language: UiLanguage) -> Option<String> {
                 Some(format!("{tok_label} · ${usd:.4}"))
             }
         }
-        (UiLanguage::English, None) => Some(format!("{tok_label} tok")),
+        (UiLanguage::English, None) => Some(twitty_core::language::fill(
+            language.t("{} tok"),
+            &[&tok_label],
+        )),
         (UiLanguage::Arabic, None) => {
             if total_tokens < 1_000 {
-                Some(arabic_count(
+                Some(twitty_core::language::format_arabic_plural(
                     total_tokens as usize,
-                    "رمز واحد",
-                    "رمزان",
-                    "رموز",
-                    "رمز",
+                    language.t("1 token|plural"),
                 ))
             } else {
-                Some(format!("{tok_label} رمز"))
+                Some(twitty_core::language::fill(
+                    language.t("{} tok"),
+                    &[&tok_label],
+                ))
             }
         }
     }
@@ -290,7 +289,7 @@ pub fn format_context_strip(bundle: &ContextBundle, language: UiLanguage) -> Str
                 });
             }
             if parts.is_empty() {
-                "Context · 0 items".to_owned()
+                language.t("Context · 0 items").to_owned()
             } else {
                 parts.join(" · ")
             }
@@ -298,34 +297,34 @@ pub fn format_context_strip(bundle: &ContextBundle, language: UiLanguage) -> Str
         UiLanguage::Arabic => {
             if rules > 0 {
                 if rules == 1 {
-                    parts.push("القواعد".to_owned());
+                    parts.push(language.t("Rules").to_owned());
                 } else {
-                    parts.push(arabic_count(
+                    parts.push(twitty_core::language::format_arabic_plural(
                         rules,
-                        "قاعدة واحدة",
-                        "قاعدتان",
-                        "قواعد",
-                        "قاعدة",
+                        language.t("1 rule|plural"),
                     ));
                 }
             }
             if memories > 0 {
-                parts.push(arabic_count(
+                parts.push(twitty_core::language::format_arabic_plural(
                     memories,
-                    "ذكرى واحدة",
-                    "ذكريان",
-                    "ذكريات",
-                    "ذكرى",
+                    language.t("1 memory|plural"),
                 ));
             }
             if blocks > 0 {
-                parts.push(arabic_count(blocks, "كتلة واحدة", "كتلتان", "كتل", "كتلة"));
+                parts.push(twitty_core::language::format_arabic_plural(
+                    blocks,
+                    language.t("1 block|plural"),
+                ));
             }
             if files > 0 {
-                parts.push(arabic_count(files, "ملف واحد", "ملفان", "ملفات", "ملف"));
+                parts.push(twitty_core::language::format_arabic_plural(
+                    files,
+                    language.t("1 file|plural"),
+                ));
             }
             if parts.is_empty() {
-                "السياق · لا عناصر".to_owned()
+                language.t("Context · 0 items").to_owned()
             } else {
                 parts.join(" · ")
             }

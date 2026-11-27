@@ -71,6 +71,30 @@ pub fn fill(template: &str, args: &[&dyn std::fmt::Display]) -> String {
     out
 }
 
+/// Format a counted noun in Arabic using its four CLDR-aligned forms:
+/// - `1` -> `one` (e.g. singular with emphasis)
+/// - `2` -> `two` (dual)
+/// - `n % 100` in `3..=10` -> `"{n} {few}"` (plural)
+/// - otherwise (`0`, `11+`, `100`, ...) -> `"{n} {many}"` (singular accusative / genitive)
+pub fn arabic_count(n: usize, one: &str, two: &str, few: &str, many: &str) -> String {
+    match n {
+        1 => one.to_owned(),
+        2 => two.to_owned(),
+        n if (3..=10).contains(&(n % 100)) => format!("{n} {few}"),
+        n => format!("{n} {many}"),
+    }
+}
+
+/// Format a counted noun from pipe-delimited Arabic catalog forms `"one|two|few|many"`.
+pub fn format_arabic_plural(n: usize, forms: &str) -> String {
+    let mut parts = forms.split('|');
+    let one = parts.next().unwrap_or("");
+    let two = parts.next().unwrap_or(one);
+    let few = parts.next().unwrap_or(one);
+    let many = parts.next().unwrap_or(few);
+    arabic_count(n, one, two, few, many)
+}
+
 /// Mark English interface text in a table built at compile time, so the catalog check finds
 /// it. It is the literal itself; translate it with [`t`] where it is shown.
 #[macro_export]

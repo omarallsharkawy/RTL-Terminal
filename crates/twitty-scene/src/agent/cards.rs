@@ -649,8 +649,12 @@ impl AgentDrawer<'_, '_> {
         if parsed.files.is_empty() {
             // Fallback for simple raw unified diffs without `diff --git` header.
             for line in raw_diff.lines().take(MAX_PATCH_DIFF_ROWS) {
-                if y + lh > rect.bottom() {
+                if y + lh > rect.bottom() || y > self.layout.body.bottom() {
                     break;
+                }
+                if y + lh < self.layout.body.y {
+                    y += lh;
+                    continue;
                 }
                 let row_r = Rect::new(rect.x + s.px(1.0), y, (rect.w - s.px(2.0)).max(0.0), lh);
                 let tint = if line.starts_with('+') && !line.starts_with("+++") {
@@ -678,96 +682,112 @@ impl AgentDrawer<'_, '_> {
         }
 
         for file in &parsed.files {
-            if drawn >= MAX_PATCH_DIFF_ROWS || y + lh > rect.bottom() {
+            if drawn >= MAX_PATCH_DIFF_ROWS
+                || y + lh > rect.bottom()
+                || y > self.layout.body.bottom()
+            {
                 break;
             }
-            // File row header (matches `review::file` styling).
-            let file_r = clamp_rect_y(
-                Rect::new(rect.x + s.px(2.0), y, (rect.w - s.px(4.0)).max(0.0), lh),
-                self.layout.body,
-            );
-            if file_r.h > 0.0 {
-                self.rect_fill(file_r, RADIUS_6, s.bg3, None);
+            if y + lh >= self.layout.body.y {
+                // File row header (matches `review::file` styling).
+                let file_r = clamp_rect_y(
+                    Rect::new(rect.x + s.px(2.0), y, (rect.w - s.px(4.0)).max(0.0), lh),
+                    self.layout.body,
+                );
+                if file_r.h > 0.0 {
+                    self.rect_fill(file_r, RADIUS_6, s.bg3, None);
+                }
+                self.push_mono_line(
+                    Rect::new(rect.x + s.px(8.0), y, (rect.w - s.px(16.0)).max(0.0), lh),
+                    file.path(),
+                    s.text,
+                    diff_clip,
+                );
             }
-            self.push_mono_line(
-                Rect::new(rect.x + s.px(8.0), y, (rect.w - s.px(16.0)).max(0.0), lh),
-                file.path(),
-                s.text,
-                diff_clip,
-            );
             y += lh;
             drawn += 1;
 
             for hunk in &file.hunks {
-                if drawn >= MAX_PATCH_DIFF_ROWS || y + lh > rect.bottom() {
+                if drawn >= MAX_PATCH_DIFF_ROWS
+                    || y + lh > rect.bottom()
+                    || y > self.layout.body.bottom()
+                {
                     break;
                 }
-                let hunk_r = clamp_rect_y(
-                    Rect::new(rect.x + s.px(2.0), y, (rect.w - s.px(4.0)).max(0.0), lh),
-                    self.layout.body,
-                );
-                if hunk_r.h > 0.0 {
-                    self.rect_fill(hunk_r, RADIUS_6, s.bg2, None);
+                if y + lh >= self.layout.body.y {
+                    let hunk_r = clamp_rect_y(
+                        Rect::new(rect.x + s.px(2.0), y, (rect.w - s.px(4.0)).max(0.0), lh),
+                        self.layout.body,
+                    );
+                    if hunk_r.h > 0.0 {
+                        self.rect_fill(hunk_r, RADIUS_6, s.bg2, None);
+                    }
+                    let hdr = hunk.header();
+                    // Hunk headers (`@@ -1,3 +1,4 @@`) are code: always LTR monospace.
+                    self.push_mono_line(
+                        Rect::new(rect.x + s.px(8.0), y, (rect.w - s.px(16.0)).max(0.0), lh),
+                        &hdr,
+                        s.text_dim,
+                        diff_clip,
+                    );
                 }
-                let hdr = hunk.header();
-                // Hunk headers (`@@ -1,3 +1,4 @@`) are code: always LTR monospace.
-                self.push_mono_line(
-                    Rect::new(rect.x + s.px(8.0), y, (rect.w - s.px(16.0)).max(0.0), lh),
-                    &hdr,
-                    s.text_dim,
-                    diff_clip,
-                );
                 y += lh;
                 drawn += 1;
 
                 for line in &hunk.lines {
-                    if drawn >= MAX_PATCH_DIFF_ROWS || y + lh > rect.bottom() {
+                    if drawn >= MAX_PATCH_DIFF_ROWS
+                        || y + lh > rect.bottom()
+                        || y > self.layout.body.bottom()
+                    {
                         break;
                     }
-                    let tint = match line.kind {
-                        LineKind::Add => Some(s.ok),
-                        LineKind::Del => Some(s.danger),
-                        LineKind::Context => None,
-                    };
-                    let row_r = clamp_rect_y(
-                        Rect::new(rect.x + s.px(1.0), y, (rect.w - s.px(2.0)).max(0.0), lh),
-                        self.layout.body,
-                    );
-                    if row_r.h > 0.0 {
-                        if let Some(color) = tint {
-                            self.rect_fill(row_r, 0.0, s.bg1.mix(color, 0.16), None);
+                    if y + lh >= self.layout.body.y {
+                        let tint = match line.kind {
+                            LineKind::Add => Some(s.ok),
+                            LineKind::Del => Some(s.danger),
+                            LineKind::Context => None,
+                        };
+                        let row_r = clamp_rect_y(
+                            Rect::new(rect.x + s.px(1.0), y, (rect.w - s.px(2.0)).max(0.0), lh),
+                            self.layout.body,
+                        );
+                        if row_r.h > 0.0 {
+                            if let Some(color) = tint {
+                                self.rect_fill(row_r, 0.0, s.bg1.mix(color, 0.16), None);
+                            }
+                            let gutter_r =
+                                Rect::new(row_r.x, row_r.y, gutter_w.min(row_r.w), row_r.h);
+                            self.rect_fill(
+                                gutter_r,
+                                0.0,
+                                tint.map_or(s.bg2, |c| s.bg2.mix(c, 0.19)),
+                                None,
+                            );
                         }
-                        let gutter_r = Rect::new(row_r.x, row_r.y, gutter_w.min(row_r.w), row_r.h);
-                        self.rect_fill(
-                            gutter_r,
-                            0.0,
-                            tint.map_or(s.bg2, |c| s.bg2.mix(c, 0.19)),
-                            None,
+                        let num = line
+                            .new
+                            .or(line.old)
+                            .map_or_else(|| "   ".to_owned(), |n| format!("{n:>3}"));
+                        let prefix = match line.kind {
+                            LineKind::Add => '+',
+                            LineKind::Del => '-',
+                            LineKind::Context => ' ',
+                        };
+                        self.push_mono_line(
+                            Rect::new(rect.x + s.px(4.0), y, (gutter_w - s.px(4.0)).max(0.0), lh),
+                            &num,
+                            s.text_faint,
+                            diff_clip,
+                        );
+                        let code_x = rect.x + gutter_w + s.px(4.0);
+                        let code_text = format!("{prefix}{}", line.text);
+                        self.push_mono_line(
+                            Rect::new(code_x, y, (rect.right() - code_x - s.px(4.0)).max(0.0), lh),
+                            &code_text,
+                            s.text,
+                            diff_clip,
                         );
                     }
-                    let num = line
-                        .new
-                        .or(line.old)
-                        .map_or_else(|| "   ".to_owned(), |n| format!("{n:>3}"));
-                    let prefix = match line.kind {
-                        LineKind::Add => '+',
-                        LineKind::Del => '-',
-                        LineKind::Context => ' ',
-                    };
-                    self.push_mono_line(
-                        Rect::new(rect.x + s.px(4.0), y, (gutter_w - s.px(4.0)).max(0.0), lh),
-                        &num,
-                        s.text_faint,
-                        diff_clip,
-                    );
-                    let code_x = rect.x + gutter_w + s.px(4.0);
-                    let code_text = format!("{prefix}{}", line.text);
-                    self.push_mono_line(
-                        Rect::new(code_x, y, (rect.right() - code_x - s.px(4.0)).max(0.0), lh),
-                        &code_text,
-                        s.text,
-                        diff_clip,
-                    );
                     y += lh;
                     drawn += 1;
                 }
@@ -882,6 +902,12 @@ impl AgentDrawer<'_, '_> {
         let lines = wrap_words(text, width, s.px(7.2), max_lines);
         for (i, line) in lines.iter().enumerate() {
             let y = start_y + i as f32 * line_h;
+            if y > clip.bottom as f32 {
+                break;
+            }
+            if y + line_h < clip.top as f32 {
+                continue;
+            }
             self.push_label(
                 Rect::new(x, y, width, line_h),
                 line,

@@ -6,12 +6,13 @@ use super::{AgentDrawer, AgentText};
 use crate::frame::bounds_around;
 use crate::helpers::{inset, rect_to_bounds};
 use twitty_core::color::Rgba;
+use twitty_core::language::{fill, format_arabic_plural};
 use twitty_core::layout::Rect;
 use twitty_render::icons::Icon;
 use twitty_render::shapes::{Border, Shadow, Shape};
 use twitty_render::text::ui::{UiAlign, UiLabel, UiSize, UiWeight};
 use twitty_render::ui_style::{OVERLAY_BLUR, OVERLAY_OFFSET, OVERLAY_SHADOW, RADIUS_12, RADIUS_6};
-use twitty_ui::ui::agent_panel::{arabic_count, included_context_tokens, AgentPanelHit};
+use twitty_ui::ui::agent_panel::{included_context_tokens, AgentPanelHit};
 use twitty_ui::ui::chrome::UiLanguage;
 
 impl AgentDrawer<'_, '_> {
@@ -75,22 +76,17 @@ impl AgentDrawer<'_, '_> {
 
         let used_tok = included_context_tokens(&self.view.context);
         let budget = self.view.context.budget_tokens;
+        let lang = self.lang();
+        let format_tokens = |n: u32| match lang {
+            UiLanguage::English => fill(lang.t("{} tok"), &[&n]),
+            UiLanguage::Arabic => format_arabic_plural(n as usize, lang.t("1 token|plural")),
+        };
         let hdr_text = if budget > 0 {
-            match self.lang() {
-                UiLanguage::English => format!("Context · {used_tok} / {budget} tok"),
-                UiLanguage::Arabic => format!(
-                    "السياق · {used_tok} / {}",
-                    arabic_count(budget as usize, "رمز واحد", "رمزان", "رموز", "رمز")
-                ),
-            }
+            let budget_str = format_tokens(budget);
+            fill(lang.t("Context · {} / {}"), &[&used_tok, &budget_str])
         } else {
-            match self.lang() {
-                UiLanguage::English => format!("Context · {used_tok} tok"),
-                UiLanguage::Arabic => format!(
-                    "السياق · {}",
-                    arabic_count(used_tok as usize, "رمز واحد", "رمزان", "رموز", "رمز")
-                ),
-            }
+            let used_str = format_tokens(used_tok);
+            fill(lang.t("Context · {}"), &[&used_str])
         };
         let title_r = Rect::new(
             hdr.x + s.px(10.0),
@@ -175,12 +171,7 @@ impl AgentDrawer<'_, '_> {
                 ContextKind::Block => self.lang().t("Block"),
                 ContextKind::File => self.lang().t("File"),
             };
-            let tok_str = match self.lang() {
-                UiLanguage::English => format!("{} tok", item.est_tokens),
-                UiLanguage::Arabic => {
-                    arabic_count(item.est_tokens as usize, "رمز واحد", "رمزان", "رموز", "رمز")
-                }
-            };
+            let tok_str = format_tokens(item.est_tokens);
             let tok_w = s.px(56.0).min(row_r.w * 0.28);
             let label_str = format!("[{kind_tag}] {}", item.label);
 

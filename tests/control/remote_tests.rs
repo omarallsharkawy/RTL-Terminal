@@ -244,6 +244,21 @@ mod remote_process {
         assert_eq!(tail.snapshot(), &big[10..]);
     }
 
+    #[test]
+    fn protocol_stream_decoder_handles_truncated_and_invalid_frames() {
+        use twitty_remote::daemon::fuzz_protocol_stream;
+        for sample in [
+            &[][..],
+            &[b'A', 0, 80, 0, 24, b'I', 0, 3, b'a', b'b', b'c', b'E', 0][..],
+            &[b'A', 0, 0, 0, 24][..],
+            &[b'O', 0xFF, 0xFF, 1, 2][..],
+            &[b'R', 0, 1][..],
+            &[b'Z', 1, 2, 3][..],
+        ] {
+            fuzz_protocol_stream(sample);
+        }
+    }
+
     struct RemoteTemp {
         dir: PathBuf,
         name: String,
