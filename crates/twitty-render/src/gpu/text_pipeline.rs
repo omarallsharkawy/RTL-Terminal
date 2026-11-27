@@ -25,7 +25,8 @@ const RASTER_CACHE_ENTRIES: usize = 16_384;
 pub(crate) struct TextPipeline {
     swash_cache: SwashCache,
     atlas: TextAtlas,
-    renderer: TextRenderer,
+    renderers: Vec<TextRenderer>,
+    active_layers: usize,
     viewport: Viewport,
 }
 
@@ -53,7 +54,8 @@ impl TextPipeline {
         TextPipeline {
             swash_cache,
             atlas,
-            renderer,
+            renderers: vec![renderer],
+            active_layers: 0,
             viewport,
         }
     }
@@ -62,7 +64,7 @@ impl TextPipeline {
         self.viewport.update(queue, Resolution { width, height });
     }
 
-    /// Rasterize and upload the glyphs of `runs` for the next `render`.
+    /// Rasterize and upload the glyphs of a single text layer for the next `render`.
     pub(crate) fn prepare<'a>(
         &mut self,
         device: &wgpu::Device,
@@ -70,35 +72,79 @@ impl TextPipeline {
         font_system: &mut FontSystem,
         runs: impl IntoIterator<Item = TextRun<'a>>,
     ) -> anyhow::Result<()> {
+        self.prepare_layered(device, queue, font_system, std::iter::once(runs))
+    }
+
+    /// Rasterize and upload glyphs for one or more z-ordered text layers sharing the same atlas.
+    pub(crate) fn prepare_layered<'a, L, I>(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        font_system: &mut FontSystem,
+        layers: L,
+    ) -> anyhow::Result<()>
+    where
+        L: IntoIterator<Item = I>,
+        I: IntoIterator<Item = TextRun<'a>>,
+    {
         if self.swash_cache.image_cache.len() >= RASTER_CACHE_ENTRIES {
             self.swash_cache.image_cache.clear();
         }
-        let areas = runs.into_iter().map(|run| TextArea {
-            buffer: run.buffer,
-            left: run.left,
-            top: run.top,
-            scale: 1.0,
-            bounds: run.bounds,
-            default_color: run.color,
-            custom_glyphs: &[],
-        });
-        self.renderer
-            .prepare(
-                device,
-                queue,
-                font_system,
-                &mut self.atlas,
-                &self.viewport,
-                areas,
-                &mut self.swash_cache,
-            )
-            .map_err(|e| anyhow::anyhow!("Text prepare error: {:?}", e))
+        let mut count = 0;
+        for runs in layers {
+            if count == self.renderers.len() {
+                self.renderers.push(TextRenderer::new(
+                    &mut self.atlas,
+                    device,
+                    wgpu::MultisampleState::default(),
+                    None,
+                ));
+            }
+            let areas = runs.into_iter().map(|run| TextArea {
+                buffer: run.buffer,
+                left: run.left,
+                top: run.top,
+                scale: 1.0,
+                bounds: run.bounds,
+                default_color: run.color,
+                custom_glyphs: &[],
+            });
+            self.renderers[count]
+                .prepare(
+                    device,
+                    queue,
+                    font_system,
+                    &mut self.atlas,
+                    &self.viewport,
+                    areas,
+                    &mut self.swash_cache,
+                )
+                .map_err(|e| anyhow::anyhow!("Text prepare error: {:?}", e))?;
+            count += 1;
+        }
+        self.active_layers = count;
+        Ok(())
+    }
+
+    pub fn layer_count(&self) -> usize {
+        self.active_layers
+    }
+
+    pub fn render_layer<'a>(
+        &'a self,
+        index: usize,
+        pass: &mut wgpu::RenderPass<'a>,
+    ) -> anyhow::Result<()> {
+        if index >= self.active_layers {
+            return Ok(());
+        }
+        self.renderers[index]
+            .render(&self.atlas, &self.viewport, pass)
+            .map_err(|e| anyhow::anyhow!("Text render error: {:?}", e))
     }
 
     pub fn render<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) -> anyhow::Result<()> {
-        self.renderer
-            .render(&self.atlas, &self.viewport, pass)
-            .map_err(|e| anyhow::anyhow!("Text render error: {:?}", e))
+        self.render_layer(0, pass)
     }
 
     /// Let the atlas evict old glyphs when the next frame needs space.

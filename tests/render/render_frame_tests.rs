@@ -161,3 +161,79 @@ fn preedit_clips_the_row_under_it() {
     let frame = s.frame(&[], &panes, &[]);
     assert!(frame.ime_area.is_none());
 }
+
+#[test]
+fn layered_gpu_passes_skip_cpu_overlay_clipping_and_align_splits() {
+    use twitty::render::text::ui::UiFont;
+    use twitty::render::ui_style::UiStyle;
+    use twitty::ui::chrome::UiLanguage;
+    use twitty::ui::context_menu::{ContextMenu, MenuAction, MenuEntry};
+    use twitty::ui::toast::{ToastKind, Toasts};
+
+    let mut s = Setup::new();
+    let rect = Rect::new(0.0, 0.0, 800.0, 600.0);
+    let panes = [pane(1, rect, "alpha\r\nbeta\r\ngamma\r\ndelta", true, None)];
+    let mut frame = s.frame(&[], &panes, &[]);
+    let base_runs_before = frame.text_runs(&panes, &s.cache, &s.ime).len();
+
+    let style = UiStyle::new(&s.palette, None, 1.0);
+    let ui_font = UiFont::default();
+    let menu = ContextMenu::new(
+        vec![
+            MenuEntry::item("Copy", MenuAction::Command("edit.copy")),
+            MenuEntry::item("Paste", MenuAction::Command("edit.paste")),
+        ],
+        (10.0, 10.0),
+    )
+    .unwrap();
+    let menu_layout = menu.layout(rect, 1.0, UiLanguage::English);
+    let mut toasts = Toasts::default();
+    toasts.push(ToastKind::Success, "Saved", std::time::Instant::now());
+
+    {
+        let mut ctx = DrawContext {
+            metrics: metrics(),
+            font_system: &mut s.font_system,
+            family: None,
+            palette: &s.palette,
+            is_srgb: false,
+        };
+        frame.add_context_menu(
+            &mut ctx,
+            style,
+            &ui_font,
+            &menu,
+            &menu_layout,
+            UiLanguage::English,
+        );
+        frame.add_toasts(
+            &mut ctx,
+            style,
+            &ui_font,
+            &toasts.visible(),
+            UiLanguage::English,
+        );
+        frame.add_tooltip(&mut ctx, style, &ui_font, "Hint", (40.0, 40.0));
+    }
+
+    let splits = frame.overlay_splits();
+    assert_eq!(splits.len(), 3, "context menu + toasts + tooltip splits");
+    assert!(splits[0] > 0);
+    assert!(splits[1] > splits[0]);
+    assert_eq!(splits[2], frame.shapes.overlay.len());
+
+    let layers = frame.text_layers(&panes, &s.cache, &s.ime);
+    assert_eq!(
+        layers.len(),
+        1 + splits.len(),
+        "base layer + one text layer per overlay split"
+    );
+    assert_eq!(
+        layers[0].len(),
+        base_runs_before,
+        "GPU layered path must not split base terminal runs via CPU clip_runs"
+    );
+    assert!(!layers[1].is_empty(), "context menu labels");
+    assert!(!layers[2].is_empty(), "toast labels");
+    assert_eq!(layers[3].len(), 1, "tooltip label");
+}

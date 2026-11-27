@@ -104,6 +104,52 @@ impl Gpu {
 
         Ok(())
     }
+
+    /// Compose base terminal + chrome at `opacity`, draw base text, then draw each GPU overlay
+    /// shape slice interleaved with its own text layer inside a single render pass.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_layered<'a, L, I>(
+        &mut self,
+        surface_texture: wgpu::SurfaceTexture,
+        geometry: (&[Quad], &ShapeLayers),
+        overlay_splits: &[usize],
+        text_layers: L,
+        font_system: &mut FontSystem,
+        background: [f32; 4],
+        opacity: f32,
+    ) -> anyhow::Result<()>
+    where
+        L: IntoIterator<Item = I>,
+        I: IntoIterator<Item = TextRun<'a>>,
+    {
+        let GpuContext { device, queue, .. } = &self.ctx;
+        let view = surface_texture
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        self.quads.set_rects(device, queue, geometry.0);
+        self.shapes
+            .prepare_layered(device, queue, geometry.1, overlay_splits);
+        self.text
+            .prepare_layered(device, queue, font_system, text_layers)?;
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("twitty layered render encoder"),
+        });
+        encode_layered_pass(
+            &mut encoder,
+            &view,
+            (&self.quads, &self.shapes, &self.text),
+            background,
+            opacity,
+        )?;
+
+        queue.submit(Some(encoder.finish()));
+        queue.present(surface_texture);
+
+        self.text.trim();
+
+        Ok(())
+    }
 }
 
 /// Compose geometry over the theme background, apply uniform material opacity, then draw text.
@@ -115,7 +161,45 @@ pub(crate) fn encode_pass(
     background: [f32; 4],
     opacity: f32,
 ) -> anyhow::Result<()> {
-    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+    let mut pass = begin_main_pass(encoder, view, background);
+    shapes.render_underlay(&mut pass);
+    quads.render(&mut pass);
+    shapes.render(&mut pass);
+    quads.apply_material_opacity(&mut pass, opacity);
+    text.render(&mut pass)
+}
+
+/// Compose base geometry + chrome at `opacity`, draw base text, then draw each overlay's SDF
+/// shapes directly over base text followed by that overlay's own text runs.
+pub(crate) fn encode_layered_pass(
+    encoder: &mut wgpu::CommandEncoder,
+    view: &wgpu::TextureView,
+    (quads, shapes, text): (&QuadRenderer, &ShapeRenderer, &TextPipeline),
+    background: [f32; 4],
+    opacity: f32,
+) -> anyhow::Result<()> {
+    let mut pass = begin_main_pass(encoder, view, background);
+    shapes.render_underlay(&mut pass);
+    quads.render(&mut pass);
+    shapes.render_chrome(&mut pass);
+    quads.apply_material_opacity(&mut pass, opacity);
+    text.render_layer(0, &mut pass)?;
+    let overlay_passes = shapes
+        .overlay_pass_count()
+        .max(text.layer_count().saturating_sub(1));
+    for i in 0..overlay_passes {
+        shapes.render_overlay_pass(i, &mut pass);
+        text.render_layer(i + 1, &mut pass)?;
+    }
+    Ok(())
+}
+
+fn begin_main_pass<'a>(
+    encoder: &'a mut wgpu::CommandEncoder,
+    view: &'a wgpu::TextureView,
+    background: [f32; 4],
+) -> wgpu::RenderPass<'a> {
+    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some("twitty render pass"),
         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
             view,
@@ -135,10 +219,5 @@ pub(crate) fn encode_pass(
         timestamp_writes: None,
         occlusion_query_set: None,
         multiview_mask: None,
-    });
-    shapes.render_underlay(&mut pass);
-    quads.render(&mut pass);
-    shapes.render(&mut pass);
-    quads.apply_material_opacity(&mut pass, opacity);
-    text.render(&mut pass)
+    })
 }

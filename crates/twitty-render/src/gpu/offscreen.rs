@@ -8,10 +8,10 @@
 
 use cosmic_text::FontSystem;
 
-use super::encode_pass;
 use super::quad_pipeline::QuadRenderer;
 use super::shape_pipeline::ShapeRenderer;
 use super::text_pipeline::TextPipeline;
+use super::{encode_layered_pass, encode_pass};
 use crate::scene::TextRun;
 use crate::shapes::ShapeLayers;
 use crate::style::Quad;
@@ -182,6 +182,48 @@ impl Offscreen {
             background,
             opacity,
         )?;
+        self.readback(encoder)
+    }
+
+    /// Draw base quads/chrome/text followed by interleaved GPU overlay shape slices and text layers.
+    pub fn render_layered<'a, L, I>(
+        &mut self,
+        geometry: (&[Quad], &ShapeLayers),
+        overlay_splits: &[usize],
+        text_layers: L,
+        font_system: &mut FontSystem,
+        background: [f32; 4],
+        opacity: f32,
+    ) -> anyhow::Result<Vec<u8>>
+    where
+        L: IntoIterator<Item = I>,
+        I: IntoIterator<Item = TextRun<'a>>,
+    {
+        let (device, queue) = (&self.device, &self.queue);
+        self.quads.set_rects(device, queue, geometry.0);
+        self.shapes
+            .prepare_layered(device, queue, geometry.1, overlay_splits);
+        self.text
+            .prepare_layered(device, queue, font_system, text_layers)?;
+
+        let view = self
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("twitty offscreen layered encoder"),
+        });
+        encode_layered_pass(
+            &mut encoder,
+            &view,
+            (&self.quads, &self.shapes, &self.text),
+            background,
+            opacity,
+        )?;
+        self.readback(encoder)
+    }
+
+    fn readback(&mut self, mut encoder: wgpu::CommandEncoder) -> anyhow::Result<Vec<u8>> {
+        let (device, queue) = (&self.device, &self.queue);
 
         // Rows of a texture-to-buffer copy are padded to 256 bytes.
         let row_bytes = self.width * 4;

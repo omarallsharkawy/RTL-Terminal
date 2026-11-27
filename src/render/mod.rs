@@ -739,12 +739,13 @@ impl Renderer {
                 winit::dpi::PhysicalSize::new(w, h),
             );
         }
-        let runs = frame.text_runs(panes, &self.row_cache, &self.ime);
+        let text_layers = frame.text_layers(panes, &self.row_cache, &self.ime);
         let draw_start = acquire.map(|_| Instant::now());
-        self.gpu.draw(
+        self.gpu.draw_layered(
             surface_texture,
             (&frame.quads, &frame.shapes),
-            runs,
+            frame.overlay_splits(),
+            text_layers,
             &mut self.ui_font_system,
             frame.background,
             self.opacity,

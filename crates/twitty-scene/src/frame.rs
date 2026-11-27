@@ -96,6 +96,8 @@ pub struct Frame {
     /// were added. All text is drawn after all shapes, so each layer first hides the text under
     /// its area, then adds its own.
     layers: Vec<TextLayer>,
+    /// Cumulative end indices into `shapes.overlay`, one per GPU overlay pass.
+    overlay_splits: Vec<usize>,
 }
 
 /// One overlay's text, in [`Frame::layers`].
@@ -103,10 +105,13 @@ enum TextLayer {
     Review,
     AgentPanel,
     Composer,
-    /// Labels over `holes`, which hide the text drawn before them.
+    /// Labels over `holes`, which hide the text drawn before them in single-pass CPU `text_runs`.
+    /// When `gpu_overlay` is true, [`Frame::text_layers`] emits these labels in their own GPU pass
+    /// directly after their corresponding `shapes.overlay` slice — avoiding CPU `clip_runs`.
     Plain {
         holes: Vec<Rect>,
         labels: Vec<UiLabel>,
+        gpu_overlay: bool,
     },
 }
 
@@ -356,6 +361,7 @@ pub fn build_frame_base(
         composer_labels: Vec::new(),
         composer_clips: Vec::new(),
         layers: Vec::new(),
+        overlay_splits: Vec::new(),
     }
 }
 
@@ -514,12 +520,29 @@ impl Frame {
         self.push_layer(rect, labels);
     }
 
-    /// Add a layer of `labels` that hides the text drawn before it under `hole`.
+    /// Add a chrome-layer label group that hides the text drawn before it under `hole`.
     fn push_layer(&mut self, hole: Option<Rect>, labels: Vec<UiLabel>) {
         self.layers.push(TextLayer::Plain {
             holes: hole.into_iter().collect(),
             labels,
+            gpu_overlay: false,
         });
+    }
+
+    /// Record a GPU overlay pass whose shapes were just appended to `self.shapes.overlay`.
+    fn push_overlay_layer(&mut self, holes: Vec<Rect>, labels: Vec<UiLabel>) {
+        self.overlay_splits.push(self.shapes.overlay.len());
+        self.layers.push(TextLayer::Plain {
+            holes,
+            labels,
+            gpu_overlay: true,
+        });
+    }
+
+    /// Cumulative end indices into `shapes.overlay` corresponding to overlay layers in
+    /// [`Frame::text_layers`].
+    pub fn overlay_splits(&self) -> &[usize] {
+        &self.overlay_splits
     }
 
     /// Draw an open right-click menu above everything else.
@@ -541,7 +564,7 @@ impl Frame {
             language,
             &mut self.shapes.overlay,
         );
-        self.push_layer(Some(layout.rect), labels);
+        self.push_overlay_layer(vec![layout.rect], labels);
     }
 
     /// Draw short notices at the top center of the window.
@@ -562,10 +585,7 @@ impl Frame {
             language,
             &mut self.shapes.overlay,
         );
-        self.layers.push(TextLayer::Plain {
-            holes: rects,
-            labels,
-        });
+        self.push_overlay_layer(rects, labels);
     }
 
     /// Draw a hover tooltip near pointer `at`, above everything else.
@@ -586,7 +606,7 @@ impl Frame {
             self.surface,
             &mut self.shapes.overlay,
         );
-        self.push_layer(Some(rect), vec![label]);
+        self.push_overlay_layer(vec![rect], vec![label]);
     }
 
     /// Draw the one-time AI privacy consent modal above everything else.
@@ -605,7 +625,7 @@ impl Frame {
             self.surface,
             &mut self.shapes.overlay,
         );
-        self.push_layer(rect, labels);
+        self.push_overlay_layer(rect.into_iter().collect(), labels);
     }
 
     /// Draw the command palette above everything else.
@@ -649,10 +669,13 @@ impl Frame {
                 .for_each(|shape| slide.shape(shape));
             texts.iter_mut().for_each(|label| slide.label(label));
         }
-        self.push_layer(outer.map(|rect| slide.rect(rect)), texts);
+        self.push_overlay_layer(
+            outer.map(|rect| slide.rect(rect)).into_iter().collect(),
+            texts,
+        );
     }
 
-    /// Draw the settings panel above everything else, clipping underlying text behind it.
+    /// Draw the settings panel above everything else, composited in its own GPU overlay pass.
     pub fn add_settings<'a>(
         &mut self,
         ctx: &mut DrawContext,
@@ -668,10 +691,10 @@ impl Frame {
             self.surface,
             &mut self.shapes.overlay,
         );
-        self.push_layer(outer, texts);
+        self.push_overlay_layer(outer.into_iter().collect(), texts);
     }
 
-    /// Draw the first-run welcome wizard above everything else, clipping underlying text behind it.
+    /// Draw the first-run welcome wizard above everything else, composited in its own GPU overlay pass.
     pub fn add_welcome<'a>(
         &mut self,
         ctx: &mut DrawContext,
@@ -687,10 +710,10 @@ impl Frame {
             self.surface,
             &mut self.shapes.overlay,
         );
-        self.push_layer(outer, texts);
+        self.push_overlay_layer(outer.into_iter().collect(), texts);
     }
 
-    /// Draw the Project Memory overlay above everything else, clipping underlying text behind it.
+    /// Draw the Project Memory overlay above everything else, composited in its own GPU overlay pass.
     pub fn add_memory<'a>(
         &mut self,
         ctx: &mut DrawContext,
@@ -706,7 +729,7 @@ impl Frame {
             self.surface,
             &mut self.shapes.overlay,
         );
-        self.push_layer(outer, texts);
+        self.push_overlay_layer(outer.into_iter().collect(), texts);
     }
 
     /// Optional chrome is attached explicitly so offscreen/golden callers keep their layout.
@@ -843,6 +866,141 @@ impl Frame {
     /// a status line) and status line, preedit, sidebar labels, the review panel, then the
     /// command palette.
     pub fn text_runs<'a>(
+        &'a self,
+        panes: &[PaneFrame],
+        cache: &'a RowCache,
+        ime: &'a PreeditState,
+    ) -> Vec<TextRun<'a>> {
+        let mut runs = self.base_text_runs(panes, cache, ime);
+        let fg = self.foreground;
+        macro_rules! push_rows {
+            ($texts:expr) => {
+                for text in $texts {
+                    for seg in &text.row.segments {
+                        runs.push(TextRun {
+                            buffer: &seg.buffer,
+                            left: text.left + seg.seg_x,
+                            top: text.top,
+                            bounds: text.bounds,
+                            color: fg,
+                        });
+                    }
+                }
+            };
+        }
+        for layer in &self.layers {
+            match layer {
+                TextLayer::Review => {
+                    if let Some(hole) = self.review_rect {
+                        runs = clip_runs(runs, hole);
+                    }
+                    push_rows!(&self.review_texts);
+                    runs.extend(self.review_labels.iter().map(ui_run));
+                }
+                TextLayer::AgentPanel => {
+                    if let Some(hole) = self.agent_panel_rect {
+                        runs = clip_runs(runs, hole);
+                    }
+                    push_rows!(&self.agent_panel_texts);
+                    runs.extend(self.agent_panel_labels.iter().map(ui_run));
+                }
+                TextLayer::Composer => {
+                    for &hole in &self.composer_clips {
+                        runs = clip_runs(runs, hole);
+                    }
+                    push_rows!(&self.composer_texts);
+                    runs.extend(self.composer_labels.iter().map(ui_run));
+                }
+                TextLayer::Plain { holes, labels, .. } => {
+                    for &hole in holes {
+                        runs = clip_runs(runs, hole);
+                    }
+                    runs.extend(labels.iter().map(ui_run));
+                }
+            }
+        }
+        runs
+    }
+
+    /// Layered text runs for GPU-interleaved rendering (`Gpu::draw_layered` /
+    /// `Offscreen::render_layered`): index `0` is base + chrome text, and indices `1..=N`
+    /// correspond 1:1 to `self.overlay_splits()`. Overlay shapes occlude underlying text
+    /// directly on the GPU without running CPU `clip_runs` over base runs.
+    pub fn text_layers<'a>(
+        &'a self,
+        panes: &[PaneFrame],
+        cache: &'a RowCache,
+        ime: &'a PreeditState,
+    ) -> Vec<Vec<TextRun<'a>>> {
+        let mut base = self.base_text_runs(panes, cache, ime);
+        let fg = self.foreground;
+        macro_rules! push_rows {
+            ($target:expr, $texts:expr) => {
+                for text in $texts {
+                    for seg in &text.row.segments {
+                        $target.push(TextRun {
+                            buffer: &seg.buffer,
+                            left: text.left + seg.seg_x,
+                            top: text.top,
+                            bounds: text.bounds,
+                            color: fg,
+                        });
+                    }
+                }
+            };
+        }
+
+        let mut overlay_layers: Vec<Vec<TextRun<'a>>> =
+            Vec::with_capacity(self.overlay_splits.len());
+        for layer in &self.layers {
+            match layer {
+                TextLayer::Review => {
+                    if let Some(hole) = self.review_rect {
+                        base = clip_runs(base, hole);
+                    }
+                    push_rows!(base, &self.review_texts);
+                    base.extend(self.review_labels.iter().map(ui_run));
+                }
+                TextLayer::AgentPanel => {
+                    if let Some(hole) = self.agent_panel_rect {
+                        base = clip_runs(base, hole);
+                    }
+                    push_rows!(base, &self.agent_panel_texts);
+                    base.extend(self.agent_panel_labels.iter().map(ui_run));
+                }
+                TextLayer::Composer => {
+                    for &hole in &self.composer_clips {
+                        base = clip_runs(base, hole);
+                    }
+                    push_rows!(base, &self.composer_texts);
+                    base.extend(self.composer_labels.iter().map(ui_run));
+                }
+                TextLayer::Plain {
+                    holes,
+                    labels,
+                    gpu_overlay: false,
+                } => {
+                    for &hole in holes {
+                        base = clip_runs(base, hole);
+                    }
+                    base.extend(labels.iter().map(ui_run));
+                }
+                TextLayer::Plain {
+                    labels,
+                    gpu_overlay: true,
+                    ..
+                } => {
+                    overlay_layers.push(labels.iter().map(ui_run).collect());
+                }
+            }
+        }
+        let mut all = Vec::with_capacity(1 + overlay_layers.len());
+        all.push(base);
+        all.extend(overlay_layers);
+        all
+    }
+
+    fn base_text_runs<'a>(
         &'a self,
         panes: &[PaneFrame],
         cache: &'a RowCache,
@@ -988,53 +1146,6 @@ impl Frame {
         }
         runs.extend(self.block_labels.iter().map(ui_run));
         runs.extend(self.chrome_labels.iter().map(ui_run));
-        // Terminal-shaped rows of a panel, positioned like the panel drew them.
-        macro_rules! push_rows {
-            ($texts:expr) => {
-                for text in $texts {
-                    for seg in &text.row.segments {
-                        runs.push(TextRun {
-                            buffer: &seg.buffer,
-                            left: text.left + seg.seg_x,
-                            top: text.top,
-                            bounds: text.bounds,
-                            color: fg,
-                        });
-                    }
-                }
-            };
-        }
-        for layer in &self.layers {
-            match layer {
-                TextLayer::Review => {
-                    if let Some(hole) = self.review_rect {
-                        runs = clip_runs(runs, hole);
-                    }
-                    push_rows!(&self.review_texts);
-                    runs.extend(self.review_labels.iter().map(ui_run));
-                }
-                TextLayer::AgentPanel => {
-                    if let Some(hole) = self.agent_panel_rect {
-                        runs = clip_runs(runs, hole);
-                    }
-                    push_rows!(&self.agent_panel_texts);
-                    runs.extend(self.agent_panel_labels.iter().map(ui_run));
-                }
-                TextLayer::Composer => {
-                    for &hole in &self.composer_clips {
-                        runs = clip_runs(runs, hole);
-                    }
-                    push_rows!(&self.composer_texts);
-                    runs.extend(self.composer_labels.iter().map(ui_run));
-                }
-                TextLayer::Plain { holes, labels } => {
-                    for &hole in holes {
-                        runs = clip_runs(runs, hole);
-                    }
-                    runs.extend(labels.iter().map(ui_run));
-                }
-            }
-        }
         runs
     }
 }

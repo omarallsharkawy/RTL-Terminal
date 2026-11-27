@@ -11,6 +11,7 @@ pub(crate) struct ShapeRenderer {
     buffer: Option<(wgpu::Buffer, usize)>,
     instances: Vec<ShapeInstance>,
     layers: [Range<u32>; 3],
+    overlay_passes: Vec<Range<u32>>,
 }
 
 impl ShapeRenderer {
@@ -71,6 +72,7 @@ impl ShapeRenderer {
             buffer: None,
             instances: Vec::new(),
             layers: [0..0, 0..0, 0..0],
+            overlay_passes: Vec::new(),
         }
     }
 
@@ -80,12 +82,46 @@ impl ShapeRenderer {
     }
 
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, shapes: &ShapeLayers) {
+        self.prepare_layered(device, queue, shapes, &[]);
+    }
+
+    pub fn prepare_layered(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        shapes: &ShapeLayers,
+        overlay_splits: &[usize],
+    ) {
         self.instances.clear();
-        self.layers = [
-            append_instances(&shapes.underlay, &mut self.instances),
-            append_instances(&shapes.chrome, &mut self.instances),
-            append_instances(&shapes.overlay, &mut self.instances),
-        ];
+        self.overlay_passes.clear();
+        let underlay = append_instances(&shapes.underlay, &mut self.instances);
+        let chrome = append_instances(&shapes.chrome, &mut self.instances);
+        let overlay_start = self.instances.len() as u32;
+        if overlay_splits.is_empty() {
+            let range = append_instances(&shapes.overlay, &mut self.instances);
+            if !range.is_empty() {
+                self.overlay_passes.push(range);
+            }
+        } else {
+            let mut prev = 0;
+            let total = shapes.overlay.len();
+            for &raw_end in overlay_splits {
+                let end = raw_end.min(total);
+                if end < prev {
+                    self.overlay_passes.push(0..0);
+                    continue;
+                }
+                let range = append_instances(&shapes.overlay[prev..end], &mut self.instances);
+                self.overlay_passes.push(range);
+                prev = end;
+            }
+            if prev < total {
+                let range = append_instances(&shapes.overlay[prev..total], &mut self.instances);
+                self.overlay_passes.push(range);
+            }
+        }
+        let overlay_end = self.instances.len() as u32;
+        self.layers = [underlay, chrome, overlay_start..overlay_end];
         let len = self.instances.len();
         if len == 0 {
             return;
@@ -111,6 +147,20 @@ impl ShapeRenderer {
 
     pub fn render_underlay<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
         self.render_layers(pass, &self.layers[..1]);
+    }
+
+    pub fn render_chrome<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
+        self.render_layers(pass, &self.layers[1..2]);
+    }
+
+    pub fn overlay_pass_count(&self) -> usize {
+        self.overlay_passes.len()
+    }
+
+    pub fn render_overlay_pass<'a>(&'a self, index: usize, pass: &mut wgpu::RenderPass<'a>) {
+        if let Some(layer) = self.overlay_passes.get(index) {
+            self.render_layers(pass, std::slice::from_ref(layer));
+        }
     }
 
     pub fn render<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {

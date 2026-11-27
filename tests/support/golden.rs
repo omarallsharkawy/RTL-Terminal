@@ -338,14 +338,15 @@ impl GoldenScene {
         };
         let mut frame = build_frame(&mut ctx, &opts, &mut cache, &mut ime, &[], &panes, &[]);
         draw(&mut frame, &mut ctx, style, &ui_font);
-        let runs = frame.text_runs(&panes, &cache, &ime);
+        let text_layers = frame.text_layers(&panes, &cache, &ime);
         let Some(mut target) = offscreen(&self.name, self.width, self.height) else {
             return;
         };
         let actual = target
-            .render_layers(
+            .render_layered(
                 (&frame.quads, &frame.shapes),
-                runs,
+                frame.overlay_splits(),
+                text_layers,
                 ctx.font_system,
                 frame.background,
                 1.0,
