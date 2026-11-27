@@ -1091,7 +1091,7 @@ fn pane_header_title(pane: &crate::session::pane::Pane) -> (String, bool) {
         .or(program)
         .map(|title| crate::shell_integration::clean_text(title, 256))
         .filter(|title| !title.is_empty())
-        .unwrap_or_else(|| crate::ui::chrome::tr("Terminal", "الطرفية").to_owned());
+        .unwrap_or_else(|| crate::ui::chrome::t("Terminal").to_owned());
     (
         title,
         agent_name.is_some() || pane.meta.agent_status.is_some(),

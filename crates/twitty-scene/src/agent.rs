@@ -189,7 +189,7 @@ impl AgentDrawer<'_, '_> {
             .session
             .as_ref()
             .and_then(|sess| sess.provider.as_ref().map(|p| p.display.as_str()))
-            .unwrap_or_else(|| self.lang().text("Agent", "الوكيل"));
+            .unwrap_or_else(|| self.lang().t("Agent"));
 
         let header_title = if self.view.project_name.is_empty() {
             provider_label.to_owned()
@@ -233,7 +233,7 @@ impl AgentDrawer<'_, '_> {
             self.rect_fill(stop, RADIUS_6, bg, Some(s.danger));
             self.push_label(
                 stop,
-                self.lang().text("Stop", "إيقاف"),
+                self.lang().t("Stop"),
                 UiSize::Small,
                 UiWeight::Semibold,
                 UiAlign::Center,
@@ -303,7 +303,7 @@ impl AgentDrawer<'_, '_> {
             });
             self.push_label(
                 pill,
-                self.lang().text("Jump to latest", "الانتقال للأحدث"),
+                self.lang().t("Jump to latest"),
                 UiSize::Small,
                 UiWeight::Semibold,
                 UiAlign::Center,
@@ -411,9 +411,9 @@ impl AgentDrawer<'_, '_> {
 
         if let Some(edit) = editing {
             let heading = if edit.is_patch() {
-                self.lang().text("Edit patch", "تعديل الرقعة")
+                self.lang().t("Edit patch")
             } else {
-                self.lang().text("Edit command", "تعديل الأمر")
+                self.lang().t("Edit command")
             };
             self.push_label(
                 title_rect,
@@ -477,7 +477,7 @@ impl AgentDrawer<'_, '_> {
             StepKind::Plan { text } => {
                 self.push_label(
                     title_rect,
-                    self.lang().text("Plan", "الخطة"),
+                    self.lang().t("Plan"),
                     UiSize::Small,
                     UiWeight::Semibold,
                     self.start_align(),
@@ -504,11 +504,7 @@ impl AgentDrawer<'_, '_> {
                 target,
                 preview,
             } => {
-                let heading = format!(
-                    "{} · {}",
-                    self.lang().text("Read", "قراءة"),
-                    read_tool_name(*tool)
-                );
+                let heading = format!("{} · {}", self.lang().t("Read"), read_tool_name(*tool));
                 self.push_label(
                     title_rect,
                     &heading,
@@ -554,8 +550,7 @@ impl AgentDrawer<'_, '_> {
             StepKind::ReadApproval { tool, target } => {
                 let heading = format!(
                     "{} · {}",
-                    self.lang()
-                        .text("Read needs approval", "قراءة تحتاج موافقة"),
+                    self.lang().t("Read needs approval"),
                     read_tool_name(*tool)
                 );
                 self.push_label(
@@ -583,10 +578,9 @@ impl AgentDrawer<'_, '_> {
                 after_untrusted_data,
             } => {
                 let title = if entry.user_edited {
-                    self.lang()
-                        .text("Command (user-edited)", "أمر (عدّله المستخدم)")
+                    self.lang().t("Command (user-edited)")
                 } else {
-                    self.lang().text("Command", "أمر")
+                    self.lang().t("Command")
                 };
                 self.push_label(
                     title_rect,
@@ -658,10 +652,9 @@ impl AgentDrawer<'_, '_> {
                 }
                 // AGENT.md §1.2 & §2.4: warning note with vector Icon::Warning when proposed after data.
                 if *after_untrusted_data {
-                    let note = self.lang().text(
-                        "Suggested after reading output — review carefully",
-                        "مقترح بعد قراءة المخرجات — راجعه بعناية",
-                    );
+                    let note = self
+                        .lang()
+                        .t("Suggested after reading output — review carefully");
                     let row_r = Rect::new(inner.x, cur_y, inner.w, s.px(17.0));
                     let icon_side = s.px(12.0);
                     let icon_logical = Rect::new(
@@ -698,10 +691,9 @@ impl AgentDrawer<'_, '_> {
                 reason,
             } => {
                 let title = if entry.user_edited {
-                    self.lang()
-                        .text("Patch (user-edited)", "تعديل (عدّله المستخدم)")
+                    self.lang().t("Patch (user-edited)")
                 } else {
-                    self.lang().text("Patch", "تعديل")
+                    self.lang().t("Patch")
                 };
                 self.push_label(
                     title_rect,
@@ -784,17 +776,17 @@ impl AgentDrawer<'_, '_> {
                 let status_txt = match exit {
                     Some(0) => format!(
                         "{} · {}",
-                        self.lang().text("Exit 0", "نجاح 0"),
+                        self.lang().t("Exit 0"),
                         format_duration_ms(*duration_ms)
                     ),
                     Some(code) => format!(
                         "{} {code} · {}",
-                        self.lang().text("Exit", "خروج"),
+                        self.lang().t("Exit"),
                         format_duration_ms(*duration_ms)
                     ),
                     None => format!(
                         "{} · {}",
-                        self.lang().text("Finished", "انتهى"),
+                        self.lang().t("Finished"),
                         format_duration_ms(*duration_ms)
                     ),
                 };
@@ -843,10 +835,9 @@ impl AgentDrawer<'_, '_> {
                 undo_available,
             } => {
                 let heading = if *undo_available {
-                    self.lang().text("Patch applied", "تم تطبيق التعديل")
+                    self.lang().t("Patch applied")
                 } else {
-                    self.lang()
-                        .text("Patch applied (undo unavailable)", "تم تطبيق التعديل")
+                    self.lang().t("Patch applied (undo unavailable)")
                 };
                 self.push_label(
                     title_rect,
@@ -872,8 +863,7 @@ impl AgentDrawer<'_, '_> {
             StepKind::FactSuggestion { text } => {
                 self.push_label(
                     title_rect,
-                    self.lang()
-                        .text("Remember for this project?", "حفظ لهذا المشروع؟"),
+                    self.lang().t("Remember for this project?"),
                     UiSize::Small,
                     UiWeight::Semibold,
                     self.start_align(),
@@ -893,7 +883,7 @@ impl AgentDrawer<'_, '_> {
             StepKind::Message { text } => {
                 self.push_label(
                     title_rect,
-                    self.lang().text("Agent", "الوكيل"),
+                    self.lang().t("Agent"),
                     UiSize::Small,
                     UiWeight::Semibold,
                     self.start_align(),
@@ -913,7 +903,7 @@ impl AgentDrawer<'_, '_> {
             StepKind::Denied { what, reason } => {
                 self.push_label(
                     title_rect,
-                    self.lang().text("Denied", "مرفوض"),
+                    self.lang().t("Denied"),
                     UiSize::Small,
                     UiWeight::Semibold,
                     self.start_align(),
@@ -946,7 +936,7 @@ impl AgentDrawer<'_, '_> {
             StepKind::LimitReached { what } => {
                 self.push_label(
                     title_rect,
-                    self.lang().text("Limit reached", "تم بلوغ الحد"),
+                    self.lang().t("Limit reached"),
                     UiSize::Small,
                     UiWeight::Semibold,
                     self.start_align(),
@@ -1160,31 +1150,31 @@ impl AgentDrawer<'_, '_> {
 
         let label = match btn {
             CardButton::Primary => match kind {
-                StepKind::Command { .. } => self.lang().text("Run", "تشغيل"),
-                StepKind::Patch { .. } => self.lang().text("Apply", "تطبيق"),
-                StepKind::FactSuggestion { .. } => self.lang().text("Remember", "حفظ"),
-                StepKind::LimitReached { .. } => self.lang().text("Continue", "متابعة"),
-                StepKind::ReadApproval { .. } => self.lang().text("Allow read", "اسمح بالقراءة"),
-                _ => self.lang().text("Approve", "موافقة"),
+                StepKind::Command { .. } => self.lang().t("Run"),
+                StepKind::Patch { .. } => self.lang().t("Apply"),
+                StepKind::FactSuggestion { .. } => self.lang().t("Remember"),
+                StepKind::LimitReached { .. } => self.lang().t("Continue"),
+                StepKind::ReadApproval { .. } => self.lang().t("Allow read"),
+                _ => self.lang().t("Approve"),
             },
-            CardButton::Edit => self.lang().text("Edit", "تعديل"),
+            CardButton::Edit => self.lang().t("Edit"),
             CardButton::Deny => match kind {
-                StepKind::FactSuggestion { .. } => self.lang().text("Dismiss", "تجاهل"),
-                StepKind::LimitReached { .. } => self.lang().text("Stop", "إيقاف"),
-                _ => self.lang().text("Deny", "رفض"),
+                StepKind::FactSuggestion { .. } => self.lang().t("Dismiss"),
+                StepKind::LimitReached { .. } => self.lang().t("Stop"),
+                _ => self.lang().t("Deny"),
             },
             CardButton::Expand => {
                 if expanded {
-                    self.lang().text("Collapse", "طيّ")
+                    self.lang().t("Collapse")
                 } else {
-                    self.lang().text("Expand", "توسيع")
+                    self.lang().t("Expand")
                 }
             }
-            CardButton::OpenBlock => self.lang().text("Open block", "افتح الكتلة"),
-            CardButton::Undo => self.lang().text("Undo", "تراجع"),
-            CardButton::Copy => self.lang().text("Copy", "نسخ"),
-            CardButton::ApplyEdit => self.lang().text("Apply edited", "تطبيق المعدّل"),
-            CardButton::CancelEdit => self.lang().text("Cancel", "إلغاء"),
+            CardButton::OpenBlock => self.lang().t("Open block"),
+            CardButton::Undo => self.lang().t("Undo"),
+            CardButton::Copy => self.lang().t("Copy"),
+            CardButton::ApplyEdit => self.lang().t("Apply edited"),
+            CardButton::CancelEdit => self.lang().t("Cancel"),
         };
 
         self.push_label(
@@ -1249,7 +1239,7 @@ impl AgentDrawer<'_, '_> {
 
         // Placeholder when composer is empty.
         if self.view.composer.is_empty() && self.view.composer.preedit().is_none() {
-            let ph = self.lang().text("Ask the agent…", "اسأل الوكيل…");
+            let ph = self.lang().t("Ask the agent…");
             self.push_label(
                 inset(l.composer_box, s.px(8.0), 0.0),
                 ph,
@@ -1277,7 +1267,7 @@ impl AgentDrawer<'_, '_> {
         self.rect_fill(l.send_button, RADIUS_6, fill, None);
         self.push_label(
             l.send_button,
-            self.lang().text("Send", "إرسال"),
+            self.lang().t("Send"),
             UiSize::Small,
             UiWeight::Semibold,
             UiAlign::Center,
@@ -1483,10 +1473,7 @@ impl AgentDrawer<'_, '_> {
             );
             self.push_label(
                 empty_r,
-                self.lang().text(
-                    "No context items attached to this request.",
-                    "لا توجد عناصر سياق مرفقة بهذا الطلب.",
-                ),
+                self.lang().t("No context items attached to this request."),
                 UiSize::Caption,
                 UiWeight::Regular,
                 self.start_align(),
@@ -1521,10 +1508,10 @@ impl AgentDrawer<'_, '_> {
             }
 
             let kind_tag = match item.kind {
-                ContextKind::Rule => self.lang().text("Rule", "قاعدة"),
-                ContextKind::Memory => self.lang().text("Memory", "ذكرى"),
-                ContextKind::Block => self.lang().text("Block", "كتلة"),
-                ContextKind::File => self.lang().text("File", "ملف"),
+                ContextKind::Rule => self.lang().t("Rule"),
+                ContextKind::Memory => self.lang().t("Memory"),
+                ContextKind::Block => self.lang().t("Block"),
+                ContextKind::File => self.lang().t("File"),
             };
             let tok_str = match self.lang() {
                 UiLanguage::English => format!("{} tok", item.est_tokens),

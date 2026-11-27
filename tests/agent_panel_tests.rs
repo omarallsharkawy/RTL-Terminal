@@ -797,7 +797,7 @@ fn agent_panel_clips_underlying_terminal_text_and_draws_needs_input_pane_header(
         assert!(!runs.is_empty());
 
         // Verify the "Needs input" header pill label was produced.
-        let expected_pill = lang.text("Needs input", "بانتظار ردك");
+        let expected_pill = lang.t("Needs input");
         assert!(
             runs.iter().any(|r| r
                 .buffer

@@ -4,7 +4,7 @@
 use super::App;
 use crate::layouts::{capture_active_tab, LayoutStore};
 use crate::pty::SpawnOptions;
-use crate::ui::chrome::tr;
+use crate::ui::chrome::t;
 
 impl App {
     /// Reload saved layouts from disk when opening a layout palette mode.
@@ -19,19 +19,13 @@ impl App {
         };
         if let Err(err) = self.layouts.upsert(layout) {
             if let Some(id) = self.focused_id() {
-                self.show_pane_warning(
-                    id,
-                    &format!("{}: {err}", tr("Could not save layout", "تعذر حفظ التخطيط")),
-                );
+                self.show_pane_warning(id, &format!("{}: {err}", t("Could not save layout")));
             }
             return;
         }
         if let Err(err) = self.layouts.save_default() {
             if let Some(id) = self.focused_id() {
-                self.show_pane_warning(
-                    id,
-                    &format!("{}: {err}", tr("Could not save layout", "تعذر حفظ التخطيط")),
-                );
+                self.show_pane_warning(id, &format!("{}: {err}", t("Could not save layout")));
             }
         }
     }
@@ -54,13 +48,7 @@ impl App {
         );
         let Some(focused) = prepared.open_in(&mut self.ws, grid, &mut shells) else {
             if let Some(id) = previous {
-                self.show_pane_warning(
-                    id,
-                    tr(
-                        "Could not open layout: the shells failed to start",
-                        "تعذر فتح التخطيط: الـshell ما اشتغلش",
-                    ),
-                );
+                self.show_pane_warning(id, t("Could not open layout: the shells failed to start"));
             }
             return;
         };
@@ -76,13 +64,7 @@ impl App {
         }
         if let Err(err) = self.layouts.save_default() {
             if let Some(id) = self.focused_id() {
-                self.show_pane_warning(
-                    id,
-                    &format!(
-                        "{}: {err}",
-                        tr("Could not delete layout", "تعذر حذف التخطيط")
-                    ),
-                );
+                self.show_pane_warning(id, &format!("{}: {err}", t("Could not delete layout")));
             }
         }
     }

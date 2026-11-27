@@ -75,10 +75,7 @@ impl EngineConfig {
                     .unwrap_or("CLI");
                 (
                     &self.models.cli,
-                    format!(
-                        "{name} · {}",
-                        twitty_core::language::tr("CLI", "سطر الأوامر")
-                    ),
+                    format!("{name} · {}", twitty_core::language::t("CLI")),
                 )
             }
             ProviderKind::Anthropic => (&self.models.anthropic, "Claude · API".into()),

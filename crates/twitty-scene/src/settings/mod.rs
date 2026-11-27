@@ -153,7 +153,7 @@ impl SettingsDrawer<'_, '_> {
             0.0,
             self.ctx.color(s.border),
         ));
-        let title = self.lang().text("Settings", "الإعدادات");
+        let title = self.lang().t("Settings");
         self.push_label(
             l.header_title,
             title,
@@ -422,7 +422,7 @@ impl SettingsDrawer<'_, '_> {
                     }),
                     shadow: None,
                 });
-                let text = self.lang().text("Open…", "فتح…");
+                let text = self.lang().t("Open…");
                 self.push_label(
                     *button,
                     text,

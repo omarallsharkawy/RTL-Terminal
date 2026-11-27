@@ -386,7 +386,7 @@ impl Chrome<'_, '_> {
                 let pill_y = title.y + (title.h - pill_h) * 0.5;
                 let pill_pad = s.px(SPACE_4);
                 let icon_side = s.px(SPACE_12).min(pill_h);
-                let text = language.text("Needs input", "بانتظار ردك");
+                let text = language.t("Needs input");
                 let text_buf = self.font.shape(
                     self.ctx.font_system,
                     UiSize::Small,
@@ -454,8 +454,8 @@ impl Chrome<'_, '_> {
                 let pill_y = title.y + (title.h - pill_h) * 0.5;
                 let pill_pad = s.px(SPACE_4);
                 let icon_side = s.px(SPACE_12).min(pill_h);
-                let full_text = language.text("Zoom · مكبّرة", "مكبّرة · Zoom");
-                let short_text = language.text("Zoom", "مكبّرة");
+                let full_text = language.t("Zoom · مكبّرة");
+                let short_text = language.t("Zoom");
                 let full_buf = self.font.shape(
                     self.ctx.font_system,
                     UiSize::Small,

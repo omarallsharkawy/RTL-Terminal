@@ -24,19 +24,16 @@ const MAX_USER_BYTES: usize = 64 * 1024;
 const MAX_TEXT_BYTES: usize = 128 * 1024;
 const MAX_HISTORY_BYTES: usize = 4 * 1024 * 1024;
 fn journal_error() -> &'static str {
-    twitty_core::language::tr("Session journal unavailable", "سجل الجلسة غير متاح")
+    twitty_core::language::t("Session journal unavailable")
 }
 fn folder_error() -> &'static str {
-    twitty_core::language::tr("Project folder unavailable", "مجلد المشروع غير متاح")
+    twitty_core::language::t("Project folder unavailable")
 }
 fn no_text() -> &'static str {
-    twitty_core::language::tr("The provider returned no message", "لم يُرجع المزود رسالة")
+    twitty_core::language::t("The provider returned no message")
 }
 fn invalid_tool() -> &'static str {
-    twitty_core::language::tr(
-        "The provider proposed an invalid tool call",
-        "اقترح المزود طلب أداة غير صالح",
-    )
+    twitty_core::language::t("The provider proposed an invalid tool call")
 }
 
 type Events = Sender<AgentEvent>;
@@ -78,15 +75,9 @@ enum Limit {
 impl Limit {
     fn message(self) -> &'static str {
         match self {
-            Self::Steps => twitty_core::language::tr("Step limit reached", "بلغ الوكيل حد الخطوات"),
-            Self::Tools => twitty_core::language::tr(
-                "Consecutive tool limit reached",
-                "بلغ الوكيل حد استدعاءات الأدوات المتتالية",
-            ),
-            Self::Budget => twitty_core::language::tr(
-                "Token or estimated cost limit reached",
-                "بلغ الوكيل حد الرموز أو التكلفة المقدرة",
-            ),
+            Self::Steps => twitty_core::language::t("Step limit reached"),
+            Self::Tools => twitty_core::language::t("Consecutive tool limit reached"),
+            Self::Budget => twitty_core::language::t("Token or estimated cost limit reached"),
         }
     }
 }
@@ -274,11 +265,7 @@ impl Session {
         if bytes > MAX_HISTORY_BYTES {
             self.finish(
                 FinishReason::Error(
-                    twitty_core::language::tr(
-                        "Conversation exceeds its size limit",
-                        "المحادثة أكبر من الحد المسموح",
-                    )
-                    .into(),
+                    twitty_core::language::t("Conversation exceeds its size limit").into(),
                 ),
                 events,
             );
@@ -562,10 +549,7 @@ impl Session {
             self.update(card, events);
         }
         while let Some(call) = self.calls.pop_front() {
-            self.result(
-                call,
-                twitty_core::language::tr("Tool cancelled", "أُلغيت الأداة"),
-            );
+            self.result(call, twitty_core::language::t("Tool cancelled"));
         }
     }
 

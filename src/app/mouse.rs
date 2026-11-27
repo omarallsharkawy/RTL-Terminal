@@ -613,7 +613,7 @@ impl App {
                     self.clipboard.set_text(cmd);
                     self.toast(
                         crate::ui::toast::ToastKind::Success,
-                        crate::ui::chrome::tr("Command copied", "اتنسخ الأمر"),
+                        crate::ui::chrome::t("Command copied"),
                     );
                 }
             }
@@ -626,7 +626,7 @@ impl App {
                     self.clipboard.set_text(text.output);
                     self.toast(
                         crate::ui::toast::ToastKind::Success,
-                        crate::ui::chrome::tr("Output copied", "اتنسخ الناتج"),
+                        crate::ui::chrome::t("Output copied"),
                     );
                 }
             }

@@ -252,7 +252,7 @@ impl ReviewDrawing<'_, '_> {
             label_width(&buffer).ceil() + s.px(27.0)
         });
         let repo_label = if view.totals.is_none() {
-            self.language.text("Review changes", "راجع التغييرات")
+            self.language.t("Review changes")
         } else {
             &view.title
         };
@@ -314,7 +314,7 @@ impl ReviewDrawing<'_, '_> {
         self.panel(l.commit, RADIUS_6, s.accent, None);
         self.label(
             l.commit,
-            self.language.text("Commit", "كوميت"),
+            self.language.t("Commit"),
             UiSize::Body,
             UiWeight::Semibold,
             UiAlign::Center,

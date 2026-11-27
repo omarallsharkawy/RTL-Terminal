@@ -42,10 +42,7 @@ impl SettingsDrawer<'_, '_> {
             );
             self.push_label(
                 sub_rect,
-                self.lang().text(
-                    "Native Bidirectional RTL Terminal",
-                    "طرفية أصلية ثنائية الاتجاه للعربية",
-                ),
+                self.lang().t("Native Bidirectional RTL Terminal"),
                 UiSize::Caption,
                 UiWeight::Regular,
                 self.start_align(),
@@ -57,21 +54,9 @@ impl SettingsDrawer<'_, '_> {
         let config_path_display = self.view.state.config_path.as_deref().unwrap_or("—");
 
         let items = [
-            (
-                self.lang().text("Version", "الإصدار"),
-                env!("CARGO_PKG_VERSION"),
-                false,
-            ),
-            (
-                self.lang().text("License", "الرخصة"),
-                "AGPL-3.0-or-later",
-                false,
-            ),
-            (
-                self.lang().text("Config file", "ملف الإعدادات"),
-                config_path_display,
-                true,
-            ),
+            (self.lang().t("Version"), env!("CARGO_PKG_VERSION"), false),
+            (self.lang().t("License"), "AGPL-3.0-or-later", false),
+            (self.lang().t("Config file"), config_path_display, true),
         ];
 
         for (i, (&row, (key_label, val_text, has_copy))) in
@@ -226,9 +211,9 @@ impl SettingsDrawer<'_, '_> {
             let icon = if copied { Icon::Check } else { Icon::Copy };
             icon.draw(icon_rect, self.ctx.color(fg), self.shapes);
             let text = if copied {
-                self.lang().text("Copied", "تم النسخ")
+                self.lang().t("Copied")
             } else {
-                self.lang().text("Copy path", "نسخ المسار")
+                self.lang().t("Copy path")
             };
             self.push_label(
                 text_rect,

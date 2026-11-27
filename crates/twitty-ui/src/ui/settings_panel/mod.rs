@@ -68,13 +68,10 @@ pub enum KeyCaptureNotice {
 impl KeyCaptureNotice {
     pub fn message(self, language: UiLanguage) -> &'static str {
         match self {
-            Self::PlainTyping => language.text(
-                "Cannot bind plain typing key — add Ctrl, Alt, or Super",
-                "لا يمكن ربط مفتاح كتابة عادي — أضف Ctrl أو Alt أو Super",
-            ),
-            Self::UnsupportedKey => {
-                language.text("Unsupported shortcut key", "مفتاح اختصار غير مدعوم")
+            Self::PlainTyping => {
+                language.t("Cannot bind plain typing key — add Ctrl, Alt, or Super")
             }
+            Self::UnsupportedKey => language.t("Unsupported shortcut key"),
         }
     }
 }

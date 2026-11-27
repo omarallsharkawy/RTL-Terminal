@@ -183,29 +183,13 @@ pub enum ProviderError {
 impl ProviderError {
     pub(super) fn message(self) -> &'static str {
         match self {
-            Self::Cancelled => {
-                twitty_core::language::tr("Provider request cancelled", "أُلغي طلب المزود")
-            }
-            Self::Timeout => {
-                twitty_core::language::tr("Provider request timed out", "انتهت مهلة طلب المزود")
-            }
-            Self::Configuration => {
-                twitty_core::language::tr("Invalid provider settings", "إعدادات المزود غير صالحة")
-            }
-            Self::Credential => {
-                twitty_core::language::tr("Provider key unavailable", "مفتاح المزود غير متاح")
-            }
-            Self::Unavailable => {
-                twitty_core::language::tr("Provider request failed", "تعذّر طلب المزود")
-            }
-            Self::Protocol => twitty_core::language::tr(
-                "Invalid or incomplete provider response",
-                "رد المزود ناقص أو غير صالح",
-            ),
-            Self::TooLarge => twitty_core::language::tr(
-                "Provider response too large",
-                "رد المزود أكبر من الحد المسموح",
-            ),
+            Self::Cancelled => twitty_core::language::t("Provider request cancelled"),
+            Self::Timeout => twitty_core::language::t("Provider request timed out"),
+            Self::Configuration => twitty_core::language::t("Invalid provider settings"),
+            Self::Credential => twitty_core::language::t("Provider key unavailable"),
+            Self::Unavailable => twitty_core::language::t("Provider request failed"),
+            Self::Protocol => twitty_core::language::t("Invalid or incomplete provider response"),
+            Self::TooLarge => twitty_core::language::t("Provider response too large"),
         }
     }
 }

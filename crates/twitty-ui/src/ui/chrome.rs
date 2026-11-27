@@ -7,7 +7,7 @@ use crate::ui::git_diff::DiffStat;
 use twitty_render::metrics::CellMetrics;
 use twitty_render::ui_style::{SPACE_4, SPACE_8};
 
-pub use twitty_core::language::{tr, UiLanguage, UiLanguagePref};
+pub use twitty_core::language::{t, tr, UiLanguage, UiLanguagePref};
 
 pub const TOP_BAR_HEIGHT: f32 = 36.0;
 pub const PANE_HEADER_HEIGHT: f32 = 24.0;

@@ -11,25 +11,19 @@ use crate::engine::policy::{self, Approval};
 use crate::engine::tools::{Tool, MAX_READ_BYTES};
 
 fn read_failed() -> &'static str {
-    twitty_core::language::tr(
-        "Read failed or exceeded its limit",
-        "تعذّرت القراءة أو تجاوزت الحد",
-    )
+    twitty_core::language::t("Read failed or exceeded its limit")
 }
 fn denied() -> &'static str {
-    twitty_core::language::tr("Denied by policy", "رُفض بموجب السياسة")
+    twitty_core::language::t("Denied by policy")
 }
 fn user_denied() -> &'static str {
-    twitty_core::language::tr("Denied by the user", "رفض المستخدم الطلب")
+    twitty_core::language::t("Denied by the user")
 }
 fn edited_note() -> &'static str {
-    twitty_core::language::tr("User-edited", "عدّله المستخدم")
+    twitty_core::language::t("User-edited")
 }
 fn changed() -> &'static str {
-    twitty_core::language::tr(
-        "The target changed after approval",
-        "تغيّر الهدف بعد الموافقة",
-    )
+    twitty_core::language::t("The target changed after approval")
 }
 
 pub(super) enum Action {
@@ -373,15 +367,12 @@ impl Session {
                 });
                 card.status = StepStatus::Done;
                 self.update(&card, events);
-                self.result(
-                    call,
-                    twitty_core::language::tr("Fact approved", "وافق المستخدم على المعلومة"),
-                );
+                self.result(call, twitty_core::language::t("Fact approved"));
             }
             _ => self.fail(
                 card,
                 call,
-                twitty_core::language::tr("This card cannot be edited", "لا يمكن تعديل هذه البطاقة"),
+                twitty_core::language::t("This card cannot be edited"),
                 events,
             ),
         }
@@ -444,15 +435,15 @@ impl Session {
         let (status, summary) = match exit {
             Some(0) => (
                 StepStatus::Done,
-                twitty_core::language::tr("Command succeeded", "نجح الأمر"),
+                twitty_core::language::t("Command succeeded"),
             ),
             Some(_) => (
-                StepStatus::Failed(twitty_core::language::tr("Command failed", "فشل الأمر").into()),
-                twitty_core::language::tr("Command failed", "فشل الأمر"),
+                StepStatus::Failed(twitty_core::language::t("Command failed").into()),
+                twitty_core::language::t("Command failed"),
             ),
             None => (
                 StepStatus::Cancelled,
-                twitty_core::language::tr("Command interrupted", "توقّف الأمر"),
+                twitty_core::language::t("Command interrupted"),
             ),
         };
         let edited_text = if edited {
@@ -521,10 +512,7 @@ impl Session {
         };
         self.result(
             call,
-            &format!(
-                "{}{notes}",
-                twitty_core::language::tr("Patch applied", "طُبّق التعديل")
-            ),
+            &format!("{}{notes}", twitty_core::language::t("Patch applied")),
         );
     }
 
@@ -556,7 +544,7 @@ impl Session {
             *available = undo_available;
         }
         let message = match &result {
-            Ok(()) => twitty_core::language::tr("Patch undone", "أُلغي التعديل"),
+            Ok(()) => twitty_core::language::t("Patch undone"),
             Err(error) => patch_message(error),
         };
         self.record(json!({"event":"undo_result","step":id.0,"message":message}));
@@ -581,15 +569,10 @@ impl Session {
 
 fn patch_message(error: &PatchError) -> &'static str {
     match error {
-        PatchError::Invalid => twitty_core::language::tr(
-            "Invalid or oversized unified diff",
-            "فرق موحّد غير صالح أو أكبر من الحد",
-        ),
+        PatchError::Invalid => twitty_core::language::t("Invalid or oversized unified diff"),
         PatchError::Policy(_) => denied(),
         PatchError::Conflict => changed(),
-        PatchError::Io => twitty_core::language::tr("Patch write failed", "تعذّرت كتابة التعديل"),
-        PatchError::Rollback => {
-            twitty_core::language::tr("Patch rollback incomplete", "لم يكتمل التراجع عن التعديل")
-        }
+        PatchError::Io => twitty_core::language::t("Patch write failed"),
+        PatchError::Rollback => twitty_core::language::t("Patch rollback incomplete"),
     }
 }

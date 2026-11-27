@@ -142,7 +142,7 @@ impl MemoryDrawer<'_, '_> {
 
         self.push_label(
             l.header_title,
-            self.lang().text("Project memory", "ذاكرة المشروع"),
+            self.lang().t("Project memory"),
             UiSize::Title,
             UiWeight::Semibold,
             self.start_align(),
@@ -152,9 +152,7 @@ impl MemoryDrawer<'_, '_> {
 
         let sub_text = match self.state.project_root.as_deref() {
             Some(root) => root,
-            None => self
-                .lang()
-                .text("No active local project", "لا يوجد مشروع محلي نشط"),
+            None => self.lang().t("No active local project"),
         };
         self.push_label(
             l.header_subtitle,
@@ -169,7 +167,7 @@ impl MemoryDrawer<'_, '_> {
         if let Some(badge) = l.excluded_badge {
             self.draw_pill(
                 badge,
-                self.lang().text("Excluded", "مستثنى"),
+                self.lang().t("Excluded"),
                 s.bg2.mix(s.warn, 0.22),
                 s.warn,
                 None,
@@ -197,9 +195,9 @@ impl MemoryDrawer<'_, '_> {
                 shadow: None,
             });
             let label = if armed {
-                self.lang().text("Confirm forget?", "تأكيد النسيان؟")
+                self.lang().t("Confirm forget?")
             } else {
-                self.lang().text("Forget this project", "نسيان هذا المشروع")
+                self.lang().t("Forget this project")
             };
             self.push_label(
                 fb,
@@ -363,10 +361,8 @@ impl MemoryDrawer<'_, '_> {
             );
             self.push_label(
                 text_rect,
-                self.lang().text(
-                    "This folder is excluded — nothing is recorded or assembled.",
-                    "هذا المجلد مستثنى — لا يُسجَّل شيء ولا يُجمَّع في السياق.",
-                ),
+                self.lang()
+                    .t("This folder is excluded — nothing is recorded or assembled."),
                 UiSize::Caption,
                 UiWeight::Regular,
                 self.start_align(),
@@ -390,7 +386,7 @@ impl MemoryDrawer<'_, '_> {
             let hovered = self.state.hover == Some(MemoryHit::AddSubmit);
             self.draw_button(
                 btn,
-                self.lang().text("+ Add", "+ إضافة"),
+                self.lang().t("+ Add"),
                 ButtonTone::Accent,
                 hovered,
                 None,
@@ -401,7 +397,7 @@ impl MemoryDrawer<'_, '_> {
             let hovered = self.state.hover == Some(MemoryHit::RefreshEnv);
             self.draw_button(
                 btn,
-                self.lang().text("Refresh", "تحديث"),
+                self.lang().t("Refresh"),
                 ButtonTone::Quiet,
                 hovered,
                 None,
@@ -412,8 +408,7 @@ impl MemoryDrawer<'_, '_> {
             let hovered = self.state.hover == Some(MemoryHit::ExcludeCurrentProject);
             self.draw_button(
                 btn,
-                self.lang()
-                    .text("Exclude this project", "استثناء هذا المشروع"),
+                self.lang().t("Exclude this project"),
                 ButtonTone::Quiet,
                 hovered,
                 None,
@@ -436,8 +431,7 @@ impl MemoryDrawer<'_, '_> {
                     if hdr.bottom() >= vp.y && hdr.y <= vp.bottom() {
                         self.push_label(
                             hdr,
-                            self.lang()
-                                .text("Project rules files", "ملفات قواعد المشروع"),
+                            self.lang().t("Project rules files"),
                             UiSize::Small,
                             UiWeight::Semibold,
                             self.start_align(),
@@ -452,10 +446,7 @@ impl MemoryDrawer<'_, '_> {
                         if empty_r.bottom() >= vp.y && empty_r.y <= vp.bottom() {
                             self.push_label(
                                 empty_r,
-                                self.lang().text(
-                                    "No AGENTS.md, CLAUDE.md, TWITTY.md, or .twitty/rules.md found.",
-                                    "لم يُعثر على AGENTS.md أو CLAUDE.md أو TWITTY.md أو .twitty/rules.md.",
-                                ),
+                                self.lang().t("No AGENTS.md, CLAUDE.md, TWITTY.md, or .twitty/rules.md found."),
                                 UiSize::Caption,
                                 UiWeight::Regular,
                                 self.start_align(),
@@ -476,7 +467,7 @@ impl MemoryDrawer<'_, '_> {
                     if hdr.bottom() >= vp.y && hdr.y <= vp.bottom() {
                         self.push_label(
                             hdr,
-                            self.lang().text("User rules", "القواعد المخصّصة"),
+                            self.lang().t("User rules"),
                             UiSize::Small,
                             UiWeight::Semibold,
                             self.start_align(),
@@ -491,10 +482,7 @@ impl MemoryDrawer<'_, '_> {
                         if empty_r.bottom() >= vp.y && empty_r.y <= vp.bottom() {
                             self.push_label(
                                 empty_r,
-                                self.lang().text(
-                                    "No user rules yet. Add one above.",
-                                    "لا توجد قواعد بعد. أضف قاعدة من الأعلى.",
-                                ),
+                                self.lang().t("No user rules yet. Add one above."),
                                 UiSize::Caption,
                                 UiWeight::Regular,
                                 self.start_align(),
@@ -514,18 +502,13 @@ impl MemoryDrawer<'_, '_> {
             MemoryTab::Facts | MemoryTab::Commands | MemoryTab::Env => {
                 if l.entry_rows.is_empty() {
                     let empty_text = match self.state.tab {
-                        MemoryTab::Facts => self.lang().text(
-                            "No saved facts for this project yet.",
-                            "لا توجد حقائق محفوظة لهذا المشروع بعد.",
-                        ),
-                        MemoryTab::Commands => self.lang().text(
-                            "No frequent commands recorded for this project yet.",
-                            "لا توجد أوامر متكررة مسجلة لهذا المشروع بعد.",
-                        ),
-                        MemoryTab::Env => self.lang().text(
-                            "No environment notes detected. Click Refresh to scan.",
-                            "لا توجد ملاحظات بيئة مكتشفة. اضغط تحديث للفحص.",
-                        ),
+                        MemoryTab::Facts => self.lang().t("No saved facts for this project yet."),
+                        MemoryTab::Commands => self
+                            .lang()
+                            .t("No frequent commands recorded for this project yet."),
+                        MemoryTab::Env => self
+                            .lang()
+                            .t("No environment notes detected. Click Refresh to scan."),
                         _ => "",
                     };
                     self.push_label(
@@ -549,10 +532,8 @@ impl MemoryDrawer<'_, '_> {
                 if l.exclusion_rows.is_empty() {
                     self.push_label(
                         Rect::new(vp.x, vp.y + s.px(8.0), vp.w, s.px(24.0)),
-                        self.lang().text(
-                            "No excluded folders. Add a path or glob above.",
-                            "لا توجد مجلدات مستثناة. أضف مساراً أو نمطاً من الأعلى.",
-                        ),
+                        self.lang()
+                            .t("No excluded folders. Add a path or glob above."),
                         UiSize::Caption,
                         UiWeight::Regular,
                         self.start_align(),
@@ -591,7 +572,7 @@ impl MemoryDrawer<'_, '_> {
                             self.state.hover == Some(MemoryHit::ExclusionRemove(row.index));
                         self.draw_button(
                             row.remove_btn,
-                            self.lang().text("Remove", "إزالة"),
+                            self.lang().t("Remove"),
                             ButtonTone::DangerQuiet,
                             hovered,
                             Some(clip),
@@ -640,17 +621,15 @@ impl MemoryDrawer<'_, '_> {
         let meta = match file.state {
             RulesFileState::Changed => format!(
                 "{} · \u{2066}sha256:{short_sha}\u{2069}",
-                self.lang()
-                    .text("Changed — re-approve", "تغيّر المحتوى — يتطلب إعادة موافقة")
+                self.lang().t("Changed — re-approve")
             ),
             RulesFileState::Approved => format!(
                 "{} · \u{2066}sha256:{short_sha}\u{2069}",
-                self.lang().text("Included in context", "مُضمّن في السياق")
+                self.lang().t("Included in context")
             ),
             RulesFileState::Unapproved => format!(
                 "{} · \u{2066}sha256:{short_sha}\u{2069}",
-                self.lang()
-                    .text("Not read until approved", "لا يُقرأ قبل الموافقة")
+                self.lang().t("Not read until approved")
             ),
         };
         self.push_label(
@@ -664,30 +643,18 @@ impl MemoryDrawer<'_, '_> {
         );
 
         let (badge_text, badge_bg, badge_fg) = match file.state {
-            RulesFileState::Approved => (
-                self.lang().text("Approved", "معتمد"),
-                s.bg1.mix(s.ok, 0.22),
-                s.ok,
-            ),
-            RulesFileState::Changed => (
-                self.lang().text("Changed", "تغيّر"),
-                s.bg1.mix(s.warn, 0.24),
-                s.warn,
-            ),
-            RulesFileState::Unapproved => (
-                self.lang().text("Unapproved", "غير معتمد"),
-                s.bg3,
-                s.text_dim,
-            ),
+            RulesFileState::Approved => (self.lang().t("Approved"), s.bg1.mix(s.ok, 0.22), s.ok),
+            RulesFileState::Changed => (self.lang().t("Changed"), s.bg1.mix(s.warn, 0.24), s.warn),
+            RulesFileState::Unapproved => (self.lang().t("Unapproved"), s.bg3, s.text_dim),
         };
         self.draw_pill(row.badge_rect, badge_text, badge_bg, badge_fg, Some(clip));
 
         if let Some(btn) = row.approve_btn {
             let hovered = self.state.hover == Some(MemoryHit::RulesApprove(row.index));
             let label = if file.state == RulesFileState::Changed {
-                self.lang().text("Re-approve", "إعادة موافقة")
+                self.lang().t("Re-approve")
             } else {
-                self.lang().text("Approve", "موافقة")
+                self.lang().t("Approve")
             };
             self.draw_button(btn, label, ButtonTone::Accent, hovered, Some(clip));
         }
@@ -695,7 +662,7 @@ impl MemoryDrawer<'_, '_> {
             let hovered = self.state.hover == Some(MemoryHit::RulesRevoke(row.index));
             self.draw_button(
                 btn,
-                self.lang().text("Revoke", "إلغاء"),
+                self.lang().t("Revoke"),
                 ButtonTone::Quiet,
                 hovered,
                 Some(clip),
@@ -733,7 +700,7 @@ impl MemoryDrawer<'_, '_> {
             self.draw_text_input(
                 inp,
                 &self.state.input_text,
-                self.lang().text("Edit memory text…", "عدّل النص…"),
+                self.lang().t("Edit memory text…"),
                 true,
                 Some(clip),
             );
@@ -741,7 +708,7 @@ impl MemoryDrawer<'_, '_> {
                 let hovered = self.state.hover == Some(MemoryHit::EditSave(row.id));
                 self.draw_button(
                     btn,
-                    self.lang().text("Save", "حفظ"),
+                    self.lang().t("Save"),
                     ButtonTone::Accent,
                     hovered,
                     Some(clip),
@@ -751,7 +718,7 @@ impl MemoryDrawer<'_, '_> {
                 let hovered = self.state.hover == Some(MemoryHit::EditCancel);
                 self.draw_button(
                     btn,
-                    self.lang().text("Cancel", "إلغاء"),
+                    self.lang().t("Cancel"),
                     ButtonTone::Quiet,
                     hovered,
                     Some(clip),
@@ -789,7 +756,7 @@ impl MemoryDrawer<'_, '_> {
             if !entry.approved {
                 self.draw_pill(
                     badge,
-                    self.lang().text("Pending", "قيد الموافقة"),
+                    self.lang().t("Pending"),
                     s.bg1.mix(s.warn, 0.24),
                     s.warn,
                     Some(clip),
@@ -816,7 +783,7 @@ impl MemoryDrawer<'_, '_> {
             let hovered = self.state.hover == Some(MemoryHit::EntryApprove(row.id));
             self.draw_button(
                 btn,
-                self.lang().text("Approve", "موافقة"),
+                self.lang().t("Approve"),
                 ButtonTone::Accent,
                 hovered,
                 Some(clip),
@@ -826,7 +793,7 @@ impl MemoryDrawer<'_, '_> {
             let hovered = self.state.hover == Some(MemoryHit::EntryEdit(row.id));
             self.draw_button(
                 btn,
-                self.lang().text("Edit", "تعديل"),
+                self.lang().t("Edit"),
                 ButtonTone::Quiet,
                 hovered,
                 Some(clip),
@@ -836,7 +803,7 @@ impl MemoryDrawer<'_, '_> {
             let hovered = self.state.hover == Some(MemoryHit::EntryDelete(row.id));
             self.draw_button(
                 btn,
-                self.lang().text("Delete", "حذف"),
+                self.lang().t("Delete"),
                 ButtonTone::DangerQuiet,
                 hovered,
                 Some(clip),

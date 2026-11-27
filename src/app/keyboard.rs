@@ -308,7 +308,7 @@ impl App {
             self.clipboard.set_text(text.output);
             self.toast(
                 crate::ui::toast::ToastKind::Success,
-                crate::ui::chrome::tr("Output copied", "اتنسخ الناتج"),
+                crate::ui::chrome::t("Output copied"),
             );
         }
     }
@@ -331,7 +331,7 @@ impl App {
     pub(super) fn search_bar_text(&self, id: PaneId, query: &str) -> String {
         match self.ws.pane(id).map(|p| &p.terminal) {
             Some(t) => search_bar_text(query, t.has_search_match(), || t.search_position()),
-            None => format!("{}: {query}", crate::ui::chrome::tr("Find", "بحث")),
+            None => format!("{}: {query}", crate::ui::chrome::t("Find")),
         }
     }
 

@@ -51,7 +51,7 @@ impl SettingsDrawer<'_, '_> {
             if in_vp(hdr) {
                 self.push_label(
                     hdr,
-                    self.lang().text("Default provider", "المزوّد الافتراضي"),
+                    self.lang().t("Default provider"),
                     UiSize::Caption,
                     UiWeight::Semibold,
                     self.start_align(),
@@ -120,8 +120,7 @@ impl SettingsDrawer<'_, '_> {
             );
             self.push_label(
                 top,
-                self.lang()
-                    .text("CLI agents on PATH", "وكلاء سطر الأوامر في PATH"),
+                self.lang().t("CLI agents on PATH"),
                 UiSize::Small,
                 UiWeight::Semibold,
                 self.start_align(),
@@ -130,10 +129,7 @@ impl SettingsDrawer<'_, '_> {
             );
             let cli_list = if state.detected_cli_agents.is_empty() {
                 self.lang()
-                    .text(
-                        "None detected (claude, codex, gemini, opencode)",
-                        "لم يُعثر على أي وكيل (claude, codex, gemini, opencode)",
-                    )
+                    .t("None detected (claude, codex, gemini, opencode)")
                     .to_owned()
             } else {
                 state.detected_cli_agents.join(" · ")
@@ -162,9 +158,9 @@ impl SettingsDrawer<'_, '_> {
                     shadow: None,
                 });
                 let status = if has_key {
-                    self.lang().text("Keyring: set", "المخزن: محفوظ")
+                    self.lang().t("Keyring: set")
                 } else {
-                    self.lang().text("Keyring: not set", "المخزن: غير مضبوط")
+                    self.lang().t("Keyring: not set")
                 };
                 let label = format!("{} · {}", spec.label, status);
                 let text_r = if self.mirrored() {
@@ -207,7 +203,7 @@ impl SettingsDrawer<'_, '_> {
                 });
                 self.push_label(
                     row.set_key_button,
-                    self.lang().text("Set key…", "ضبط المفتاح…"),
+                    self.lang().t("Set key…"),
                     UiSize::Small,
                     UiWeight::Semibold,
                     UiAlign::Center,
@@ -229,7 +225,7 @@ impl SettingsDrawer<'_, '_> {
                     });
                     self.push_label(
                         clr,
-                        self.lang().text("Clear", "حذف"),
+                        self.lang().t("Clear"),
                         UiSize::Small,
                         UiWeight::Regular,
                         UiAlign::Center,
@@ -252,10 +248,7 @@ impl SettingsDrawer<'_, '_> {
                     });
                     let masked = if state.key_draft.is_empty() {
                         self.lang()
-                            .text(
-                                "Paste API key (stored in keyring only)…",
-                                "ألصق مفتاح API (يُحفظ في المخزن فقط)…",
-                            )
+                            .t("Paste API key (stored in keyring only)…")
                             .to_owned()
                     } else {
                         "•".repeat(state.key_draft.chars().count().min(32))
@@ -287,7 +280,7 @@ impl SettingsDrawer<'_, '_> {
                     });
                     self.push_label(
                         sv,
-                        self.lang().text("Save", "حفظ"),
+                        self.lang().t("Save"),
                         UiSize::Small,
                         UiWeight::Semibold,
                         UiAlign::Center,
@@ -318,7 +311,7 @@ impl SettingsDrawer<'_, '_> {
             };
             self.push_label(
                 lbl_r,
-                self.lang().text("Ollama URL", "رابط Ollama"),
+                self.lang().t("Ollama URL"),
                 UiSize::Caption,
                 UiWeight::Regular,
                 self.start_align(),
@@ -372,8 +365,7 @@ impl SettingsDrawer<'_, '_> {
             };
             self.push_label(
                 lbl_r,
-                self.lang()
-                    .text("Monthly cost cap (USD)", "سقف التكلفة الشهري (دولار)"),
+                self.lang().t("Monthly cost cap (USD)"),
                 UiSize::Caption,
                 UiWeight::Regular,
                 self.start_align(),
@@ -392,7 +384,7 @@ impl SettingsDrawer<'_, '_> {
                 shadow: None,
             });
             let val_txt = if state.cost_cap_draft.is_empty() {
-                self.lang().text("Off", "معطّل").to_owned()
+                self.lang().t("Off").to_owned()
             } else {
                 format!("${}", state.cost_cap_draft)
             };
@@ -421,10 +413,8 @@ impl SettingsDrawer<'_, '_> {
         if in_vp(allow_hdr) {
             self.push_label(
                 allow_hdr,
-                self.lang().text(
-                    "Project allow-list (off by default — exact argv prefixes)",
-                    "قائمة السماح للمشروع (معطّلة افتراضياً — بادئات أوامر دقيقة)",
-                ),
+                self.lang()
+                    .t("Project allow-list (off by default — exact argv prefixes)"),
                 UiSize::Caption,
                 UiWeight::Semibold,
                 self.start_align(),
@@ -445,10 +435,7 @@ impl SettingsDrawer<'_, '_> {
                 shadow: None,
             });
             let txt = if state.allow_list_draft.is_empty() {
-                self.lang().text(
-                    "e.g. cargo test, git status",
-                    "مثال: cargo test, git status",
-                )
+                self.lang().t("e.g. cargo test, git status")
             } else {
                 state.allow_list_draft.as_str()
             };
@@ -483,7 +470,7 @@ impl SettingsDrawer<'_, '_> {
             });
             self.push_label(
                 ai.allow_add_button,
-                self.lang().text("Add", "إضافة"),
+                self.lang().t("Add"),
                 UiSize::Small,
                 UiWeight::Semibold,
                 UiAlign::Center,
@@ -550,10 +537,8 @@ impl SettingsDrawer<'_, '_> {
                     (ai.deny_box.w - 2.0 * pad).max(0.0),
                     s.px(18.0),
                 ),
-                self.lang().text(
-                    "Hard deny-list (read-only — never allow-listed)",
-                    "قائمة الحظر الصارم (للقراءة فقط — لا يمكن استثناؤها)",
-                ),
+                self.lang()
+                    .t("Hard deny-list (read-only — never allow-listed)"),
                 UiSize::Small,
                 UiWeight::Semibold,
                 self.start_align(),
@@ -598,9 +583,9 @@ impl SettingsDrawer<'_, '_> {
                 shadow: None,
             });
             let lbl = if state.history_cleared {
-                self.lang().text("History cleared", "تم مسح السجل")
+                self.lang().t("History cleared")
             } else {
-                self.lang().text("Clear agent history", "مسح سجل الوكيل")
+                self.lang().t("Clear agent history")
             };
             self.push_label(
                 ai.clear_history_button,

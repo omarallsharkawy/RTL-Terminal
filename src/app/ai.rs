@@ -268,11 +268,7 @@ impl App {
                 command: None,
                 exit_code: 0,
                 status: BlockAiCardStatus::Error(
-                    crate::ui::chrome::tr(
-                        "No failed command in this pane.",
-                        "مفيش أمر فاشل في اللوحة دي.",
-                    )
-                    .into(),
+                    crate::ui::chrome::t("No failed command in this pane.").into(),
                 ),
                 scroll_lines: 0,
             });

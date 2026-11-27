@@ -74,11 +74,11 @@ pub fn search_bar_text(
     let status = if query.is_empty() {
         String::new()
     } else if !has_match {
-        crate::ui::chrome::tr("  no matches", "  مفيش نتائج").to_owned()
+        crate::ui::chrome::t("  no matches").to_owned()
     } else {
         position().map_or(String::new(), |(i, n)| format!("  {i}/{n}"))
     };
-    format!("{}: {query}{status}", crate::ui::chrome::tr("Find", "بحث"))
+    format!("{}: {query}{status}", crate::ui::chrome::t("Find"))
 }
 
 #[cfg(test)]

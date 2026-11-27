@@ -248,7 +248,7 @@ impl WelcomeDrawer<'_, '_> {
         let headline_h = s.px(22.0).min(text_area.h);
         self.push_label(
             Rect::new(text_area.x, text_area.y, text_area.w, headline_h),
-            lang.text("Twitty · Arabic-first terminal", "تويتي · طرفية عربية أولاً"),
+            lang.t("Twitty · Arabic-first terminal"),
             UiSize::Body,
             UiWeight::Semibold,
             self.start_align(),
@@ -258,10 +258,7 @@ impl WelcomeDrawer<'_, '_> {
         let sample_h = s.px(22.0).min((text_area.bottom() - sample_y).max(0.0));
         self.push_label(
             Rect::new(text_area.x, sample_y, text_area.w, sample_h),
-            lang.text(
-                "Bidi shaping, command blocks, composer & local coding agents.",
-                "دعم كامل للعربية والاتجاهين، بطاقات الأوامر، المحرر الذكي ووكلاء البرمجة.",
-            ),
+            lang.t("Bidi shaping, command blocks, composer & local coding agents."),
             UiSize::Caption,
             UiWeight::Regular,
             self.start_align(),
@@ -292,7 +289,7 @@ impl WelcomeDrawer<'_, '_> {
         // Interface language segmented control.
         self.push_label(
             l.language_label,
-            lang.text("Interface language", "لغة الواجهة"),
+            lang.t("Interface language"),
             UiSize::Body,
             UiWeight::Semibold,
             self.start_align(),
@@ -328,7 +325,7 @@ impl WelcomeDrawer<'_, '_> {
             let label = match pref {
                 UiLanguagePref::English => "English",
                 UiLanguagePref::Arabic => "العربية",
-                UiLanguagePref::Auto => lang.text("Follow system", "حسب النظام"),
+                UiLanguagePref::Auto => lang.t("Follow system"),
             };
             let fg = if selected {
                 s.accent_text()
@@ -353,23 +350,11 @@ impl WelcomeDrawer<'_, '_> {
 
         let hint = match active_pref {
             UiLanguagePref::Auto => match self.view.state.env_language {
-                UiLanguage::Arabic => lang.text(
-                    "System locale detected: Arabic",
-                    "لغة النظام المكتشفة: العربية",
-                ),
-                UiLanguage::English => lang.text(
-                    "System locale detected: English",
-                    "لغة النظام المكتشفة: الإنجليزية",
-                ),
+                UiLanguage::Arabic => lang.t("System locale detected: Arabic"),
+                UiLanguage::English => lang.t("System locale detected: English"),
             },
-            UiLanguagePref::English => lang.text(
-                "Menus and controls stay in English.",
-                "القوائم وعناصر التحكم ستبقى بالإنجليزية.",
-            ),
-            UiLanguagePref::Arabic => lang.text(
-                "Menus and controls are mirrored for Arabic.",
-                "القوائم وعناصر التحكم معكوسة للعربية (من اليمين لليسار).",
-            ),
+            UiLanguagePref::English => lang.t("Menus and controls stay in English."),
+            UiLanguagePref::Arabic => lang.t("Menus and controls are mirrored for Arabic."),
         };
         self.push_label(
             l.language_hint,
@@ -390,7 +375,7 @@ impl WelcomeDrawer<'_, '_> {
 
         self.push_label(
             l.theme_label,
-            lang.text("Theme", "السمة"),
+            lang.t("Theme"),
             UiSize::Body,
             UiWeight::Semibold,
             self.start_align(),
@@ -558,7 +543,7 @@ impl WelcomeDrawer<'_, '_> {
         self.draw_row_shell(l.font_row, font_focused, font_hover);
         self.push_label(
             l.font_label,
-            lang.text("Font size", "حجم الخط"),
+            lang.t("Font size"),
             UiSize::Body,
             UiWeight::Regular,
             self.start_align(),
@@ -637,15 +622,11 @@ impl WelcomeDrawer<'_, '_> {
                 UiLanguage::Arabic => format!("خلفية شفافة ({opacity_pct}%)"),
             }
         } else {
-            lang.text(
-                "Solid opaque background (100%)",
-                "خلفية معتمة بالكامل (100%)",
-            )
-            .to_owned()
+            lang.t("Solid opaque background (100%)").to_owned()
         };
         self.draw_two_line_label(
             l.transparency_label,
-            lang.text("Window transparency", "شفافية النافذة"),
+            lang.t("Window transparency"),
             &trans_note,
         );
         self.draw_toggle(l.transparency_track, trans_on);
@@ -720,13 +701,13 @@ impl WelcomeDrawer<'_, '_> {
         );
 
         let (status_color, status_text) = if shell.marks_seen {
-            (s.ok, lang.text("Active · OSC 133", "نشط · OSC 133"))
+            (s.ok, lang.t("Active · OSC 133"))
         } else if !self.view.config.shell_integration {
-            (s.text_faint, lang.text("Disabled", "معطّل"))
+            (s.text_faint, lang.t("Disabled"))
         } else if shell.supported {
-            (s.warn, lang.text("Waiting for prompt", "بانتظار الموجه"))
+            (s.warn, lang.t("Waiting for prompt"))
         } else {
-            (s.text_dim, lang.text("No marks seen", "لم تُرصد علامات"))
+            (s.text_dim, lang.t("No marks seen"))
         };
         self.shapes.push(Shape::RoundedRect {
             rect: badge_rect,
@@ -755,20 +736,11 @@ impl WelcomeDrawer<'_, '_> {
             (l.shell_card.bottom() - pad - detail_y).max(0.0),
         );
         let detail_text = if shell.marks_seen {
-            lang.text(
-                "OSC 133 prompt marks are active in this session. Command blocks, smart composer, and notifications work automatically.",
-                "علامات OSC 133 نشطة في هذه الجلسة. بطاقات الأوامر والمحرر الذكي والإشعارات تعمل تلقائياً.",
-            )
+            lang.t("OSC 133 prompt marks are active in this session. Command blocks, smart composer, and notifications work automatically.")
         } else if shell.supported {
-            lang.text(
-                "Twitty automatically injects lightweight hooks for bash, zsh, and fish without editing your startup files.",
-                "يحقن تويتي تكاملاً خفيفاً تلقائياً لـ bash و zsh و fish بدون تعديل ملفات الإعداد الخاصة بك.",
-            )
+            lang.t("Twitty automatically injects lightweight hooks for bash, zsh, and fish without editing your startup files.")
         } else {
-            lang.text(
-                "Automatic hooks cover bash, zsh, and fish; other shells still work if they emit standard OSC 133 marks.",
-                "التكامل التلقائي يدعم bash و zsh و fish؛ وتعمل أي شيل أخرى ترسل علامات OSC 133 القياسية.",
-            )
+            lang.t("Automatic hooks cover bash, zsh, and fish; other shells still work if they emit standard OSC 133 marks.")
         };
         self.push_wrapped(
             detail_rect,
@@ -786,8 +758,8 @@ impl WelcomeDrawer<'_, '_> {
         self.draw_row_shell(l.shell_toggle_row, toggle_focused, toggle_hover);
         self.draw_two_line_label(
             l.shell_toggle_label,
-            lang.text("Automatic shell integration", "تكامل الشيل التلقائي"),
-            lang.text("Applies to newly opened shells", "يطبّق على الشيل الجديد"),
+            lang.t("Automatic shell integration"),
+            lang.t("Applies to newly opened shells"),
         );
         self.draw_toggle(l.shell_toggle_track, self.view.config.shell_integration);
     }
@@ -875,11 +847,11 @@ impl WelcomeDrawer<'_, '_> {
             );
 
             let (badge_bg, badge_fg, badge_text) = if agent.active {
-                (s.accent, s.accent_text(), lang.text("Selected", "سيُستخدم"))
+                (s.accent, s.accent_text(), lang.t("Selected"))
             } else if agent.installed {
-                (s.bg2, s.ok, lang.text("Installed", "مثبّت"))
+                (s.bg2, s.ok, lang.t("Installed"))
             } else {
-                (s.bg2, s.text_faint, lang.text("Not found", "غير مثبّت"))
+                (s.bg2, s.text_faint, lang.t("Not found"))
             };
             self.shapes.push(Shape::rounded(
                 status_rect,
@@ -911,10 +883,7 @@ impl WelcomeDrawer<'_, '_> {
                 UiLanguage::Arabic => format!("الوكيل الذي سيُستخدم: {name} (قراءة فقط)"),
             },
             None => lang
-                .text(
-                    "No coding agent found on PATH yet — install claude, codex, gemini, or opencode anytime.",
-                    "لم يتم العثور على وكيل برمجة في PATH بعد — يمكنك تثبيت claude أو codex أو gemini أو opencode لاحقاً.",
-                )
+                .t("No coding agent found on PATH yet — install claude, codex, gemini, or opencode anytime.")
                 .to_owned(),
         };
         self.push_label(
@@ -936,11 +905,8 @@ impl WelcomeDrawer<'_, '_> {
         self.draw_row_shell(l.ai_toggle_row, toggle_focused, toggle_hover);
         self.draw_two_line_label(
             l.ai_toggle_label,
-            lang.text("Built-in AI features", "ميزات الذكاء الاصطناعي المدمجة"),
-            lang.text(
-                "Natural-language composer (#) and failed-block explanations",
-                "توليد الأوامر (#) وشرح أخطاء الأوامر الفاشلة",
-            ),
+            lang.t("Built-in AI features"),
+            lang.t("Natural-language composer (#) and failed-block explanations"),
         );
         self.draw_toggle(l.ai_toggle_track, self.view.config.ai);
     }
@@ -1023,7 +989,7 @@ impl WelcomeDrawer<'_, '_> {
         }
         self.push_label(
             l.skip_button,
-            lang.text("Skip", "تخطّي"),
+            lang.t("Skip"),
             UiSize::Caption,
             UiWeight::Regular,
             UiAlign::Center,
@@ -1068,7 +1034,7 @@ impl WelcomeDrawer<'_, '_> {
             });
             self.push_label(
                 back_rect,
-                lang.text("Back", "السابق"),
+                lang.t("Back"),
                 UiSize::Caption,
                 UiWeight::Regular,
                 UiAlign::Center,
@@ -1089,9 +1055,9 @@ impl WelcomeDrawer<'_, '_> {
             self.ctx.color(fill),
         ));
         let next_label = if self.view.state.step.is_last() {
-            lang.text("Finish", "ابدأ")
+            lang.t("Finish")
         } else {
-            lang.text("Next", "التالي")
+            lang.t("Next")
         };
         self.push_label(
             l.next_button,

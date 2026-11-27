@@ -5,7 +5,7 @@
 use std::time::{Duration, Instant};
 
 use crate::blocks::cards::BlockButton;
-use crate::ui::chrome::{tr, ChromeAction};
+use crate::ui::chrome::{t, ChromeAction};
 
 /// How long the pointer rests on a button before its tooltip shows.
 pub const DELAY: Duration = Duration::from_millis(450);
@@ -23,37 +23,22 @@ impl TipTarget {
     pub fn label(self) -> Option<(&'static str, Option<&'static str>)> {
         Some(match self {
             TipTarget::Chrome(action) => match action {
-                ChromeAction::Sidebar => (
-                    tr("Show or hide the sidebar", "إظهار أو إخفاء الشريط الجانبي"),
-                    Some("sidebar.toggle"),
-                ),
-                ChromeAction::Diff => (
-                    tr("Review changes", "راجع التغييرات"),
-                    Some("review.toggle"),
-                ),
-                ChromeAction::Notifications => {
-                    (tr("Notifications", "الإشعارات"), Some("notifications.list"))
-                }
-                ChromeAction::NewTab => (tr("New tab", "تاب جديد"), Some("tab.new")),
-                ChromeAction::CloseTab(_) => (tr("Close tab", "اقفل التاب"), None),
-                ChromeAction::SplitRight(_) => (tr("Split right", "قسّم يمين"), Some("split.right")),
-                ChromeAction::SplitDown(_) => (tr("Split down", "قسّم تحت"), Some("split.down")),
-                ChromeAction::Close(_) => (tr("Close pane", "قفل اللوحة"), Some("pane.close")),
+                ChromeAction::Sidebar => (t("Show or hide the sidebar"), Some("sidebar.toggle")),
+                ChromeAction::Diff => (t("Review changes"), Some("review.toggle")),
+                ChromeAction::Notifications => (t("Notifications"), Some("notifications.list")),
+                ChromeAction::NewTab => (t("New tab"), Some("tab.new")),
+                ChromeAction::CloseTab(_) => (t("Close tab"), None),
+                ChromeAction::SplitRight(_) => (t("Split right"), Some("split.right")),
+                ChromeAction::SplitDown(_) => (t("Split down"), Some("split.down")),
+                ChromeAction::Close(_) => (t("Close pane"), Some("pane.close")),
                 ChromeAction::Search | ChromeAction::FocusPane(_) => return None,
             },
             TipTarget::Block(button) => match button {
-                BlockButton::ExplainError => {
-                    (tr("Explain error", "اشرح الخطأ"), Some("ai.explain-error"))
-                }
-                BlockButton::CopyCommand => (tr("Copy command", "انسخ الأمر"), None),
-                BlockButton::CopyOutput => {
-                    (tr("Copy output", "انسخ الناتج"), Some("block.copy-output"))
-                }
-                BlockButton::AskAgent => (
-                    tr("Ask an agent about this", "اسأل وكيل عن ده"),
-                    Some("agent.ask"),
-                ),
-                BlockButton::Rerun => (tr("Run again", "شغّله تاني"), None),
+                BlockButton::ExplainError => (t("Explain error"), Some("ai.explain-error")),
+                BlockButton::CopyCommand => (t("Copy command"), None),
+                BlockButton::CopyOutput => (t("Copy output"), Some("block.copy-output")),
+                BlockButton::AskAgent => (t("Ask an agent about this"), Some("agent.ask")),
+                BlockButton::Rerun => (t("Run again"), None),
             },
         })
     }

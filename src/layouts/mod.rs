@@ -41,13 +41,13 @@ pub const MAX_TITLE_CHARS: usize = 256;
 pub const MAX_LAYOUTS_FILE_BYTES: usize = 2 * 1024 * 1024;
 
 pub fn save_layout_placeholder() -> &'static str {
-    crate::ui::chrome::tr("Name this layout…", "اسم التخطيط…")
+    crate::ui::chrome::t("Name this layout…")
 }
 pub fn open_layout_placeholder() -> &'static str {
-    crate::ui::chrome::tr("Open layout…", "افتح تخطيط…")
+    crate::ui::chrome::t("Open layout…")
 }
 pub fn delete_layout_placeholder() -> &'static str {
-    crate::ui::chrome::tr("Delete layout…", "احذف تخطيط…")
+    crate::ui::chrome::t("Delete layout…")
 }
 
 /// Clean and validate a layout name (strips control and bidi-override characters, trims, bounds).

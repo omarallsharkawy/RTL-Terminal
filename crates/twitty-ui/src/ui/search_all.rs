@@ -517,7 +517,7 @@ fn note(title_en: &str, title_ar: &str) -> PaletteItem {
 
 /// Shown in the query line while it is empty.
 pub fn placeholder() -> &'static str {
-    crate::ui::chrome::tr("Search all terminals…", "دوّر في كل الترمينالات…")
+    crate::ui::chrome::t("Search all terminals…")
 }
 
 /// How long one slice of a scan may take before the window gets to handle input and draw.

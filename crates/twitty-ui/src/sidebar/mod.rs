@@ -34,7 +34,7 @@ pub fn localized_entry_title(
         .chain(program)
         .map(|text| clean_text(text, 256))
         .find(|text| !text.is_empty())
-        .unwrap_or_else(|| format!("{} {}", language.text("Tab", "تاب"), index + 1))
+        .unwrap_or_else(|| format!("{} {}", language.t("Tab"), index + 1))
 }
 
 pub struct Placement {

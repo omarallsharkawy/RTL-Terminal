@@ -223,10 +223,7 @@ impl App {
                     .collect();
                 (
                     rows,
-                    Some(
-                        crate::ui::chrome::tr("Filter notifications…", "دوّر في الإشعارات…")
-                            .to_string(),
-                    ),
+                    Some(crate::ui::chrome::t("Filter notifications…").to_string()),
                 )
             }
             PaletteMode::RenameTab => (
@@ -253,13 +250,7 @@ impl App {
                         dimmed: false,
                     },
                 ],
-                Some(
-                    crate::ui::chrome::tr(
-                        "Close panes with running programs?",
-                        "تقفل لوحات فيها برامج شغّالة؟",
-                    )
-                    .into(),
-                ),
+                Some(crate::ui::chrome::t("Close panes with running programs?").into()),
             ),
             PaletteMode::Search => (
                 open.search.rows(&state.query),
@@ -725,10 +716,7 @@ impl App {
                     pane_id,
                     &format!(
                         "{}: {err}",
-                        crate::ui::chrome::tr(
-                            "Could not save the trust list",
-                            "تعذر حفظ قائمة الثقة"
-                        )
+                        crate::ui::chrome::t("Could not save the trust list")
                     ),
                 );
             }
@@ -936,10 +924,7 @@ impl App {
         if !workflow.trusted {
             return Err(format!(
                 "{} {:?}",
-                crate::ui::chrome::tr(
-                    "Refusing to run an untrusted project command:",
-                    "رفضنا تشغيل أمر مشروع مش موثوق:"
-                ),
+                crate::ui::chrome::t("Refusing to run an untrusted project command:"),
                 workflow.spec.name
             ));
         }
@@ -968,11 +953,7 @@ impl App {
                     self.new_tab_with(options)
                 };
                 if spawned.is_none() {
-                    return Err(crate::ui::chrome::tr(
-                        "failed to start custom command",
-                        "تعذر تشغيل الأمر المخصص",
-                    )
-                    .into());
+                    return Err(crate::ui::chrome::t("failed to start custom command").into());
                 }
                 Ok(())
             }

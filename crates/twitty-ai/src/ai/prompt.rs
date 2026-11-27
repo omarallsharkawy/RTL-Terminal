@@ -43,10 +43,10 @@ impl BlockAiMode {
 
     /// The title in the current interface language.
     pub fn title_localized(self) -> &'static str {
-        use twitty_core::language::tr;
+        use twitty_core::language::t;
         match self {
-            Self::Explain => tr("Explain error", "اشرح الخطأ"),
-            Self::SuggestFix => tr("Suggest a fix", "اقترح حل"),
+            Self::Explain => t("Explain error"),
+            Self::SuggestFix => t("Suggest a fix"),
         }
     }
 }

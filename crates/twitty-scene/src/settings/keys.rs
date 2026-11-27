@@ -10,7 +10,7 @@ impl SettingsDrawer<'_, '_> {
         let has_overrides = !self.view.config.keybindings.is_empty();
 
         if let Some(search) = self.layout.keys_search {
-            let placeholder = self.lang().text("Search shortcuts…", "دوّر في الاختصارات…");
+            let placeholder = self.lang().t("Search shortcuts…");
             self.draw_search_box(search, &self.view.state.keys_query, placeholder, clip);
         }
 
@@ -44,7 +44,7 @@ impl SettingsDrawer<'_, '_> {
             };
             self.push_label(
                 reset_all,
-                self.lang().text("Reset all", "رجّع الكل"),
+                self.lang().t("Reset all"),
                 UiSize::Caption,
                 UiWeight::Semibold,
                 UiAlign::Center,
@@ -76,10 +76,8 @@ impl SettingsDrawer<'_, '_> {
             let text = if let Some(notice) = self.view.state.key_capture_notice {
                 notice.message(self.lang())
             } else {
-                self.lang().text(
-                    "Press a new shortcut…  Esc cancels · Backspace clears",
-                    "اضغط الاختصار الجديد…  Esc للإلغاء · Backspace للمسح",
-                )
+                self.lang()
+                    .t("Press a new shortcut…  Esc cancels · Backspace clears")
             };
             self.push_label(
                 inner,
@@ -103,8 +101,7 @@ impl SettingsDrawer<'_, '_> {
                 );
                 self.push_label(
                     empty,
-                    self.lang()
-                        .text("No matching shortcuts", "لا توجد اختصارات مطابقة"),
+                    self.lang().t("No matching shortcuts"),
                     UiSize::Body,
                     UiWeight::Regular,
                     self.start_align(),
@@ -174,9 +171,9 @@ impl SettingsDrawer<'_, '_> {
                 shadow: None,
             });
             let change_label = if capturing_this {
-                self.lang().text("Cancel", "إلغاء")
+                self.lang().t("Cancel")
             } else {
-                self.lang().text("Change", "غيّر")
+                self.lang().t("Change")
             };
             self.push_label(
                 change_rect,
@@ -209,7 +206,7 @@ impl SettingsDrawer<'_, '_> {
                 });
                 self.push_label(
                     reset_rect,
-                    self.lang().text("Reset", "رجّع الافتراضي"),
+                    self.lang().t("Reset"),
                     UiSize::Small,
                     UiWeight::Regular,
                     UiAlign::Center,
@@ -232,7 +229,7 @@ impl SettingsDrawer<'_, '_> {
             let keys_w = if capturing_this {
                 self.draw_key_status_pill(
                     inner,
-                    self.lang().text("Press keys…", "اضغط مفتاحاً…"),
+                    self.lang().t("Press keys…"),
                     s.accent,
                     s.accent,
                     clip,
@@ -248,7 +245,7 @@ impl SettingsDrawer<'_, '_> {
             } else if is_custom {
                 self.draw_key_status_pill(
                     inner,
-                    self.lang().text("Unbound", "غير معيّن"),
+                    self.lang().t("Unbound"),
                     s.border,
                     s.text_faint,
                     clip,

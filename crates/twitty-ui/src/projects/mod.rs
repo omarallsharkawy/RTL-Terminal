@@ -19,10 +19,7 @@ use self::scan::ScannedRepo;
 /// Palette placeholder for the project switcher (`Ctrl+Shift+L`).
 /// Palette placeholder while picking a project.
 pub fn projects_placeholder() -> &'static str {
-    crate::ui::chrome::tr(
-        "Open project… (Enter: tab, Alt+Enter: split)",
-        "افتح مشروع… (Enter: تاب، Alt+Enter: تقسيم)",
-    )
+    crate::ui::chrome::t("Open project… (Enter: tab, Alt+Enter: split)")
 }
 
 /// Maximum characters kept in a project's display name or path.

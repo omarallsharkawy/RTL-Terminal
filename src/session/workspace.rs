@@ -3,7 +3,7 @@
 //! Window-free: the grid geometry comes in through [`GridGeometry`] and new shells through
 //! [`PaneFactory`], so tab and pane lifecycles can be tested with fake panes.
 
-use crate::ui::chrome::{tr, UiLanguage};
+use crate::ui::chrome::{t, UiLanguage};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -30,7 +30,7 @@ impl SplitFailure {
         let Some((cols, rows)) = size else {
             return Self {
                 code: "not_found",
-                message: tr("No focused pane", "مفيش لوحة محددة").into(),
+                message: t("No focused pane").into(),
             };
         };
         let min_cols = MIN_SPLIT_COLS * 2;
@@ -60,10 +60,7 @@ impl SplitFailure {
             },
             _ => Self {
                 code: "internal",
-                message: tr(
-                    "Could not split the pane: the shell failed to start",
-                    "مقدرناش نقسّم اللوحة: الـshell ما اشتغلش",
-                )
+                message: t("Could not split the pane: the shell failed to start")
                 .into(),
             },
         }

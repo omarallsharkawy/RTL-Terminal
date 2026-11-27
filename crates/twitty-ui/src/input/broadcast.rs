@@ -15,10 +15,7 @@ pub const DOUBLE_ESC_WINDOW: Duration = Duration::from_millis(500);
 
 /// Status text shown when pane headers are hidden and broadcast is active.
 pub fn broadcast_status_text() -> &'static str {
-    crate::ui::chrome::tr(
-        "Broadcast: typing goes to all panes (Esc Esc to stop)",
-        "البث: الكتابة بتروح لكل اللوحات (Esc Esc للإيقاف)",
-    )
+    crate::ui::chrome::t("Broadcast: typing goes to all panes (Esc Esc to stop)")
 }
 
 /// Format a pane header title with a compact bilingual broadcast badge at the front so it stays

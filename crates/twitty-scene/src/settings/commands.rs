@@ -54,9 +54,9 @@ impl SettingsDrawer<'_, '_> {
                     continue;
                 }
                 let placeholder = match field {
-                    FormField::Name => lang.text("e.g. Run tests", "مثلاً: شغّل الاختبارات"),
-                    FormField::NameAr => lang.text("e.g. شغّل الاختبارات", "مثلاً: شغّل الاختبارات"),
-                    _ => lang.text("e.g. cargo test", "مثلاً: cargo test"),
+                    FormField::Name => lang.t("e.g. Run tests"),
+                    FormField::NameAr => lang.t("e.g. شغّل الاختبارات"),
+                    _ => lang.t("e.g. cargo test"),
                 };
                 self.draw_text_input(input, form.text(field), placeholder, focused, clip);
             }
@@ -73,41 +73,31 @@ impl SettingsDrawer<'_, '_> {
             }
             if let Some(save) = list.save {
                 let text = if form.editing.is_some() {
-                    lang.text("Save", "احفظ")
+                    lang.t("Save")
                 } else {
-                    lang.text("Add", "أضف")
+                    lang.t("Add")
                 };
                 self.draw_small_button(save, text, false, true, clip);
             }
             if let Some(cancel) = list.cancel {
                 let hovered = hover == Some(SettingsHit::CommandCancel);
-                self.draw_small_button(cancel, lang.text("Cancel", "إلغاء"), hovered, false, clip);
+                self.draw_small_button(cancel, lang.t("Cancel"), hovered, false, clip);
             }
             return;
         }
 
         if let Some(add) = list.add_button {
             let hovered = hover == Some(SettingsHit::CommandsAdd);
-            self.draw_small_button(
-                add,
-                lang.text("+ Add command", "+ أضف أمر"),
-                hovered,
-                true,
-                clip,
-            );
+            self.draw_small_button(add, lang.t("+ Add command"), hovered, true, clip);
         }
         let commands = &view.config.commands;
         if let Some(intro) = list.intro {
             let text = if commands.is_empty() {
-                lang.text(
+                lang.t(
                     "No saved commands yet. Saved commands appear in the palette and the composer.",
-                    "مفيش أوامر محفوظة لسه. الأوامر المحفوظة بتظهر في لوحة الأوامر وفي خانة الكتابة.",
                 )
             } else {
-                lang.text(
-                    "Enter edits · Delete removes · Ctrl+N adds",
-                    "Enter للتعديل · Delete للحذف · Ctrl+N للإضافة",
-                )
+                lang.t("Enter edits · Delete removes · Ctrl+N adds")
             };
             self.push_label(
                 intro,
@@ -190,15 +180,9 @@ impl SettingsDrawer<'_, '_> {
                 Some(clip),
             );
             let edit_hover = hover == Some(SettingsHit::CommandEdit(row.index));
-            self.draw_small_button(row.edit, lang.text("Edit", "عدّل"), edit_hover, false, clip);
+            self.draw_small_button(row.edit, lang.t("Edit"), edit_hover, false, clip);
             let delete_hover = hover == Some(SettingsHit::CommandDelete(row.index));
-            self.draw_small_button(
-                row.delete,
-                lang.text("Delete", "احذف"),
-                delete_hover,
-                false,
-                clip,
-            );
+            self.draw_small_button(row.delete, lang.t("Delete"), delete_hover, false, clip);
         }
     }
 }

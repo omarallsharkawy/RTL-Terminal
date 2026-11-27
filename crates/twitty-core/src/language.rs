@@ -1,12 +1,43 @@
-//! Window-independent interface language and locale resolution.
+//! Window-independent interface language and locale resolution, and the translations.
+//!
+//! Interface text is written in English in the code and passed through [`t`] (or
+//! [`UiLanguage::t`]); the English text is the key into one catalog per language in
+//! `crates/twitty-core/i18n/` (`ar.json`). Text in a table that is built at compile time is
+//! marked with [`en!`](crate::en) so the catalog check finds it, and translated where it is
+//! shown. `tests/i18n_catalog_tests.rs` fails when the code uses a text the catalog lacks or
+//! the catalog keeps one nothing uses.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::OnceLock;
 
 use crate::layout::Rect;
 
 /// The running app's interface language, for messages built away from any window (errors,
 /// toasts, PTY notices). The window keeps it in sync with `ui_language`.
 static CURRENT: AtomicU8 = AtomicU8::new(0);
+
+/// The Arabic catalog: English text to its translation.
+pub const ARABIC_CATALOG: &str = include_str!("../i18n/ar.json");
+
+fn arabic() -> &'static HashMap<String, String> {
+    static CATALOG: OnceLock<HashMap<String, String>> = OnceLock::new();
+    CATALOG.get_or_init(|| serde_json::from_str(ARABIC_CATALOG).unwrap_or_default())
+}
+
+/// `english` in the current interface language (see [`UiLanguage::t`]).
+pub fn t(english: &str) -> &str {
+    UiLanguage::current().t(english)
+}
+
+/// Mark English interface text in a table built at compile time, so the catalog check finds
+/// it. It is the literal itself; translate it with [`t`] where it is shown.
+#[macro_export]
+macro_rules! en {
+    ($text:literal) => {
+        $text
+    };
+}
 
 /// `english` or `arabic`, whichever matches the current interface language.
 pub fn tr<'a>(english: &'a str, arabic: &'a str) -> &'a str {
@@ -115,6 +146,15 @@ impl UiLanguage {
             )
         } else {
             rect
+        }
+    }
+
+    /// `english` in this language: itself, or its translation from the catalog (English when
+    /// the catalog has none).
+    pub fn t(self, english: &str) -> &str {
+        match self {
+            Self::English => english,
+            Self::Arabic => arabic().get(english).map_or(english, String::as_str),
         }
     }
 

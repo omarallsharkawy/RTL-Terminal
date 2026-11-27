@@ -32,10 +32,10 @@ impl FormField {
 
     pub fn label(self, lang: UiLanguage) -> &'static str {
         match self {
-            FormField::Name => lang.text("Name", "الاسم"),
-            FormField::NameAr => lang.text("Arabic name (optional)", "الاسم بالعربي (اختياري)"),
-            FormField::Command => lang.text("Command", "الأمر"),
-            FormField::Mode => lang.text("When picked", "لما تختاره"),
+            FormField::Name => lang.t("Name"),
+            FormField::NameAr => lang.t("Arabic name (optional)"),
+            FormField::Command => lang.t("Command"),
+            FormField::Mode => lang.t("When picked"),
         }
     }
 }
@@ -521,7 +521,7 @@ pub fn display_name(spec: &WorkflowSpec, lang: UiLanguage) -> &str {
 
 pub fn mode_label(mode: CommandMode, lang: UiLanguage) -> &'static str {
     match mode {
-        CommandMode::Insert => lang.text("Insert for review", "يتكتب للمراجعة"),
-        CommandMode::Run => lang.text("Run in a split", "يشتغل في نافذة جنب"),
+        CommandMode::Insert => lang.t("Insert for review"),
+        CommandMode::Run => lang.t("Run in a split"),
     }
 }

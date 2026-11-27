@@ -9,7 +9,7 @@ use super::App;
 use crate::blocks::cards::BlockButton;
 use crate::blocks::BlockStatus;
 use crate::layout::PaneId;
-use crate::ui::chrome::{tr, UiLanguage};
+use crate::ui::chrome::{t, UiLanguage};
 use crate::ui::context_menu::{
     BlockAction, ContextMenu, MenuAction, MenuButton, MenuEffect, MenuEntry, MenuKey,
 };
@@ -81,7 +81,7 @@ impl App {
         let has_selection = self.ws.pane(id).is_some_and(|p| p.terminal.has_selection());
         if has_selection {
             entries.push(
-                MenuEntry::item(tr("Copy", "نسخ"), MenuAction::CopySelection)
+                MenuEntry::item(t("Copy"), MenuAction::CopySelection)
                     .with_shortcut(self.keybindings.display_shortcut("edit.copy")),
             );
         }
@@ -100,28 +100,28 @@ impl App {
                 .is_some_and(|b| b.command.as_deref().is_some_and(|c| !c.trim().is_empty()));
             if has_command {
                 entries.push(MenuEntry::item(
-                    tr("Copy command", "انسخ الأمر"),
+                    t("Copy command"),
                     MenuAction::Block(BlockAction::CopyCommand, block),
                 ));
             }
             entries.push(MenuEntry::item(
-                tr("Copy output", "انسخ الناتج"),
+                t("Copy output"),
                 MenuAction::Block(BlockAction::CopyOutput, block),
             ));
             if has_command {
                 entries.push(MenuEntry::item(
-                    tr("Run again", "شغّله تاني"),
+                    t("Run again"),
                     MenuAction::Block(BlockAction::Rerun, block),
                 ));
             }
             if failed && self.config.ai {
                 entries.push(MenuEntry::item(
-                    tr("Explain error", "اشرح الخطأ"),
+                    t("Explain error"),
                     MenuAction::Block(BlockAction::ExplainError, block),
                 ));
             }
             entries.push(MenuEntry::item(
-                tr("Ask an agent about this", "اسأل وكيل عن ده"),
+                t("Ask an agent about this"),
                 MenuAction::Block(BlockAction::AskAgent, block),
             ));
             entries.push(MenuEntry::Separator);
@@ -142,22 +142,17 @@ impl App {
     fn tab_menu(&self, index: usize) -> Vec<MenuEntry> {
         let mut entries = vec![
             self.command_entry("tab.new"),
-            MenuEntry::item(
-                tr("Rename tab…", "غيّر اسم التاب…"),
-                MenuAction::RenameTab(index),
-            )
-            .with_shortcut(self.keybindings.display_shortcut("tab.rename")),
+            MenuEntry::item(t("Rename tab…"), MenuAction::RenameTab(index))
+                .with_shortcut(self.keybindings.display_shortcut("tab.rename")),
             MenuEntry::Separator,
         ];
         if self.ws.tabs().len() > 1 {
             entries.push(MenuEntry::item(
-                tr("Close other tabs", "اقفل باقي التابات"),
+                t("Close other tabs"),
                 MenuAction::CloseOtherTabs(index),
             ));
         }
-        entries.push(
-            MenuEntry::item(tr("Close tab", "اقفل التاب"), MenuAction::CloseTab(index)).danger(),
-        );
+        entries.push(MenuEntry::item(t("Close tab"), MenuAction::CloseTab(index)).danger());
         entries
     }
 
@@ -250,7 +245,7 @@ impl App {
             MenuAction::Command(name) => return self.run_command(name),
             MenuAction::CopySelection => {
                 if pane.is_some_and(|id| self.copy_selection(id)) {
-                    self.toast(crate::ui::toast::ToastKind::Success, tr("Copied", "اتنسخ"));
+                    self.toast(crate::ui::toast::ToastKind::Success, t("Copied"));
                 }
             }
             MenuAction::Block(action, block) => {

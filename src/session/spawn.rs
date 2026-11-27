@@ -183,7 +183,7 @@ pub(crate) fn start_remote_pty(proxy: &EventLoopProxy<AppEvent>, pane: &mut Pane
             let error = crate::shell_integration::clean_text(&format!("{err:#}"), 512);
             let line = format!(
                 "\r\nTwitty: {error}. {}\r\n",
-                crate::ui::chrome::tr("Press Enter to retry", "اضغط Enter للمحاولة تاني")
+                crate::ui::chrome::t("Press Enter to retry")
             );
             pane.terminal.process_bytes(line.as_bytes());
         }

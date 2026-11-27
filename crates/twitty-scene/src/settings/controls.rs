@@ -459,18 +459,18 @@ impl SettingsDrawer<'_, '_> {
                 }
                 name.to_owned()
             }
-            SettingId::FontFamily => self.view.config.font_family.clone().unwrap_or_else(|| {
-                self.lang()
-                    .text("System monospace", "خط النظام أحادي العرض")
-                    .to_owned()
-            }),
-            SettingId::UiFontFamily => {
-                self.view.config.ui_font_family.clone().unwrap_or_else(|| {
-                    self.lang()
-                        .text("System sans-serif", "خط النظام الافتراضي")
-                        .to_owned()
-                })
-            }
+            SettingId::FontFamily => self
+                .view
+                .config
+                .font_family
+                .clone()
+                .unwrap_or_else(|| self.lang().t("System monospace").to_owned()),
+            SettingId::UiFontFamily => self
+                .view
+                .config
+                .ui_font_family
+                .clone()
+                .unwrap_or_else(|| self.lang().t("System sans-serif").to_owned()),
             _ => String::new(),
         };
         self.push_label(
@@ -568,7 +568,7 @@ impl SettingsDrawer<'_, '_> {
 
         if let Some(search) = picker.search {
             if search.y >= vp.y - 1.0 && search.bottom() <= vp.bottom() + 1.0 {
-                let placeholder = self.lang().text("Search fonts…", "دوّر في الخطوط…");
+                let placeholder = self.lang().t("Search fonts…");
                 self.draw_search_box(search, &exp.query, placeholder, clip);
             }
         }
@@ -586,7 +586,7 @@ impl SettingsDrawer<'_, '_> {
             if empty_rect.bottom() <= vp.bottom() {
                 self.push_label(
                     empty_rect,
-                    self.lang().text("No matching fonts", "لا توجد خطوط مطابقة"),
+                    self.lang().t("No matching fonts"),
                     UiSize::Caption,
                     UiWeight::Regular,
                     self.start_align(),

@@ -53,10 +53,10 @@ impl Card {
 impl AgentState {
     pub fn label(self, language: UiLanguage) -> &'static str {
         match self {
-            Self::Working => language.text("Working", "شغّال"),
-            Self::NeedsInput => language.text("Needs input", "مستني إدخال"),
-            Self::Done => language.text("Done", "تم"),
-            Self::Error => language.text("Error", "خطأ"),
+            Self::Working => language.t("Working"),
+            Self::NeedsInput => language.t("Needs input"),
+            Self::Done => language.t("Done"),
+            Self::Error => language.t("Error"),
         }
     }
 }

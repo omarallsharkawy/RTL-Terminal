@@ -169,12 +169,7 @@ impl AiSettingsState {
                 self.refresh_key_flags(store);
                 self.notice = Some((
                     false,
-                    language
-                        .text(
-                            "API key saved to system keyring.",
-                            "تم حفظ مفتاح API في مخزن المفاتيح بالنظام.",
-                        )
-                        .to_owned(),
+                    language.t("API key saved to system keyring.").to_owned(),
                 ));
             }
             Err(err) => {
@@ -195,12 +190,7 @@ impl AiSettingsState {
                 self.refresh_key_flags(store);
                 self.notice = Some((
                     false,
-                    language
-                        .text(
-                            "API key removed from keyring.",
-                            "تم حذف مفتاح API من مخزن المفاتيح.",
-                        )
-                        .to_owned(),
+                    language.t("API key removed from keyring.").to_owned(),
                 ));
             }
             Err(err) => {
@@ -231,10 +221,7 @@ impl AiSettingsState {
                 self.notice = Some((
                     true,
                     language
-                        .text(
-                            "Cost cap must be a positive USD number (or blank for off).",
-                            "يجب أن يكون سقف التكلفة رقماً موجباً بالدولار (أو فارغاً للتعطيل).",
-                        )
+                        .t("Cost cap must be a positive USD number (or blank for off).")
                         .to_owned(),
                 ));
                 false
@@ -262,10 +249,7 @@ impl AiSettingsState {
             self.notice = Some((
                 true,
                 language
-                    .text(
-                        "Allow-list prefixes cannot contain shell metacharacters (;, &&, ||, |, $, >, <).",
-                        "لا يُسمح برموز الشيل الخاصة (;, &&, ||, |, $, >, <) في قائمة السماح.",
-                    )
+                    .t("Allow-list prefixes cannot contain shell metacharacters (;, &&, ||, |, $, >, <).")
                     .to_owned(),
             ));
             return false;

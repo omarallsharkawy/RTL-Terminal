@@ -532,7 +532,7 @@ pub fn block_ai_overlay(
             shadow: None,
         });
         let text = if btn.w >= style.px(290.0) {
-            twitty_ui::ui::chrome::tr("Insert fix into composer", "حط الحل في خانة الأوامر")
+            twitty_ui::ui::chrome::t("Insert fix into composer")
         } else if view.language == UiLanguage::Arabic {
             "حط الحل في خانة الأوامر"
         } else {
@@ -572,7 +572,7 @@ pub fn block_ai_overlay(
             shadow: None,
         });
         let text = if btn.w >= style.px(180.0) {
-            twitty_ui::ui::chrome::tr("Suggest a fix", "اقترح حل")
+            twitty_ui::ui::chrome::t("Suggest a fix")
         } else if view.language == UiLanguage::Arabic {
             "اقترح حل"
         } else {

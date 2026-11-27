@@ -847,7 +847,7 @@ pub fn build(
                     bi_side,
                 );
                 Icon::Agent.draw(bi_rect, ctx.color(style.accent), &mut scene.shapes);
-                let label_text = view.language.text("Generate", "ولّد");
+                let label_text = view.language.t("Generate");
                 let label_x = bi_rect.right() + style.px(4.0);
                 let label_rect = Rect::new(
                     label_x,
@@ -1271,8 +1271,7 @@ pub fn build(
                     (banner_rect.right() - text_x - pad).max(0.0),
                     banner_rect.h,
                 );
-                let label =
-                    twitty_ui::ui::chrome::tr("Thinking…", "بيفكر… (Esc to cancel / للإلغاء)");
+                let label = twitty_ui::ui::chrome::t("Thinking…");
                 let buf = font.fit(
                     ctx.font_system,
                     UiSize::Small,

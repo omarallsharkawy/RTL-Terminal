@@ -292,9 +292,8 @@ impl App {
                 let cwd = self.pane_cwd(id);
                 let root = self.review.snapshot().map(|s| s.root.as_path());
                 if !cwd_in_repo(cwd.as_deref(), root) {
-                    self.review.warn(crate::ui::chrome::tr(
+                    self.review.warn(crate::ui::chrome::t(
                         "The focused pane is not in this repository; refresh or switch panes",
-                        "اللوحة المحددة مش في المستودع ده؛ حدّث أو بدّل اللوحة",
                     ));
                 } else {
                     self.insert_text(id, "git commit");
@@ -384,14 +383,12 @@ impl App {
                 // The new agent pane has the keyboard now.
                 self.review.set_focused(false);
             }
-            Err(AgentStartError::NotFound) => self.review.warn(crate::ui::chrome::tr(
+            Err(AgentStartError::NotFound) => self.review.warn(crate::ui::chrome::t(
                 "No coding agent found (claude, codex, gemini, opencode, grok, agy)",
-                "مفيش وكيل برمجة متسطّب",
             )),
-            Err(AgentStartError::Failed) => self.review.warn(crate::ui::chrome::tr(
-                "Could not start the agent",
-                "مقدرناش نشغّل الوكيل",
-            )),
+            Err(AgentStartError::Failed) => self
+                .review
+                .warn(crate::ui::chrome::t("Could not start the agent")),
         }
     }
 }

@@ -14,6 +14,7 @@ anyhow.workspace = true
 cosmic_text.workspace = true
 memchr.workspace = true
 portable-pty.workspace = true
+serde_json.workspace = true
 tracing.workspace = true
 unicode-bidi.workspace = true
 unicode-normalization.workspace = true

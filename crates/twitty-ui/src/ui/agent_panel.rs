@@ -376,7 +376,7 @@ pub fn format_deny_reason(reason: &DenyReason, language: UiLanguage) -> String {
             UiLanguage::English => format!("Outside project root: {}", path.display()),
             UiLanguage::Arabic => format!("خارج مجلد المشروع: {}", path.display()),
         },
-        DenyReason::User => language.text("Denied by user", "رفضه المستخدم").to_owned(),
+        DenyReason::User => language.t("Denied by user").to_owned(),
     }
 }
 
@@ -508,7 +508,7 @@ fn placeholder_engine_loop(cmd_rx: mpsc::Receiver<AgentCommand>, evt_tx: mpsc::S
                     step: Step {
                         id,
                         kind: StepKind::Message {
-                            text: crate::ui::chrome::tr("Agent engine backend is not linked in this build yet. Configure a provider in Settings → AI.", "محرك الوكيل غير مرتبط في هذا البناء بعد. اضبط المزوّد في الإعدادات ← الذكاء الاصطناعي.").into(),
+                            text: crate::ui::chrome::t("Agent engine backend is not linked in this build yet. Configure a provider in Settings → AI.").into(),
                         },
                         status: StepStatus::Done,
                     },

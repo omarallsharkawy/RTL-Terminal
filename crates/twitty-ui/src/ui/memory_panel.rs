@@ -55,11 +55,11 @@ impl MemoryTab {
 
     pub fn label(self, language: UiLanguage) -> &'static str {
         match self {
-            Self::Rules => language.text("Rules", "القواعد"),
-            Self::Facts => language.text("Facts", "الحقائق"),
-            Self::Commands => language.text("Commands", "الأوامر"),
-            Self::Env => language.text("Environment", "البيئة"),
-            Self::Exclusions => language.text("Exclusions", "الاستثناءات"),
+            Self::Rules => language.t("Rules"),
+            Self::Facts => language.t("Facts"),
+            Self::Commands => language.t("Commands"),
+            Self::Env => language.t("Environment"),
+            Self::Exclusions => language.t("Exclusions"),
         }
     }
 
@@ -75,14 +75,11 @@ impl MemoryTab {
 
     pub fn add_placeholder(self, language: UiLanguage) -> &'static str {
         match self {
-            Self::Rules => language.text("Add a project rule…", "أضف قاعدة للمشروع…"),
-            Self::Facts => language.text("Add a project fact…", "أضف حقيقة عن المشروع…"),
-            Self::Commands => language.text("Add a frequent command…", "أضف أمراً متكرراً…"),
-            Self::Env => language.text("Add an environment note…", "أضف ملاحظة بيئة…"),
-            Self::Exclusions => language.text(
-                "Exclude glob or path (e.g. ~/secrets, **/private/**)…",
-                "استثنِ مساراً أو نمطاً (مثل ~/secrets)…",
-            ),
+            Self::Rules => language.t("Add a project rule…"),
+            Self::Facts => language.t("Add a project fact…"),
+            Self::Commands => language.t("Add a frequent command…"),
+            Self::Env => language.t("Add an environment note…"),
+            Self::Exclusions => language.t("Exclude glob or path (e.g. ~/secrets, **/private/**)…"),
         }
     }
 }
@@ -963,13 +960,13 @@ impl MemoryPanelState {
     /// Short human-friendly source label for a memory entry.
     pub fn source_badge(&self, entry: &MemoryEntry) -> &'static str {
         if entry.source == AUTO_ENV_SOURCE {
-            self.language.text("Detected", "مكتشف")
+            self.language.t("Detected")
         } else if entry.source == AUTO_COMMAND_SOURCE {
-            self.language.text("History", "السجل")
+            self.language.t("History")
         } else if entry.source == "agent" {
-            self.language.text("Agent", "الوكيل")
+            self.language.t("Agent")
         } else {
-            self.language.text("User", "مستخدم")
+            self.language.t("User")
         }
     }
 }

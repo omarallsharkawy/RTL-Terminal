@@ -386,7 +386,7 @@ impl Cards<'_, '_> {
         }
         let title = entry.title.trim();
         let title = if title.is_empty() || matches!(title, "…" | "...") {
-            self.view.language.text("Tab", "تاب")
+            self.view.language.t("Tab")
         } else {
             title
         };
@@ -520,9 +520,9 @@ impl Cards<'_, '_> {
         let remote = entry.remote_state.map(|state| {
             use twitty_ui::remote::ConnectionState::*;
             match state {
-                Connecting => self.view.language.text("Connecting", "جاري الاتصال"),
-                Connected => self.view.language.text("Connected", "متّصل"),
-                Disconnected => self.view.language.text("Disconnected", "الاتصال مقطوع"),
+                Connecting => self.view.language.t("Connecting"),
+                Connected => self.view.language.t("Connected"),
+                Disconnected => self.view.language.t("Disconnected"),
             }
         });
         let detail = remote
@@ -629,7 +629,7 @@ impl Cards<'_, '_> {
         self.label(
             title,
             Kind::Title,
-            self.view.language.text("New tab", "تاب جديد"),
+            self.view.language.t("New tab"),
             self.leading_align(),
             ink,
         );

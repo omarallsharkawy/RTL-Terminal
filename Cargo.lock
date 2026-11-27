@@ -3565,6 +3565,7 @@ dependencies = [
  "cosmic-text",
  "memchr",
  "portable-pty",
+ "serde_json",
  "tracing",
  "unicode-bidi",
  "unicode-normalization",
