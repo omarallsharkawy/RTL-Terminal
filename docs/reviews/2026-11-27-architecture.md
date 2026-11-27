@@ -139,3 +139,7 @@ Each step lands on its own with green CI and no behavior change.
 - Step 4 done: `tests/support/golden.rs` holds fonts, the GPU target, comparison and
   `GoldenScene`; overlay goldens are 10 to 25 lines each, and all 18 references pass
   unchanged.
+- Step 5, first half: `twitty-ui` holds config, commands, input, panels, composer, review,
+  sidebar, workflows, projects and remote (about 32k lines). Four links to sessions and the
+  control socket were cut first (palette item types, `Shell`, pane notifications, UID lookup).
+  `twitty-scene` is next.

@@ -150,12 +150,7 @@ impl PaneMeta {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Notification {
-    pub title: Option<String>,
-    pub body: String,
-    pub at: std::time::SystemTime,
-}
+pub(crate) use crate::sidebar::Notification;
 
 /// Pointer, selection and search state of one pane.
 #[derive(Debug)]

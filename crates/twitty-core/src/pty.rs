@@ -551,3 +551,24 @@ fn find_in_path(program: &str) -> Option<std::path::PathBuf> {
         .map(|dir| dir.join(program))
         .find(|path| path.is_file())
 }
+
+/// A shell Twitty knows how to integrate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shell {
+    Bash,
+    Zsh,
+    Fish,
+}
+
+impl Shell {
+    /// The shell a program path names (`/usr/bin/zsh`, `fish`...).
+    pub fn of(program: &str) -> Option<Shell> {
+        let name = std::path::Path::new(program).file_name()?.to_str()?;
+        match name {
+            "bash" => Some(Shell::Bash),
+            "zsh" => Some(Shell::Zsh),
+            "fish" => Some(Shell::Fish),
+            _ => None,
+        }
+    }
+}

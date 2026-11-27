@@ -15,26 +15,7 @@ use crate::render::ui_style::{
 use crate::render::text::labels::UiLabels;
 pub use crate::render::text::ui::{fit_query_tail, label_width};
 
-/// What the palette shows; built by the app from `ui::palette`.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct PaletteView {
-    pub query: String,
-    /// Title (English), Arabic title, shortcut.
-    pub items: Vec<PaletteItem>,
-    /// Index into `items`.
-    pub selected: usize,
-    /// Shown while the query is empty; `None` for the commands' hint.
-    pub placeholder: Option<String>,
-}
-
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct PaletteItem {
-    pub title_en: String,
-    pub title_ar: String,
-    pub shortcut: Option<String>,
-    /// Listed but cannot be chosen (a notification from a closed pane).
-    pub dimmed: bool,
-}
+pub use crate::ui::palette::{PaletteItem, PaletteView};
 
 /// Optional pictograms for the active mode and the visible command rows.
 pub struct PaletteIcons {

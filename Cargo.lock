@@ -3520,6 +3520,7 @@ dependencies = [
  "twitty-core",
  "twitty-render",
  "twitty-store",
+ "twitty-ui",
  "unicode-bidi",
  "unicode-normalization",
  "unicode-segmentation",
@@ -3594,6 +3595,32 @@ dependencies = [
  "rusqlite",
  "tracing",
  "twitty-core",
+]
+
+[[package]]
+name = "twitty-ui"
+version = "4.0.0"
+dependencies = [
+ "alacritty_terminal",
+ "anyhow",
+ "arboard",
+ "libc",
+ "memchr",
+ "portable-pty",
+ "rustix 1.1.6",
+ "serde",
+ "serde_json",
+ "tracing",
+ "twitty-ai",
+ "twitty-control",
+ "twitty-core",
+ "twitty-render",
+ "twitty-store",
+ "unicode-bidi",
+ "unicode-normalization",
+ "unicode-segmentation",
+ "unicode-width",
+ "winit",
 ]
 
 [[package]]

@@ -2,7 +2,7 @@
 
 // Build the shared daemon source independently of the GUI library.
 #[cfg(target_os = "linux")]
-#[path = "../remote/daemon/mod.rs"]
+#[path = "../../crates/twitty-ui/src/remote/daemon/mod.rs"]
 pub mod daemon;
 #[cfg(target_os = "linux")]
 #[path = "../../crates/twitty-core/src/remote/wire.rs"]

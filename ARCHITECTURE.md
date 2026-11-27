@@ -78,14 +78,19 @@ All packages inherit their version and Rust edition from the root manifest. The 
 | `twitty-store` | Local SQLite storage (command history, project memory, Drive index with FTS5 and versioned migrations), background worker thread (`StoreHandle`), and OS keyring abstraction (`SecretStore`) | `twitty-core` |
 | `twitty-control` | Control sockets, wire formats, CLI, and Claude hook client | `twitty-core` |
 | `twitty-ai` | Agent selection, prompts, subprocess execution, consent, and AI response formats | `twitty-core`, `twitty-control` (UID lookup on Unix) |
-| `twitty` | Windows, sessions, app views and frame composition, cmux dispatch, remote bootstrap and daemon, and the library facade | All five members |
+| `twitty-ui` | Everything about the interface that needs no window: config, the command table, key and mouse input, panel state and geometry (`ui`: palette, settings, menus, welcome, agent panel), the composer, review, sidebar, workflows, projects and remote bootstrap. Paths stay `twitty::ui::…` etc. through re-exports | `twitty-core`, `twitty-render` (styles, metrics), `twitty-ai`, `twitty-store`, `twitty-control` (UID lookup) |
+| `twitty` | Windows, sessions, the app (`app/`), the control socket's pane dispatch, frame composition (`render/scene`), and the library facade | All six members |
 
-The app composes its frame from live UI state. Its renderer and pane-specific cmux dispatch
+`twitty-ui` never reaches into sessions, the control socket or the window: changing a panel
+rebuilds only it and the app, and the compiler stops UI code from touching a PTY. The app
+composes its frame from live UI state. Its renderer and pane-specific cmux dispatch
 stay with those models. Assets and integration tests live at the repository root.
 
 ## Modules
 
-The module names below follow the root library's module tree.
+The module names below follow the root library's module tree. `ai/`, `blocks/`, `commands.rs`,
+`composer/`, `config.rs`, `input/`, `projects/`, `remote/`, `review/`, `sidebar/`, `ui/` and
+`workflows/` live in `crates/twitty-ui/src/`; the rest are in `src/`.
 
 | Module | Responsibility | Depends on |
 | --- | --- | --- |
