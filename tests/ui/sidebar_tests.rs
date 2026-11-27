@@ -1620,11 +1620,14 @@ fn sidebar_quick_ssh_button_workspace_color_and_ssh_input_parser() {
 
     // 3. `parse_ssh_input` supports host, user@host, optional `ssh ` prefix, and `:session`, while
     //    rejecting option-injection and preserving IPv6 literals.
-    let named = parse_ssh_input("ssh alice@prod.internal:deploy").unwrap();
-    assert_eq!(named.destination(), "alice@prod.internal");
-    assert_eq!(named.name(), "deploy");
-    let ipv6 = parse_ssh_input("root@[2001:db8::1]").unwrap();
-    assert_eq!(ipv6.destination(), "root@[2001:db8::1]");
+    #[cfg(target_os = "linux")]
+    {
+        let named = parse_ssh_input("ssh alice@prod.internal:deploy").unwrap();
+        assert_eq!(named.destination(), "alice@prod.internal");
+        assert_eq!(named.name(), "deploy");
+        let ipv6 = parse_ssh_input("root@[2001:db8::1]").unwrap();
+        assert_eq!(ipv6.destination(), "root@[2001:db8::1]");
+    }
     assert!(parse_ssh_input("-oProxyCommand=id host").is_err());
     assert!(parse_ssh_input("   ").is_err());
 

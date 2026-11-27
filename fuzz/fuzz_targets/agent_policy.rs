@@ -9,6 +9,6 @@ fuzz_target!(|data: &[u8]| {
         let prefixes = vec![vec!["cargo".into(), "test".into()]];
         let _ = twitty_ai::engine::policy::command(root, root, text, &prefixes, false);
         let _ = twitty_ai::engine::policy::command(root, root, text, &prefixes, true);
-        let _ = twitty_ai::engine::patch::ValidatedPatch::validate(root, text);
+        let _ = twitty_ai::engine::patch::Patch::validate(root, text);
     }
 });

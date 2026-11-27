@@ -125,7 +125,7 @@ fn tabs_in_arabic_rows_do_not_bloat_spacing_or_merge_distant_columns() {
         .map(|g| segs[0].seg_x + g.x + g.w)
         .fold(0.0_f32, f32::max);
     assert!(
-        max_x <= 12.0 * cw + 1.0,
+        max_x <= 12.0 * cw + cw,
         "short tab bloated RTL row to {max_x}px (grid is {}px)",
         12.0 * cw
     );

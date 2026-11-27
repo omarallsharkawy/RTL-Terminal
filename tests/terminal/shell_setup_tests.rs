@@ -234,6 +234,146 @@ mod unix_shell_tests {
         String::from_utf8_lossy(&fs::read(&out_path).unwrap()).into_owned()
     }
 
+    /// Run an integrated shell inside a real PTY, sending each command line after the shell
+    /// prints its prompt/mark so interactive-only shells (like `fish`, which skips prompt and
+    /// preexec/postexec hooks when stdin is a pipe) emit full OSC 133 / 633 / 7 sequences.
+    fn run_shell_pty(
+        program: &Path,
+        shell_args: &[&str],
+        home: &Path,
+        commands: &[&str],
+    ) -> String {
+        use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+        use std::io::{Read, Write};
+        use std::sync::{Arc, Condvar, Mutex};
+        use std::time::Duration;
+
+        let scripts = home.join("scripts");
+        install(&scripts).unwrap();
+        let integration = integrate(
+            program.to_str().unwrap(),
+            &args(shell_args),
+            &scripts,
+            no_env,
+        )
+        .expect("integrated");
+
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize {
+                rows: 24,
+                cols: 120,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("openpty");
+
+        let mut cmd = CommandBuilder::new(&integration.command[0]);
+        for arg in &integration.command[1..] {
+            cmd.arg(arg);
+        }
+        cmd.env_clear();
+        if let Some(path) = std::env::var_os("PATH") {
+            cmd.env("PATH", path);
+        }
+        cmd.env("HOME", home);
+        cmd.env("TERM", "xterm-256color");
+        for (k, v) in &integration.env {
+            cmd.env(k, v);
+        }
+        cmd.cwd(home);
+
+        let mut child = pair.slave.spawn_command(cmd).expect("spawn shell in pty");
+        drop(pair.slave);
+
+        let mut reader = pair.master.try_clone_reader().expect("clone pty reader");
+        let mut writer = pair.master.take_writer().expect("take pty writer");
+
+        let shared = Arc::new((Mutex::new((Vec::<u8>::new(), false)), Condvar::new()));
+        let bg = Arc::clone(&shared);
+        let reader_thread = std::thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        let (lock, cv) = &*bg;
+                        let mut guard = lock.lock().unwrap();
+                        guard.0.extend_from_slice(&buf[..n]);
+                        cv.notify_all();
+                    }
+                }
+            }
+            let (lock, cv) = &*bg;
+            let mut guard = lock.lock().unwrap();
+            guard.1 = true;
+            cv.notify_all();
+        });
+
+        let wait_for = |pred: &dyn Fn(&[u8]) -> bool, timeout: Duration| {
+            let (lock, cv) = &*shared;
+            let deadline = Instant::now() + timeout;
+            let mut guard = lock.lock().unwrap();
+            while !guard.1 && !pred(&guard.0) {
+                let Some(rem) = deadline.checked_duration_since(Instant::now()) else {
+                    break;
+                };
+                let (g, _) = cv.wait_timeout(guard, rem).unwrap();
+                guard = g;
+            }
+        };
+
+        let count_bytes = |haystack: &[u8], needle: &[u8]| -> usize {
+            haystack
+                .windows(needle.len())
+                .filter(|w| *w == needle)
+                .count()
+        };
+
+        // Wait for the initial prompt mark (OSC 133;B) before feeding commands.
+        let mut expected_b = 1usize;
+        wait_for(
+            &|buf| count_bytes(buf, b"\x1b]133;B") >= expected_b,
+            Duration::from_secs(4),
+        );
+
+        let mut expected_d = 0usize;
+        for line in commands {
+            let _ = writer.write_all(line.as_bytes());
+            let _ = writer.write_all(b"\r");
+            let _ = writer.flush();
+            if *line != "exit" {
+                expected_d += 1;
+                expected_b += 1;
+                wait_for(
+                    &|buf| {
+                        count_bytes(buf, b"\x1b]133;D;") >= expected_d
+                            && count_bytes(buf, b"\x1b]133;B") >= expected_b
+                    },
+                    Duration::from_secs(4),
+                );
+            }
+        }
+        drop(writer);
+
+        let start = Instant::now();
+        loop {
+            if child.try_wait().unwrap().is_some() {
+                break;
+            }
+            if start.elapsed().as_secs() > 20 {
+                let _ = child.kill();
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        drop(pair.master);
+        let _ = reader_thread.join();
+
+        let guard = shared.0.lock().unwrap();
+        String::from_utf8_lossy(&guard.0).into_owned()
+    }
+
     /// The shell signals in `output`, in order.
     fn signals(output: &str) -> Vec<Signal> {
         output
@@ -409,11 +549,16 @@ mod unix_shell_tests {
         let home = TempDir::new("fish");
         let dir = home.0.join("dir x");
         fs::create_dir(&dir).unwrap();
-        let out = run_shell(&fish, &[], &home.0, "echo hi\nfalse\ncd 'dir x'\nexit\n");
+        let out = run_shell_pty(
+            &fish,
+            &[],
+            &home.0,
+            &["echo hi", "false", "cd 'dir x'", "exit"],
+        );
         let joined = marks(&out).join(" ");
         assert!(
             joined.contains("C D0") && joined.contains("C D1"),
-            "{joined}"
+            "marks={joined:?} out={out:?}"
         );
         assert!(
             signals(&out).contains(&Signal::CommandLine("echo hi".into())),
@@ -428,7 +573,7 @@ mod unix_shell_tests {
     fn claude_wrapper_dir_stays_first_on_path_after_startup_files() {
         let rc =
             "export TWITTY_CLAUDE_DIR=/twitty-wrap\nexport PATH=\"/user-bin:/twitty-wrap:$PATH\"\n";
-        let check = "echo \"P=$PATH\"\nexit\n";
+        let check = "printf '\\nTWITTY_PATH_CHECK=%s\\n' \"$PATH\"\nexit\n";
         for (shell, rcfile) in [("bash", ".bashrc"), ("zsh", ".zshrc")] {
             let Some(program) = find(shell) else {
                 eprintln!("{shell} not installed, skipped");
@@ -439,7 +584,7 @@ mod unix_shell_tests {
             let out = run_shell(&program, &[], &home.0, check);
             let line = out
                 .lines()
-                .filter_map(|l| l.split("P=").nth(1))
+                .filter_map(|l| l.trim_end_matches('\r').strip_prefix("TWITTY_PATH_CHECK="))
                 .next_back()
                 .unwrap_or_else(|| panic!("{shell}: no PATH line in {out:?}"));
             let dirs: Vec<&str> = line.trim().split(':').collect();
