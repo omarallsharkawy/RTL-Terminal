@@ -18,6 +18,7 @@ mod agent_panel;
 mod ai;
 mod branches;
 mod composer;
+mod context_menu;
 mod control;
 mod event;
 mod git_diff;
@@ -120,6 +121,8 @@ pub struct App {
     git_diff: git_diff::GitDiffWatch,
     /// The docked command composer.
     composer: composer::ComposerHost,
+    /// An open right-click menu.
+    context_menu: Option<context_menu::ContextMenuHost>,
     /// Built-in non-interactive AI assistant (composer generation, block explain/fix, consent).
     ai: ai::AiHost,
     /// Project switcher MRU and off-thread git repo scan state.
@@ -180,6 +183,7 @@ impl App {
             agent_panel: agent_panel::AgentPanelHost::default(),
             git_diff: git_diff::GitDiffWatch::default(),
             composer: composer::ComposerHost::default(),
+            context_menu: None,
             ai: ai::AiHost::load(),
             projects: projects::ProjectState::load(),
             layouts: crate::layouts::LayoutStore::default(),

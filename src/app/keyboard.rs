@@ -27,6 +27,9 @@ impl App {
         if self.handle_ai_consent_key(event) {
             return false;
         }
+        if let Some(close) = self.context_menu_key(event) {
+            return close;
+        }
         if self.welcome_open() {
             return self.handle_welcome_key(event);
         }

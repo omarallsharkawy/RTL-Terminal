@@ -3,6 +3,7 @@
 pub mod agent_panel;
 pub mod chrome;
 pub mod clipboard;
+pub mod context_menu;
 pub mod git_diff;
 pub mod hit;
 pub mod memory_panel;

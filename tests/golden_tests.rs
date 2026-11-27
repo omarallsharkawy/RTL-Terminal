@@ -1499,3 +1499,123 @@ fn golden_settings_commands_en_dark_and_edit_form_ar_light() {
         },
     );
 }
+
+/// A right-click menu over terminal output, English dark and Arabic light.
+fn check_context_menu_golden(name: &str, palette_name: &str, lang: twitty::ui::chrome::UiLanguage) {
+    use twitty::render::text::ui::UiFont;
+    use twitty::render::ui_style::UiStyle;
+    use twitty::ui::context_menu::{BlockAction, ContextMenu, MenuAction, MenuEntry};
+
+    let (width, height) = (640u32, 400u32);
+    let surface = (width as f32, height as f32);
+    let mut fonts = font_system();
+    let ui_font = UiFont::default();
+    let palette = Palette::named(palette_name).unwrap();
+    let metrics = CellMetrics::measure(&mut fonts, None, 14.5, 1.0);
+    let style = UiStyle::new(&palette, None, 1.0);
+    let rect = Rect::new(0.0, 0.0, surface.0, surface.1);
+    let (cols, rows) = metrics.grid_size(rect);
+    let mut term = Terminal::new(cols.max(20), rows.max(10), |_| {});
+    term.process_bytes(
+        b"\x1b[?25l~/projects/twitty $ cargo test\r\ntest result: ok. 12 passed\r\n",
+    );
+    let (lines, cursor) = term.snapshot();
+    let panes = [PaneFrame {
+        id: PaneId(1),
+        rect,
+        lines,
+        cursor,
+        focused: true,
+        status: None,
+        blocks: Vec::new(),
+    }];
+    let ar = lang == twitty::ui::chrome::UiLanguage::Arabic;
+    let t = |en: &'static str, a: &'static str| if ar { a } else { en };
+    let keys = |k: &str| Some(k.to_owned());
+    let mut menu = ContextMenu::new(
+        vec![
+            MenuEntry::item(t("Paste", "لصق"), MenuAction::Command("edit.paste"))
+                .with_shortcut(keys("Ctrl+Shift+V")),
+            MenuEntry::Separator,
+            MenuEntry::item(
+                t("Copy output", "انسخ الناتج"),
+                MenuAction::Block(BlockAction::CopyOutput, 1),
+            ),
+            MenuEntry::item(
+                t("Run again", "شغّله تاني"),
+                MenuAction::Block(BlockAction::Rerun, 1),
+            ),
+            MenuEntry::Separator,
+            MenuEntry::item(
+                t("Split right", "قسّم يمين"),
+                MenuAction::Command("split.right"),
+            )
+            .with_shortcut(keys("Ctrl+Shift+E")),
+            MenuEntry::item(
+                t("Split down", "قسّم تحت"),
+                MenuAction::Command("split.down"),
+            )
+            .with_shortcut(keys("Ctrl+Shift+O")),
+            MenuEntry::Separator,
+            MenuEntry::item(
+                t("Close pane", "قفل اللوحة"),
+                MenuAction::Command("pane.close"),
+            )
+            .with_shortcut(keys("Ctrl+Shift+W"))
+            .danger(),
+        ],
+        if ar { (420.0, 40.0) } else { (220.0, 40.0) },
+    )
+    .unwrap();
+    menu.selected = Some(3);
+    let layout = menu.layout(rect, 1.0, lang);
+
+    let mut cache = RowCache::default();
+    let mut ime = PreeditState::default();
+    let mut ctx = DrawContext {
+        font_system: &mut fonts,
+        family: None,
+        palette: &palette,
+        metrics,
+        is_srgb: false,
+    };
+    let opts = FrameOptions {
+        window_focused: true,
+        cursor_style: "block",
+        cursor_blink_on: false,
+        surface,
+    };
+    let mut frame = build_frame(&mut ctx, &opts, &mut cache, &mut ime, &[], &panes, &[]);
+    frame.add_context_menu(&mut ctx, style, &ui_font, &menu, &layout, lang);
+    let runs = frame.text_runs(&panes, &cache, &ime);
+    let _gpu = GPU.lock().unwrap_or_else(|e| e.into_inner());
+    let mut target = match Offscreen::new(width, height) {
+        Ok(target) => target,
+        Err(e) => {
+            assert!(
+                !env_flag("TWITTY_REQUIRE_GOLDEN"),
+                "TWITTY_REQUIRE_GOLDEN is set but golden test {name} cannot run: {e}"
+            );
+            eprintln!("note: skipping golden image {name}: {e}");
+            return;
+        }
+    };
+    let actual = target
+        .render_layers(
+            (&frame.quads, &frame.shapes),
+            runs,
+            ctx.font_system,
+            frame.background,
+            1.0,
+        )
+        .expect("offscreen render");
+    let (w, h) = target.size();
+    compare_golden(name, w, h, &actual);
+}
+
+#[test]
+fn golden_context_menu_en_dark_and_ar_light() {
+    use twitty::ui::chrome::UiLanguage;
+    check_context_menu_golden("context_menu_en_dark", "twitty-dark", UiLanguage::English);
+    check_context_menu_golden("context_menu_ar_light", "twitty-light", UiLanguage::Arabic);
+}

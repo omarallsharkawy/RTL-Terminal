@@ -35,6 +35,10 @@ impl App {
 
     pub(super) fn on_cursor_moved(&mut self, x: f64, y: f64) {
         self.pointer.pos = (x, y);
+        if self.context_menu_open() {
+            self.context_menu_motion();
+            return;
+        }
         self.window.update_sidebar_drag();
         if let Some(icon) = self.ai_consent_cursor(x, y) {
             self.window.set_cursor_icon(icon);
@@ -184,6 +188,9 @@ impl App {
             }
             return false;
         }
+        if self.context_menu_open() {
+            return self.context_menu_mouse(button, pressed);
+        }
         if self.welcome_open() {
             self.on_welcome_mouse(button, pressed);
             return false;
@@ -225,6 +232,15 @@ impl App {
                     && self.pointer.capture.is_none()
                     && self.pointer.drag.is_none()
                     && self.click_chrome(action);
+            }
+            if button == MouseButton::Right
+                && self.pointer.capture.is_none()
+                && self.pointer.drag.is_none()
+            {
+                let program = matches!(hit, Hit::Pane(id) if self.right_click_goes_to_program(id));
+                if !program && self.open_context_menu(&hit) {
+                    return false;
+                }
             }
             if button == MouseButton::Left
                 && self.pointer.capture.is_none()
@@ -624,7 +640,12 @@ impl App {
     }
 
     /// Hit-test `(x, y)` against visible command block cards in pane `id`.
-    fn block_card_hit(&self, id: PaneId, x: f64, y: f64) -> Option<(u64, Option<BlockButton>)> {
+    pub(super) fn block_card_hit(
+        &self,
+        id: PaneId,
+        x: f64,
+        y: f64,
+    ) -> Option<(u64, Option<BlockButton>)> {
         if !self.config.block_cards || self.mode_of(id).intersects(TermMode::MOUSE_MODE) {
             return None;
         }
@@ -650,7 +671,7 @@ impl App {
     }
 
     /// Execute a floating toolbar button action for `block_id` in pane `id`.
-    fn run_block_button(&mut self, id: PaneId, block_id: u64, button: BlockButton) {
+    pub(super) fn run_block_button(&mut self, id: PaneId, block_id: u64, button: BlockButton) {
         match button {
             BlockButton::ExplainError => {
                 self.analyze_failed_block(id, block_id, crate::ai::BlockAiMode::Explain);

@@ -100,6 +100,8 @@ pub struct Frame {
     /// Failed-block AI explanation popover labels and clip rect.
     block_ai_labels: Vec<UiLabel>,
     block_ai_rect: Option<Rect>,
+    menu_labels: Vec<UiLabel>,
+    menu_rect: Option<Rect>,
     /// One-time AI privacy consent modal labels and clip rect (drawn above everything).
     consent_labels: Vec<UiLabel>,
     consent_rect: Option<Rect>,
@@ -354,6 +356,8 @@ pub(crate) fn build_frame_base(
         composer_clips: Vec::new(),
         block_ai_labels: Vec::new(),
         block_ai_rect: None,
+        menu_labels: Vec::new(),
+        menu_rect: None,
         consent_labels: Vec::new(),
         consent_rect: None,
     }
@@ -512,6 +516,28 @@ impl Frame {
         );
         self.block_ai_rect = rect;
         self.block_ai_labels = labels;
+    }
+
+    /// Draw an open right-click menu above everything else.
+    pub fn add_context_menu(
+        &mut self,
+        ctx: &mut DrawContext,
+        style: UiStyle,
+        font: &UiFont,
+        menu: &crate::ui::context_menu::ContextMenu,
+        layout: &crate::ui::context_menu::MenuLayout,
+        language: crate::ui::chrome::UiLanguage,
+    ) {
+        self.menu_labels = super::context_menu::draw(
+            ctx,
+            style,
+            font,
+            menu,
+            layout,
+            language,
+            &mut self.shapes.overlay,
+        );
+        self.menu_rect = Some(layout.rect);
     }
 
     /// Draw the one-time AI privacy consent modal above everything else.
@@ -973,6 +999,10 @@ impl Frame {
             runs = clip_runs(runs, hole);
         }
         runs.extend(self.consent_labels.iter().map(ui_run));
+        if let Some(hole) = self.menu_rect {
+            runs = clip_runs(runs, hole);
+        }
+        runs.extend(self.menu_labels.iter().map(ui_run));
         runs
     }
 }

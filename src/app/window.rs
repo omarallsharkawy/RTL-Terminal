@@ -354,6 +354,22 @@ impl Window {
         }
     }
 
+    /// Hand an open right-click menu to the renderer (`None` hides it).
+    pub(super) fn set_context_menu(&mut self, menu: Option<crate::ui::context_menu::ContextMenu>) {
+        if let Some(ref mut r) = self.renderer {
+            r.set_context_menu(menu);
+        }
+    }
+
+    /// Where `menu` is drawn, for hit testing (`None` before the renderer exists).
+    pub(super) fn context_menu_layout(
+        &self,
+        menu: &crate::ui::context_menu::ContextMenu,
+    ) -> Option<crate::ui::context_menu::MenuLayout> {
+        let r = self.renderer.as_ref()?;
+        Some(r.context_menu_layout(menu, self.language))
+    }
+
     /// Hand the one-time AI privacy consent modal view to the renderer (`None` hides it).
     pub(super) fn set_ai_consent(
         &mut self,
@@ -1209,6 +1225,8 @@ impl App {
         self.window.set_block_ai(block_ai);
         let consent = self.ai_consent_view();
         self.window.set_ai_consent(consent);
+        self.window
+            .set_context_menu(self.context_menu.as_ref().map(|h| h.menu.clone()));
         let (panes, dividers) = self.frame();
         let visible = self.cursor_blink.visible();
         let broadcast = self.active_tab_broadcast();

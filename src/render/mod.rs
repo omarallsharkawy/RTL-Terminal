@@ -113,6 +113,7 @@ pub(crate) struct Renderer {
     composer_view: AnimatedView<scene::composer::ComposerView>,
     /// The failed-block AI explanation/fix popover, while it is open.
     block_ai_view: Option<scene::ai::BlockAiView>,
+    context_menu: Option<crate::ui::context_menu::ContextMenu>,
     /// The one-time AI privacy consent modal, while it is open.
     ai_consent_view: Option<scene::ai::ConsentOverlayView>,
     /// The settings panel, while it is open.
@@ -182,6 +183,7 @@ impl Renderer {
             palette_view: AnimatedView::default(),
             composer_view: AnimatedView::default(),
             block_ai_view: None,
+            context_menu: None,
             ai_consent_view: None,
             settings_view: None,
             memory_view: None,
@@ -405,6 +407,21 @@ impl Renderer {
     /// Show the failed-block AI explanation/fix popover (`Some`) or hide it.
     pub(crate) fn set_block_ai(&mut self, view: Option<scene::ai::BlockAiView>) {
         self.block_ai_view = view;
+    }
+
+    /// Show a right-click menu (`Some`) or hide it.
+    pub(crate) fn set_context_menu(&mut self, menu: Option<crate::ui::context_menu::ContextMenu>) {
+        self.context_menu = menu;
+    }
+
+    /// Where `menu` is drawn in the current surface, for hit testing.
+    pub(crate) fn context_menu_layout(
+        &self,
+        menu: &crate::ui::context_menu::ContextMenu,
+        language: crate::ui::chrome::UiLanguage,
+    ) -> crate::ui::context_menu::MenuLayout {
+        let (w, h) = self.surface_size();
+        menu.layout(Rect::new(0.0, 0.0, w, h), self.metrics.scale, language)
     }
 
     /// Show the one-time AI privacy consent modal (`Some`) or hide it.
@@ -635,6 +652,22 @@ impl Renderer {
         }
         if let Some(view) = &self.ai_consent_view {
             frame.add_ai_consent(&mut ctx, style, &self.ui_font, view);
+        }
+        if let Some(menu) = &self.context_menu {
+            let (w, h) = (self.config.width as f32, self.config.height as f32);
+            let layout = menu.layout(
+                Rect::new(0.0, 0.0, w, h),
+                self.metrics.scale,
+                chrome.language,
+            );
+            frame.add_context_menu(
+                &mut ctx,
+                style,
+                &self.ui_font,
+                menu,
+                &layout,
+                chrome.language,
+            );
         }
         if let Some((x, y, w, h)) = frame.ime_area {
             self.window.set_ime_cursor_area(
