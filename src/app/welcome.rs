@@ -36,6 +36,8 @@ impl App {
         }
         self.close_palette();
         self.close_settings();
+        self.close_memory();
+        self.close_context_menu();
         self.reset_pointer_gesture();
 
         let pane_program = self

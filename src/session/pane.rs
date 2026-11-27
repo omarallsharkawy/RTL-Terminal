@@ -219,7 +219,9 @@ impl Pane {
 
     pub fn write(&self, bytes: &[u8]) {
         if let Some(ref pty) = self.pty {
-            let _ = pty.write(bytes);
+            if let Err(err) = pty.write(bytes) {
+                tracing::debug!(pane = self.id.0, "pty write failed: {err}");
+            }
         }
     }
 
@@ -234,7 +236,9 @@ impl Pane {
         if let Some(ref pty) = self.pty {
             let pty_cols = cols.clamp(1, u16::MAX as usize) as u16;
             let pty_rows = rows.clamp(1, u16::MAX as usize) as u16;
-            let _ = pty.resize(pty_cols, pty_rows);
+            if let Err(err) = pty.resize(pty_cols, pty_rows) {
+                tracing::debug!(pane = self.id.0, "pty resize failed: {err}");
+            }
         }
     }
 }

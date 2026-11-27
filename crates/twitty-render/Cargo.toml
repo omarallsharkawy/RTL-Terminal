@@ -16,6 +16,7 @@ cosmic_text.workspace = true
 glyphon.workspace = true
 pollster.workspace = true
 twitty-core.workspace = true
+twitty-style.workspace = true
 unicode-segmentation.workspace = true
 wgpu.workspace = true
 winit.workspace = true

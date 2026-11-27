@@ -176,13 +176,18 @@ pub fn tail_trim_to_tokens(text: &str, max_tokens: u32) -> Option<String> {
         slice.to_owned()
     };
 
-    // Guarantee the strict upper bound even under prefix rounding.
-    while !out.is_empty() && estimate_tokens(&out) > max_tokens {
-        if let Some((first_len, _)) = out.char_indices().nth(1) {
-            out.drain(..first_len);
+    // Guarantee the strict upper bound even under prefix rounding, trimming body characters after
+    // `TRIM_PREFIX` so the prefix itself is never corrupted.
+    let prefix_len = if use_prefix { TRIM_PREFIX.len() } else { 0 };
+    while out.len() > prefix_len && estimate_tokens(&out) > max_tokens {
+        if let Some((offset, _)) = out[prefix_len..].char_indices().nth(1) {
+            out.drain(prefix_len..prefix_len + offset);
         } else {
-            out.clear();
+            out.truncate(prefix_len);
         }
+    }
+    if use_prefix && out.len() <= prefix_len {
+        return None;
     }
     (!out.is_empty()).then_some(out)
 }

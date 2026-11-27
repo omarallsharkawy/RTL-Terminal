@@ -47,7 +47,40 @@ fn endpoint(kind: &ProviderKind, model: &str) -> Result<Uri, ProviderError> {
     if !matches!(uri.scheme_str(), Some("http" | "https")) || uri.host().is_none() {
         return Err(ProviderError::Configuration);
     }
+    if matches!(kind, ProviderKind::Ollama { .. }) && !is_allowed_ollama_uri(&uri) {
+        return Err(ProviderError::Configuration);
+    }
     Ok(uri)
+}
+
+fn is_allowed_ollama_uri(uri: &Uri) -> bool {
+    let Some(raw_host) = uri.host() else {
+        return false;
+    };
+    let host = raw_host
+        .strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .unwrap_or(raw_host);
+    if host.eq_ignore_ascii_case("localhost") {
+        return matches!(uri.scheme_str(), Some("http" | "https"));
+    }
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        if ip.is_loopback() {
+            return matches!(uri.scheme_str(), Some("http" | "https"));
+        }
+        if ip.is_unspecified() || ip.is_multicast() || is_link_local(ip) {
+            return false;
+        }
+        return uri.scheme_str() == Some("https");
+    }
+    uri.scheme_str() == Some("https")
+}
+
+fn is_link_local(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => v4.is_link_local(),
+        std::net::IpAddr::V6(v6) => (v6.segments()[0] & 0xffc0) == 0xfe80,
+    }
 }
 
 fn wire_request(
@@ -184,6 +217,38 @@ mod tests {
             assert!(!wire.uri().to_string().contains(key));
             assert_eq!(wire.headers().values().filter(|header| header.is_sensitive()
                 && header.to_str().unwrap().contains(key)).count(), 1);
+        }
+    }
+
+    #[test]
+    fn ollama_endpoint_rejects_remote_cleartext_and_metadata_ips() {
+        for ok in [
+            "",
+            "http://127.0.0.1:11434",
+            "http://localhost:11434",
+            "http://[::1]:11434",
+            "https://ollama.example.com",
+        ] {
+            let kind = ProviderKind::Ollama {
+                base_url: ok.into(),
+            };
+            assert!(endpoint(&kind, "llama3").is_ok(), "should accept {ok:?}");
+        }
+        for bad in [
+            "http://169.254.169.254",
+            "https://169.254.169.254",
+            "http://example.com:11434",
+            "https://0.0.0.0:11434",
+            "https://[fe80::1]:11434",
+        ] {
+            let kind = ProviderKind::Ollama {
+                base_url: bad.into(),
+            };
+            assert_eq!(
+                endpoint(&kind, "llama3"),
+                Err(ProviderError::Configuration),
+                "should reject {bad:?}"
+            );
         }
     }
 }

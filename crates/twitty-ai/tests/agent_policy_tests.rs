@@ -51,6 +51,7 @@ fn fixed_denials_precede_approval_and_allow_lists() {
         ("secret-tool lookup app demo", "keyring"),
         ("busctl call org.freedesktop.secrets", "keyring"),
         ("git -C sub push", "git push"),
+        ("git -C config push", "git push"),
         ("git push --force-with-lease origin main", "git push"),
         ("git config --global user.name test", "git config --global"),
         (
@@ -65,6 +66,10 @@ fn fixed_denials_precede_approval_and_allow_lists() {
         ("apt install demo", "package manager"),
         ("brew install demo", "package manager"),
         ("bash -xec 'sudo true'", "sudo"),
+        ("bash -c \"bash -c 'sudo true'\"", "sudo"),
+        ("env -S \"sh -c 'sudo true'\"", "sudo"),
+        ("sh -c \"sh -c 'sh -c \\\"sh -c echo\\\"'\"", "nested shell"),
+        ("xargs xargs xargs xargs xargs echo hi", "nested wrapper"),
         ("xargs --replace=VAR /usr/bin/sudo true", "sudo"),
         ("find . -exec bash -c 'sudo true' {} \\;", "sudo"),
         ("env -S 'sudo true'", "sudo"),
@@ -149,7 +154,7 @@ fn exact_argv_prefixes_and_uncertainty() {
         "cargo test \\",
         "MODE=dev cargo test",
         "env MODE=dev cargo test",
-        "bash -c \"bash -c 'sudo true'\"",
+        "bash -c \"bash -c 'echo hi'\"",
     ] {
         assert_eq!(
             command(root, root, input, &allow, false),

@@ -3,8 +3,8 @@
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub(crate) struct QuadVertex {
-    pub position: [f32; 2],
+pub(crate) struct QuadInstance {
+    pub rect: [f32; 4],
     pub color: [f32; 4],
 }
 
@@ -17,18 +17,22 @@ struct ScreenUniform {
 
 pub(crate) struct QuadRenderer {
     pipeline: wgpu::RenderPipeline,
-    material_opacity: wgpu::RenderPipeline,
+    material_opacity: Option<wgpu::RenderPipeline>,
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
-    vertex_buffer: Option<wgpu::Buffer>,
-    vertex_capacity: usize,
-    vertex_count: usize,
-    /// CPU-side vertices, kept between frames so they are not reallocated every frame.
-    vertices: Vec<QuadVertex>,
+    instance_buffer: Option<wgpu::Buffer>,
+    instance_capacity: usize,
+    instance_count: usize,
+    /// CPU-side instances, kept between frames so they are not reallocated every frame.
+    instances: Vec<QuadInstance>,
 }
 
 impl QuadRenderer {
-    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        alpha_mode: wgpu::CompositeAlphaMode,
+    ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("quad shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("quad.wgsl").into()),
@@ -78,16 +82,16 @@ impl QuadRenderer {
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
                 buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: std::mem::size_of::<QuadVertex>() as wgpu::BufferAddress,
-                    step_mode: wgpu::VertexStepMode::Vertex,
+                    array_stride: std::mem::size_of::<QuadInstance>() as wgpu::BufferAddress,
+                    step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &[
                         wgpu::VertexAttribute {
                             offset: 0,
                             shader_location: 0,
-                            format: wgpu::VertexFormat::Float32x2,
+                            format: wgpu::VertexFormat::Float32x4,
                         },
                         wgpu::VertexAttribute {
-                            offset: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
+                            offset: std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress,
                             shader_location: 1,
                             format: wgpu::VertexFormat::Float32x4,
                         },
@@ -119,40 +123,57 @@ impl QuadRenderer {
             cache: None,
         });
 
-        // Scale the already composed material in place. A second fill with source-over
-        // blending would raise alpha wherever chrome or highlight layers overlap.
+        // Scale the already composed material in place according to the surface alpha mode:
+        // - PreMultiplied: scale both RGB and A by `opacity`.
+        // - PostMultiplied: scale A only (compositor multiplies RGB by A once).
+        // - Opaque (or unknown): skip attenuation so `opacity < 1.0` never darkens an opaque window.
         let attenuate = wgpu::BlendComponent {
             src_factor: wgpu::BlendFactor::Zero,
             dst_factor: wgpu::BlendFactor::Constant,
             operation: wgpu::BlendOperation::Add,
         };
-        let material_opacity = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("window material opacity"),
-            layout: None,
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("material_vertex"),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("material_fragment"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState {
-                        color: attenuate,
-                        alpha: attenuate,
-                    }),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
+        let keep_dst = wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::Zero,
+            dst_factor: wgpu::BlendFactor::One,
+            operation: wgpu::BlendOperation::Add,
+        };
+        let opacity_blend = match alpha_mode {
+            wgpu::CompositeAlphaMode::PreMultiplied => Some(wgpu::BlendState {
+                color: attenuate,
+                alpha: attenuate,
             }),
-            primitive: Default::default(),
-            depth_stencil: None,
-            multisample: Default::default(),
-            multiview_mask: None,
-            cache: None,
+            wgpu::CompositeAlphaMode::PostMultiplied => Some(wgpu::BlendState {
+                color: keep_dst,
+                alpha: attenuate,
+            }),
+            _ => None,
+        };
+        let material_opacity = opacity_blend.map(|blend| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("window material opacity"),
+                layout: None,
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("material_vertex"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("material_fragment"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(blend),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: Default::default(),
+                depth_stencil: None,
+                multisample: Default::default(),
+                multiview_mask: None,
+                cache: None,
+            })
         });
 
         Self {
@@ -160,10 +181,10 @@ impl QuadRenderer {
             material_opacity,
             uniform_buffer,
             bind_group,
-            vertex_buffer: None,
-            vertex_capacity: 0,
-            vertex_count: 0,
-            vertices: Vec::new(),
+            instance_buffer: None,
+            instance_capacity: 0,
+            instance_count: 0,
+            instances: Vec::new(),
         }
     }
 
@@ -182,57 +203,34 @@ impl QuadRenderer {
         quads: &[(f32, f32, f32, f32, [f32; 4])],
     ) {
         if quads.is_empty() {
-            self.vertex_count = 0;
+            self.instance_count = 0;
             return;
         }
 
-        let vertices = &mut self.vertices;
-        vertices.clear();
-        vertices.reserve(quads.len() * 6);
+        let instances = &mut self.instances;
+        instances.clear();
+        instances.reserve(quads.len());
         for &(x, y, w, h, color) in quads {
-            let x2 = x + w;
-            let y2 = y + h;
-            vertices.push(QuadVertex {
-                position: [x, y],
-                color,
-            });
-            vertices.push(QuadVertex {
-                position: [x2, y],
-                color,
-            });
-            vertices.push(QuadVertex {
-                position: [x, y2],
-                color,
-            });
-
-            vertices.push(QuadVertex {
-                position: [x2, y],
-                color,
-            });
-            vertices.push(QuadVertex {
-                position: [x2, y2],
-                color,
-            });
-            vertices.push(QuadVertex {
-                position: [x, y2],
+            instances.push(QuadInstance {
+                rect: [x, y, w, h],
                 color,
             });
         }
 
-        self.vertex_count = vertices.len();
+        self.instance_count = instances.len();
         // Reuse the GPU buffer across frames; grow it geometrically only when needed.
-        if self.vertex_buffer.is_none() || self.vertex_capacity < vertices.len() {
-            let capacity = vertices.len().next_power_of_two().max(1024);
-            self.vertex_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("quad vertex buffer"),
-                size: (capacity * std::mem::size_of::<QuadVertex>()) as u64,
+        if self.instance_buffer.is_none() || self.instance_capacity < instances.len() {
+            let capacity = instances.len().next_power_of_two().max(256);
+            self.instance_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("quad instance buffer"),
+                size: (capacity * std::mem::size_of::<QuadInstance>()) as u64,
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }));
-            self.vertex_capacity = capacity;
+            self.instance_capacity = capacity;
         }
-        if let Some(ref buffer) = self.vertex_buffer {
-            queue.write_buffer(buffer, 0, bytemuck::cast_slice(vertices));
+        if let Some(ref buffer) = self.instance_buffer {
+            queue.write_buffer(buffer, 0, bytemuck::cast_slice(instances));
         }
     }
 
@@ -244,8 +242,11 @@ impl QuadRenderer {
         if opacity >= 1.0 {
             return;
         }
+        let Some(ref pipeline) = self.material_opacity else {
+            return;
+        };
         let opacity = f64::from(opacity);
-        pass.set_pipeline(&self.material_opacity);
+        pass.set_pipeline(pipeline);
         pass.set_blend_constant(wgpu::Color {
             r: opacity,
             g: opacity,
@@ -256,15 +257,17 @@ impl QuadRenderer {
     }
 
     pub fn render<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>) {
-        if let Some(ref buffer) = self.vertex_buffer {
-            if self.vertex_count > 0 {
+        if let Some(ref buffer) = self.instance_buffer {
+            if self.instance_count > 0 {
                 render_pass.set_pipeline(&self.pipeline);
                 render_pass.set_bind_group(0, &self.bind_group, &[]);
                 render_pass.set_vertex_buffer(
                     0,
-                    buffer.slice(..(self.vertex_count * std::mem::size_of::<QuadVertex>()) as u64),
+                    buffer.slice(
+                        ..(self.instance_count * std::mem::size_of::<QuadInstance>()) as u64,
+                    ),
                 );
-                render_pass.draw(0..self.vertex_count as u32, 0..1);
+                render_pass.draw(0..6, 0..self.instance_count as u32);
             }
         }
     }

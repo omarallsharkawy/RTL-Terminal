@@ -92,19 +92,13 @@ impl App {
         self.sync_memory();
     }
 
-    /// Refresh environment notes once per project root per session off the UI thread.
+    /// Refresh environment notes once per working directory per session off the UI thread.
     pub(super) fn maybe_refresh_project_env(&mut self, cwd: &Path) {
-        let root = twitty_store::resolve_project_root(cwd);
-        if root.as_os_str().is_empty() {
+        if cwd.as_os_str().is_empty() || !self.refreshed_env_projects.insert(cwd.to_path_buf()) {
             return;
         }
-        if twitty_store::is_project_excluded(cwd, &root, &self.config.memory_exclude) {
-            return;
-        }
-        if self.refreshed_env_projects.insert(root.clone()) {
-            self.store
-                .refresh_env_notes_async(root, self.config.memory_exclude.clone());
-        }
+        self.store
+            .refresh_env_notes_async(cwd.to_path_buf(), self.config.memory_exclude.clone());
     }
 
     /// Store a user-approved fact from the agent panel (`AgentEvent::RememberFact`), honoring
@@ -124,13 +118,25 @@ impl App {
         let store = self.store.clone();
         let excludes = self.config.memory_exclude.clone();
         let proxy = self.proxy.clone();
-        let _ = std::thread::Builder::new()
+        if let Err(err) = std::thread::Builder::new()
             .name("twitty-memory-load".into())
             .spawn(move || {
-                if let Ok(snapshot) = store.load_project_snapshot(project_root, excludes) {
-                    let _ = proxy.send_event(AppEvent::MemorySnapshot(generation, snapshot));
-                }
-            });
+                let snapshot = match store.load_project_snapshot(project_root, excludes) {
+                    Ok(snapshot) => snapshot,
+                    Err(err) => {
+                        tracing::warn!("twitty: failed to load project memory snapshot: {err}");
+                        twitty_store::ProjectMemorySnapshot::default()
+                    }
+                };
+                let _ = proxy.send_event(AppEvent::MemorySnapshot(generation, snapshot));
+            })
+        {
+            tracing::warn!("twitty: memory snapshot thread failed to start: {err}");
+            if let Some(state) = self.memory.as_mut() {
+                state.apply_snapshot(twitty_store::ProjectMemorySnapshot::default());
+                self.sync_memory();
+            }
+        }
     }
 
     fn memory_geometry(&self) -> ((f32, f32), f32) {
@@ -320,50 +326,56 @@ impl App {
             .name("twitty-memory-op".into())
             .spawn(move || {
                 for action in actions {
-                    match action {
-                        MemoryAction::AddMemory { kind, text } => {
-                            let _ = store.create_memory(NewMemory {
+                    let res: Result<(), twitty_store::StoreError> = match action {
+                        MemoryAction::AddMemory { kind, text } => store
+                            .create_memory(NewMemory {
                                 project_root: root_str.clone(),
                                 kind,
                                 text,
                                 source: "user".to_owned(),
                                 approved: true,
-                            });
-                        }
-                        MemoryAction::UpdateMemory { id, text } => {
-                            let _ = store.update_memory(
+                            })
+                            .map(|_| ()),
+                        MemoryAction::UpdateMemory { id, text } => store
+                            .update_memory(
                                 id,
                                 MemoryUpdate {
                                     text: Some(text),
                                     source: Some("user".to_owned()),
                                     ..Default::default()
                                 },
-                            );
-                        }
+                            )
+                            .map(|_| ()),
                         MemoryAction::ApproveMemory { id } => {
-                            let _ = store.set_memory_approved(id, true);
+                            store.set_memory_approved(id, true).map(|_| ())
                         }
-                        MemoryAction::DeleteMemory { id } => {
-                            let _ = store.delete_memory(id);
-                        }
-                        MemoryAction::ApproveRulesFile { rel_path, sha256 } => {
-                            let _ = store.approve_rules_file(root_str.clone(), rel_path, sha256);
-                        }
-                        MemoryAction::RevokeRulesFile { rel_path } => {
-                            let _ = store.revoke_rules_file(root_str.clone(), rel_path);
-                        }
+                        MemoryAction::DeleteMemory { id } => store.delete_memory(id).map(|_| ()),
+                        MemoryAction::ApproveRulesFile { rel_path, sha256 } => store
+                            .approve_rules_file(root_str.clone(), rel_path, sha256)
+                            .map(|_| ()),
+                        MemoryAction::RevokeRulesFile { rel_path } => store
+                            .revoke_rules_file(root_str.clone(), rel_path)
+                            .map(|_| ()),
                         MemoryAction::RefreshEnv => {
-                            let _ = store.refresh_env_notes(project_root.clone());
+                            store.refresh_env_notes(project_root.clone()).map(|_| ())
                         }
                         MemoryAction::ForgetProject => {
-                            let _ = store.forget_project(root_str.clone());
+                            store.forget_project(root_str.clone()).map(|_| ())
                         }
                         MemoryAction::AddExclusion { .. }
-                        | MemoryAction::RemoveExclusion { .. } => {}
+                        | MemoryAction::RemoveExclusion { .. } => Ok(()),
+                    };
+                    if let Err(err) = res {
+                        tracing::warn!("twitty: memory mutation failed: {err}");
                     }
                 }
-                if let Ok(snapshot) = store.load_project_snapshot(project_root, excludes) {
-                    let _ = proxy.send_event(AppEvent::MemorySnapshot(generation, snapshot));
+                match store.load_project_snapshot(project_root, excludes) {
+                    Ok(snapshot) => {
+                        let _ = proxy.send_event(AppEvent::MemorySnapshot(generation, snapshot));
+                    }
+                    Err(err) => {
+                        tracing::warn!("twitty: memory reload after mutation failed: {err}");
+                    }
                 }
             });
     }

@@ -59,23 +59,60 @@ pub(crate) fn prepare_db_path(path: &Path) -> Result<(), StoreError> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
-        if !parent.exists() {
-            let mut builder = fs::DirBuilder::new();
-            builder.recursive(true).mode(0o700);
-            builder.create(parent)?;
-        }
-        // Tighten the immediate parent directory to 0700 (skip if parent is `.` or `/`).
-        if parent != Path::new(".") && parent.parent().is_some() {
-            let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
-        }
-        if !path.exists() {
-            let mut opts = OpenOptions::new();
-            opts.write(true).create_new(true).mode(0o600);
-            match opts.open(path) {
-                Ok(_) => {}
-                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {}
-                Err(err) => return Err(err.into()),
+        let mut created_parent = false;
+        match fs::symlink_metadata(parent) {
+            Ok(meta) => {
+                if meta.file_type().is_symlink() {
+                    return Err(StoreError::InvalidInput(
+                        "database parent directory must not be a symlink",
+                    ));
+                }
             }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                let mut builder = fs::DirBuilder::new();
+                builder.recursive(true).mode(0o700);
+                builder.create(parent)?;
+                created_parent = true;
+            }
+            Err(err) => return Err(err.into()),
+        }
+        // Only tighten the parent directory to 0700 when Twitty created it or it is a dedicated
+        // `twitty` directory — never silently chmod shared directories such as `$HOME` or `/tmp`.
+        let dedicated_dir = parent.file_name() == Some(OsStr::new("twitty"));
+        if (created_parent || dedicated_dir)
+            && parent != Path::new(".")
+            && parent.parent().is_some()
+        {
+            if let Ok(meta) = fs::symlink_metadata(parent) {
+                if !meta.file_type().is_symlink() {
+                    let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
+                }
+            }
+        }
+        match fs::symlink_metadata(path) {
+            Ok(meta) => {
+                if meta.file_type().is_symlink() {
+                    return Err(StoreError::InvalidInput(
+                        "database path must not be a symlink",
+                    ));
+                }
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                let mut opts = OpenOptions::new();
+                opts.write(true).create_new(true).mode(0o600);
+                match opts.open(path) {
+                    Ok(_) => {}
+                    Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                        if fs::symlink_metadata(path)?.file_type().is_symlink() {
+                            return Err(StoreError::InvalidInput(
+                                "database path must not be a symlink",
+                            ));
+                        }
+                    }
+                    Err(err) => return Err(err.into()),
+                }
+            }
+            Err(err) => return Err(err.into()),
         }
         fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
     }
@@ -101,7 +138,10 @@ pub(crate) fn tighten_sidecar_permissions(path: &Path) {
         let mut shm = path.as_os_str().to_os_string();
         shm.push("-shm");
         for sidecar in [PathBuf::from(wal), PathBuf::from(shm)] {
-            if sidecar.exists() {
+            if fs::symlink_metadata(&sidecar)
+                .ok()
+                .is_some_and(|meta| !meta.file_type().is_symlink())
+            {
                 let _ = fs::set_permissions(sidecar, fs::Permissions::from_mode(0o600));
             }
         }

@@ -87,6 +87,8 @@ impl App {
         }
         self.close_settings();
         self.close_welcome();
+        self.close_memory();
+        self.close_context_menu();
         self.reset_pointer_gesture();
         let (workflows, entries) = if mode == PaletteMode::Commands {
             let cwd = self.focused_id().and_then(|id| self.pane_cwd(id));

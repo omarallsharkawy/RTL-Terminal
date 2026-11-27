@@ -7,14 +7,14 @@
 # Find the real claude binary on PATH, skipping our own directory.
 find_real_claude() {
     local self_dir
-    self_dir="$(cd -- "$(dirname -- "$0")" && pwd -P)"
+    self_dir="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)"
     local IFS=:
     local dirs=()
     read -ra dirs <<< "${PATH:-}"
     local d resolved
     for d in "${dirs[@]}"; do
         [[ -z "$d" ]] && continue
-        resolved="$(cd -- "$d" 2>/dev/null && pwd -P)" || continue
+        resolved="$(CDPATH='' cd -- "$d" 2>/dev/null && pwd -P)" || continue
         [[ "$resolved" == "$self_dir" ]] && continue
         if [[ -f "$d/claude" && -x "$d/claude" ]]; then
             printf '%s' "$d/claude"

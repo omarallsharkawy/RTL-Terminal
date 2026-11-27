@@ -172,6 +172,11 @@ fn table_driven_secret_redaction() {
             "[REDACTED:pem_private_key]",
         ),
         (
+            "pem_truncated_private_key_without_end",
+            "before\n-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA0Z3VS5JJcds3xfn/ygWyF8PbnGy0AHB7Mhgw\nmorebase64lines==",
+            "before\n[REDACTED:pem_private_key]",
+        ),
+        (
             "arabic_around_secret",
             "تشغيل الأمر مع مفتاح ghp_1234567890abcdef1234567890abcdef1234 في المشروع",
             "تشغيل الأمر مع مفتاح [REDACTED:github_token] في المشروع",

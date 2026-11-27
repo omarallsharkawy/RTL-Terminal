@@ -174,6 +174,10 @@ impl Session {
         !self.finished && matches!(self.pending, None | Some(Pending::Provider { .. }))
     }
 
+    pub(super) fn is_finished(&self) -> bool {
+        self.finished
+    }
+
     pub(super) fn reply(&mut self, text: &str, events: &Events) {
         if !self.finished {
             return;
@@ -338,29 +342,34 @@ impl Session {
             );
         }
         if let Some(cap) = config.cost_cap_micros_usd {
-            let used = self
-                .usage
-                .cost_micros_usd
-                .unwrap_or_default()
-                .saturating_sub(self.budget_base.cost_micros_usd.unwrap_or_default());
-            let remaining = cap.saturating_sub(used);
-            let fits = |tokens| {
-                estimated_cost_micros(&self.provider.kind, &self.provider.model, input, tokens)
-                    .is_some_and(|cost| cost <= remaining)
-            };
-            if !fits(1) {
-                return None;
-            }
-            let (mut low, mut high) = (1, output.max(1));
-            while low < high {
-                let middle = low + (high - low).div_ceil(2);
-                if fits(u64::from(middle)) {
-                    low = middle;
-                } else {
-                    high = middle - 1;
+            // Only enforce cost-cap clamping when the model has known pricing; unlisted or custom
+            // models are still governed by `token_cap` instead of being permanently blocked.
+            if estimated_cost_micros(&self.provider.kind, &self.provider.model, input, 1).is_some()
+            {
+                let used = self
+                    .usage
+                    .cost_micros_usd
+                    .unwrap_or_default()
+                    .saturating_sub(self.budget_base.cost_micros_usd.unwrap_or_default());
+                let remaining = cap.saturating_sub(used);
+                let fits = |tokens| {
+                    estimated_cost_micros(&self.provider.kind, &self.provider.model, input, tokens)
+                        .is_some_and(|cost| cost <= remaining)
+                };
+                if !fits(1) {
+                    return None;
                 }
+                let (mut low, mut high) = (1, output.max(1));
+                while low < high {
+                    let middle = low + (high - low).div_ceil(2);
+                    if fits(u64::from(middle)) {
+                        low = middle;
+                    } else {
+                        high = middle - 1;
+                    }
+                }
+                output = output.min(low);
             }
-            output = output.min(low);
         }
         (output != 0).then_some(output)
     }
@@ -596,6 +605,7 @@ impl Session {
             reason = FinishReason::Error(journal_error().into());
         }
         self.finished = true;
+        self.journal.close();
         let _ = events.send(AgentEvent::Finished {
             session: self.id,
             reason,

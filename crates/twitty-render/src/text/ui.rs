@@ -6,7 +6,7 @@ use glyphon::TextBounds;
 use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
-use super::fit::fit_text;
+use super::fit_text;
 use super::fonts::{installed_family, is_arabic_script};
 use twitty_core::color::Rgba;
 use twitty_core::layout::Rect;

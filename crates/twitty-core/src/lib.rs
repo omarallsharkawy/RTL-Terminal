@@ -13,6 +13,7 @@ pub mod pty;
 pub mod redact;
 pub mod remote;
 pub mod row;
+pub mod sha256;
 pub mod shell_integration;
 pub mod style;
 pub mod terminal;

@@ -176,6 +176,23 @@ impl NamedLayout {
     /// Prepare this layout for opening in a new tab: bounds split depth/count, clamps ratios,
     /// and validates directories (missing directories fall back to `None`).
     pub fn prepare(&self) -> PreparedLayout {
+        let tab_title = self
+            .tab_title
+            .as_deref()
+            .map(|s| clean_text(s, MAX_TITLE_CHARS))
+            .filter(|s| !s.is_empty());
+        if self.nodes.is_empty() {
+            let slot = PaneId(1);
+            return PreparedLayout {
+                tab_title,
+                root: Node::Leaf(slot),
+                focused: slot,
+                panes: vec![PreparedPane {
+                    cwd: None,
+                    title: None,
+                }],
+            };
+        }
         let mut splits_left = MAX_LAYOUT_PANES.saturating_sub(1);
         let mut panes = Vec::new();
         let mut focused = None;
@@ -186,11 +203,6 @@ impl NamedLayout {
             &mut panes,
             &mut focused,
         );
-        let tab_title = self
-            .tab_title
-            .as_deref()
-            .map(|s| clean_text(s, MAX_TITLE_CHARS))
-            .filter(|s| !s.is_empty());
         let focused = focused.unwrap_or_else(|| root.leaves()[0]);
         PreparedLayout {
             tab_title,
@@ -209,7 +221,14 @@ impl NamedLayout {
         focused: &mut Option<PaneId>,
     ) -> Node {
         loop {
-            match &self.nodes[index] {
+            let Some(node) = self.nodes.get(index) else {
+                panes.push(PreparedPane {
+                    cwd: None,
+                    title: None,
+                });
+                return Node::Leaf(PaneId(panes.len() as u64));
+            };
+            match node {
                 LayoutNode::Pane { cwd, title } => {
                     let resolved_cwd = cwd
                         .as_deref()
@@ -764,5 +783,18 @@ mod tests {
             }
             _ => panic!("expected horizontal split at root"),
         }
+    }
+
+    #[test]
+    fn prepare_empty_layout_returns_single_pane_without_panicking() {
+        let empty = NamedLayout {
+            name: "empty".into(),
+            tab_title: None,
+            nodes: Vec::new(),
+            focused: 0,
+        };
+        let prepared = empty.prepare();
+        assert_eq!(prepared.panes.len(), 1);
+        assert_eq!(prepared.root.leaves().len(), 1);
     }
 }

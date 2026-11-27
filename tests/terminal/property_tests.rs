@@ -92,12 +92,19 @@ fn finished(text: &str) -> Terminal {
     term
 }
 
+fn shared_font_system() -> std::sync::MutexGuard<'static, FontSystem> {
+    static FS: std::sync::OnceLock<std::sync::Mutex<FontSystem>> = std::sync::OnceLock::new();
+    FS.get_or_init(|| std::sync::Mutex::new(FontSystem::new()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(300))]
 
     #[test]
     fn selected_row_backgrounds_have_no_gaps_or_overlaps(text in sentence()) {
-        let mut fs = FontSystem::new();
+        let mut fs = shared_font_system();
         let palette = Palette::default();
         let mut term = finished(&text);
         let used = text.chars().map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0)).sum::<usize>();
@@ -119,7 +126,7 @@ proptest! {
 
     #[test]
     fn every_cell_is_hit_at_the_center_of_where_it_is_drawn(text in sentence()) {
-        let mut fs = FontSystem::new();
+        let mut fs = shared_font_system();
         let palette = Palette::default();
         let s = shape(finished(&text), &mut fs, &palette);
         for (col, extent) in s.row.visual.iter().enumerate() {
@@ -134,7 +141,7 @@ proptest! {
 
     #[test]
     fn dragging_between_two_cells_selects_contiguous_text(text in sentence(), a in 0usize..COLS, b in 0usize..COLS) {
-        let mut fs = FontSystem::new();
+        let mut fs = shared_font_system();
         let palette = Palette::default();
         let s = shape(finished(&text), &mut fs, &palette);
         let x = |c: usize| s.row.visual.get(c).copied().flatten().map_or(c as f32 * CW + CW / 2.0, |(l, r)| (l + r) / 2.0);
@@ -151,7 +158,7 @@ proptest! {
 
     #[test]
     fn arbitrary_program_output_never_crashes(bytes in prop::collection::vec(any::<u8>(), 0..400)) {
-        let mut fs = FontSystem::new();
+        let mut fs = shared_font_system();
         let palette = Palette::default();
         let mut term = Terminal::new(30, 6, |_| {});
         term.process_bytes(&bytes);

@@ -15,7 +15,7 @@ use unicode_bidi::{bidi_class, BidiClass};
 
 use crate::color::{Palette, Rgba};
 use crate::composer::specs::{default_registry, CommandSpec, SpecRegistry};
-use twitty_render::ui_style::UiStyle;
+use twitty_style::ui_style::UiStyle;
 
 /// Semantic token category for syntax highlighting.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

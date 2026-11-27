@@ -664,3 +664,19 @@ fn taint_stays_after_a_follow_up_so_the_allow_list_cannot_auto_run() {
         }
     ));
 }
+
+#[test]
+fn cost_cap_does_not_block_unlisted_models() {
+    let temp = Temp::new();
+    let root = &temp.0;
+    let provider = ScriptedProvider::new([answer("Completed with custom model")]);
+    let mut settings = config(root);
+    settings.provider = ProviderKind::OpenAi;
+    settings.models.openai = "gpt-5-custom-unlisted".into();
+    settings.cost_cap_micros_usd = Some(1);
+    let handle = provider.spawn(settings);
+    let id = SessionId(1);
+    start(&handle, id, root, vec![]);
+    finish(&handle, id, FinishReason::Completed);
+    assert_eq!(provider.requests().len(), 1);
+}

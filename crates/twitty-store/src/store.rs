@@ -737,9 +737,11 @@ impl Store {
         project_root: &str,
         rel_path: &str,
     ) -> Result<bool, StoreError> {
+        let project_root = redact(project_root);
+        let rel_path = redact(rel_path);
         let changed = self.conn.execute(
             "DELETE FROM rules_file_approvals WHERE project_root = ?1 AND rel_path = ?2",
-            params![project_root, rel_path],
+            params![project_root.as_ref(), rel_path.as_ref()],
         )?;
         Ok(changed > 0)
     }
@@ -749,13 +751,14 @@ impl Store {
         &self,
         project_root: &str,
     ) -> Result<Vec<RulesApproval>, StoreError> {
+        let project_root = redact(project_root);
         let mut stmt = self.conn.prepare(
             "SELECT project_root, rel_path, sha256, approved_at
                FROM rules_file_approvals
               WHERE project_root = ?1
               ORDER BY rel_path ASC",
         )?;
-        let rows = stmt.query_map(params![project_root], |row| {
+        let rows = stmt.query_map(params![project_root.as_ref()], |row| {
             Ok(RulesApproval {
                 project_root: row.get(0)?,
                 rel_path: row.get(1)?,

@@ -9,7 +9,6 @@ pub struct Rgba {
 }
 
 impl Rgba {
-    #[allow(dead_code)]
     pub const fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
         Self { r, g, b, a }
     }

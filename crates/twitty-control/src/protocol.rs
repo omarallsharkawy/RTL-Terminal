@@ -235,6 +235,9 @@ pub fn parse_request_line(line: &str) -> Result<Request, Response> {
     if method.is_empty() {
         return Err(Response::err(id, "\"method\" must not be empty"));
     }
+    if method.len() > MAX_METHOD_LEN {
+        return Err(Response::err(id, "\"method\" exceeds maximum length"));
+    }
     let params = match obj.get("params") {
         None | Some(Value::Null) => Value::Object(Map::new()),
         Some(v @ Value::Object(_)) => v.clone(),

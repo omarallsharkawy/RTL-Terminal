@@ -611,12 +611,13 @@ fn exec_twitty_call(
                     ));
                 }
             }
+            let prev_focus = host.ws().focused_id();
             match pane {
                 Some(p) => {
                     host.focus_pane_by_id(PaneId(p))?;
                 }
                 None => {
-                    if host.ws().focused_id().is_none() {
+                    if prev_focus.is_none() {
                         return Err("no focused pane".into());
                     }
                 }
@@ -627,9 +628,17 @@ fn exec_twitty_call(
                 env: Vec::new(),
                 shell: false,
             };
-            let id = host
-                .split_focused_with(direction, options)
-                .map_err(|err| err.message)?;
+            let id = match host.split_focused_with(direction, options) {
+                Ok(id) => id,
+                Err(err) => {
+                    if pane.is_some() {
+                        if let Some(prev) = prev_focus {
+                            let _ = host.focus_pane_by_id(prev);
+                        }
+                    }
+                    return Err(err.message);
+                }
+            };
             Ok((json!({ "pane": id.0, "tab": host.ws().active() }), false))
         }
         MethodCall::Notify { pane, title, body } => {
@@ -1161,11 +1170,12 @@ fn handle_cmux_split(
         Ok(v) => v,
         Err(msg) => return Response::cmux_err(id, "invalid_params", msg),
     };
+    let prev_focus = host.ws().focused_id();
     if let Some(pid) = explicit_pane {
         if let Err(msg) = host.focus_pane_by_id(PaneId(pid)) {
             return Response::cmux_err(id, "not_found", msg);
         }
-    } else if host.ws().focused_id().is_none() {
+    } else if prev_focus.is_none() {
         return Response::cmux_err(id, "not_found", "No workspace selected");
     }
 
@@ -1177,7 +1187,14 @@ fn handle_cmux_split(
     };
     let new_id = match host.split_focused_with(dir, options) {
         Ok(id) => id,
-        Err(err) => return Response::cmux_err(id, err.code, err.message),
+        Err(err) => {
+            if explicit_pane.is_some() {
+                if let Some(prev) = prev_focus {
+                    let _ = host.focus_pane_by_id(prev);
+                }
+            }
+            return Response::cmux_err(id, err.code, err.message);
+        }
     };
     let tab_idx = host.ws().active();
     let tab_id = host.ws().tabs()[tab_idx].id;
@@ -1716,7 +1733,7 @@ impl PaneFactory for HeadlessFactory {
     }
 }
 
-/// Window-free [`Workspace`] + [`NotificationHistory`] harness implementing control dispatch so
+/// Window-free `Workspace` + [`NotificationHistory`] harness implementing control dispatch so
 /// every cmux v2, v1, and Twitty `ctl` method can be tested without a GUI window or PTY.
 pub struct HeadlessHost {
     ws: Workspace,

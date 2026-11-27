@@ -19,3 +19,21 @@ pub fn validate_destination(destination: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// Lifecycle state of a remote SSH pane connection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConnectionState {
+    Connecting,
+    Connected,
+    Disconnected,
+}
+
+impl ConnectionState {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Connecting => "Connecting",
+            Self::Connected => "Connected",
+            Self::Disconnected => "Disconnected",
+        }
+    }
+}

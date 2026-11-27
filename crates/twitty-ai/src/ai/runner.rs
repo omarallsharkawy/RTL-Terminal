@@ -317,7 +317,7 @@ fn run_isolated(
 
     let stderr_thread = thread::Builder::new()
         .name("twitty-ai-stderr".into())
-        .spawn(move || read_bounded(stderr_pipe, MAX_AI_STDERR_BYTES).0)
+        .spawn(move || read_bounded_and_drain(stderr_pipe, MAX_AI_STDERR_BYTES))
         .map_err(|e| AiError::SpawnFailed(e.to_string()))?;
 
     let start = Instant::now();
@@ -391,6 +391,23 @@ fn read_bounded(reader: impl Read, limit: usize) -> (Vec<u8>, bool) {
     let truncated = out.len() > limit;
     out.truncate(limit);
     (out, truncated)
+}
+
+/// Keep up to `limit` bytes of stderr and drain the remainder to EOF so verbose child processes
+/// do not receive `SIGPIPE`/`EPIPE`.
+fn read_bounded_and_drain(mut reader: impl Read, limit: usize) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut buf = [0u8; 4096];
+    while let Ok(n) = reader.read(&mut buf) {
+        if n == 0 {
+            break;
+        }
+        if out.len() < limit {
+            let take = (limit - out.len()).min(n);
+            out.extend_from_slice(&buf[..take]);
+        }
+    }
+    out
 }
 
 fn first_non_empty_line(text: &str) -> Option<String> {

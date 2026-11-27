@@ -99,7 +99,7 @@ impl Offscreen {
             })
             .await?;
 
-        let quads = QuadRenderer::new(&device, FORMAT);
+        let quads = QuadRenderer::new(&device, FORMAT, wgpu::CompositeAlphaMode::PreMultiplied);
         quads.update_screen_size(&queue, width as f32, height as f32);
         let shapes = ShapeRenderer::new(&device, FORMAT);
         shapes.resize(&queue, width, height);

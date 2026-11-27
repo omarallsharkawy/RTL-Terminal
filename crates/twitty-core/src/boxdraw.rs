@@ -416,7 +416,7 @@ pub fn is_box_or_block(c: char) -> bool {
 ///
 /// Light lines are `stroke_width` thick and centred in the cell on whole pixels, so
 /// neighbouring cells join exactly. Double lines are two light lines with one light
-/// line of gap between them, laid out on the grid of [`G`].
+/// line of gap between them, laid out on the grid of `G`.
 pub fn try_render_box_or_block(
     c: char,
     x: f32,

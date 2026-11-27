@@ -322,13 +322,19 @@ impl App {
                     SettingId::BuiltInAi => {
                         self.composer.state.ai_enabled = self.config.ai;
                     }
+                    SettingId::ControlSocket => {
+                        if self.config.control_socket {
+                            self.start_control_server();
+                        } else {
+                            self.stop_control_server();
+                        }
+                    }
                     SettingId::DesktopNotifications
                     | SettingId::AiTimeout
                     | SettingId::RestoreSession
                     | SettingId::ShellIntegration
                     | SettingId::RecordHistory
                     | SettingId::ClaudeHooks
-                    | SettingId::ControlSocket
                     | SettingId::CmuxCompat
                     | SettingId::AgentCommand
                     | SettingId::ProjectMemory

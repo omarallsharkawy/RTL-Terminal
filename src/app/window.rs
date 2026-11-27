@@ -1194,11 +1194,7 @@ impl App {
             return;
         }
         let frame_start = self.window.perf.as_ref().map(|_| Instant::now());
-        if self.modifiers.control_key()
-            && !self.palette_open()
-            && !self.settings_open()
-            && !self.welcome_open()
-        {
+        if self.modifiers.control_key() && !self.any_modal_open() {
             self.refresh_pointer_hover();
         }
         // A notification counts as seen once its pane is on screen, focused, in a focused window.

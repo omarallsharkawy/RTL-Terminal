@@ -3,7 +3,6 @@
 
 pub mod discover;
 pub mod parse;
-pub mod sha256;
 pub mod trust;
 
 use std::fmt;
@@ -26,8 +25,8 @@ pub use discover::{discover_project_file, discover_project_file_default};
 pub use parse::{
     deserialize_config_commands, parse_entries_slice, parse_entry, parse_project_bytes,
 };
-pub use sha256::{sha256, sha256_hex};
 pub use trust::{TrustEntry, TrustStore, MAX_TRUST_FILE_BYTES, TRUST_STORE_VERSION};
+pub use twitty_store::{sha256, sha256_hex};
 
 /// Maximum custom commands accepted from one source (`config.json` or `.twitty/commands.json`).
 pub const MAX_COMMANDS_PER_SOURCE: usize = 100;

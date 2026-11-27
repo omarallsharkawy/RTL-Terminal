@@ -1,0 +1,20 @@
+[package]
+name = "twitty-remote"
+publish = false
+description = "Twitty's persistent SSH session bootstrapper and Linux remote PTY daemon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+twitty-core.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+anyhow.workspace = true
+libc.workspace = true
+portable-pty.workspace = true
+rustix.workspace = true

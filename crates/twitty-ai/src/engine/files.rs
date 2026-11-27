@@ -268,6 +268,20 @@ pub(super) fn text_files(
             remaining = remaining.saturating_sub(entries.len());
             entries.sort_unstable();
             for entry in entries.into_iter().rev() {
+                if matches!(
+                    entry.to_str(),
+                    Some(
+                        ".git"
+                            | ".hg"
+                            | ".svn"
+                            | "target"
+                            | "node_modules"
+                            | "dist"
+                            | "__pycache__"
+                    )
+                ) {
+                    continue;
+                }
                 let child = path.join(entry);
                 if matches!(super::policy::path_policy(root, &child, false), Ok((canonical, super::policy::Approval::Allow)) if canonical == child)
                 {

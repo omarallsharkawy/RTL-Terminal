@@ -272,4 +272,28 @@ fn lookup_follows_the_language_and_falls_back_to_english() {
         UiLanguage::Arabic.t("A text nobody translated"),
         "A text nobody translated"
     );
+    assert_eq!(UiLanguage::English.t("Block|cursor"), "Block");
+    assert_eq!(
+        UiLanguage::English.t("Type a command…|composer"),
+        "Type a command…"
+    );
+    assert_eq!(
+        UiLanguage::English.t("curl | sh, wget | bash (network pipe to shell)"),
+        "curl | sh, wget | bash (network pipe to shell)"
+    );
+    assert_eq!(
+        UiLanguage::English
+            .t("Allow-list prefixes cannot contain shell metacharacters (;, &&, ||, |, $, >, <)."),
+        "Allow-list prefixes cannot contain shell metacharacters (;, &&, ||, |, $, >, <)."
+    );
+    assert!(!UiLanguage::English.is_rtl());
+    assert!(UiLanguage::Arabic.is_rtl());
+    assert_eq!(
+        twitty_core::language::fill("{1} of {0}", &[&10, &3]),
+        "3 of 10"
+    );
+    assert_eq!(
+        twitty_core::language::fill("{} of {}", &[&3, &10]),
+        "3 of 10"
+    );
 }

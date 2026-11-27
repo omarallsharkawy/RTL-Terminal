@@ -46,6 +46,13 @@ fn spawn_provider(config: EngineConfig, provider: Arc<dyn Provider>) -> AgentHan
     AgentHandle { commands, events }
 }
 
+const MAX_RETAINED_FINISHED_SESSIONS: usize = 8;
+
+struct SessionSlot {
+    session: Session,
+    last_used: u64,
+}
+
 fn run(
     config: EngineConfig,
     provider: Arc<dyn Provider>,
@@ -53,9 +60,10 @@ fn run(
     events: &mpsc::Sender<AgentEvent>,
 ) {
     let (notice_tx, notice_rx) = mpsc::channel();
-    let mut sessions = HashMap::<SessionId, Session>::new();
+    let mut sessions = HashMap::<SessionId, SessionSlot>::new();
+    let mut tick: u64 = 0;
     loop {
-        let busy = sessions.values().any(Session::busy);
+        let busy = sessions.values().any(|slot| slot.session.busy());
         let received = if busy {
             requests.recv_timeout(Duration::from_millis(10))
         } else {
@@ -65,22 +73,46 @@ fn run(
         };
         match received {
             Ok(command) => {
-                handle(command, &config, events, &mut sessions);
+                handle(command, &config, events, &mut sessions, &mut tick);
                 for command in requests.try_iter().take(64) {
-                    handle(command, &config, events, &mut sessions);
+                    handle(command, &config, events, &mut sessions, &mut tick);
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
         for (id, generation, notice) in notice_rx.try_iter().take(64) {
-            if let Some(session) = sessions.get_mut(&id) {
-                session.provider_notice(generation, notice, &config, events);
+            if let Some(slot) = sessions.get_mut(&id) {
+                tick = tick.wrapping_add(1);
+                slot.last_used = tick;
+                slot.session
+                    .provider_notice(generation, notice, &config, events);
             }
         }
-        for session in sessions.values_mut() {
-            session.advance(&config, &provider, &notice_tx, events);
+        for slot in sessions.values_mut() {
+            slot.session.advance(&config, &provider, &notice_tx, events);
         }
+        prune_finished_sessions(&mut sessions);
+    }
+}
+
+fn prune_finished_sessions(sessions: &mut HashMap<SessionId, SessionSlot>) {
+    let finished_count = sessions
+        .values()
+        .filter(|slot| slot.session.is_finished())
+        .count();
+    if finished_count <= MAX_RETAINED_FINISHED_SESSIONS {
+        return;
+    }
+    let mut finished: Vec<(SessionId, u64)> = sessions
+        .iter()
+        .filter(|(_, slot)| slot.session.is_finished())
+        .map(|(&id, slot)| (id, slot.last_used))
+        .collect();
+    finished.sort_by_key(|&(_, last_used)| last_used);
+    let to_remove = finished.len() - MAX_RETAINED_FINISHED_SESSIONS;
+    for (id, _) in finished.into_iter().take(to_remove) {
+        sessions.remove(&id);
     }
 }
 
@@ -88,8 +120,11 @@ fn handle(
     command: AgentCommand,
     config: &EngineConfig,
     events: &mpsc::Sender<AgentEvent>,
-    sessions: &mut HashMap<SessionId, Session>,
+    sessions: &mut HashMap<SessionId, SessionSlot>,
+    tick: &mut u64,
 ) {
+    *tick = tick.wrapping_add(1);
+    let now = *tick;
     match command {
         AgentCommand::Start {
             session,
@@ -100,7 +135,10 @@ fn handle(
             if let std::collections::hash_map::Entry::Vacant(entry) = sessions.entry(session) {
                 match Session::start(session, request, context, &cwd, config, events) {
                     Ok(state) => {
-                        entry.insert(state);
+                        entry.insert(SessionSlot {
+                            session: state,
+                            last_used: now,
+                        });
                     }
                     Err(message) => {
                         let _ = events.send(AgentEvent::Finished {
@@ -112,8 +150,9 @@ fn handle(
             }
         }
         AgentCommand::Reply { session, text } => {
-            if let Some(state) = sessions.get_mut(&session) {
-                state.reply(&text, events);
+            if let Some(slot) = sessions.get_mut(&session) {
+                slot.last_used = now;
+                slot.session.reply(&text, events);
             }
         }
         AgentCommand::Decide {
@@ -121,8 +160,9 @@ fn handle(
             step,
             decision,
         } => {
-            if let Some(state) = sessions.get_mut(&session) {
-                state.decide(step, decision, config, events);
+            if let Some(slot) = sessions.get_mut(&session) {
+                slot.last_used = now;
+                slot.session.decide(step, decision, config, events);
             }
         }
         AgentCommand::CommandFinished {
@@ -132,18 +172,22 @@ fn handle(
             duration_ms,
             output,
         } => {
-            if let Some(state) = sessions.get_mut(&session) {
-                state.command_finished(step, exit, duration_ms, &output, events);
+            if let Some(slot) = sessions.get_mut(&session) {
+                slot.last_used = now;
+                slot.session
+                    .command_finished(step, exit, duration_ms, &output, events);
             }
         }
         AgentCommand::Undo { session, step } => {
-            if let Some(state) = sessions.get_mut(&session) {
-                state.undo(step, events);
+            if let Some(slot) = sessions.get_mut(&session) {
+                slot.last_used = now;
+                slot.session.undo(step, events);
             }
         }
         AgentCommand::Stop { session } => {
-            if let Some(state) = sessions.get_mut(&session) {
-                state.stop(events);
+            if let Some(slot) = sessions.get_mut(&session) {
+                slot.last_used = now;
+                slot.session.stop(events);
             }
         }
     }

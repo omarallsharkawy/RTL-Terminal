@@ -64,6 +64,12 @@ impl Output {
 /// Run `git -C dir <fixed config> args…`, reading at most `limit` bytes of output.
 fn git(dir: &Path, args: &[&str], limit: usize) -> Result<Output, LoadError> {
     let mut cmd = Command::new("git");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
     cmd.arg("-C")
         .arg(dir)
         .args([

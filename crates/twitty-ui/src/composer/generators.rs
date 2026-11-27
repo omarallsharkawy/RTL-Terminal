@@ -297,6 +297,12 @@ fn run_command_bounded(
     limit: usize,
 ) -> Option<Vec<u8>> {
     let mut cmd = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
     cmd.args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

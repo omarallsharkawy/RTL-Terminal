@@ -73,6 +73,16 @@ impl App {
         self.window.request_redraw();
     }
 
+    /// Resize only the active tab's panes (e.g. divider drags, splits, pane zoom).
+    pub(super) fn apply_active_layout(&mut self) {
+        let Some(r) = self.window.grid() else {
+            return;
+        };
+        self.ws.apply_active_tab_layout(r);
+        self.refresh_pointer_hover();
+        self.window.request_redraw();
+    }
+
     pub(super) fn new_tab(&mut self) {
         self.new_tab_with(SpawnOptions::default());
     }
@@ -309,10 +319,11 @@ impl App {
             return;
         };
         for id in removed {
+            self.agent_panel_on_pane_closed(id);
             self.window.forget_pane(id);
             self.pointer.forget(id);
         }
-        self.apply_layout();
+        self.apply_active_layout();
     }
 
     pub(super) fn focus_direction(&mut self, dir: FocusDir) {
@@ -336,11 +347,11 @@ impl App {
                 self.closed_tabs.push(snapshot);
             }
         }
+        self.agent_panel_on_pane_closed(id);
         self.window.forget_pane(id);
         self.pointer.forget(id);
         let Some(now) = closed.focused else {
-            self.close_palette();
-            self.close_settings();
+            self.close_all_modals();
             self.session.last_pane_closed();
             return true;
         };
@@ -369,12 +380,12 @@ impl App {
             }
         }
         for id in removed {
+            self.agent_panel_on_pane_closed(id);
             self.window.forget_pane(id);
             self.pointer.forget(id);
         }
         let Some(now) = closed.focused else {
-            self.close_palette();
-            self.close_settings();
+            self.close_all_modals();
             self.session.last_pane_closed();
             return true;
         };

@@ -90,23 +90,35 @@ pub fn is_allowed_scheme(url: &str) -> bool {
     let Some((scheme, rest)) = url.split_once(':') else {
         return false;
     };
-    if scheme.eq_ignore_ascii_case("mailto") && rest.to_ascii_lowercase().contains("attach") {
-        // Some mail clients attach the named local file (`?attach=~/.ssh/id_rsa`).
-        return false;
+    if scheme.eq_ignore_ascii_case("mailto") {
+        // Some mail clients attach the named local file (`?attach=~/.ssh/id_rsa`); also block
+        // percent-encoded forms such as `?%61ttach=...` and malformed escapes.
+        if rest.to_ascii_lowercase().contains("attach") {
+            return false;
+        }
+        let Some(decoded) = percent_decode(rest) else {
+            return false;
+        };
+        if decoded.to_ascii_lowercase().contains("attach") {
+            return false;
+        }
     }
     ALLOWED.iter().any(|s| scheme.eq_ignore_ascii_case(s)) && !rest.is_empty()
 }
 
-/// Extensions the system opener runs instead of showing (Windows and Linux desktops).
+/// Extensions the system opener runs instead of showing (Windows, Linux, and macOS desktops).
 const LAUNCHABLE: &[&str] = &[
+    "app",
     "appimage",
     "application",
     "appref-ms",
     "bat",
     "cmd",
     "com",
+    "command",
     "cpl",
     "desktop",
+    "dmg",
     "exe",
     "hta",
     "jar",
@@ -117,15 +129,19 @@ const LAUNCHABLE: &[&str] = &[
     "msi",
     "msp",
     "pif",
+    "pkg",
     "ps1",
     "psm1",
     "reg",
     "run",
+    "scpt",
     "scr",
     "sh",
+    "tool",
     "url",
     "vbe",
     "vbs",
+    "workflow",
     "ws",
     "wsf",
     "wsh",

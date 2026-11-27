@@ -203,8 +203,8 @@ fn proportional_ui_text_scales_and_arabic_starts_on_the_right() {
     assert!((text.left + label_width(&text.buffer) - 250.0).abs() <= 1.0);
 
     let mut db = cosmic_text::fontdb::Database::new();
-    db.load_font_data(include_bytes!("golden/fonts/NotoSansMono-Subset.ttf").to_vec());
-    db.load_font_data(include_bytes!("../assets/fonts/NotoNaskhArabic-Regular.ttf").to_vec());
+    db.load_font_data(include_bytes!("../golden/fonts/NotoSansMono-Subset.ttf").to_vec());
+    db.load_font_data(include_bytes!("../../assets/fonts/NotoNaskhArabic-Regular.ttf").to_vec());
     let mut fonts = cosmic_text::FontSystem::new_with_locale_and_db("en-US".into(), db);
     let font = UiFont::new(&mut fonts, Some("Noto Sans Mono"));
     let latin = font.shape(&mut fonts, UiSize::Body, UiWeight::Regular, 1.0, "Text");

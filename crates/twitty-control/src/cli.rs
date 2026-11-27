@@ -68,7 +68,7 @@ pub fn help_text() -> &'static str {
     )
 }
 
-/// Parse CLI arguments (excluding argv[0]). `env_pane` is `$TWITTY_PANE_ID` if present.
+/// Parse CLI arguments (excluding `argv[0]`). `env_pane` is `$TWITTY_PANE_ID` if present.
 pub fn parse_args(args: &[String], env_pane: Option<&str>) -> Result<CliAction, String> {
     let Some((first, rest)) = args.split_first() else {
         return Ok(CliAction::RunGui);

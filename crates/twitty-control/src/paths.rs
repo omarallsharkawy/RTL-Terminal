@@ -39,39 +39,15 @@ pub fn socket_path_in(dir: &Path, pid: u32) -> PathBuf {
 #[cfg(unix)]
 mod unix {
     use super::*;
-    use std::fs::{self, DirBuilder, OpenOptions};
+    use std::fs::{self, DirBuilder};
     use std::io;
-    use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, OpenOptionsExt};
+    use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt};
     use std::os::unix::net::UnixStream;
     use std::time::SystemTime;
 
-    /// Current user's UID, obtained without `unsafe` code.
+    /// Current user's UID, obtained safely via `rustix` without `unsafe` code.
     pub fn current_uid() -> io::Result<u32> {
-        #[cfg(target_os = "linux")]
-        if let Ok(meta) = fs::metadata("/proc/self") {
-            return Ok(meta.uid());
-        }
-
-        let pid = std::process::id();
-        let dir = std::env::temp_dir();
-        for attempt in 0u32..64 {
-            let probe = dir.join(format!(".twitty-uid-{pid}-{attempt}"));
-            match OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(&probe)
-            {
-                Ok(file) => {
-                    let uid = file.metadata().map(|m| m.uid());
-                    let _ = fs::remove_file(&probe);
-                    return uid;
-                }
-                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-                Err(e) => return Err(e),
-            }
-        }
-        Err(io::Error::other("could not determine current user id"))
+        Ok(rustix::process::getuid().as_raw())
     }
 
     /// Default runtime directory for the current process.

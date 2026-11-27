@@ -167,7 +167,7 @@ impl App {
             Ok(handle) => {
                 let proxy = self.proxy.clone();
                 let rx = handle.events;
-                let _ = thread::Builder::new()
+                if let Err(err) = thread::Builder::new()
                     .name("twitty-agent-events".into())
                     .spawn(move || {
                         while let Ok(ev) = rx.recv() {
@@ -175,7 +175,11 @@ impl App {
                                 break;
                             }
                         }
-                    });
+                    })
+                {
+                    tracing::warn!("twitty agent event forwarder failed to start: {err}");
+                    return None;
+                }
                 self.agent_panel.cmd_tx = Some(handle.commands.clone());
                 Some(handle.commands)
             }
@@ -184,6 +188,12 @@ impl App {
                 None
             }
         }
+    }
+
+    /// Shut down the background agent engine cleanly when the application exits.
+    pub(super) fn shutdown_agent_panel(&mut self) {
+        self.agent_panel.running_cmd = None;
+        self.agent_panel.cmd_tx = None;
     }
 
     /// Settings → AI changed (provider, keys, caps, allow-lists): the next request starts a
@@ -603,7 +613,7 @@ impl App {
                 };
                 let split = self
                     .split_focused_with(SplitDir::Horizontal, options.clone())
-                    .or_else(|_| self.split_focused_with(SplitDir::Vertical, options));
+                    .or_else(|_| self.split_focused_with(SplitDir::Vertical, options.clone()));
                 match split {
                     Ok(new_id) => {
                         if let Some(pane) = self.ws.pane_mut(new_id) {
@@ -611,9 +621,23 @@ impl App {
                         }
                         new_id
                     }
-                    Err(_) => match self.focused_id() {
-                        Some(id) => id,
-                        None => return,
+                    Err(_) => match self.new_tab_with(options) {
+                        Some(new_id) => {
+                            if let Some(pane) = self.ws.pane_mut(new_id) {
+                                pane.title = Some("Agent".to_owned());
+                            }
+                            new_id
+                        }
+                        None => {
+                            self.send_agent_command(AgentCommand::CommandFinished {
+                                session,
+                                step,
+                                exit: Some(1),
+                                duration_ms: 0,
+                                output: "[could not open a pane for agent command]".to_owned(),
+                            });
+                            return;
+                        }
                     },
                 }
             }
@@ -719,6 +743,32 @@ impl App {
                 exit: Some(130),
                 duration_ms,
                 output: "[cancelled by user via Ctrl+C]".to_owned(),
+            });
+        }
+    }
+
+    /// Notify the agent engine if the pane executing an agent command is closed before
+    /// `OSC 133 D` arrives, so the engine never hangs waiting for `CommandFinished`.
+    pub(super) fn agent_panel_on_pane_closed(&mut self, pane_id: PaneId) {
+        if self.agent_panel.waiting_status_pane == Some(pane_id) {
+            self.agent_panel.waiting_status_pane = None;
+        }
+        let matches_running = self
+            .agent_panel
+            .running_cmd
+            .as_ref()
+            .is_some_and(|r| r.pane_id == pane_id);
+        if !matches_running {
+            return;
+        }
+        if let Some(running) = self.agent_panel.running_cmd.take() {
+            let duration_ms = running.started_at.elapsed().as_millis() as u64;
+            self.send_agent_command(AgentCommand::CommandFinished {
+                session: running.session,
+                step: running.step,
+                exit: None,
+                duration_ms,
+                output: "[pane closed before command finished]".to_owned(),
             });
         }
     }

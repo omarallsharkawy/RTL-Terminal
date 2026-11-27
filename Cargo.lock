@@ -3500,12 +3500,10 @@ version = "4.0.0"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
- "arboard",
  "cosmic-text",
  "criterion",
  "glyphon",
  "libc",
- "memchr",
  "png",
  "pollster",
  "portable-pty",
@@ -3518,12 +3516,12 @@ dependencies = [
  "twitty-ai",
  "twitty-control",
  "twitty-core",
+ "twitty-remote",
  "twitty-render",
  "twitty-scene",
  "twitty-store",
+ "twitty-style",
  "twitty-ui",
- "unicode-bidi",
- "unicode-normalization",
  "unicode-segmentation",
  "unicode-width",
  "wgpu",
@@ -3534,13 +3532,11 @@ dependencies = [
 name = "twitty-ai"
 version = "4.0.0"
 dependencies = [
- "libc",
  "log",
  "rustix 1.1.6",
  "serde",
  "serde_json",
  "tracing",
- "twitty-control",
  "twitty-core",
  "twitty-store",
  "ureq",
@@ -3550,6 +3546,7 @@ dependencies = [
 name = "twitty-control"
 version = "4.0.0"
 dependencies = [
+ "rustix 1.1.6",
  "serde",
  "serde_json",
  "tracing",
@@ -3574,6 +3571,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "twitty-remote"
+version = "4.0.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "portable-pty",
+ "rustix 1.1.6",
+ "serde",
+ "twitty-core",
+]
+
+[[package]]
 name = "twitty-render"
 version = "4.0.0"
 dependencies = [
@@ -3584,6 +3593,7 @@ dependencies = [
  "glyphon",
  "pollster",
  "twitty-core",
+ "twitty-style",
  "unicode-segmentation",
  "wgpu",
  "winit",
@@ -3617,6 +3627,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "twitty-style"
+version = "4.0.0"
+dependencies = [
+ "alacritty_terminal",
+ "cosmic-text",
+ "twitty-core",
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "twitty-ui"
 version = "4.0.0"
 dependencies = [
@@ -3625,16 +3645,14 @@ dependencies = [
  "arboard",
  "libc",
  "memchr",
- "portable-pty",
  "rustix 1.1.6",
  "serde",
  "serde_json",
- "tracing",
  "twitty-ai",
  "twitty-control",
  "twitty-core",
- "twitty-render",
  "twitty-store",
+ "twitty-style",
  "unicode-bidi",
  "unicode-normalization",
  "unicode-segmentation",

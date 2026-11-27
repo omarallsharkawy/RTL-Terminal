@@ -1,0 +1,16 @@
+[package]
+name = "twitty-style"
+publish = false
+description = "Pure window-free UI style tokens, cell metrics, text fitting, and block card geometry"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+alacritty_terminal.workspace = true
+cosmic_text.workspace = true
+twitty-core.workspace = true
+unicode-segmentation.workspace = true

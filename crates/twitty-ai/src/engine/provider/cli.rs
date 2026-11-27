@@ -102,15 +102,16 @@ pub(super) fn complete(
 ) -> Result<ProviderTurn, ProviderError> {
     let stem = std::path::Path::new(program)
         .file_stem()
-        .and_then(|s| s.to_str());
+        .and_then(|s| s.to_str())
+        .map(str::to_ascii_lowercase);
     if !NON_INTERACTIVE_AGENTS
         .iter()
-        .any(|spec| Some(spec.program) == stem)
+        .any(|spec| stem.as_deref() == Some(spec.program))
     {
         return Err(ProviderError::Configuration);
     }
     let mut argv = vec![program.to_owned()];
-    let confinement: &[&str] = match stem {
+    let confinement: &[&str] = match stem.as_deref() {
         Some("claude") => &[
             "--tools",
             "",

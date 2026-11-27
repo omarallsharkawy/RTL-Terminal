@@ -21,7 +21,7 @@ use crate::layout::Rect;
 use crate::pty::Shell;
 use crate::ui::chrome::{UiLanguage, UiLanguagePref};
 use crate::ui::settings::{clamp_font_size, MAX_FONT_SIZE, MIN_FONT_SIZE};
-use twitty_render::ui_style::{SPACE_12, SPACE_16, SPACE_24, SPACE_4, SPACE_8};
+use twitty_style::ui_style::{SPACE_12, SPACE_16, SPACE_24, SPACE_4, SPACE_8};
 
 /// File name of the first-run completion flag inside Twitty's state directory.
 pub const FIRST_RUN_FLAG_NAME: &str = "first_run_done";

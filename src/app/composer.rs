@@ -64,6 +64,7 @@ pub(super) struct ComposerHost {
     exit_requested: bool,
     path_exists_cache: HashMap<PathBuf, bool>,
     path_exists_pending: HashSet<PathBuf>,
+    last_has_lints: std::cell::Cell<bool>,
 }
 
 impl App {
@@ -269,12 +270,16 @@ impl App {
         };
         self.composer.slash_pending = true;
         let proxy = self.proxy.clone();
-        let _ = std::thread::Builder::new()
+        if std::thread::Builder::new()
             .name("twitty-composer-slash".into())
             .spawn(move || {
                 let catalog = slash::discover(&home, root.as_deref(), &slash::installed_agents());
                 let _ = proxy.send_event(AppEvent::ComposerSlash(Box::new(catalog)));
-            });
+            })
+            .is_err()
+        {
+            self.composer.slash_pending = false;
+        }
     }
 
     pub(super) fn on_composer_slash(&mut self, catalog: slash::SlashCatalog) {
@@ -323,12 +328,16 @@ impl App {
         }
         self.composer.history_requested = true;
         let proxy = self.proxy.clone();
-        let _ = std::thread::Builder::new()
+        if std::thread::Builder::new()
             .name("twitty-composer-history".into())
             .spawn(move || {
                 let entries = load_shell_history_default();
                 let _ = proxy.send_event(AppEvent::ComposerHistory(entries));
-            });
+            })
+            .is_err()
+        {
+            self.composer.history_requested = false;
+        }
     }
 
     fn ensure_path_commands_loaded(&mut self) {
@@ -337,7 +346,7 @@ impl App {
         }
         self.composer.path_commands_requested = true;
         let proxy = self.proxy.clone();
-        let _ = std::thread::Builder::new()
+        if std::thread::Builder::new()
             .name("twitty-composer-path".into())
             .spawn(move || {
                 let cmds = scan_path_executables();
@@ -345,7 +354,11 @@ impl App {
                     commands: Some(cmds),
                     existing: Vec::new(),
                 });
-            });
+            })
+            .is_err()
+        {
+            self.composer.path_commands_requested = false;
+        }
     }
 
     pub(super) fn on_composer_history(&mut self, entries: Vec<String>) {
@@ -378,12 +391,16 @@ impl App {
     fn request_composer_dir(&mut self, dir: PathBuf) {
         self.composer.dir_pending = Some(dir.clone());
         let proxy = self.proxy.clone();
-        let _ = std::thread::Builder::new()
+        if std::thread::Builder::new()
             .name("twitty-composer-dir".into())
             .spawn(move || {
                 let entries = read_dir_entries(&dir, MAX_DIR_ENTRIES);
                 let _ = proxy.send_event(AppEvent::ComposerDir(dir, entries));
-            });
+            })
+            .is_err()
+        {
+            self.composer.dir_pending = None;
+        }
     }
 
     pub(super) fn on_composer_dir(&mut self, dir: PathBuf, entries: Vec<DirEntryInfo>) {
@@ -408,13 +425,18 @@ impl App {
                 continue;
             }
             self.composer.generators_pending.insert(key.clone());
+            let key_on_err = key.clone();
             let proxy = self.proxy.clone();
-            let _ = std::thread::Builder::new()
+            if std::thread::Builder::new()
                 .name("twitty-composer-gen".into())
                 .spawn(move || {
                     let items = run_generator(key.kind, key.cwd.as_deref());
                     let _ = proxy.send_event(AppEvent::ComposerGenerator(key, items));
-                });
+                })
+                .is_err()
+            {
+                self.composer.generators_pending.remove(&key_on_err);
+            }
         }
     }
 
@@ -449,8 +471,9 @@ impl App {
         for p in &to_check {
             self.composer.path_exists_pending.insert(p.clone());
         }
+        let rollback = to_check.clone();
         let proxy = self.proxy.clone();
-        let _ = std::thread::Builder::new()
+        if std::thread::Builder::new()
             .name("twitty-composer-stat".into())
             .spawn(move || {
                 let existing = to_check
@@ -464,7 +487,13 @@ impl App {
                     commands: None,
                     existing,
                 });
-            });
+            })
+            .is_err()
+        {
+            for p in &rollback {
+                self.composer.path_exists_pending.remove(p);
+            }
+        }
     }
 
     pub(super) fn on_composer_path_info(
@@ -747,9 +776,8 @@ impl App {
             .as_ref()
             .map_or(0, |p| p.visible_range().len());
         let ai_view = self.composer_ai_view();
-        let cwd = self.pane_cwd(id);
-        let (_, lints) =
-            self.composer_highlight_and_lint(self.composer.state.editor.text(), cwd.as_deref());
+        let has_lints =
+            !self.composer.state.slash_menu_open() && self.composer.last_has_lints.get();
         Some(ComposerLayout::with_ai_and_lint(
             pane_rect,
             metrics,
@@ -759,7 +787,7 @@ impl App {
             popup_items,
             ai_view.enabled,
             ai_view.has_banner(),
-            !lints.is_empty(),
+            has_lints,
         ))
     }
 
@@ -863,6 +891,7 @@ impl App {
         let preedit = ed.preedit().map(|p| (p.text.clone(), p.cursor));
         let language = self.window.ui_language();
         let (highlights, lints) = self.composer_highlight_and_lint(ed.text(), cwd.as_deref());
+        self.composer.last_has_lints.set(!lints.is_empty());
         let popup = self.composer.state.popup.as_ref().map(|p| {
             let range = p.visible_range();
             let items = p.items[range.clone()]

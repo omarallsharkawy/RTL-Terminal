@@ -62,6 +62,11 @@ impl App {
         }
     }
 
+    /// Stop the control socket server if currently running.
+    pub(super) fn stop_control_server(&mut self) {
+        self.control = None;
+    }
+
     /// Path of the running control socket, if enabled and started.
     pub(super) fn control_socket_path(&self) -> Option<String> {
         self.control

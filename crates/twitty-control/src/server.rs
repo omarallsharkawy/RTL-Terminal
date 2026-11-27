@@ -47,6 +47,7 @@ mod imp {
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::{Condvar, Mutex};
     use std::thread::{self, JoinHandle};
 
     use serde_json::Value;
@@ -61,7 +62,9 @@ mod imp {
     /// the socket file.
     pub struct ControlServer {
         path: PathBuf,
+        socket_id: (u64, u64),
         shutdown: Arc<AtomicBool>,
+        shutdown_done: Arc<(Mutex<bool>, Condvar)>,
         accept_thread: Option<JoinHandle<()>>,
     }
 
@@ -120,15 +123,24 @@ mod imp {
                 return Err(err);
             }
 
+            let meta = fs::symlink_metadata(&path)?;
+            let socket_id = (meta.dev(), meta.ino());
+
             let shutdown = Arc::new(AtomicBool::new(false));
             let shutdown_bg = Arc::clone(&shutdown);
+            let shutdown_done = Arc::new((Mutex::new(false), Condvar::new()));
+            let shutdown_done_bg = Arc::clone(&shutdown_done);
             let accept_thread = thread::Builder::new()
                 .name("twitty-control-accept".into())
-                .spawn(move || accept_loop(listener, handler, config, shutdown_bg))?;
+                .spawn(move || {
+                    accept_loop(listener, handler, config, shutdown_bg, shutdown_done_bg)
+                })?;
 
             Ok(Self {
                 path,
+                socket_id,
                 shutdown,
+                shutdown_done,
                 accept_thread: Some(accept_thread),
             })
         }
@@ -205,15 +217,42 @@ mod imp {
         }
     }
 
+    impl ControlServer {
+        fn path_is_ours(&self) -> bool {
+            fs::symlink_metadata(&self.path)
+                .ok()
+                .is_some_and(|meta| (meta.dev(), meta.ino()) == self.socket_id)
+        }
+    }
+
     impl Drop for ControlServer {
         fn drop(&mut self) {
             self.shutdown.store(true, Ordering::Release);
-            // Wake the blocking `accept()` call so the accept thread exits cleanly.
-            let _ = UnixStream::connect(&self.path);
-            if let Some(handle) = self.accept_thread.take() {
-                let _ = handle.join();
+            let ours = self.path_is_ours();
+            if ours {
+                // Wake the blocking `accept()` call so the accept thread exits cleanly.
+                let _ = UnixStream::connect(&self.path);
             }
-            let _ = fs::remove_file(&self.path);
+            if let Some(handle) = self.accept_thread.take() {
+                let (lock, cvar) = &*self.shutdown_done;
+                let exited = match lock.lock() {
+                    Ok(guard) => cvar
+                        .wait_timeout_while(guard, Duration::from_millis(500), |done| !*done)
+                        .is_ok_and(|(g, _)| *g),
+                    Err(poisoned) => *poisoned.into_inner(),
+                };
+                if exited {
+                    let _ = handle.join();
+                } else {
+                    tracing::warn!(
+                        target: "twitty::control::server::imp",
+                        "control socket accept thread did not wake during drop; detaching"
+                    );
+                }
+            }
+            if self.path_is_ours() {
+                let _ = fs::remove_file(&self.path);
+            }
         }
     }
 
@@ -222,6 +261,18 @@ mod imp {
     impl Drop for ClientSlot {
         fn drop(&mut self) {
             self.0.fetch_sub(1, Ordering::AcqRel);
+        }
+    }
+
+    struct ExitSignal(Arc<(Mutex<bool>, Condvar)>);
+
+    impl Drop for ExitSignal {
+        fn drop(&mut self) {
+            let (lock, cvar) = &*self.0;
+            if let Ok(mut done) = lock.lock() {
+                *done = true;
+            }
+            cvar.notify_all();
         }
     }
 
@@ -243,7 +294,9 @@ mod imp {
         handler: Handler,
         config: ServerConfig,
         shutdown: Arc<AtomicBool>,
+        shutdown_done: Arc<(Mutex<bool>, Condvar)>,
     ) {
+        let _exit_signal = ExitSignal(shutdown_done);
         let active = Arc::new(AtomicUsize::new(0));
         for incoming in listener.incoming() {
             if shutdown.load(Ordering::Acquire) {

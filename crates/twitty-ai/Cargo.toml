@@ -19,6 +19,4 @@ ureq = { version = "3.5.2", default-features = false, features = ["rustls"] }
 log = { version = "0.4.34", features = ["max_level_debug"] }
 
 [target.'cfg(unix)'.dependencies]
-libc.workspace = true
 rustix.workspace = true
-twitty-control.workspace = true

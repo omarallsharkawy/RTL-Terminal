@@ -13,8 +13,8 @@ use crate::config::warn;
 use crate::shell_integration::clean_text;
 
 use super::parse::parse_project_bytes;
-use super::sha256::sha256_hex;
 use super::{ProjectFile, MAX_DISCOVERY_LEVELS, MAX_PROJECT_FILE_BYTES};
+use twitty_store::sha256_hex;
 
 /// Discover and parse the nearest `.twitty/commands.json` starting from `start_cwd`, using
 /// `$HOME` (or `%USERPROFILE%` on Windows) as the ceiling directory.

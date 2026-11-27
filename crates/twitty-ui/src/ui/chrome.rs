@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 
 use crate::layout::{sidebar_layout, PaneId, Rect, SidebarPosition};
 use crate::ui::git_diff::DiffStat;
-use twitty_render::metrics::CellMetrics;
-use twitty_render::ui_style::{SPACE_4, SPACE_8};
+use twitty_style::metrics::CellMetrics;
+use twitty_style::ui_style::{SPACE_4, SPACE_8};
 
 pub use twitty_core::language::{t, UiLanguage, UiLanguagePref};
 

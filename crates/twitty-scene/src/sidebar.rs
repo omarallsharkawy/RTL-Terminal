@@ -518,7 +518,7 @@ impl Cards<'_, '_> {
         let mirror = self.view.mirrored;
         let gap = s.px(SPACE_4);
         let remote = entry.remote_state.map(|state| {
-            use twitty_ui::remote::ConnectionState::*;
+            use twitty_core::remote::ConnectionState::*;
             match state {
                 Connecting => self.view.language.t("Connecting"),
                 Connected => self.view.language.t("Connected"),

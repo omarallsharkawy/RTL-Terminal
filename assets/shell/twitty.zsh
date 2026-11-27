@@ -120,8 +120,9 @@ elif [[ -o interactive ]] && (( ! ${+__twitty_si_loaded} )); then
     __twitty_prompt() {
         local st=$?
         __twitty_osc7
-        if [[ $PS1 != "$__twitty_a"*"$__twitty_b" ]]; then
-            local prompt=${PS1//"$__twitty_a"/}
+        if [[ ${PS1-} != "$__twitty_a"*"$__twitty_b" ]]; then
+            local prompt=${PS1-}
+            prompt=${prompt//"$__twitty_a"/}
             prompt=${prompt//"$__twitty_b"/}
             PS1=$__twitty_a$prompt$__twitty_b
         fi

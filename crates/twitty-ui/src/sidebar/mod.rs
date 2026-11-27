@@ -6,10 +6,10 @@ pub mod git;
 use std::path::{Path, PathBuf};
 
 use crate::layout::{PaneId, SidebarPosition};
-use crate::remote::ConnectionState;
 use crate::shell_integration::{clean_text, MAX_NOTIFY_CHARS};
 use crate::ui::chrome::UiLanguage;
 use crate::ui::notifications::HistoryEntry;
+use twitty_core::remote::ConnectionState;
 
 /// A desktop notification a pane asked for (OSC 9/99/777), waiting to be seen.
 #[derive(Clone, Debug, PartialEq, Eq)]

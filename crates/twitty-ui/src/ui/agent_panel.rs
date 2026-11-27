@@ -25,7 +25,7 @@ use crate::composer::editor::TextEditor;
 use crate::layout::{PaneId, Rect};
 use crate::review::diff::{parse as parse_diff, Limits as DiffLimits};
 use crate::ui::chrome::UiLanguage;
-use twitty_render::metrics::CellMetrics;
+use twitty_style::metrics::CellMetrics;
 
 // ---- Docking geometry constants (AGENT.md §1.1) ----
 
@@ -588,16 +588,37 @@ pub struct StepEntry {
     pub expanded: bool,
     pub block_link: Option<(PaneId, u64)>,
     pub user_edited: bool,
+    /// Pre-parsed unified diff for `StepKind::Patch`, shared via `Arc` so layout and drawing
+    /// avoid re-parsing on every frame.
+    pub parsed_diff: Option<std::sync::Arc<crate::review::diff::Diff>>,
+}
+
+fn parse_patch_diff_cached(kind: &StepKind) -> Option<std::sync::Arc<crate::review::diff::Diff>> {
+    match kind {
+        StepKind::Patch { diff, .. } => Some(std::sync::Arc::new(parse_diff(
+            diff.as_bytes(),
+            false,
+            &DiffLimits::default(),
+        ))),
+        _ => None,
+    }
 }
 
 impl StepEntry {
     pub fn new(step: Step) -> Self {
+        let parsed_diff = parse_patch_diff_cached(&step.kind);
         Self {
             step,
             expanded: false,
             block_link: None,
             user_edited: false,
+            parsed_diff,
         }
+    }
+
+    pub fn set_step(&mut self, step: Step) {
+        self.parsed_diff = parse_patch_diff_cached(&step.kind);
+        self.step = step;
     }
 
     /// True if this card is currently waiting for user approval.
@@ -1055,7 +1076,7 @@ impl AgentPanelState {
                     .entry(session)
                     .or_insert_with(|| AgentSession::new(session));
                 if let Some(existing) = sess.step_mut(id) {
-                    existing.step = step;
+                    existing.set_step(step);
                 } else {
                     sess.steps.push(StepEntry::new(step));
                 }
@@ -2668,7 +2689,15 @@ fn measure_card_height(
                 let files_h = (files.len().clamp(1, 6) as f32) * mono_lh;
                 let reason_h = if reason.is_empty() { 0.0 } else { px(20.0) };
                 let diff_h = if entry.expanded {
-                    let parsed = parse_diff(diff.as_bytes(), false, &DiffLimits::default());
+                    let parsed_owned;
+                    let parsed = match entry.parsed_diff.as_deref() {
+                        Some(cached) => cached,
+                        None => {
+                            parsed_owned =
+                                parse_diff(diff.as_bytes(), false, &DiffLimits::default());
+                            &parsed_owned
+                        }
+                    };
                     let rows = parsed
                         .files
                         .iter()

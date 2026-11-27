@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! SSH session identity and reconnect policy, independent of the window and renderer.
 
 pub mod bootstrap;
@@ -9,7 +11,8 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 pub use twitty_core::remote::{
-    validate_destination, validate_name, ATTACH_MARKER, BOOTSTRAP_FAILED, SSH_DISCONNECTED,
+    validate_destination, validate_name, ConnectionState, ATTACH_MARKER, BOOTSTRAP_FAILED,
+    SSH_DISCONNECTED,
 };
 
 pub const PANE_WORKER: &str = "__ssh-pane";
@@ -100,23 +103,6 @@ pub fn retry_delay(attempt: usize) -> Option<Duration> {
         .get(attempt)
         .copied()
         .map(Duration::from_secs)
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ConnectionState {
-    Connecting,
-    Connected,
-    Disconnected,
-}
-
-impl ConnectionState {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Connecting => "Connecting",
-            Self::Connected => "Connected",
-            Self::Disconnected => "Disconnected",
-        }
-    }
 }
 
 pub struct RemotePane {

@@ -166,7 +166,10 @@ pub struct PathQuery {
 
 /// Extract the path completion context at `caret` in `text`, relative to `cwd`.
 pub fn extract_path_query(text: &str, caret: usize, cwd: Option<&Path>) -> Option<PathQuery> {
-    let caret = caret.min(text.len());
+    let mut caret = caret.min(text.len());
+    while caret > 0 && !text.is_char_boundary(caret) {
+        caret -= 1;
+    }
     let before = &text[..caret];
     let line_start = before.rfind('\n').map_or(0, |i| i + 1);
     let line_before = &text[line_start..caret];
@@ -1526,4 +1529,17 @@ fn strip_outer_quotes(s: &str) -> &str {
 
 fn next_char_len(s: &str, idx: usize) -> usize {
     s[idx..].chars().next().map_or(1, char::len_utf8)
+}
+
+#[cfg(test)]
+mod path_query_utf8_tests {
+    use super::extract_path_query;
+
+    #[test]
+    fn non_boundary_caret_in_arabic_does_not_panic() {
+        let text = "cat مجلد/ملف";
+        for caret in 0..=text.len() + 2 {
+            let _ = extract_path_query(text, caret, None);
+        }
+    }
 }

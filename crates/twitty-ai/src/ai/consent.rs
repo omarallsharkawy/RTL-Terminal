@@ -154,7 +154,9 @@ impl AiConsentStore {
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
-            options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+            options.custom_flags(
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+            );
         }
         let Ok(file) = options.open(path) else {
             return Self::default();
@@ -168,10 +170,8 @@ impl AiConsentStore {
         #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;
-            let Ok(uid) = twitty_control::paths::current_uid() else {
-                return Self::default();
-            };
-            if fd_meta.uid() != uid || fd_meta.mode() & 0o6002 != 0 {
+            let uid = rustix::process::getuid().as_raw();
+            if fd_meta.uid() != uid || fd_meta.mode() & 0o6022 != 0 {
                 return Self::default();
             }
         }

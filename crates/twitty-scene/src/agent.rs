@@ -25,8 +25,7 @@ use twitty_render::shapes::{Border, Shadow, Shape};
 use twitty_render::style::Quad;
 use twitty_render::text::ui::{label_width, UiAlign, UiFont, UiLabel, UiSize, UiWeight};
 use twitty_render::ui_style::{
-    UiStyle, OVERLAY_BLUR, OVERLAY_OFFSET, OVERLAY_SHADOW, RADIUS_12, RADIUS_6, RADIUS_8, SPACE_4,
-    SPACE_8,
+    UiStyle, OVERLAY_BLUR, OVERLAY_OFFSET, OVERLAY_SHADOW, RADIUS_12, RADIUS_6, RADIUS_8,
 };
 use twitty_ui::composer::editor::TextEditor;
 use twitty_ui::review::diff::{parse as parse_diff, Limits as DiffLimits, LineKind};
@@ -764,7 +763,7 @@ impl AgentDrawer<'_, '_> {
                     );
                 }
                 if let Some(diff_rect) = card.diff_rect {
-                    self.draw_patch_diff(diff, diff_rect, clip);
+                    self.draw_patch_diff(diff, entry.parsed_diff.as_deref(), diff_rect, clip);
                 }
             }
             StepKind::CommandResult {
@@ -958,7 +957,13 @@ impl AgentDrawer<'_, '_> {
 
     /// Render an expanded Patch card's unified diff reusing the review panel's diff parser,
     /// dim gutter, green/red row tints, and terminal row shaping (`review::text_line`).
-    fn draw_patch_diff(&mut self, raw_diff: &str, rect: Rect, parent_clip: TextBounds) {
+    fn draw_patch_diff(
+        &mut self,
+        raw_diff: &str,
+        cached_diff: Option<&twitty_ui::review::diff::Diff>,
+        rect: Rect,
+        parent_clip: TextBounds,
+    ) {
         let s = self.style;
         let clamped = clamp_rect_y(rect, self.layout.body);
         if clamped.h <= 0.0 {
@@ -967,7 +972,14 @@ impl AgentDrawer<'_, '_> {
         self.rect_fill(clamped, RADIUS_6, s.bg0, Some(s.border));
         let diff_clip = intersect_bounds(rect_to_bounds(clamped), parent_clip);
 
-        let parsed = parse_diff(raw_diff.as_bytes(), false, &DiffLimits::default());
+        let parsed_owned;
+        let parsed = match cached_diff {
+            Some(cached) => cached,
+            None => {
+                parsed_owned = parse_diff(raw_diff.as_bytes(), false, &DiffLimits::default());
+                &parsed_owned
+            }
+        };
         let lh = self.ctx.metrics.line_height.max(s.px(17.0));
         let cw = self.ctx.metrics.char_width.max(s.px(7.5));
         let gutter_w = (cw * 5.0).min(rect.w * 0.25);
@@ -1741,6 +1753,3 @@ fn wrap_mono_lines(text: &str, max_w: f32, char_w: f32, max_lines: usize) -> Vec
     }
     out
 }
-
-#[allow(dead_code)]
-const _UNUSED_SPACE: (f32, f32) = (SPACE_4, SPACE_8);

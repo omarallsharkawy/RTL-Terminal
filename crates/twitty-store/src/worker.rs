@@ -138,6 +138,10 @@ enum StoreOp {
         excludes: Vec<String>,
         reply: Option<mpsc::Sender<Result<Vec<MemoryEntry>, StoreError>>>,
     },
+    RefreshProjectMemory {
+        project_root: PathBuf,
+        excludes: Vec<String>,
+    },
     FrequentCommands {
         project_root: String,
         min_runs: usize,
@@ -358,20 +362,10 @@ impl StoreHandle {
 
     /// Refresh environment notes and frequent commands for `project_root` off the UI thread.
     pub fn refresh_project_memory_async(&self, project_root: PathBuf, excludes: Vec<String>) {
-        let key = project_root.to_string_lossy().into_owned();
-        if !is_path_excluded(&project_root, &excludes) {
-            self.send_fire_and_forget(StoreOp::RefreshEnvNotes {
-                project_root,
-                excludes,
-                reply: None,
-            });
-            self.send_fire_and_forget(StoreOp::SyncFrequentCommands {
-                project_root: key,
-                min_runs: DEFAULT_MIN_COMMAND_RUNS,
-                limit: DEFAULT_FREQUENT_COMMAND_LIMIT,
-                reply: None,
-            });
-        }
+        self.send_fire_and_forget(StoreOp::RefreshProjectMemory {
+            project_root,
+            excludes,
+        });
     }
 
     // ---- Request/reply methods (for background callers and tests) ----
@@ -1005,14 +999,17 @@ fn worker_loop(target: StoreTarget, rx: mpsc::Receiver<StoreOp>) {
                 excludes,
                 reply,
             } => {
-                if !excludes.is_empty() && is_path_excluded(&project_root, &excludes) {
+                let resolved_root = crate::paths::resolve_project_root(&project_root);
+                if !excludes.is_empty()
+                    && crate::project::is_project_excluded(&project_root, &resolved_root, &excludes)
+                {
                     if let Some(reply) = reply {
                         let _ = reply.send(Ok(Vec::new()));
                     }
                     continue;
                 }
                 let res = match store.as_ref() {
-                    Some(s) => s.refresh_env_notes(&project_root),
+                    Some(s) => s.refresh_env_notes(&resolved_root),
                     None => Err(StoreError::Unavailable),
                 };
                 if let Err(ref err) = res {
@@ -1020,6 +1017,27 @@ fn worker_loop(target: StoreTarget, rx: mpsc::Receiver<StoreOp>) {
                 }
                 if let Some(reply) = reply {
                     let _ = reply.send(res);
+                }
+            }
+            StoreOp::RefreshProjectMemory {
+                project_root,
+                excludes,
+            } => {
+                if !excludes.is_empty() && is_path_excluded(&project_root, &excludes) {
+                    continue;
+                }
+                if let Some(s) = store.as_ref() {
+                    if let Err(ref err) = s.refresh_env_notes(&project_root) {
+                        log_once("refresh_env_notes failed", err);
+                    }
+                    let key = project_root.to_string_lossy();
+                    if let Err(ref err) = s.sync_frequent_commands(
+                        &key,
+                        DEFAULT_MIN_COMMAND_RUNS,
+                        DEFAULT_FREQUENT_COMMAND_LIMIT,
+                    ) {
+                        log_once("sync_frequent_commands failed", err);
+                    }
                 }
             }
             StoreOp::FrequentCommands {

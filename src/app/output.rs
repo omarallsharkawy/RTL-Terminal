@@ -64,11 +64,7 @@ impl App {
         if self.ws.is_visible(id) {
             self.window.request_redraw();
         }
-        if self.modifiers.control_key()
-            && !self.palette_open()
-            && !self.settings_open()
-            && !self.welcome_open()
-        {
+        if self.modifiers.control_key() && !self.any_modal_open() {
             self.update_link_hover(id);
         }
         for event in events {

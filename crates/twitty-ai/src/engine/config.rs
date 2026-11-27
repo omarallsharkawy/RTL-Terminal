@@ -108,11 +108,14 @@ pub fn estimated_cost_micros(
     output: u64,
 ) -> Option<u64> {
     let (input_rate, output_rate) = match (kind, model) {
-        (ProviderKind::Anthropic, "claude-sonnet-4-6") => (3000_u64, 15000_u64),
-        (ProviderKind::OpenAi, "gpt-4.1-mini" | "gpt-4.1-mini-2025-04-14") => (400, 1600),
-        (ProviderKind::OpenAi, "gpt-4.1" | "gpt-4.1-2025-04-14") => (2000, 8000),
-        (ProviderKind::Gemini, "gemini-3.5-flash-lite") => (300, 2500),
-        (ProviderKind::Gemini, "gemini-2.5-flash") => (300, 2500),
+        (ProviderKind::Anthropic, m) if m.starts_with("claude-opus-") => (15000_u64, 75000_u64),
+        (ProviderKind::Anthropic, m) if m.starts_with("claude-sonnet-") => (3000, 15000),
+        (ProviderKind::Anthropic, m) if m.starts_with("claude-haiku-") => (800, 4000),
+        (ProviderKind::OpenAi, m) if m.starts_with("gpt-4.1-mini") => (400, 1600),
+        (ProviderKind::OpenAi, m) if m.starts_with("gpt-4.1-nano") => (100, 400),
+        (ProviderKind::OpenAi, m) if m.starts_with("gpt-4.1") => (2000, 8000),
+        (ProviderKind::Gemini, m) if m.starts_with("gemini-") && m.contains("flash") => (300, 2500),
+        (ProviderKind::Gemini, m) if m.starts_with("gemini-") && m.contains("pro") => (1250, 10000),
         (ProviderKind::Ollama { .. }, _) => (0, 0),
         _ => return None,
     };

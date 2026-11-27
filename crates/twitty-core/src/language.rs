@@ -31,19 +31,41 @@ pub fn t(english: &str) -> &str {
     UiLanguage::current().t(english)
 }
 
-/// `template` with each `{}` replaced by the next of `args`, in order. Templates go through the
-/// catalog like any text: `fill(t("Unknown key {}"), &[&key])`.
+/// `template` with each `{}` replaced by the next of `args` in order, or `{0}`/`{1}`… replaced
+/// by the indexed argument (allowing languages with different word orders to reorder values).
+/// Templates go through the catalog like any text: `fill(t("Unknown key {}"), &[&key])`.
 pub fn fill(template: &str, args: &[&dyn std::fmt::Display]) -> String {
     let mut out = String::with_capacity(template.len());
-    let mut args = args.iter();
+    let mut next_seq = 0usize;
     let mut rest = template;
-    while let Some(at) = rest.find("{}") {
-        out.push_str(&rest[..at]);
-        match args.next() {
-            Some(arg) => out.push_str(&arg.to_string()),
-            None => out.push_str("{}"),
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        let after_open = &rest[open + 1..];
+        if let Some(close) = after_open.find('}') {
+            let token = &after_open[..close];
+            if token.is_empty() {
+                match args.get(next_seq) {
+                    Some(arg) => {
+                        out.push_str(&arg.to_string());
+                        next_seq += 1;
+                    }
+                    None => out.push_str("{}"),
+                }
+                rest = &after_open[close + 1..];
+                continue;
+            }
+            if !token.is_empty() && token.bytes().all(|b| b.is_ascii_digit()) {
+                if let Ok(idx) = token.parse::<usize>() {
+                    if let Some(arg) = args.get(idx) {
+                        out.push_str(&arg.to_string());
+                        rest = &after_open[close + 1..];
+                        continue;
+                    }
+                }
+            }
         }
-        rest = &rest[at + 2..];
+        out.push('{');
+        rest = after_open;
     }
     out.push_str(rest);
     out
@@ -107,6 +129,15 @@ impl std::str::FromStr for UiLanguagePref {
     }
 }
 
+/// Base text direction of an interface language, separate from the locale identity so adding
+/// future LTR or RTL languages only changes [`UiLanguage::direction`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TextDirection {
+    #[default]
+    Ltr,
+    Rtl,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum UiLanguage {
     #[default]
@@ -115,6 +146,17 @@ pub enum UiLanguage {
 }
 
 impl UiLanguage {
+    pub fn direction(self) -> TextDirection {
+        match self {
+            Self::English => TextDirection::Ltr,
+            Self::Arabic => TextDirection::Rtl,
+        }
+    }
+
+    pub fn is_rtl(self) -> bool {
+        self.direction() == TextDirection::Rtl
+    }
+
     pub fn from_locale(locale: &str) -> Self {
         if locale
             .get(..2)
@@ -134,7 +176,7 @@ impl UiLanguage {
         }
     }
 
-    /// Make this the language [`tr`] and [`UiLanguage::current`] answer with.
+    /// Make this the language [`t`] and [`UiLanguage::current`] answer with.
     pub fn set_current(self) {
         CURRENT.store(u8::from(self == Self::Arabic), Ordering::Relaxed);
     }
@@ -148,7 +190,7 @@ impl UiLanguage {
     }
 
     pub fn mirror(self, rect: Rect, within: Rect) -> Rect {
-        if self == Self::Arabic {
+        if self.is_rtl() {
             Rect::new(
                 within.right() - (rect.right() - within.x),
                 rect.y,
@@ -162,9 +204,10 @@ impl UiLanguage {
 
     /// `english` in this language: itself, or its translation from the catalog (English when
     /// the catalog has none). A key may end in `|context` to tell apart one English word with
-    /// two meanings (`"Block|cursor"`); the context is never shown.
+    /// two meanings (`"Block|cursor"`); the context is never shown. Literal shell pipes inside
+    /// prose (e.g. `"curl | sh"`) are preserved.
     pub fn t(self, english: &str) -> &str {
-        let shown = english.split_once('|').map_or(english, |(text, _)| text);
+        let shown = strip_context(english);
         match self {
             Self::English => shown,
             Self::Arabic => arabic().get(english).map_or(shown, String::as_str),
@@ -178,5 +221,21 @@ impl UiLanguage {
             Self::English => english,
             Self::Arabic => arabic,
         }
+    }
+}
+
+fn strip_context(english: &str) -> &str {
+    match english.rsplit_once('|') {
+        Some((text, ctx))
+            if !text.is_empty()
+                && !text.ends_with(char::is_whitespace)
+                && !ctx.is_empty()
+                && ctx
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-')) =>
+        {
+            text
+        }
+        _ => english,
     }
 }

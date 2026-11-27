@@ -191,7 +191,7 @@ pub fn run_in_pane(target: &Target, cols: u16, rows: u16) -> Result<(), Error> {
             binary.display()
         ))
     })?;
-    let digest = crate::workflows::sha256_hex(&bytes);
+    let digest = twitty_core::sha256::sha256_hex(&bytes);
     drop(bytes);
     bootstrap(
         &mut OpenSsh,

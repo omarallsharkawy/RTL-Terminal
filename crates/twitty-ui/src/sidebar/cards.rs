@@ -9,7 +9,7 @@ use crate::layout::{Rect, SidebarPosition};
 use crate::ui::chrome::{ChromeAction, UiLanguage};
 use crate::ui::hit::Hit;
 use crate::ui::motion::Reorder;
-use twitty_render::ui_style::{SPACE_12, SPACE_16, SPACE_4, SPACE_8};
+use twitty_style::ui_style::{SPACE_12, SPACE_16, SPACE_4, SPACE_8};
 
 pub const DOT_INTERVAL: Duration = Duration::from_millis(240);
 const TITLE_HEIGHT: f32 = 20.0;
@@ -461,7 +461,7 @@ fn max_scroll(content_height: f32, area: Rect) -> f32 {
 
 /// Keep a whole-word prefix when possible and fall back to graphemes in an overlong word.
 pub fn fit_title(text: &str, mut fits: impl FnMut(&str) -> bool) -> String {
-    let fitted = twitty_render::text::fit_text(text, &mut fits);
+    let fitted = twitty_style::fit::fit_text(text, &mut fits);
     if fitted != "…" {
         return fitted;
     }

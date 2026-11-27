@@ -32,7 +32,7 @@ impl Gpu {
     pub async fn new(window: Arc<Window>) -> anyhow::Result<(Self, wgpu::SurfaceConfiguration)> {
         let (ctx, config) = GpuContext::new(window).await?;
         let (width, height) = (config.width, config.height);
-        let quads = QuadRenderer::new(&ctx.device, config.format);
+        let quads = QuadRenderer::new(&ctx.device, config.format, config.alpha_mode);
         quads.update_screen_size(&ctx.queue, width as f32, height as f32);
         let shapes = ShapeRenderer::new(&ctx.device, config.format);
         shapes.resize(&ctx.queue, width, height);

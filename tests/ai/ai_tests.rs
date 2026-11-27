@@ -49,8 +49,8 @@ use twitty::terminal::Terminal;
 use twitty::ui::chrome::UiLanguage;
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
-const NASKH: &[u8] = include_bytes!("../assets/fonts/NotoNaskhArabic-Regular.ttf");
-const MONO: &[u8] = include_bytes!("golden/fonts/NotoSansMono-Subset.ttf");
+const NASKH: &[u8] = include_bytes!("../../assets/fonts/NotoNaskhArabic-Regular.ttf");
+const MONO: &[u8] = include_bytes!("../golden/fonts/NotoSansMono-Subset.ttf");
 
 fn test_font_system() -> FontSystem {
     let mut db = fontdb::Database::new();

@@ -290,26 +290,31 @@ fn inspect_words(
     wrapper_depth: usize,
     fetched: bool,
 ) -> Option<DenyReason> {
+    const MAX_SHELL_DEPTH: usize = 3;
+    const MAX_WRAPPER_DEPTH: usize = 4;
+
     // Inspect environment wrappers whose command arguments are shell-split by env itself.
     if let Some(index) = words.iter().position(|word| executable(word) == "env") {
         let options = &words[index + 1..];
-        if wrapper_depth < 4 {
-            for (index, option) in options
-                .iter()
-                .enumerate()
-                .take_while(|(_, option)| option.starts_with('-') || assignment(option))
-            {
-                let split = match *option {
-                    "-S" | "--split-string" => options.get(index + 1).copied(),
-                    arg => arg
-                        .strip_prefix("--split-string=")
-                        .or_else(|| arg.strip_prefix("-S").filter(|value| !value.is_empty())),
-                };
-                if let Some(command) = split {
-                    if shell_depth == 0 {
-                        return inspect(root, cwd, command, shell_depth + 1);
-                    }
+        for (index, option) in options
+            .iter()
+            .enumerate()
+            .take_while(|(_, option)| option.starts_with('-') || assignment(option))
+        {
+            let split = match *option {
+                "-S" | "--split-string" => options.get(index + 1).copied(),
+                arg => arg
+                    .strip_prefix("--split-string=")
+                    .or_else(|| arg.strip_prefix("-S").filter(|value| !value.is_empty())),
+            };
+            if let Some(command) = split {
+                if wrapper_depth >= MAX_WRAPPER_DEPTH {
+                    return Some(hard("nested wrapper"));
                 }
+                if shell_depth >= MAX_SHELL_DEPTH {
+                    return Some(hard("nested shell"));
+                }
+                return inspect(root, cwd, command, shell_depth + 1);
             }
         }
     }
@@ -323,9 +328,7 @@ fn inspect_words(
             .take_while(|arg| **arg != "--")
             .any(|arg| arg.starts_with('-') && !arg.starts_with("--") && arg[1..].contains(flag))
     };
-    let git = args
-        .iter()
-        .position(|arg| matches!(*arg, "push" | "config" | "remote"));
+    let git = git_subcommand(args);
     let rule = match program {
         "sudo" | "doas" | "pkexec" | "su" => Some(program),
         _ if fetched && interpreter(program) => Some("curl|sh"),
@@ -350,19 +353,17 @@ fn inspect_words(
         }
         "git" if args.iter().any(|arg| arg.starts_with("credential")) => Some("keyring"),
         "git"
-            if git.is_some_and(|i| match args[i] {
+            if git.is_some_and(|sub| match sub {
                 "push" => true,
                 "config" => has("--global") || has("--system"),
                 "remote" => has("set-url"),
                 _ => false,
             }) =>
         {
-            Some(if has("push") {
-                "git push"
-            } else if has("config") {
-                "git config --global"
-            } else {
-                "git remote set-url"
+            Some(match git {
+                Some("push") => "git push",
+                Some("config") => "git config --global",
+                _ => "git remote set-url",
             })
         }
         "pacman" | "apt" | "apt-get" | "brew" | "dnf" | "yum" | "zypper" | "apk" => {
@@ -444,13 +445,16 @@ fn inspect_words(
         if let Some(script) = args.windows(2).find(|pair| {
             pair[0].starts_with('-') && !pair[0].starts_with("--") && pair[0][1..].contains('c')
         }) {
-            if shell_depth == 0 {
+            if shell_depth < MAX_SHELL_DEPTH {
                 return inspect(root, cwd, script[1], shell_depth + 1);
             }
-            return None;
+            return Some(hard("nested shell"));
         }
     }
-    if wrapper_depth < 4 && program == "xargs" {
+    if program == "xargs" {
+        if wrapper_depth >= MAX_WRAPPER_DEPTH {
+            return Some(hard("nested wrapper"));
+        }
         let mut rest = args;
         while let Some((first, tail)) = rest.split_first() {
             rest = match *first {
@@ -473,9 +477,12 @@ fn inspect_words(
             fetched,
         );
     }
-    if wrapper_depth < 4 && program == "find" {
+    if program == "find" {
         for (index, arg) in args.iter().enumerate() {
             if matches!(*arg, "-exec" | "-execdir" | "-ok" | "-okdir") {
+                if wrapper_depth >= MAX_WRAPPER_DEPTH {
+                    return Some(hard("nested wrapper"));
+                }
                 let nested = &args[index + 1..];
                 let end = nested
                     .iter()
@@ -556,6 +563,35 @@ fn inspect_path(root: &Path, cwd: &Path, value: &str, write: bool) -> Option<Den
         (write && (has_git(&path) || has_git(&resolved) || !resolved.starts_with(root)))
             .then(|| outside(&path))
     })
+}
+
+/// Return the git subcommand, skipping leading global options such as `-C <dir>` or `-c <k=v>`.
+fn git_subcommand<'a>(args: &'a [&'a str]) -> Option<&'a str> {
+    let mut i = 0;
+    while i < args.len() {
+        let arg = args[i];
+        if arg == "--" {
+            return None;
+        }
+        if matches!(
+            arg,
+            "-C" | "-c"
+                | "--git-dir"
+                | "--work-tree"
+                | "--namespace"
+                | "--super-prefix"
+                | "--config-env"
+        ) {
+            i += 2;
+            continue;
+        }
+        if arg.starts_with('-') {
+            i += 1;
+            continue;
+        }
+        return Some(arg);
+    }
+    None
 }
 
 /// Validate a patch path before joining it to the project.

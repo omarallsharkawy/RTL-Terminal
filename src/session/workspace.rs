@@ -1,7 +1,7 @@
 //! Tabs of split panes: which panes exist, how they are arranged, and which one has focus.
 //!
-//! Window-free: the grid geometry comes in through [`GridGeometry`] and new shells through
-//! [`PaneFactory`], so tab and pane lifecycles can be tested with fake panes.
+//! Window-free: the grid geometry comes in through `GridGeometry` and new shells through
+//! `PaneFactory`, so tab and pane lifecycles can be tested with fake panes.
 
 use crate::ui::chrome::t;
 use std::collections::HashMap;
@@ -305,6 +305,30 @@ impl Workspace {
                 sizes.push((id, geo.grid_size(rect)));
             }
         }
+        for (id, (cols, rows)) in sizes {
+            if let Some(pane) = self.panes.get_mut(&id) {
+                pane.resize(cols, rows);
+            }
+        }
+    }
+
+    /// Resize only the active tab's panes (for active-tab-only geometry changes such as divider
+    /// drags, splits, or pane zoom toggles, avoiding scrollback reflow and `TIOCSWINSZ` on
+    /// unaffected background tabs).
+    pub(crate) fn apply_active_tab_layout(&mut self, geo: &impl GridGeometry) {
+        let Some(tab) = self.tabs.get(self.active) else {
+            return;
+        };
+        let content = geo.content_rect(self.tabs.len());
+        let gap = geo.gap();
+        let zoomed = self.zoomed_pane();
+        let sizes: Vec<(PaneId, (usize, usize))> = layout(&tab.root, content, gap)
+            .into_iter()
+            .map(|(id, rect)| {
+                let rect = if zoomed == Some(id) { content } else { rect };
+                (id, geo.grid_size(rect))
+            })
+            .collect();
         for (id, (cols, rows)) in sizes {
             if let Some(pane) = self.panes.get_mut(&id) {
                 pane.resize(cols, rows);

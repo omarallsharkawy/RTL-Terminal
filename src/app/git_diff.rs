@@ -42,6 +42,7 @@ pub(super) struct GitDiffWatch {
     due: Option<Instant>,
     generation: u64,
     in_flight: bool,
+    worker: Option<std::sync::mpsc::Sender<(u64, WorkingDirectory)>>,
 }
 
 impl GitDiffWatch {
@@ -50,6 +51,44 @@ impl GitDiffWatch {
             self.due = Some(Instant::now());
             self.generation = self.generation.wrapping_add(1);
         }
+    }
+
+    pub fn stop(&mut self) {
+        self.worker = None;
+        self.in_flight = false;
+    }
+
+    fn ensure_worker(
+        &mut self,
+        proxy: &winit::event_loop::EventLoopProxy<AppEvent>,
+    ) -> Option<&std::sync::mpsc::Sender<(u64, WorkingDirectory)>> {
+        if self.worker.is_none() {
+            let (tx, rx) = std::sync::mpsc::channel::<(u64, WorkingDirectory)>();
+            let proxy = proxy.clone();
+            if std::thread::Builder::new()
+                .name("twitty-git-diff".into())
+                .spawn(move || {
+                    while let Ok(mut job) = rx.recv() {
+                        // Drain queued probes so only the latest target is scanned.
+                        while let Ok(newer) = rx.try_recv() {
+                            job = newer;
+                        }
+                        let (generation, directory) = job;
+                        let stat = scan(directory);
+                        if proxy
+                            .send_event(AppEvent::GitDiff(generation, stat))
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                })
+                .is_ok()
+            {
+                self.worker = Some(tx);
+            }
+        }
+        self.worker.as_ref()
     }
 }
 
@@ -77,15 +116,14 @@ impl App {
         {
             let directory = target.directory.clone();
             let generation = watch.generation;
-            let proxy = self.proxy.clone();
             watch.due = Some(now + INTERVAL);
-            watch.in_flight = std::thread::Builder::new()
-                .name("twitty git diff".into())
-                .spawn(move || {
-                    let stat = scan(directory);
-                    let _ = proxy.send_event(AppEvent::GitDiff(generation, stat));
-                })
-                .is_ok();
+            if let Some(tx) = watch.ensure_worker(&self.proxy) {
+                if tx.send((generation, directory)).is_ok() {
+                    watch.in_flight = true;
+                } else {
+                    watch.worker = None;
+                }
+            }
         }
         if watch.in_flight {
             None

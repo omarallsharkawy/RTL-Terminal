@@ -15,6 +15,8 @@ use crate::pty::SpawnOptions;
 pub(super) struct ProjectState {
     mru: ProjectMru,
     mru_dirty: bool,
+    mru_save_seq: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    mru_save_lock: std::sync::Arc<std::sync::Mutex<()>>,
     generation: u64,
     scanning: bool,
     items: Vec<ProjectItem>,
@@ -25,6 +27,8 @@ impl ProjectState {
         Self {
             mru: ProjectMru::load_default(),
             mru_dirty: false,
+            mru_save_seq: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            mru_save_lock: std::sync::Arc::new(std::sync::Mutex::new(())),
             generation: 0,
             scanning: false,
             items: Vec::new(),
@@ -168,13 +172,28 @@ impl App {
         }
         self.projects.mru_dirty = false;
         let snapshot = self.projects.mru.clone();
-        let _ = std::thread::Builder::new()
+        let seq = self
+            .projects
+            .mru_save_seq
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel)
+            + 1;
+        let seq_ref = std::sync::Arc::clone(&self.projects.mru_save_seq);
+        let lock = std::sync::Arc::clone(&self.projects.mru_save_lock);
+        if let Err(err) = std::thread::Builder::new()
             .name("twitty-mru-save".into())
             .spawn(move || {
+                let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+                if seq_ref.load(std::sync::atomic::Ordering::Acquire) != seq {
+                    return;
+                }
                 if let Err(err) = snapshot.save_default() {
                     tracing::warn!("twitty: could not save recent projects: {err}");
                 }
-            });
+            })
+        {
+            tracing::warn!("twitty: mru save thread failed to start: {err}");
+            self.projects.mru_dirty = true;
+        }
     }
 
     /// Persist recent pane working directories when the window exits.
@@ -182,6 +201,14 @@ impl App {
         self.collect_live_cwds_into_mru();
         if self.projects.mru_dirty {
             self.projects.mru_dirty = false;
+            self.projects
+                .mru_save_seq
+                .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+            let _guard = self
+                .projects
+                .mru_save_lock
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             if let Err(err) = self.projects.mru.save_default() {
                 crate::config::warn(format!("twitty: could not save recent projects ({err})"));
             }

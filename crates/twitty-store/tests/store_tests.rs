@@ -923,3 +923,41 @@ fn sha256_matches_fips_180_test_vectors() {
         assert_eq!(sha256_hex(&vec![0u8; len]).len(), 64);
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn open_rejects_symlinks_and_preserves_existing_non_twitty_parent_mode() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+
+    let dir = TempDir::new("symlink-guard");
+    let shared = dir.path().join("shared");
+    fs::create_dir(&shared).unwrap();
+    fs::set_permissions(&shared, fs::Permissions::from_mode(0o755)).unwrap();
+
+    // Opening directly in an existing non-"twitty" directory must not silently chmod 0700 it.
+    let db = shared.join("custom.db");
+    let _store = Store::open(&db).expect("open in existing dir");
+    let mode = fs::metadata(&shared).unwrap().permissions().mode() & 0o777;
+    assert_eq!(
+        mode, 0o755,
+        "existing non-twitty parent mode must be preserved"
+    );
+
+    // Symlink DB path must be refused.
+    let real_target = dir.path().join("real.db");
+    fs::write(&real_target, b"").unwrap();
+    let link_db = dir.path().join("link.db");
+    symlink(&real_target, &link_db).unwrap();
+    assert!(matches!(
+        Store::open(&link_db),
+        Err(StoreError::InvalidInput(_))
+    ));
+
+    // Symlink parent directory must be refused.
+    let link_parent = dir.path().join("link_dir");
+    symlink(&shared, &link_parent).unwrap();
+    assert!(matches!(
+        Store::open(&link_parent.join("twitty.db")),
+        Err(StoreError::InvalidInput(_))
+    ));
+}

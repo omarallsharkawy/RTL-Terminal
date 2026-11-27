@@ -3,7 +3,7 @@
 
 use std::time::{Duration, Instant};
 
-#[path = "support/golden.rs"]
+#[path = "../support/golden.rs"]
 mod golden;
 
 use alacritty_terminal::index::Side;

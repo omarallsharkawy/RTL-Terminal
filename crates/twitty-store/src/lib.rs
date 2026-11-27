@@ -13,7 +13,6 @@ pub mod paths;
 pub mod project;
 pub mod rules;
 pub mod secrets;
-pub mod sha256;
 pub mod store;
 pub mod worker;
 
@@ -36,9 +35,9 @@ pub use rules::{
 pub use secrets::{
     InMemorySecretStore, SecretError, SecretStore, SecretValue, SystemSecretStore, SECRET_SERVICE,
 };
-pub use sha256::{sha256, sha256_hex};
 pub use store::{
     now_epoch_ms, DriveIndexEntry, ForgetReport, HistoryEntry, MemoryEntry, MemoryKind,
     MemoryUpdate, NewCommand, NewMemory, ProjectMemorySnapshot, Store,
 };
+pub use twitty_core::sha256::{self, sha256, sha256_hex};
 pub use worker::StoreHandle;

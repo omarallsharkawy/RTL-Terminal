@@ -62,7 +62,10 @@ impl RowCache {
     /// built. Put the new rows back with `put` once drawn.
     pub fn take(&mut self, pane: PaneId) -> PreviousRows {
         let rows = self.panes.remove(&pane).unwrap_or_default();
-        let by_hash = rows.iter().enumerate().map(|(i, r)| (r.hash, i)).collect();
+        let mut by_hash: HashMap<u64, Vec<usize>> = HashMap::with_capacity(rows.len());
+        for (i, r) in rows.iter().enumerate() {
+            by_hash.entry(r.hash).or_default().push(i);
+        }
         PreviousRows { rows, by_hash }
     }
 
@@ -75,20 +78,46 @@ impl RowCache {
 /// A pane's rows from its previous frame.
 pub struct PreviousRows {
     rows: Vec<CachedRow>,
-    by_hash: HashMap<u64, usize>,
+    by_hash: HashMap<u64, Vec<usize>>,
 }
 
 impl PreviousRows {
     /// The row drawn from `hash`, preferably the one that was at `index`. Rows are found
-    /// wherever they were, so output that scrolls the screen reuses every row it moved. Each
-    /// row is handed out once.
+    /// wherever they were, so output that scrolls the screen reuses every row it moved
+    /// (including duplicate lines such as blank rows or repeated separators). Each row is
+    /// handed out once.
     pub fn take(&mut self, index: usize, hash: u64) -> Option<CachedRow> {
-        let at = if self.rows.get(index).is_some_and(|r| r.hash == hash) {
-            index
-        } else {
-            *self.by_hash.get(&hash)?
+        if self.rows.get(index).is_some_and(|r| r.hash == hash) {
+            return Some(std::mem::take(&mut self.rows[index]));
+        }
+        let indices = self.by_hash.get_mut(&hash)?;
+        while let Some(at) = indices.pop() {
+            if let Some(row) = self.rows.get_mut(at).filter(|r| r.hash == hash) {
+                return Some(std::mem::take(row));
+            }
+        }
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn previous_rows_reuses_all_duplicate_scrolled_rows() {
+        let mut cache = RowCache::default();
+        let pane = PaneId(1);
+        let mk = |hash: u64| CachedRow {
+            hash,
+            ..CachedRow::default()
         };
-        let row = self.rows.get_mut(at).filter(|r| r.hash == hash)?;
-        Some(std::mem::take(row))
+        cache.put(pane, vec![mk(7), mk(7), mk(7), mk(9)]);
+        let mut prev = cache.take(pane);
+        // Shift all 3 identical rows by 1 position (simulating scroll).
+        assert_eq!(prev.take(10, 7).map(|r| r.hash), Some(7));
+        assert_eq!(prev.take(11, 7).map(|r| r.hash), Some(7));
+        assert_eq!(prev.take(12, 7).map(|r| r.hash), Some(7));
+        assert!(prev.take(13, 7).is_none());
     }
 }

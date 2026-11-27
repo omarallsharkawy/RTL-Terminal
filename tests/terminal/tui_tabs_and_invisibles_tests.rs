@@ -8,8 +8,8 @@ use twitty::render::text::fonts::new_font_system;
 use twitty::render::{build_row_quads, measure_char_width, CachedSegment, RowShaper};
 use twitty::terminal::Terminal;
 
-const NASKH: &[u8] = include_bytes!("../assets/fonts/NotoNaskhArabic-Regular.ttf");
-const MONO: &[u8] = include_bytes!("golden/fonts/NotoSansMono-Subset.ttf");
+const NASKH: &[u8] = include_bytes!("../../assets/fonts/NotoNaskhArabic-Regular.ttf");
+const MONO: &[u8] = include_bytes!("../golden/fonts/NotoSansMono-Subset.ttf");
 
 fn subset_font_system() -> FontSystem {
     let mut db = fontdb::Database::new();

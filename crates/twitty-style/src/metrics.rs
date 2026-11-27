@@ -4,8 +4,8 @@
 use alacritty_terminal::index::Side;
 use cosmic_text::FontSystem;
 
-use super::text::shaper::measure_char_width;
 use twitty_core::layout::{tab_rects, Rect};
+use twitty_core::text::shaper::measure_char_width;
 
 /// Line height as a multiple of the font size (tall enough for Arabic harakat).
 const LINE_HEIGHT_FACTOR: f32 = 1.55;

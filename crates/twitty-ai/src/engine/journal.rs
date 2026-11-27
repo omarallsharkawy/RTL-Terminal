@@ -17,7 +17,10 @@ pub(super) fn default_dir() -> PathBuf {
         .unwrap_or_default()
 }
 
-pub(super) struct Journal(File);
+pub(super) struct Journal {
+    path: PathBuf,
+    file: Option<File>,
+}
 
 impl Journal {
     pub fn open(dir: &Path, session: SessionId) -> io::Result<Self> {
@@ -56,15 +59,41 @@ impl Journal {
             .as_nanos();
         let seq = SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let name = format!("{now}-{}-{seq}-{}.jsonl", std::process::id(), session.0);
-        Ok(Self(options.open(dir.join(name))?))
+        let path = dir.join(name);
+        let file = options.open(&path)?;
+        Ok(Self {
+            path,
+            file: Some(file),
+        })
+    }
+
+    /// Release the underlying file descriptor while keeping the journal path so a later `Reply`
+    /// or `Undo` can re-open it on demand.
+    pub fn close(&mut self) {
+        self.file = None;
+    }
+
+    fn ensure_open(&mut self) -> io::Result<&mut File> {
+        if self.file.is_none() {
+            let mut options = OpenOptions::new();
+            options.append(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32);
+            }
+            self.file = Some(options.open(&self.path)?);
+        }
+        Ok(self.file.as_mut().expect("journal file just opened"))
     }
 
     pub fn append(&mut self, mut record: Value) -> io::Result<()> {
         scrub(&mut record, None);
         let mut line = serde_json::to_vec(&record)?;
         line.push(b'\n');
-        self.0.write_all(&line)?;
-        self.0.sync_data()
+        let file = self.ensure_open()?;
+        file.write_all(&line)?;
+        file.sync_data()
     }
 }
 

@@ -1,7 +1,8 @@
-//! Twitty's interface without a window: the config, the command table, key and mouse input,
-//! and the state, geometry and hit testing of every panel (palette, settings, composer,
-//! review, sidebar, agent panel, menus). Drawing lives in the `twitty` crate's
-//! `render::scene`; sessions, the control socket and the window live in the `twitty` crate.
+//! Twitty's interface without a window or GPU: the config, the command table, key and mouse
+//! input, and the state, geometry and hit testing of every panel (palette, settings, composer,
+//! review, sidebar, agent panel, menus). Drawing lives in `twitty-scene` / `twitty-render`;
+//! SSH remoting lives in `twitty-remote`; sessions, the control socket and the window live in
+//! the `twitty` crate.
 #![forbid(unsafe_code)]
 
 pub mod ai;
@@ -12,7 +13,6 @@ pub mod config;
 pub mod input;
 pub mod ports;
 pub mod projects;
-pub mod remote;
 pub mod review;
 pub mod sidebar;
 pub mod ui;

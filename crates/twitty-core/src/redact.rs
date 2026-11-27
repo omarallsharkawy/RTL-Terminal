@@ -273,7 +273,9 @@ fn match_pem_private_key(bytes: &[u8], start: usize) -> Option<usize> {
     let body_start = start + PREFIX.len() + line_end_rel;
     let mut search = body_start;
     while search < bytes.len() {
-        let rel = memchr(b'-', &bytes[search..])?;
+        let Some(rel) = memchr(b'-', &bytes[search..]) else {
+            break;
+        };
         let pos = search + rel;
         if bytes[pos..].starts_with(b"-----END ") {
             let after_end = pos + b"-----END ".len();

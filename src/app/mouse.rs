@@ -432,12 +432,7 @@ impl App {
     }
 
     pub(super) fn refresh_pointer_hover(&mut self) {
-        if self.palette_open()
-            || self.settings_open()
-            || self.welcome_open()
-            || self.pointer.capture.is_some()
-            || self.pointer.drag.is_some()
-        {
+        if self.any_modal_open() || self.pointer.capture.is_some() || self.pointer.drag.is_some() {
             return;
         }
         let (x, y) = self.pointer.pos;
@@ -682,7 +677,7 @@ impl App {
         };
         let ratio = ratio_at(divider, pos, self.window.gap());
         if self.ws.set_ratio(&divider.path, ratio) {
-            self.apply_layout();
+            self.apply_active_layout();
         }
     }
 }

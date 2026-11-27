@@ -226,6 +226,25 @@ impl App {
         }
     }
 
+    /// True when any modal overlay or popup menu is open above the terminal grid.
+    pub(super) fn any_modal_open(&self) -> bool {
+        self.palette_open()
+            || self.settings_open()
+            || self.welcome_open()
+            || self.memory_open()
+            || self.ai_consent_open()
+            || self.context_menu_open()
+    }
+
+    /// Close every open modal overlay or popup menu (e.g. when the last pane closes).
+    pub(super) fn close_all_modals(&mut self) {
+        self.close_palette();
+        self.close_settings();
+        self.close_welcome();
+        self.close_memory();
+        self.close_context_menu();
+    }
+
     /// Any input sent to the shell snaps the view back to the live screen.
     fn scroll_to_bottom(&mut self, id: PaneId) {
         let scrolled = self
@@ -359,8 +378,14 @@ impl ApplicationHandler<AppEvent> for App {
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         self.ai.cancel_active();
+        self.shutdown_agent_panel();
+        self.git_diff.stop();
+        self.ports = Default::default();
+        self.branches = Default::default();
         self.finish_projects();
-        self.session.finish(&self.ws, self.window.sidebar_visible());
+        if self.config.restore_session {
+            self.session.finish(&self.ws, self.window.sidebar_visible());
+        }
         self.control = None;
         self.store
             .flush_timeout(std::time::Duration::from_millis(250));
