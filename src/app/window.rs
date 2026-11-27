@@ -92,6 +92,7 @@ pub(super) struct Window {
     motion: ChromeAnimations,
     motion_frame: Option<Instant>,
     block_hover: Option<BlockHover>,
+    tooltip_shown: bool,
     pane_flash: PaneFlash,
     diff: Option<(git_diff::Target, DiffStat)>,
     sidebar_scroll: ScrollState,
@@ -132,6 +133,7 @@ impl Window {
             motion: ChromeAnimations::default(),
             motion_frame: None,
             block_hover: None,
+            tooltip_shown: false,
             pane_flash: PaneFlash::default(),
             diff: None,
             sidebar_scroll: ScrollState::default(),
@@ -456,6 +458,26 @@ impl Window {
     fn diff(&self, ws: &Workspace) -> Option<DiffStat> {
         let (target, stats) = self.diff.as_ref()?;
         (git_diff::target(ws).as_ref() == Some(target)).then_some(*stats)
+    }
+
+    pub(super) fn chrome_hover(&self) -> Option<ChromeAction> {
+        self.chrome_hover
+    }
+
+    pub(super) fn block_hover(&self) -> Option<BlockHover> {
+        self.block_hover
+    }
+
+    /// Show a tooltip (`text` near pointer `at`) or hide it.
+    pub(super) fn set_tooltip(&mut self, tip: Option<(String, (f32, f32))>) {
+        self.tooltip_shown = tip.is_some();
+        if let Some(ref mut r) = self.renderer {
+            r.set_tooltip(tip);
+        }
+    }
+
+    pub(super) fn tooltip_shown(&self) -> bool {
+        self.tooltip_shown
     }
 
     pub(super) fn set_chrome_hover(&mut self, hover: Option<ChromeAction>, tab: Option<usize>) {
@@ -1227,6 +1249,7 @@ impl App {
         self.window.set_ai_consent(consent);
         self.window
             .set_context_menu(self.context_menu.as_ref().map(|h| h.menu.clone()));
+        self.sync_tooltip(Instant::now());
         let (panes, dividers) = self.frame();
         let visible = self.cursor_blink.visible();
         let broadcast = self.active_tab_broadcast();

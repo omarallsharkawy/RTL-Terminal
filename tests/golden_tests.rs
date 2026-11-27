@@ -1587,6 +1587,15 @@ fn check_context_menu_golden(name: &str, palette_name: &str, lang: twitty::ui::c
     };
     let mut frame = build_frame(&mut ctx, &opts, &mut cache, &mut ime, &[], &panes, &[]);
     frame.add_context_menu(&mut ctx, style, &ui_font, &menu, &layout, lang);
+    if !ar {
+        frame.add_tooltip(
+            &mut ctx,
+            style,
+            &ui_font,
+            "Split right  Ctrl+Shift+E",
+            (40.0, 300.0),
+        );
+    }
     let runs = frame.text_runs(&panes, &cache, &ime);
     let _gpu = GPU.lock().unwrap_or_else(|e| e.into_inner());
     let mut target = match Offscreen::new(width, height) {

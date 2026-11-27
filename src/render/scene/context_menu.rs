@@ -103,3 +103,55 @@ pub fn draw(
     }
     labels
 }
+
+/// Draw a one-line tooltip just below and after pointer `at`, kept inside `surface`. Returns its
+/// label and rect.
+pub fn draw_tooltip(
+    ctx: &mut DrawContext,
+    style: UiStyle,
+    font: &UiFont,
+    text: &str,
+    at: (f32, f32),
+    surface: (f32, f32),
+    shapes: &mut Vec<Shape>,
+) -> (UiLabel, Rect) {
+    let buffer = font.shape(
+        ctx.font_system,
+        UiSize::Small,
+        UiWeight::Regular,
+        style.scale,
+        text,
+    );
+    let pad = style.px(SPACE_8);
+    let w = (label_width(&buffer).ceil() + 2.0 * pad).min(surface.0);
+    let h = style.px(24.0);
+    let margin = style.px(4.0);
+    let below = at.1 + style.px(18.0);
+    let y = if below + h + margin <= surface.1 {
+        below
+    } else {
+        at.1 - h - style.px(8.0)
+    };
+    let x = (at.0 + style.px(4.0))
+        .min(surface.0 - w - margin)
+        .max(margin);
+    let rect = Rect::new(x.round(), y.max(margin).round(), w, h);
+    shapes.push(Shape::RoundedRect {
+        rect,
+        radii: [style.px(RADIUS_6); 4],
+        fill: ctx.color(style.bg3),
+        border: Some(Border {
+            width: style.px(1.0),
+            color: ctx.color(style.border),
+        }),
+        shadow: Some(Shadow {
+            blur: style.px(8.0),
+            offset: [0.0, style.px(2.0)],
+            color: ctx.color(OVERLAY_SHADOW),
+        }),
+    });
+    (
+        UiLabel::new(buffer, rect, UiAlign::Center, style.text),
+        rect,
+    )
+}

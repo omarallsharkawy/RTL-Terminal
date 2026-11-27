@@ -101,7 +101,7 @@ pub struct Frame {
     block_ai_labels: Vec<UiLabel>,
     block_ai_rect: Option<Rect>,
     menu_labels: Vec<UiLabel>,
-    menu_rect: Option<Rect>,
+    menu_holes: Vec<Rect>,
     /// One-time AI privacy consent modal labels and clip rect (drawn above everything).
     consent_labels: Vec<UiLabel>,
     consent_rect: Option<Rect>,
@@ -357,7 +357,7 @@ pub(crate) fn build_frame_base(
         block_ai_labels: Vec::new(),
         block_ai_rect: None,
         menu_labels: Vec::new(),
-        menu_rect: None,
+        menu_holes: Vec::new(),
         consent_labels: Vec::new(),
         consent_rect: None,
     }
@@ -528,7 +528,7 @@ impl Frame {
         layout: &crate::ui::context_menu::MenuLayout,
         language: crate::ui::chrome::UiLanguage,
     ) {
-        self.menu_labels = super::context_menu::draw(
+        let labels = super::context_menu::draw(
             ctx,
             style,
             font,
@@ -537,7 +537,30 @@ impl Frame {
             language,
             &mut self.shapes.overlay,
         );
-        self.menu_rect = Some(layout.rect);
+        self.menu_labels.extend(labels);
+        self.menu_holes.push(layout.rect);
+    }
+
+    /// Draw a hover tooltip near pointer `at`, above everything else.
+    pub fn add_tooltip(
+        &mut self,
+        ctx: &mut DrawContext,
+        style: UiStyle,
+        font: &UiFont,
+        text: &str,
+        at: (f32, f32),
+    ) {
+        let (label, rect) = super::context_menu::draw_tooltip(
+            ctx,
+            style,
+            font,
+            text,
+            at,
+            self.surface,
+            &mut self.shapes.overlay,
+        );
+        self.menu_labels.push(label);
+        self.menu_holes.push(rect);
     }
 
     /// Draw the one-time AI privacy consent modal above everything else.
@@ -999,7 +1022,7 @@ impl Frame {
             runs = clip_runs(runs, hole);
         }
         runs.extend(self.consent_labels.iter().map(ui_run));
-        if let Some(hole) = self.menu_rect {
+        for &hole in &self.menu_holes {
             runs = clip_runs(runs, hole);
         }
         runs.extend(self.menu_labels.iter().map(ui_run));

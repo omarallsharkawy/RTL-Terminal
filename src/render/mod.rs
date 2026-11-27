@@ -114,6 +114,7 @@ pub(crate) struct Renderer {
     /// The failed-block AI explanation/fix popover, while it is open.
     block_ai_view: Option<scene::ai::BlockAiView>,
     context_menu: Option<crate::ui::context_menu::ContextMenu>,
+    tooltip: Option<(String, (f32, f32))>,
     /// The one-time AI privacy consent modal, while it is open.
     ai_consent_view: Option<scene::ai::ConsentOverlayView>,
     /// The settings panel, while it is open.
@@ -184,6 +185,7 @@ impl Renderer {
             composer_view: AnimatedView::default(),
             block_ai_view: None,
             context_menu: None,
+            tooltip: None,
             ai_consent_view: None,
             settings_view: None,
             memory_view: None,
@@ -412,6 +414,11 @@ impl Renderer {
     /// Show a right-click menu (`Some`) or hide it.
     pub(crate) fn set_context_menu(&mut self, menu: Option<crate::ui::context_menu::ContextMenu>) {
         self.context_menu = menu;
+    }
+
+    /// Show a hover tooltip near the pointer (`Some`) or hide it.
+    pub(crate) fn set_tooltip(&mut self, tip: Option<(String, (f32, f32))>) {
+        self.tooltip = tip;
     }
 
     /// Where `menu` is drawn in the current surface, for hit testing.
@@ -668,6 +675,9 @@ impl Renderer {
                 &layout,
                 chrome.language,
             );
+        }
+        if let Some((text, at)) = &self.tooltip {
+            frame.add_tooltip(&mut ctx, style, &self.ui_font, text, *at);
         }
         if let Some((x, y, w, h)) = frame.ime_area {
             self.window.set_ime_cursor_area(

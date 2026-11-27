@@ -35,6 +35,7 @@ mod review;
 mod selection;
 mod settings;
 mod ssh;
+mod tooltip;
 mod welcome;
 mod window;
 
@@ -123,6 +124,7 @@ pub struct App {
     composer: composer::ComposerHost,
     /// An open right-click menu.
     context_menu: Option<context_menu::ContextMenuHost>,
+    tooltip: tooltip::TooltipState,
     /// Built-in non-interactive AI assistant (composer generation, block explain/fix, consent).
     ai: ai::AiHost,
     /// Project switcher MRU and off-thread git repo scan state.
@@ -184,6 +186,7 @@ impl App {
             git_diff: git_diff::GitDiffWatch::default(),
             composer: composer::ComposerHost::default(),
             context_menu: None,
+            tooltip: tooltip::TooltipState::default(),
             ai: ai::AiHost::load(),
             projects: projects::ProjectState::load(),
             layouts: crate::layouts::LayoutStore::default(),
@@ -338,6 +341,7 @@ impl ApplicationHandler<AppEvent> for App {
             self.poll_ai_animation(now),
             self.window.poll_motion(now),
             self.window.poll_perf(now),
+            self.poll_tooltip(now),
         ]
         .into_iter()
         .flatten()
