@@ -6,6 +6,7 @@ use winit::event::{KeyEvent, MouseButton, MouseScrollDelta};
 use winit::keyboard::PhysicalKey;
 use winit::window::CursorIcon;
 
+use super::window::Appearance;
 use super::App;
 use crate::config::TwittyConfig;
 use crate::input::keybindings::KeyBindings;
@@ -56,7 +57,7 @@ impl App {
         if let Some(preview) = revert.preview_theme {
             let mut cfg = self.config.clone();
             cfg.theme = preview;
-            self.window.set_palette(cfg.palette());
+            self.window.preview_palette(cfg.palette());
         }
         self.window.set_settings_panel(None);
         self.refresh_pointer_hover();
@@ -232,7 +233,7 @@ impl App {
         if let Some(ref preview) = outcome.preview_theme {
             let mut preview_cfg = self.config.clone();
             preview_cfg.theme = preview.clone();
-            self.window.set_palette(preview_cfg.palette());
+            self.window.preview_palette(preview_cfg.palette());
         }
         if let Some((account, secret)) = outcome.save_secret {
             let keyring = twitty_store::SystemSecretStore::new();
@@ -270,30 +271,30 @@ impl App {
             || outcome.ai_config_changed
             || outcome.commands_changed
         {
-            let mut needs_layout = false;
+            let mut needs_layout = self
+                .window
+                .set_appearance(Appearance::from_config(&self.config));
             for setting in &outcome.changed {
                 match setting {
+                    // Applied above, all at once.
                     SettingId::Theme
                     | SettingId::ColorBackground
                     | SettingId::ColorForeground
                     | SettingId::ColorCursor
                     | SettingId::ColorSelection
-                    | SettingId::ColorAnsi => {
-                        self.window.set_palette(self.config.palette());
-                    }
-                    SettingId::FontFamily => {
-                        self.window
-                            .set_font_family(self.config.font_family.as_deref());
-                        needs_layout = true;
-                    }
-                    SettingId::FontSize => {
-                        self.window.set_font_size(self.config.font_size);
-                        needs_layout = true;
-                    }
-                    SettingId::UiFontFamily => {
-                        self.window
-                            .set_ui_font_family(self.config.ui_font_family.as_deref());
-                    }
+                    | SettingId::ColorAnsi
+                    | SettingId::FontFamily
+                    | SettingId::FontSize
+                    | SettingId::UiFontFamily
+                    | SettingId::UiAccent
+                    | SettingId::BackgroundOpacity
+                    | SettingId::CursorStyle
+                    | SettingId::SidebarPosition
+                    | SettingId::SidebarWidth
+                    | SettingId::TopBar
+                    | SettingId::PaneHeaders
+                    | SettingId::BlockCards
+                    | SettingId::ReduceMotion => {}
                     SettingId::UiLanguage => {
                         let lang = self
                             .settings
@@ -303,16 +304,6 @@ impl App {
                         self.window.set_ui_language(lang);
                         needs_layout = true;
                     }
-                    SettingId::UiAccent => {
-                        self.window.set_ui_accent(self.config.ui_accent_color());
-                    }
-                    SettingId::BackgroundOpacity => {
-                        self.window.set_opacity(self.config.background_opacity);
-                    }
-                    SettingId::CursorStyle => {
-                        self.window
-                            .set_cursor_style(self.config.cursor_style.clone());
-                    }
                     SettingId::CursorBlink => {
                         let blink = self.config.cursor_blink;
                         let ids: Vec<PaneId> = self.ws.panes().map(|p| p.id).collect();
@@ -321,29 +312,6 @@ impl App {
                                 pane.terminal.set_default_cursor_blink(blink);
                             }
                         }
-                    }
-                    SettingId::SidebarPosition => {
-                        self.window
-                            .set_sidebar_position(self.config.sidebar.parse().unwrap_or_default());
-                        needs_layout = true;
-                    }
-                    SettingId::SidebarWidth => {
-                        self.window.set_sidebar_width(self.config.sidebar_width);
-                        needs_layout = true;
-                    }
-                    SettingId::TopBar => {
-                        self.window.set_top_bar(self.config.top_bar);
-                        needs_layout = true;
-                    }
-                    SettingId::PaneHeaders => {
-                        self.window.set_pane_headers(self.config.pane_headers);
-                        needs_layout = true;
-                    }
-                    SettingId::BlockCards => {
-                        self.window.set_block_cards(self.config.block_cards);
-                    }
-                    SettingId::ReduceMotion => {
-                        self.window.set_reduce_motion(self.config.reduce_motion);
                     }
                     SettingId::ComposerMode => {
                         if self.config.composer_mode() == crate::composer::ComposerMode::Off {

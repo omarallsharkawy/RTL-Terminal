@@ -73,8 +73,49 @@ struct LayoutKey {
 }
 
 /// The window, once it is open: its renderer, the pending-redraw flag and the cursor icon.
+/// How the window looks, as the config sets it. Built with `from_config` and applied whole
+/// with `Window::set_appearance`; a new look setting is one field here.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct Appearance {
+    pub palette: crate::color::Palette,
+    pub font_family: Option<String>,
+    pub font_size: f32,
+    pub ui_font_family: Option<String>,
+    pub ui_accent: Option<crate::color::Rgba>,
+    pub opacity: f32,
+    pub cursor_style: String,
+    pub block_cards: bool,
+    pub reduce_motion: bool,
+    pub sidebar: SidebarPosition,
+    pub sidebar_width: f32,
+    pub top_bar: bool,
+    pub pane_headers: bool,
+}
+
+impl Appearance {
+    pub(super) fn from_config(config: &TwittyConfig) -> Self {
+        Self {
+            palette: config.palette(),
+            font_family: config.font_family.clone(),
+            font_size: config.font_size,
+            ui_font_family: config.ui_font_family.clone(),
+            ui_accent: config.ui_accent_color(),
+            opacity: config.background_opacity,
+            cursor_style: config.cursor_style.clone(),
+            block_cards: config.block_cards,
+            reduce_motion: config.reduce_motion,
+            sidebar: config.sidebar.parse().unwrap_or_default(),
+            sidebar_width: config.sidebar_width,
+            top_bar: config.top_bar,
+            pane_headers: config.pane_headers,
+        }
+    }
+}
+
 pub(super) struct Window {
     renderer: Option<Renderer>,
+    /// What `set_appearance` last applied (None until the renderer exists).
+    appearance: Option<Appearance>,
     perf: Option<crate::perf::Perf>,
     needs_redraw: bool,
     layout_cache: RefCell<Option<(LayoutKey, Rc<WindowLayout>)>>,
@@ -112,6 +153,7 @@ impl Window {
     pub(super) fn new(perf: Option<crate::perf::Perf>) -> Self {
         Self {
             renderer: None,
+            appearance: None,
             perf,
             needs_redraw: false,
             layout_cache: RefCell::default(),
@@ -181,7 +223,7 @@ impl Window {
         window.set_ime_allowed(true);
         window.set_ime_purpose(winit::window::ImePurpose::Terminal);
 
-        let mut renderer =
+        let renderer =
             match pollster::block_on(Renderer::new(window, config.font_size, self.perf.as_mut())) {
                 Ok(r) => r,
                 Err(e) => {
@@ -191,21 +233,11 @@ impl Window {
                 }
             };
 
-        self.motion = ChromeAnimations::new(config.reduce_motion);
-        renderer.set_reduce_motion(config.reduce_motion);
-        renderer.set_font_family(config.font_family.as_deref());
-        renderer.set_ui_style(config.ui_font_family.as_deref(), config.ui_accent_color());
-        renderer.set_opacity(config.background_opacity);
-        renderer.set_cursor_style(config.cursor_style.clone());
-        renderer.set_palette(config.palette());
-        renderer.set_block_cards(config.block_cards);
-        self.sidebar = Placement::new(config.sidebar.parse().unwrap_or_default());
-        self.sidebar_width = config.sidebar_width;
-        self.top_bar = config.top_bar;
-        self.pane_headers = config.pane_headers;
+        self.renderer = Some(renderer);
+        self.appearance = None;
+        self.set_appearance(Appearance::from_config(config));
         self.language = config.effective_ui_language();
         self.language.set_current();
-        self.renderer = Some(renderer);
         true
     }
 
@@ -653,63 +685,71 @@ impl Window {
         self.renderer.as_ref().map(Renderer::surface_size)
     }
 
-    pub(super) fn set_palette(&mut self, palette: crate::color::Palette) {
+    /// Show `palette` without changing the config (theme previews). `set_appearance` leaves a
+    /// preview alone until the configured palette itself changes.
+    pub(super) fn preview_palette(&mut self, palette: crate::color::Palette) {
         if let Some(ref mut r) = self.renderer {
             r.set_palette(palette);
         }
     }
 
-    pub(super) fn set_font_family(&mut self, family: Option<&str>) {
-        if let Some(ref mut r) = self.renderer {
-            r.set_font_family(family);
+    /// Apply how the window looks. Only what differs from what is shown reaches the renderer.
+    /// Returns true when the panes must be laid out again (cell size or chrome changed).
+    pub(super) fn set_appearance(&mut self, next: Appearance) -> bool {
+        let Some(r) = self.renderer.as_mut() else {
+            return false;
+        };
+        let old = self.appearance.take();
+        macro_rules! changed {
+            ($field:ident) => {
+                old.as_ref().is_none_or(|o| o.$field != next.$field)
+            };
         }
-    }
-
-    pub(super) fn set_ui_font_family(&mut self, family: Option<&str>) {
-        if let Some(ref mut r) = self.renderer {
-            r.set_ui_font_family(family);
+        let mut layout = false;
+        if changed!(palette) {
+            r.set_palette(next.palette.clone());
         }
-    }
-
-    pub(super) fn set_ui_accent(&mut self, accent: Option<crate::color::Rgba>) {
-        if let Some(ref mut r) = self.renderer {
-            r.set_ui_accent(accent);
+        if changed!(font_family) {
+            r.set_font_family(next.font_family.as_deref());
+            layout = true;
         }
-    }
-
-    pub(super) fn set_cursor_style(&mut self, style: String) {
-        if let Some(ref mut r) = self.renderer {
-            r.set_cursor_style(style);
+        if changed!(font_size) {
+            r.set_font_size(next.font_size);
+            layout = true;
         }
-    }
-
-    pub(super) fn set_sidebar_position(&mut self, position: SidebarPosition) {
-        self.sidebar = Placement::new(position);
-    }
-
-    pub(super) fn set_sidebar_width(&mut self, width: f32) {
-        self.sidebar_width = crate::layout::clamp_sidebar_width(width);
-    }
-
-    pub(super) fn set_top_bar(&mut self, enabled: bool) {
-        self.top_bar = enabled;
-    }
-
-    pub(super) fn set_pane_headers(&mut self, enabled: bool) {
-        self.pane_headers = enabled;
-    }
-
-    pub(super) fn set_reduce_motion(&mut self, reduced: bool) {
-        self.motion = ChromeAnimations::new(reduced);
-        if let Some(ref mut r) = self.renderer {
-            r.set_reduce_motion(reduced);
+        if changed!(ui_font_family) {
+            r.set_ui_font_family(next.ui_font_family.as_deref());
         }
-    }
-
-    pub(super) fn set_block_cards(&mut self, enabled: bool) {
-        if let Some(ref mut r) = self.renderer {
-            r.set_block_cards(enabled);
+        if changed!(ui_accent) {
+            r.set_ui_accent(next.ui_accent);
         }
+        if changed!(opacity) {
+            r.set_opacity(next.opacity);
+        }
+        if changed!(cursor_style) {
+            r.set_cursor_style(next.cursor_style.clone());
+        }
+        if changed!(block_cards) {
+            r.set_block_cards(next.block_cards);
+        }
+        if changed!(reduce_motion) {
+            r.set_reduce_motion(next.reduce_motion);
+            self.motion = ChromeAnimations::new(next.reduce_motion);
+        }
+        // The sidebar can also be toggled from the chrome, so compare with what is shown.
+        if old.is_none() || self.sidebar.position != next.sidebar {
+            self.sidebar = Placement::new(next.sidebar);
+            layout = true;
+        }
+        let width = crate::layout::clamp_sidebar_width(next.sidebar_width);
+        layout |= self.sidebar_width != width
+            || self.top_bar != next.top_bar
+            || self.pane_headers != next.pane_headers;
+        self.sidebar_width = width;
+        self.top_bar = next.top_bar;
+        self.pane_headers = next.pane_headers;
+        self.appearance = Some(next);
+        layout
     }
 
     pub(super) fn palette_rows(&self, max: usize) -> usize {
@@ -749,18 +789,6 @@ impl Window {
     pub(super) fn set_scale_factor(&mut self, scale: f32) {
         if let Some(ref mut r) = self.renderer {
             r.set_scale_factor(scale);
-        }
-    }
-
-    pub(super) fn set_font_size(&mut self, size: f32) {
-        if let Some(ref mut r) = self.renderer {
-            r.set_font_size(size);
-        }
-    }
-
-    pub(super) fn set_opacity(&mut self, opacity: f32) {
-        if let Some(ref mut r) = self.renderer {
-            r.set_opacity(opacity);
         }
     }
 
@@ -1314,7 +1342,8 @@ impl App {
         self.config.font_size = clamped;
         // Written once on exit instead of on every zoom step.
         self.config_dirty = true;
-        self.window.set_font_size(clamped);
+        self.window
+            .set_appearance(Appearance::from_config(&self.config));
         self.apply_layout();
     }
 
@@ -1323,7 +1352,8 @@ impl App {
         let opacity = step_opacity(self.config.background_opacity, steps);
         self.config.background_opacity = opacity;
         self.config_dirty = true;
-        self.window.set_opacity(opacity);
+        self.window
+            .set_appearance(Appearance::from_config(&self.config));
         self.window.request_redraw();
     }
 

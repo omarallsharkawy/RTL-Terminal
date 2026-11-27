@@ -185,15 +185,10 @@ impl App {
             self.window.set_ui_language(lang);
             needs_layout = true;
         }
-        if outcome.apply.palette {
-            self.window.set_palette(self.config.palette());
-        }
-        if outcome.apply.font_size {
-            self.window.set_font_size(self.config.font_size);
-            needs_layout = true;
-        }
-        if outcome.apply.opacity {
-            self.window.set_opacity(self.config.background_opacity);
+        if outcome.apply.palette || outcome.apply.font_size || outcome.apply.opacity {
+            needs_layout |= self
+                .window
+                .set_appearance(super::window::Appearance::from_config(&self.config));
         }
         if needs_layout {
             self.apply_layout();

@@ -261,13 +261,6 @@ impl Renderer {
         (self.config.width as f32, self.config.height as f32)
     }
 
-    pub(crate) fn set_ui_style(&mut self, family: Option<&str>, accent: Option<Rgba>) {
-        self.ui_font = UiFont::new(&mut self.ui_font_system, family);
-        self.ui_labels = UiLabelCache::default();
-        self.ui_accent = accent;
-        self.sidebar_labels.clear();
-    }
-
     pub(crate) fn set_ui_font_family(&mut self, family: Option<&str>) {
         self.ui_font = UiFont::new(&mut self.ui_font_system, family);
         self.ui_labels = UiLabelCache::default();
