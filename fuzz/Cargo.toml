@@ -10,6 +10,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 twitty = { path = ".." }
+twitty-ai = { path = "../crates/twitty-ai" }
 cosmic_text = { package = "cosmic-text", version = "0.19.0" }
 
 # Not part of the main build: run with `cargo +nightly fuzz run <target>`.
@@ -26,6 +27,34 @@ bench = false
 [[bin]]
 name = "shape_rows"
 path = "fuzz_targets/shape_rows.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "control_protocol"
+path = "fuzz_targets/control_protocol.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "redact_secrets"
+path = "fuzz_targets/redact_secrets.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "review_diff"
+path = "fuzz_targets/review_diff.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "agent_policy"
+path = "fuzz_targets/agent_policy.rs"
 test = false
 doc = false
 bench = false

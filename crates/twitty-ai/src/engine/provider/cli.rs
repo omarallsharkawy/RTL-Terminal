@@ -138,15 +138,32 @@ pub(super) fn complete(
         argv.push(format!("--model={}", request.model));
     }
     let prompt = prompt(request);
-    let argv = non_interactive_argv(&argv, &prompt);
-    // CLI output has no common token meter. Bound its bytes and report an estimate.
+    // Linux limits each single argv string to MAX_ARG_STRLEN (128 KiB). Keep small prompts on
+    // argv for maximum compatibility, and pipe larger multi-turn prompts via stdin to avoid E2BIG.
+    const CLI_ARGV_PROMPT_LIMIT: usize = 64 * 1024;
     let output_limit = MAX_AI_OUTPUT_BYTES.min(request.max_output_tokens as usize * 4);
-    let output = crate::ai::runner::run_agent_command_blocking(
-        &argv,
-        request.timeout,
-        output_limit,
-        &cancel.flag,
-    )
+    let output = if prompt.len() > CLI_ARGV_PROMPT_LIMIT {
+        let placeholder = match stem.as_deref() {
+            Some("codex") => "-",
+            _ => "",
+        };
+        let argv = non_interactive_argv(&argv, placeholder);
+        crate::ai::runner::run_agent_command_with_stdin(
+            &argv,
+            prompt.as_bytes(),
+            request.timeout,
+            output_limit,
+            &cancel.flag,
+        )
+    } else {
+        let argv = non_interactive_argv(&argv, &prompt);
+        crate::ai::runner::run_agent_command_blocking(
+            &argv,
+            request.timeout,
+            output_limit,
+            &cancel.flag,
+        )
+    }
     .map_err(|error| match error {
         AiError::Cancelled => ProviderError::Cancelled,
         AiError::TimedOut(_) => ProviderError::Timeout,

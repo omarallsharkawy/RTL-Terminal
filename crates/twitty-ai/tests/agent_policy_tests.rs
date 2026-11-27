@@ -233,3 +233,19 @@ fn canonical_paths_and_sensitive_names() {
         ));
     }
 }
+
+#[test]
+fn denies_windows_userprofile_protected_paths() {
+    let temp = Temp::new();
+    let root = temp.0.join("project");
+    fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    assert!(matches!(
+        command(&root, &root, "cat %USERPROFILE%/.ssh/id_rsa", &[], false),
+        Approval::Deny(DenyReason::HardDeny { .. })
+    ));
+    assert!(matches!(
+        command(&root, &root, r"cat '%USERPROFILE%\.ssh\id_rsa'", &[], false),
+        Approval::Deny(DenyReason::HardDeny { .. })
+    ));
+}

@@ -10,7 +10,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use alacritty_terminal::term::cell::Flags as CellFlags;
-use alacritty_terminal::vte::ansi::{Color as AnsiColor, Rgb};
+use alacritty_terminal::vte::ansi::Color as AnsiColor;
 use glyphon::TextBounds;
 use unicode_bidi::{bidi_class, BidiClass};
 use unicode_width::UnicodeWidthChar;
@@ -1531,14 +1531,7 @@ pub fn build(
     scene
 }
 
-fn rgb8(c: Rgba) -> Rgb {
-    let to8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-    Rgb {
-        r: to8(c.r),
-        g: to8(c.g),
-        b: to8(c.b),
-    }
-}
+use crate::helpers::rgb8;
 
 fn clamp_char_boundary(s: &str, mut byte: usize) -> usize {
     byte = byte.min(s.len());

@@ -6,15 +6,12 @@
 //! Settings that could run other programs or change the output format (external diff and
 //! textconv drivers, fsmonitor, quoted paths, prefixes) are turned off on the command line.
 
-use std::io::Read;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, ExitStatus, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::process::{Command, ExitStatus};
+use std::time::Duration;
 
 use super::diff::{parse, Diff, Limits, Untracked, MAX_DIFF_BYTES};
+use crate::process::{read_bounded, run_bounded};
 
 /// Longest a git command may run.
 const TIMEOUT: Duration = Duration::from_secs(20);
@@ -64,12 +61,6 @@ impl Output {
 /// Run `git -C dir <fixed config> args…`, reading at most `limit` bytes of output.
 fn git(dir: &Path, args: &[&str], limit: usize) -> Result<Output, LoadError> {
     let mut cmd = Command::new("git");
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
     cmd.arg("-C")
         .arg(dir)
         .args([
@@ -87,77 +78,23 @@ fn git(dir: &Path, args: &[&str], limit: usize) -> Result<Output, LoadError> {
         .args(args)
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_TERMINAL_PROMPT", "0")
-        .env("LC_ALL", "C")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    let mut child = cmd.spawn().map_err(|e| match e.kind() {
+        .env("LC_ALL", "C");
+    let out = run_bounded(
+        cmd,
+        "twitty-review-git",
+        TIMEOUT,
+        Duration::from_millis(15),
+        limit,
+    )
+    .map_err(|e| match e.kind() {
         std::io::ErrorKind::NotFound => LoadError::NoGit,
         _ => LoadError::Failed(format!("git: {e}")),
     })?;
-    let Some(stdout) = child.stdout.take() else {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err(LoadError::Failed("git: no output pipe".into()));
-    };
-    // The watchdog owns the child: it reaps it, or kills it on timeout, when the reader has
-    // enough, or if the watchdog thread itself fails to spawn. Killing closes the pipe, which
-    // ends the read below.
-    struct KillOnDrop(Option<std::process::Child>);
-    impl Drop for KillOnDrop {
-        fn drop(&mut self) {
-            if let Some(mut c) = self.0.take() {
-                let _ = c.kill();
-                let _ = c.wait();
-            }
-        }
-    }
-
-    let stop = Arc::new(AtomicBool::new(false));
-    let mut guard = KillOnDrop(Some(child));
-    let watchdog = {
-        let stop = stop.clone();
-        thread::Builder::new()
-            .name("twitty-review-git".into())
-            .spawn(move || {
-                let start = Instant::now();
-                loop {
-                    let child = guard.0.as_mut()?;
-                    match child.try_wait() {
-                        Ok(Some(status)) => {
-                            let _ = guard.0.take();
-                            return Some(status);
-                        }
-                        Ok(None) => {}
-                        Err(_) => return None,
-                    }
-                    if stop.load(Ordering::Relaxed) || start.elapsed() > TIMEOUT {
-                        return None;
-                    }
-                    thread::sleep(Duration::from_millis(15));
-                }
-            })
-            .map_err(|e| LoadError::Failed(format!("thread: {e}")))?
-    };
-    let (stdout, truncated) = read_bounded(stdout, limit);
-    if truncated {
-        stop.store(true, Ordering::Relaxed);
-    }
-    let status = watchdog.join().ok().flatten();
     Ok(Output {
-        stdout,
-        truncated,
-        status,
+        stdout: out.stdout,
+        truncated: out.truncated,
+        status: out.status,
     })
-}
-
-/// Read `reader` to its end or `limit` bytes; true when there was more.
-fn read_bounded(reader: impl Read, limit: usize) -> (Vec<u8>, bool) {
-    let mut out = Vec::new();
-    let _ = reader.take(limit as u64 + 1).read_to_end(&mut out);
-    let truncated = out.len() > limit;
-    out.truncate(limit);
-    (out, truncated)
 }
 
 fn path_from_bytes(bytes: &[u8]) -> PathBuf {

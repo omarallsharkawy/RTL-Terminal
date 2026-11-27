@@ -363,6 +363,31 @@ impl SessionStore {
         self.last_pane_closed = true;
     }
 
+    /// Persist a crash-recovery snapshot of the workspace on a background thread without blocking
+    /// the UI loop. No-op when the last pane was closed or the workspace is empty.
+    pub fn checkpoint(&self, workspace: &Workspace, sidebar_visible: bool) {
+        if self.last_pane_closed || workspace.is_empty() {
+            return;
+        }
+        let Some(path) = self.path.clone() else {
+            return;
+        };
+        let session = Session::capture(workspace, sidebar_visible);
+        if let Err(err) = std::thread::Builder::new()
+            .name("twitty-session-save".into())
+            .spawn(move || {
+                if let Err(err) = write_session(&path, &session) {
+                    tracing::warn!(
+                        "twitty session checkpoint failed ({}): {err}",
+                        path.display()
+                    );
+                }
+            })
+        {
+            tracing::warn!("twitty session checkpoint thread failed to start: {err}");
+        }
+    }
+
     pub fn finish(&self, workspace: &Workspace, sidebar_visible: bool) {
         let Some(path) = &self.path else {
             return;

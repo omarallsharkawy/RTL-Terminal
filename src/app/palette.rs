@@ -92,8 +92,9 @@ impl App {
         self.reset_pointer_gesture();
         let (workflows, entries) = if mode == PaletteMode::Commands {
             let cwd = self.focused_id().and_then(|id| self.pane_cwd(id));
-            let workflows = WorkflowSet::load(&self.config.commands, cwd.as_deref());
+            let workflows = self.cached_workflows(cwd.as_deref());
             let entries = workflows.palette_entries_with(&self.keybindings);
+            self.request_workflows_load(cwd);
             (workflows, entries)
         } else {
             (WorkflowSet::default(), Vec::new())
@@ -123,6 +124,17 @@ impl App {
             search: SearchAll::default(),
         });
         self.sync_palette();
+    }
+
+    /// Refresh open Command Palette entries when off-thread project workflows finish loading.
+    pub(super) fn on_palette_workflows_loaded(&mut self, workflows: WorkflowSet) {
+        if let Some(open) = self.palette.as_mut() {
+            if open.state.mode == PaletteMode::Commands {
+                open.entries = workflows.palette_entries_with(&self.keybindings);
+                open.workflows = workflows;
+                self.sync_palette();
+            }
+        }
     }
 
     pub(super) fn open_close_others_confirmation(&mut self, plan: CloseOthers) {

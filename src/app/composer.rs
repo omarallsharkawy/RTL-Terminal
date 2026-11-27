@@ -160,8 +160,23 @@ impl App {
         self.window.request_redraw();
     }
 
+    /// Apply off-thread loaded workflows to the composer and refresh ghost suggestions.
+    pub(super) fn on_composer_workflows_loaded(
+        &mut self,
+        cwd: Option<PathBuf>,
+        workflows: WorkflowSet,
+    ) {
+        self.composer.workflows = workflows;
+        self.composer.workflows_cwd = cwd;
+        self.composer.state.refresh_ghost(
+            self.composer.history.entries(),
+            self.composer.workflows.workflows(),
+        );
+    }
+
     /// Reload saved commands on the next composer refresh (after Settings → Commands edits).
     pub(super) fn invalidate_composer_workflows(&mut self) {
+        self.workflows_cache = None;
         self.composer.workflows_cwd = None;
         self.composer.workflows = WorkflowSet::default();
     }
@@ -234,8 +249,9 @@ impl App {
         self.ensure_path_commands_loaded();
         let cwd = self.focused_id().and_then(|id| self.pane_cwd(id));
         if self.composer.workflows_cwd != cwd || self.composer.workflows.workflows().is_empty() {
-            self.composer.workflows = WorkflowSet::load(&self.config.commands, cwd.as_deref());
+            self.composer.workflows = self.cached_workflows(cwd.as_deref());
             self.composer.workflows_cwd = cwd.clone();
+            self.request_workflows_load(cwd.clone());
         }
         self.composer.state.refresh_ghost(
             self.composer.history.entries(),

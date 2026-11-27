@@ -58,6 +58,32 @@ pub enum AppEvent {
     AgentContext(u64, twitty_ai::engine::model::ContextBundle),
     /// Project memory snapshot loaded off the UI thread for the Memory screen.
     MemorySnapshot(u64, twitty_store::ProjectMemorySnapshot),
+    /// Off-thread Settings → AI keyring & CLI PATH probe result.
+    SettingsAiProbed {
+        generation: u64,
+        detected_cli_agents: Vec<String>,
+        saved_keys: [bool; 3],
+        notice: Option<(bool, String)>,
+        restart_engine: bool,
+    },
+    /// Off-thread Agent engine config built from `$PATH` + system keyring.
+    AgentEngineConfigReady {
+        generation: u64,
+        config: twitty_ai::engine::EngineConfig,
+    },
+    /// Assembled context ready to start an agent session without blocking the UI thread.
+    AgentStartReady {
+        generation: u64,
+        session: twitty_ai::engine::model::SessionId,
+        request: String,
+        cwd: PathBuf,
+        context: twitty_ai::engine::model::ContextBundle,
+    },
+    /// Project + config workflows loaded off the UI thread for palette & composer.
+    WorkflowsLoaded {
+        cwd: Option<PathBuf>,
+        workflows: Box<crate::workflows::WorkflowSet>,
+    },
 }
 
 /// Longest title kept from a program, in characters.
@@ -118,6 +144,7 @@ impl App {
                     recorded_cwd = Some(path.clone());
                 }
                 meta.cwd = Some(path);
+                self.mark_session_dirty();
             }
             Signal::Notify { title, body } => {
                 self.notify(id, title, body);

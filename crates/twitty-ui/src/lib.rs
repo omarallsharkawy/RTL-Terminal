@@ -12,6 +12,7 @@ pub mod composer;
 pub mod config;
 pub mod input;
 pub mod ports;
+pub(crate) mod process;
 pub mod projects;
 pub mod review;
 pub mod sidebar;

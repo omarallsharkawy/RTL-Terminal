@@ -95,14 +95,7 @@ impl ReviewCache {
     }
 }
 
-fn rgb8(c: Rgba) -> Rgb {
-    let to8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-    Rgb {
-        r: to8(c.r),
-        g: to8(c.g),
-        b: to8(c.b),
-    }
-}
+use crate::helpers::{inset_clamped as inset, rgb8};
 
 /// `text` as one row of cells in color `fg`: combining marks on their base cell, wide
 /// characters on two cells. Control characters must already be replaced (`display_text`).
@@ -608,17 +601,6 @@ impl ReviewDrawing<'_, '_> {
         );
         icon.draw(rect, self.ctx.color(color), &mut self.scene.shapes);
     }
-}
-
-fn inset(rect: Rect, dx: f32, dy: f32) -> Rect {
-    let dx = dx.min(rect.w / 2.0);
-    let dy = dy.min(rect.h / 2.0);
-    Rect::new(
-        rect.x + dx,
-        rect.y + dy,
-        rect.w - 2.0 * dx,
-        rect.h - 2.0 * dy,
-    )
 }
 
 fn centered_height(rect: Rect, h: f32) -> Rect {

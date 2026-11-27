@@ -157,7 +157,7 @@ const ARABIC_IN_CODE: &[(&str, usize, &str)] = &[
         "the answer language named to the agent",
     ),
     (
-        "crates/twitty-scene/src/agent.rs",
+        "crates/twitty-scene/src/agent/inspector.rs",
         5,
         "Arabic counted nouns (one, two, few, many)",
     ),
@@ -182,7 +182,7 @@ const ARABIC_IN_CODE: &[(&str, usize, &str)] = &[
         "startup warnings in both languages",
     ),
     (
-        "crates/twitty-ui/src/ui/agent_panel.rs",
+        "crates/twitty-ui/src/ui/agent_panel/mod.rs",
         17,
         "Arabic counted nouns (one, two, few, many)",
     ),

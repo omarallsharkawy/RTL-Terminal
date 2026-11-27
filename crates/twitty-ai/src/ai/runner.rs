@@ -8,7 +8,7 @@
 //! - Environment stripped of all `TWITTY_*`, `CMUX_*`, `__TWITTY_*`, and inherited terminal vars
 //! - Fresh empty `0700` temporary working directory (never the user's pane cwd), removed after exit
 
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -229,7 +229,7 @@ pub fn run_command_blocking(
     max_output_bytes: usize,
     cancel: &AiCancel,
 ) -> Result<String, AiError> {
-    run_isolated(argv, timeout, max_output_bytes, cancel, false)
+    run_isolated(argv, timeout, max_output_bytes, cancel, false, None)
 }
 
 pub(crate) fn run_agent_command_blocking(
@@ -238,7 +238,24 @@ pub(crate) fn run_agent_command_blocking(
     max_output_bytes: usize,
     cancel: &AiCancel,
 ) -> Result<String, AiError> {
-    run_isolated(argv, timeout, max_output_bytes, cancel, true)
+    run_isolated(argv, timeout, max_output_bytes, cancel, true, None)
+}
+
+pub(crate) fn run_agent_command_with_stdin(
+    argv: &[String],
+    stdin_payload: &[u8],
+    timeout: Duration,
+    max_output_bytes: usize,
+    cancel: &AiCancel,
+) -> Result<String, AiError> {
+    run_isolated(
+        argv,
+        timeout,
+        max_output_bytes,
+        cancel,
+        true,
+        Some(stdin_payload),
+    )
 }
 
 fn run_isolated(
@@ -247,6 +264,7 @@ fn run_isolated(
     max_output_bytes: usize,
     cancel: &AiCancel,
     strip_credentials: bool,
+    stdin_payload: Option<&[u8]>,
 ) -> Result<String, AiError> {
     if cancel.is_cancelled() {
         return Err(AiError::Cancelled);
@@ -262,7 +280,11 @@ fn run_isolated(
     let mut cmd = Command::new(program);
     cmd.args(args)
         .current_dir(sandbox_dir.path())
-        .stdin(Stdio::null())
+        .stdin(if stdin_payload.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -282,10 +304,26 @@ fn run_isolated(
         cmd.env_remove(key);
     }
 
-    let mut child = cmd.spawn().map_err(|e| match e.kind() {
-        std::io::ErrorKind::NotFound => AiError::NoAgent,
-        _ => AiError::SpawnFailed(clean_text(&e.to_string(), 160)),
-    })?;
+    // Retry briefly on Linux ETXTBSY (transient when another thread forks while a newly written
+    // helper script fd is still open in the child before exec).
+    let mut child = {
+        let mut attempt = 0u8;
+        loop {
+            match cmd.spawn() {
+                Ok(child) => break child,
+                Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && attempt < 4 => {
+                    attempt += 1;
+                    thread::sleep(Duration::from_millis(5 * u64::from(attempt)));
+                }
+                Err(e) => {
+                    return Err(match e.kind() {
+                        std::io::ErrorKind::NotFound => AiError::NoAgent,
+                        _ => AiError::SpawnFailed(clean_text(&e.to_string(), 160)),
+                    });
+                }
+            }
+        }
+    };
 
     let Some(stdout_pipe) = child.stdout.take() else {
         let _ = child.kill();
@@ -297,9 +335,21 @@ fn run_isolated(
         let _ = child.wait();
         return Err(AiError::SpawnFailed("missing stderr pipe".into()));
     };
+    let stdin_pipe = child.stdin.take();
 
     let overflow = Arc::new(AtomicBool::new(false));
     let mut guard = KillOnDrop(Some(child));
+
+    // Write large prompts off-thread so filling the OS pipe buffer never deadlocks stdout reading.
+    if let (Some(mut stdin), Some(payload)) = (stdin_pipe, stdin_payload) {
+        let bytes = payload.to_vec();
+        let _ = thread::Builder::new()
+            .name("twitty-ai-stdin".into())
+            .spawn(move || {
+                let _ = stdin.write_all(&bytes);
+                let _ = stdin.flush();
+            });
+    }
 
     let stdout_thread = {
         let overflow = overflow.clone();

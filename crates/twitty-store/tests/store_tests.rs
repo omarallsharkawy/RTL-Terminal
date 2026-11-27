@@ -128,7 +128,8 @@ fn migrations_fresh_intermediate_rerun_and_newer_schema() {
     assert_eq!(store2.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     drop(store2);
 
-    // 2. Multi-step migration chain: fresh (0 -> 3) and every intermediate version (1 -> 3, 2 -> 3).
+    // 2. Multi-step migration chain: fresh (0 -> future) and every intermediate version -> future.
+    const FUTURE_VERSION: u32 = CURRENT_SCHEMA_VERSION + 1;
     const CHAIN: &[Migration] = &[
         Migration {
             version: 1,
@@ -142,19 +143,23 @@ fn migrations_fresh_intermediate_rerun_and_newer_schema() {
             version: 3,
             sql: "CREATE TABLE extra_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);",
         },
+        Migration {
+            version: FUTURE_VERSION,
+            sql: "CREATE TABLE future_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);",
+        },
     ];
 
-    // Fresh 0 -> 3.
+    // Fresh 0 -> FUTURE_VERSION.
     let p_fresh = dir.path().join("chain_fresh.db");
     let s = Store::open_with_migrations(&p_fresh, CHAIN).unwrap();
-    assert_eq!(s.schema_version().unwrap(), 3);
+    assert_eq!(s.schema_version().unwrap(), FUTURE_VERSION);
     drop(s);
-    // Re-run at 3 -> no-op.
+    // Re-run at FUTURE_VERSION -> no-op.
     let s = Store::open_with_migrations(&p_fresh, CHAIN).unwrap();
-    assert_eq!(s.schema_version().unwrap(), 3);
+    assert_eq!(s.schema_version().unwrap(), FUTURE_VERSION);
     drop(s);
 
-    // Every intermediate version (1 and 2) -> latest (3).
+    // Every intermediate version -> FUTURE_VERSION.
     for start_ver in 1..CHAIN.len() {
         let p = dir.path().join(format!("chain_from_{start_ver}.db"));
         let s_init = Store::open_with_migrations(&p, &CHAIN[..start_ver]).unwrap();
@@ -175,13 +180,13 @@ fn migrations_fresh_intermediate_rerun_and_newer_schema() {
         drop(s_init);
 
         let s_upgraded = Store::open_with_migrations(&p, CHAIN).unwrap();
-        assert_eq!(s_upgraded.schema_version().unwrap(), 3);
+        assert_eq!(s_upgraded.schema_version().unwrap(), FUTURE_VERSION);
         let rows = s_upgraded.recent_history(None, 10).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].command, "cargo check");
         drop(s_upgraded);
 
-        // 3. Opening a v3 DB with only supported migrations must fail with NewerSchema without downgrading.
+        // 3. Opening a future-version DB with only supported migrations must fail with NewerSchema without downgrading.
         let err = match Store::open_with_migrations(&p, MIGRATIONS) {
             Ok(_) => panic!("expected NewerSchema error"),
             Err(err) => err,
@@ -190,7 +195,7 @@ fn migrations_fresh_intermediate_rerun_and_newer_schema() {
             matches!(
                 err,
                 StoreError::NewerSchema {
-                    found: 3,
+                    found: FUTURE_VERSION,
                     supported: CURRENT_SCHEMA_VERSION,
                 }
             ),
@@ -199,7 +204,7 @@ fn migrations_fresh_intermediate_rerun_and_newer_schema() {
         // Verify version was NOT downgraded and the DB is still readable read-only.
         let ro = Store::open_read_only(&p).unwrap();
         assert!(ro.is_read_only());
-        assert_eq!(ro.schema_version().unwrap(), 3);
+        assert_eq!(ro.schema_version().unwrap(), FUTURE_VERSION);
         let rows = ro.recent_history(None, 10).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].command, "cargo check");
@@ -960,4 +965,30 @@ fn open_rejects_symlinks_and_preserves_existing_non_twitty_parent_mode() {
         Store::open(&link_parent.join("twitty.db")),
         Err(StoreError::InvalidInput(_))
     ));
+}
+
+#[test]
+fn prune_history_keeps_newest_and_optimize_succeeds() {
+    let store = Store::open_in_memory().unwrap();
+    for i in 0..10i64 {
+        store
+            .record_command(&NewCommand {
+                command: format!("echo step-{i}"),
+                exit_code: Some(0),
+                duration_ms: Some(1),
+                cwd: "/tmp".into(),
+                project_root: None,
+                shell: Some("bash".into()),
+                started_at: 1000 + i,
+                finished_at: Some(1001 + i),
+            })
+            .unwrap();
+    }
+    let removed = store.prune_history(4).unwrap();
+    assert_eq!(removed, 6);
+    let kept = store.recent_history(None, 20).unwrap();
+    assert_eq!(kept.len(), 4);
+    assert_eq!(kept[0].command, "echo step-9");
+    assert_eq!(kept[3].command, "echo step-6");
+    store.optimize().unwrap();
 }

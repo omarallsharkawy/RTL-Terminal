@@ -63,6 +63,9 @@ pub(super) struct AgentPanelHost {
     pub state: AgentPanelState,
     spawner: Box<dyn AgentEngineSpawner>,
     cmd_tx: Option<mpsc::Sender<AgentCommand>>,
+    engine_starting: bool,
+    engine_generation: u64,
+    pending_cmds: Vec<AgentCommand>,
     running_cmd: Option<RunningAgentCommand>,
     waiting_status_pane: Option<PaneId>,
     dragging_divider: bool,
@@ -81,6 +84,9 @@ impl AgentPanelHost {
             state: AgentPanelState::new(),
             spawner,
             cmd_tx: None,
+            engine_starting: false,
+            engine_generation: 0,
+            pending_cmds: Vec::new(),
             running_cmd: None,
             waiting_status_pane: None,
             dragging_divider: false,
@@ -151,18 +157,42 @@ impl App {
         self.agent_panel.state.is_focused() && self.window.agent_panel_rect(&self.ws).is_some()
     }
 
-    /// Ensure the background engine handle exists and its event forwarding thread is running.
-    fn ensure_agent_engine(&mut self) -> Option<mpsc::Sender<AgentCommand>> {
-        if let Some(tx) = &self.agent_panel.cmd_tx {
-            return Some(tx.clone());
+    /// Start probing `$PATH` and system keyring off the UI thread to build [`EngineConfig`].
+    fn start_agent_engine_init(&mut self) {
+        if self.agent_panel.engine_starting {
+            return;
         }
-        let detected = crate::ui::settings_ai::detect_cli_agents_on_path();
-        let keyring = twitty_store::SystemSecretStore::new();
-        let config = crate::ui::settings_ai::engine_config(
-            &self.config,
-            &detected,
-            |account| matches!(keyring.get(account), Ok(Some(v)) if !v.is_empty()),
-        );
+        self.agent_panel.engine_generation = self.agent_panel.engine_generation.wrapping_add(1);
+        let generation = self.agent_panel.engine_generation;
+        self.agent_panel.engine_starting = true;
+        let app_config = self.config.clone();
+        let proxy = self.proxy.clone();
+        if let Err(err) = thread::Builder::new()
+            .name("twitty-agent-init".into())
+            .spawn(move || {
+                let detected = crate::ui::settings_ai::detect_cli_agents_on_path();
+                let keyring = twitty_store::SystemSecretStore::new();
+                let config = crate::ui::settings_ai::engine_config(
+                    &app_config,
+                    &detected,
+                    |account| matches!(keyring.get(account), Ok(Some(v)) if !v.is_empty()),
+                );
+                let _ = proxy.send_event(AppEvent::AgentEngineConfigReady { generation, config });
+            })
+        {
+            tracing::warn!("twitty agent init thread failed to start: {err}");
+            self.agent_panel.engine_starting = false;
+            self.agent_panel.pending_cmds.clear();
+        }
+    }
+
+    /// Receive the off-thread [`EngineConfig`], spawn the engine, and flush any queued commands.
+    pub(super) fn on_agent_engine_config_ready(&mut self, generation: u64, config: EngineConfig) {
+        if generation != self.agent_panel.engine_generation {
+            return;
+        }
+        self.agent_panel.engine_starting = false;
+        let pending = std::mem::take(&mut self.agent_panel.pending_cmds);
         match self.agent_panel.spawner.spawn(config) {
             Ok(handle) => {
                 let proxy = self.proxy.clone();
@@ -178,14 +208,18 @@ impl App {
                     })
                 {
                     tracing::warn!("twitty agent event forwarder failed to start: {err}");
-                    return None;
+                    return;
                 }
-                self.agent_panel.cmd_tx = Some(handle.commands.clone());
-                Some(handle.commands)
+                let tx = handle.commands;
+                for cmd in pending {
+                    if tx.send(cmd).is_err() {
+                        return;
+                    }
+                }
+                self.agent_panel.cmd_tx = Some(tx);
             }
             Err(err) => {
                 tracing::warn!("twitty agent engine failed to start: {err}");
-                None
             }
         }
     }
@@ -194,6 +228,9 @@ impl App {
     pub(super) fn shutdown_agent_panel(&mut self) {
         self.agent_panel.running_cmd = None;
         self.agent_panel.cmd_tx = None;
+        self.agent_panel.engine_starting = false;
+        self.agent_panel.engine_generation = self.agent_panel.engine_generation.wrapping_add(1);
+        self.agent_panel.pending_cmds.clear();
     }
 
     /// Settings → AI changed (provider, keys, caps, allow-lists): the next request starts a
@@ -201,15 +238,26 @@ impl App {
     pub(super) fn restart_agent_engine_when_idle(&mut self) {
         if !self.agent_panel.state.is_running() {
             self.agent_panel.cmd_tx = None;
+            self.agent_panel.engine_starting = false;
+            self.agent_panel.engine_generation = self.agent_panel.engine_generation.wrapping_add(1);
+            self.agent_panel.pending_cmds.clear();
         }
     }
 
     fn send_agent_command(&mut self, cmd: AgentCommand) {
-        if let Some(tx) = self.ensure_agent_engine() {
-            if tx.send(cmd).is_err() {
-                self.agent_panel.cmd_tx = None;
+        if let Some(tx) = &self.agent_panel.cmd_tx {
+            match tx.send(cmd) {
+                Ok(()) => return,
+                Err(mpsc::SendError(unsent)) => {
+                    self.agent_panel.cmd_tx = None;
+                    self.agent_panel.pending_cmds.push(unsent);
+                    self.start_agent_engine_init();
+                    return;
+                }
             }
         }
+        self.agent_panel.pending_cmds.push(cmd);
+        self.start_agent_engine_init();
     }
 
     /// Receive an off-thread assembled [`ContextBundle`] for the Agent panel inspector.
@@ -293,9 +341,9 @@ impl App {
         request: String,
         cwd: PathBuf,
     ) {
-        let Some(tx) = self.ensure_agent_engine() else {
-            return;
-        };
+        if self.agent_panel.cmd_tx.is_none() {
+            self.start_agent_engine_init();
+        }
         self.agent_panel.context_generation = self.agent_panel.context_generation.wrapping_add(1);
         let generation = self.agent_panel.context_generation;
         let cwd_opt = (!cwd.as_os_str().is_empty()).then(|| cwd.clone());
@@ -303,7 +351,7 @@ impl App {
         let selected_blocks = self.collect_agent_selected_blocks();
         let overrides = self.agent_panel.state.context_overrides.clone();
         let proxy = self.proxy.clone();
-        let _ = thread::Builder::new()
+        if let Err(err) = thread::Builder::new()
             .name("twitty-agent-start-context".into())
             .spawn(move || {
                 let store = twitty_store::Store::open_default().ok();
@@ -317,14 +365,36 @@ impl App {
                     selected_blocks: &selected_blocks,
                     included_overrides: &overrides,
                 });
-                let _ = proxy.send_event(AppEvent::AgentContext(generation, context.clone()));
-                let _ = tx.send(AgentCommand::Start {
+                let _ = proxy.send_event(AppEvent::AgentStartReady {
+                    generation,
                     session,
                     request,
-                    context,
                     cwd,
+                    context,
                 });
-            });
+            })
+        {
+            tracing::warn!("twitty agent start-context thread failed to start: {err}");
+        }
+    }
+
+    pub(super) fn on_agent_start_ready(
+        &mut self,
+        generation: u64,
+        session: SessionId,
+        request: String,
+        cwd: PathBuf,
+        context: ContextBundle,
+    ) {
+        if generation == self.agent_panel.context_generation {
+            self.agent_panel.state.set_context_bundle(context.clone());
+        }
+        self.send_agent_command(AgentCommand::Start {
+            session,
+            request,
+            context,
+            cwd,
+        });
     }
 
     /// Receive an [`AgentEvent`] forwarded from the engine thread.

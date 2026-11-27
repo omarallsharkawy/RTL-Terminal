@@ -261,6 +261,28 @@ impl Store {
         Ok(on != 0)
     }
 
+    /// Delete the oldest `history` rows beyond `max_rows` (newest kept by `started_at DESC, id DESC`).
+    /// Returns the number of rows removed.
+    pub fn prune_history(&self, max_rows: usize) -> Result<usize, StoreError> {
+        let removed = self.conn.execute(
+            "DELETE FROM history
+             WHERE id NOT IN (
+                 SELECT id FROM history ORDER BY started_at DESC, id DESC LIMIT ?1
+             )",
+            params![max_rows as i64],
+        )?;
+        Ok(removed)
+    }
+
+    /// Run lightweight SQLite query-planner optimization and truncate the WAL file when idle.
+    pub fn optimize(&self) -> Result<(), StoreError> {
+        self.conn.execute_batch("PRAGMA optimize;")?;
+        if !self.read_only {
+            let _ = self.conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+        }
+        Ok(())
+    }
+
     // ---- Command history ----
 
     /// Insert a command into `history` after redacting all text fields. Returns the row id.

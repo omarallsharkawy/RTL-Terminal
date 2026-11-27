@@ -110,6 +110,7 @@ impl App {
         // A second tab shows the tab bar, which shrinks every pane.
         self.apply_layout();
         self.focus_changed(previous, id);
+        self.mark_session_dirty();
         Some(id)
     }
 
@@ -150,6 +151,7 @@ impl App {
         };
         self.apply_layout();
         self.focus_changed(Some(old), new);
+        self.mark_session_dirty();
         Ok(new)
     }
 
@@ -234,6 +236,7 @@ impl App {
         if let Some(new) = self.focused_id() {
             self.focus_changed(old, new);
         }
+        self.mark_session_dirty();
     }
 
     pub(super) fn cycle_tab(&mut self, step: isize) {
@@ -246,6 +249,7 @@ impl App {
         if self.ws.move_active_tab_by(delta) {
             self.window.reveal_active_tab();
             self.window.request_redraw();
+            self.mark_session_dirty();
         }
     }
 
@@ -269,6 +273,7 @@ impl App {
         self.apply_layout();
         self.focus_changed(previous, id);
         self.refresh_window_title();
+        self.mark_session_dirty();
     }
 
     /// Focus the pane with the oldest unseen notification, switching tabs when needed.
@@ -324,6 +329,7 @@ impl App {
             self.pointer.forget(id);
         }
         self.apply_active_layout();
+        self.mark_session_dirty();
     }
 
     pub(super) fn focus_direction(&mut self, dir: FocusDir) {
@@ -358,6 +364,7 @@ impl App {
         self.apply_layout();
         self.focus_changed(closed.previous, now);
         self.refresh_window_title();
+        self.mark_session_dirty();
         false
     }
 
@@ -392,6 +399,7 @@ impl App {
         self.apply_layout();
         self.focus_changed(closed.previous, now);
         self.refresh_window_title();
+        self.mark_session_dirty();
         false
     }
 }

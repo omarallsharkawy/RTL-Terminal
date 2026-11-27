@@ -31,7 +31,7 @@ Options:
                         (default: dist/twitty-<version>-linux-x86_64.AppImage)
   --version VER         Override package version (default: parsed from Cargo.toml)
   --appimagetool PATH   Path to appimagetool binary (or set APPIMAGETOOL)
-  --rasterize           Re-rasterize hicolor PNG icons with rsvg-convert from docs/assets/twitty-mark.svg
+  --rasterize           Re-rasterize hicolor PNG icons with rsvg-convert from packaging/linux/icons/hicolor/scalable/apps/twitty.svg
   --stage-only DIR      Stage the AppDir into DIR and exit without invoking appimagetool
   -h, --help            Show this help message
 EOF
@@ -165,12 +165,12 @@ for size in 16 24 32 48 64 128 256 512; do
       echo "error: --rasterize requires rsvg-convert" >&2
       exit 1
     fi
-    rsvg-convert -w "$size" -h "$size" "$REPO_ROOT/docs/assets/twitty-mark.svg" -o "$dst"
+    rsvg-convert -w "$size" -h "$size" "$REPO_ROOT/packaging/linux/icons/hicolor/scalable/apps/twitty.svg" -o "$dst"
   else
     install -Dm644 "$REPO_ROOT/packaging/linux/icons/hicolor/${size}x${size}/apps/twitty.png" "$dst"
   fi
 done
-install -Dm644 "$REPO_ROOT/docs/assets/twitty-mark.svg" \
+install -Dm644 "$REPO_ROOT/packaging/linux/icons/hicolor/scalable/apps/twitty.svg" \
   "$APPDIR/usr/share/icons/hicolor/scalable/apps/twitty.svg"
 install -Dm644 "$APPDIR/usr/share/icons/hicolor/256x256/apps/twitty.png" "$APPDIR/twitty.png"
 ln -sf twitty.png "$APPDIR/.DirIcon"

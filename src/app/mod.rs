@@ -84,6 +84,16 @@ pub struct App {
     clipboard: Clipboard,
     config: TwittyConfig,
     config_dirty: bool,
+    /// Debounced deadline for flushing `config.save()` after rapid settings adjustments (sliders).
+    config_save_due: Option<Instant>,
+    /// Debounced deadline for writing a crash-recovery `session.json` checkpoint.
+    session_checkpoint_due: Option<Instant>,
+    /// Generation counter for off-thread Settings → AI keyring/CLI probes.
+    settings_probe_gen: u64,
+    /// Cached project + config workflows keyed by `cwd`, refreshed off the UI thread.
+    workflows_cache: Option<(Option<std::path::PathBuf>, crate::workflows::WorkflowSet)>,
+    /// True while a background `WorkflowSet::load` worker is running.
+    workflows_pending: bool,
     /// Compiled keyboard shortcut table (defaults + `config.keybindings`), updated live.
     keybindings: crate::input::keybindings::KeyBindings,
     session: SessionStore,
@@ -165,6 +175,11 @@ impl App {
             clipboard: Clipboard::default(),
             config,
             config_dirty: false,
+            config_save_due: None,
+            session_checkpoint_due: None,
+            settings_probe_gen: 0,
+            workflows_cache: None,
+            workflows_pending: false,
             keybindings,
             session,
             startup_session,
@@ -234,6 +249,106 @@ impl App {
             || self.memory_open()
             || self.ai_consent_open()
             || self.context_menu_open()
+    }
+
+    /// Schedule a debounced `config.save()` so rapid slider drags coalesce into one disk write.
+    pub(super) fn schedule_config_save(&mut self) {
+        self.config_dirty = true;
+        self.config_save_due = Some(Instant::now() + std::time::Duration::from_millis(350));
+    }
+
+    /// Flush any pending `config.save()` immediately (e.g. on slider release, close, or exit).
+    pub(super) fn flush_config_save(&mut self) {
+        self.config_save_due = None;
+        if self.config_dirty {
+            self.config.save();
+            self.config_dirty = false;
+        }
+    }
+
+    fn poll_config_save(&mut self, now: Instant) -> Option<Instant> {
+        let due = self.config_save_due?;
+        if now >= due {
+            self.flush_config_save();
+            None
+        } else {
+            Some(due)
+        }
+    }
+
+    /// Mark the workspace session layout dirty for debounced crash-recovery checkpointing.
+    pub(super) fn mark_session_dirty(&mut self) {
+        if self.config.restore_session {
+            self.session_checkpoint_due =
+                Some(Instant::now() + std::time::Duration::from_millis(2500));
+        }
+    }
+
+    fn poll_session_checkpoint(&mut self, now: Instant) -> Option<Instant> {
+        let due = self.session_checkpoint_due?;
+        if now >= due {
+            self.session_checkpoint_due = None;
+            if self.config.restore_session {
+                self.session
+                    .checkpoint(&self.ws, self.window.sidebar_visible());
+            }
+            None
+        } else {
+            Some(due)
+        }
+    }
+
+    /// Return cached workflows for `cwd` if available, else config-only workflows (never crawling
+    /// the project tree on the UI thread).
+    pub(super) fn cached_workflows(
+        &self,
+        cwd: Option<&std::path::Path>,
+    ) -> crate::workflows::WorkflowSet {
+        if let Some((cached_cwd, set)) = &self.workflows_cache {
+            if cached_cwd.as_deref() == cwd {
+                return set.clone();
+            }
+        }
+        crate::workflows::WorkflowSet::load(&self.config.commands, None)
+    }
+
+    /// Refresh `WorkflowSet::load` for `cwd` on a background thread.
+    pub(super) fn request_workflows_load(&mut self, cwd: Option<std::path::PathBuf>) {
+        if self.workflows_pending {
+            return;
+        }
+        if let Some((cached_cwd, _)) = &self.workflows_cache {
+            if cached_cwd == &cwd {
+                return;
+            }
+        }
+        let commands = self.config.commands.clone();
+        let proxy = self.proxy.clone();
+        self.workflows_pending = true;
+        if std::thread::Builder::new()
+            .name("twitty-workflows".into())
+            .spawn(move || {
+                let set = crate::workflows::WorkflowSet::load(&commands, cwd.as_deref());
+                let _ = proxy.send_event(AppEvent::WorkflowsLoaded {
+                    cwd,
+                    workflows: Box::new(set),
+                });
+            })
+            .is_err()
+        {
+            self.workflows_pending = false;
+        }
+    }
+
+    fn on_workflows_loaded(
+        &mut self,
+        cwd: Option<std::path::PathBuf>,
+        workflows: crate::workflows::WorkflowSet,
+    ) {
+        self.workflows_pending = false;
+        self.workflows_cache = Some((cwd.clone(), workflows.clone()));
+        self.on_composer_workflows_loaded(cwd, workflows.clone());
+        self.on_palette_workflows_loaded(workflows);
     }
 
     /// Close every open modal overlay or popup menu (e.g. when the last pane closes).
@@ -322,6 +437,32 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::MemorySnapshot(generation, snapshot) => {
                 self.on_memory_snapshot(generation, snapshot)
             }
+            AppEvent::SettingsAiProbed {
+                generation,
+                detected_cli_agents,
+                saved_keys,
+                notice,
+                restart_engine,
+            } => self.on_settings_ai_probed(
+                generation,
+                detected_cli_agents,
+                saved_keys,
+                notice,
+                restart_engine,
+            ),
+            AppEvent::AgentEngineConfigReady { generation, config } => {
+                self.on_agent_engine_config_ready(generation, config)
+            }
+            AppEvent::AgentStartReady {
+                generation,
+                session,
+                request,
+                cwd,
+                context,
+            } => self.on_agent_start_ready(generation, session, request, cwd, context),
+            AppEvent::WorkflowsLoaded { cwd, workflows } => {
+                self.on_workflows_loaded(cwd, *workflows)
+            }
         }
     }
 
@@ -366,6 +507,8 @@ impl ApplicationHandler<AppEvent> for App {
             self.window.poll_perf(now),
             self.poll_tooltip(now),
             self.poll_toasts(now),
+            self.poll_config_save(now),
+            self.poll_session_checkpoint(now),
         ]
         .into_iter()
         .flatten()
@@ -389,9 +532,7 @@ impl ApplicationHandler<AppEvent> for App {
         self.control = None;
         self.store
             .flush_timeout(std::time::Duration::from_millis(250));
-        if self.config_dirty {
-            self.config.save();
-        }
+        self.flush_config_save();
     }
 
     fn window_event(

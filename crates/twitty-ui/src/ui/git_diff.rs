@@ -99,13 +99,8 @@ impl WorkingDirectory {
 pub fn scan(directory: WorkingDirectory) -> Option<DiffStat> {
     let cwd = directory.resolve()?;
     let mut git = Command::new("git");
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        git.creation_flags(CREATE_NO_WINDOW);
-    }
-    let mut child = git
+    crate::process::apply_no_window(&mut git);
+    let child = git
         .args([
             "--no-pager",
             "-c",
@@ -129,21 +124,19 @@ pub fn scan(directory: WorkingDirectory) -> Option<DiffStat> {
         .stderr(Stdio::null())
         .spawn()
         .ok()?;
+    let mut guard = crate::process::KillOnDrop::new(child);
     let deadline = Instant::now() + TIMEOUT;
-    let result = read_output(&mut child, deadline).and_then(|output| loop {
-        if let Some(status) = child.try_wait().ok()? {
+    let output = read_output(guard.0.as_mut()?, deadline)?;
+    loop {
+        if let Some(status) = guard.0.as_mut()?.try_wait().ok()? {
+            let _ = guard.disarm();
             return status.success().then(|| parse_numstat(&output)).flatten();
         }
         if Instant::now() >= deadline {
             return None;
         }
         std::thread::sleep(POLL_INTERVAL);
-    });
-    if result.is_none() {
-        let _ = child.kill();
-        let _ = child.wait();
     }
-    result
 }
 
 #[cfg(target_os = "linux")]

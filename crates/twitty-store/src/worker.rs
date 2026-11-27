@@ -675,7 +675,15 @@ fn worker_loop(target: StoreTarget, rx: mpsc::Receiver<StoreOp>) {
 
     let store = match target {
         StoreTarget::Path(path) => match Store::open(&path) {
-            Ok(s) => Some(s),
+            Ok(s) => {
+                // Keep long-lived command history bounded and query planner stats fresh on startup.
+                const DEFAULT_MAX_HISTORY_ROWS: usize = 50_000;
+                if let Err(err) = s.prune_history(DEFAULT_MAX_HISTORY_ROWS) {
+                    log_once("prune_history failed", &err);
+                }
+                let _ = s.optimize();
+                Some(s)
+            }
             Err(err) => {
                 log_once("could not open database; continuing without storage", &err);
                 None

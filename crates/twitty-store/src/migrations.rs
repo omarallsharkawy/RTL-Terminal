@@ -5,7 +5,7 @@ use rusqlite::Connection;
 use crate::error::StoreError;
 
 /// Latest schema version supported by this build.
-pub const CURRENT_SCHEMA_VERSION: u32 = 2;
+pub const CURRENT_SCHEMA_VERSION: u32 = 3;
 
 /// One forward-only schema migration applied inside a transaction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -113,6 +113,12 @@ CREATE TABLE rules_file_approvals (
 CREATE INDEX idx_rules_approvals_project ON rules_file_approvals(project_root);
 "#;
 
+/// Schema v3: composite index accelerating per-project + kind memory queries.
+const SCHEMA_V3: &str = r#"
+CREATE INDEX IF NOT EXISTS idx_memory_project_kind
+    ON memory(project_root, kind, updated_at DESC, id DESC);
+"#;
+
 /// Ordered list of schema migrations shipped with this crate.
 pub const MIGRATIONS: &[Migration] = &[
     Migration {
@@ -122,6 +128,10 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 2,
         sql: SCHEMA_V2,
+    },
+    Migration {
+        version: 3,
+        sql: SCHEMA_V3,
     },
 ];
 

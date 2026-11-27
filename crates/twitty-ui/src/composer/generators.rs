@@ -7,12 +7,10 @@ use std::collections::{HashMap, HashSet};
 use std::fs::OpenOptions;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::thread;
+use std::process::Command;
 use std::time::{Duration, Instant};
 
+use crate::process::run_bounded;
 use crate::shell_integration::clean_text;
 
 /// Maximum bytes read from a single config/manifest file (`package.json`, `Makefile`, `Cargo.toml`,
@@ -297,71 +295,22 @@ fn run_command_bounded(
     limit: usize,
 ) -> Option<Vec<u8>> {
     let mut cmd = Command::new(program);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-    cmd.args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+    cmd.args(args);
     if let Some(dir) = cwd {
         cmd.current_dir(dir);
     }
     for &(k, v) in envs {
         cmd.env(k, v);
     }
-
-    let mut child = cmd.spawn().ok()?;
-    let stdout = child.stdout.take()?;
-
-    struct KillOnDrop(Option<std::process::Child>);
-    impl Drop for KillOnDrop {
-        fn drop(&mut self) {
-            if let Some(mut c) = self.0.take() {
-                let _ = c.kill();
-                let _ = c.wait();
-            }
-        }
-    }
-
-    let stop = Arc::new(AtomicBool::new(false));
-    let mut guard = KillOnDrop(Some(child));
-    let watchdog = {
-        let stop = stop.clone();
-        thread::Builder::new()
-            .name("twitty-gen-watch".into())
-            .spawn(move || {
-                let start = Instant::now();
-                loop {
-                    let child = guard.0.as_mut()?;
-                    match child.try_wait() {
-                        Ok(Some(status)) => {
-                            let _ = guard.0.take();
-                            return Some(status);
-                        }
-                        Ok(None) => {}
-                        Err(_) => return None,
-                    }
-                    if stop.load(Ordering::Relaxed) || start.elapsed() > timeout {
-                        return None;
-                    }
-                    thread::sleep(Duration::from_millis(10));
-                }
-            })
-            .ok()?
-    };
-
-    let mut out = Vec::new();
-    let _ = stdout.take(limit as u64 + 1).read_to_end(&mut out);
-    if out.len() > limit {
-        out.truncate(limit);
-        stop.store(true, Ordering::Relaxed);
-    }
-    let status = watchdog.join().ok().flatten()?;
-    status.success().then_some(out)
+    let out = run_bounded(
+        cmd,
+        "twitty-gen-watch",
+        timeout,
+        Duration::from_millis(10),
+        limit,
+    )
+    .ok()?;
+    out.status?.success().then_some(out.stdout)
 }
 
 fn run_git(cwd: &Path, args: &[&str]) -> Option<String> {

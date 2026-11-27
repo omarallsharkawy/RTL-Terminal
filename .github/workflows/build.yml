@@ -28,9 +28,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install D-Bus headers (keyring Secret Service)
+      - name: Install D-Bus headers and test shells (bash, zsh, fish)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config zsh fish
       - name: Setup Rust stable with fmt and clippy
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -155,12 +155,12 @@ jobs:
           install -m644 packaging/linux/twitty.desktop "$stage/share/applications/twitty.desktop"
           install -m644 packaging/linux/dev.twitty.Twitty.metainfo.xml \
             "$stage/share/metainfo/dev.twitty.Twitty.metainfo.xml"
-          install -m644 docs/assets/twitty-mark.svg \
+          install -m644 packaging/linux/icons/hicolor/scalable/apps/twitty.svg \
             "$stage/share/icons/hicolor/scalable/apps/twitty.svg"
 
           for size in 16 24 32 48 64 128 256 512; do
             mkdir -p "$stage/share/icons/hicolor/${size}x${size}/apps"
-            rsvg-convert -w "$size" -h "$size" docs/assets/twitty-mark.svg \
+            rsvg-convert -w "$size" -h "$size" packaging/linux/icons/hicolor/scalable/apps/twitty.svg \
               -o "$stage/share/icons/hicolor/${size}x${size}/apps/twitty.png"
           done
 
@@ -259,8 +259,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install D-Bus headers (keyring Secret Service)
-        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+      - name: Install D-Bus headers and test shells (bash, zsh, fish)
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config zsh fish
       - name: Setup Rust stable with llvm-tools
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -308,6 +308,10 @@ jobs:
           # The prebuilt cargo-fuzz defaults to its own (musl) target.
           cargo fuzz run --target x86_64-unknown-linux-gnu terminal_bytes -- -max_total_time=60
           cargo fuzz run --target x86_64-unknown-linux-gnu shape_rows -- -max_total_time=60
+          cargo fuzz run --target x86_64-unknown-linux-gnu control_protocol -- -max_total_time=30
+          cargo fuzz run --target x86_64-unknown-linux-gnu redact_secrets -- -max_total_time=30
+          cargo fuzz run --target x86_64-unknown-linux-gnu review_diff -- -max_total_time=30
+          cargo fuzz run --target x86_64-unknown-linux-gnu agent_policy -- -max_total_time=30
 
   golden:
     name: Golden-image rendering tests

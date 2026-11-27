@@ -985,29 +985,7 @@ enum ButtonTone {
     DangerQuiet,
 }
 
-fn contrasting_fg(bg: Rgba) -> Rgba {
-    let [r, g, b, _] = bg.to_linear();
-    let lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    let v = if lum > 0.179 { 0.0 } else { 1.0 };
-    Rgba::new(v, v, v, 1.0)
-}
-
-fn rect_to_bounds(r: Rect) -> TextBounds {
-    TextBounds {
-        left: r.x.ceil() as i32,
-        top: r.y.ceil() as i32,
-        right: r.right().floor() as i32,
-        bottom: r.bottom().floor() as i32,
-    }
-}
-
-fn intersect_bounds(a: TextBounds, b: TextBounds) -> TextBounds {
-    let left = a.left.max(b.left);
-    let top = a.top.max(b.top);
-    TextBounds {
-        left,
-        top,
-        right: a.right.min(b.right).max(left),
-        bottom: a.bottom.min(b.bottom).max(top),
-    }
-}
+use crate::helpers::{
+    contrasting_fg, intersect_bounds_clamped as intersect_bounds,
+    rect_to_bounds_inward as rect_to_bounds,
+};

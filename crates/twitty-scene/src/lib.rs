@@ -10,6 +10,7 @@ pub mod chrome;
 pub mod composer;
 pub mod context_menu;
 pub mod frame;
+pub(crate) mod helpers;
 pub mod memory;
 mod motion;
 pub mod palette;

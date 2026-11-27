@@ -6,6 +6,7 @@ use winit::event::{KeyEvent, MouseButton, MouseScrollDelta};
 use winit::keyboard::PhysicalKey;
 use winit::window::CursorIcon;
 
+use super::event::AppEvent;
 use super::window::Appearance;
 use super::App;
 use crate::config::TwittyConfig;
@@ -14,7 +15,18 @@ use crate::input::mouse::wheel_lines;
 use crate::input::{key_shortcut_with, InputAction};
 use crate::layout::PaneId;
 use crate::render::scene::settings::SettingsView;
+use crate::ui::chrome::UiLanguage;
+use crate::ui::settings_ai::{detect_cli_agents_on_path, API_PROVIDERS};
 use crate::ui::settings_panel::{SettingId, SettingsLayout, SettingsOutcome, SettingsPanelState};
+use twitty_store::SecretStore;
+
+fn probe_keyring_flags(store: &dyn SecretStore) -> [bool; 3] {
+    let mut flags = [false; 3];
+    for (i, spec) in API_PROVIDERS.iter().enumerate() {
+        flags[i] = matches!(store.get(spec.keyring_account), Ok(Some(v)) if !v.is_empty());
+    }
+    flags
+}
 
 impl App {
     pub(super) fn settings_open(&self) -> bool {
@@ -36,20 +48,66 @@ impl App {
         let language = self.window.ui_language();
         let mut panel = SettingsPanelState::new(mono, all, config_path, language)
             .with_env_language(env_language);
-        panel.ai.detected_cli_agents = crate::ui::settings_ai::detect_cli_agents_on_path();
         panel.ai.active_project_root = self
             .focused_id()
             .and_then(|id| self.pane_cwd(id))
             .map(|p| p.display().to_string());
         panel.ai.sync_from_config(&self.config);
-        let keyring = twitty_store::SystemSecretStore::new();
-        panel.ai.refresh_key_flags(&keyring);
         self.settings = Some(panel);
+        self.spawn_settings_ai_probe();
         self.sync_settings();
+    }
+
+    fn spawn_settings_ai_probe(&mut self) {
+        self.settings_probe_gen = self.settings_probe_gen.wrapping_add(1);
+        let generation = self.settings_probe_gen;
+        let proxy = self.proxy.clone();
+        if let Err(err) = std::thread::Builder::new()
+            .name("twitty-settings-probe".into())
+            .spawn(move || {
+                let detected_cli_agents = detect_cli_agents_on_path();
+                let keyring = twitty_store::SystemSecretStore::new();
+                let saved_keys = probe_keyring_flags(&keyring);
+                let _ = proxy.send_event(AppEvent::SettingsAiProbed {
+                    generation,
+                    detected_cli_agents,
+                    saved_keys,
+                    notice: None,
+                    restart_engine: false,
+                });
+            })
+        {
+            tracing::warn!("twitty settings probe thread failed to start: {err}");
+        }
+    }
+
+    pub(super) fn on_settings_ai_probed(
+        &mut self,
+        generation: u64,
+        detected_cli_agents: Vec<String>,
+        saved_keys: [bool; 3],
+        notice: Option<(bool, String)>,
+        restart_engine: bool,
+    ) {
+        if restart_engine {
+            self.restart_agent_engine_when_idle();
+        }
+        if generation != self.settings_probe_gen {
+            return;
+        }
+        if let Some(state) = self.settings.as_mut() {
+            state.ai.detected_cli_agents = detected_cli_agents;
+            state.ai.saved_keys = saved_keys;
+            if let Some(msg) = notice {
+                state.ai.notice = Some(msg);
+            }
+            self.sync_settings();
+        }
     }
 
     /// Close the settings panel and revert any uncommitted theme preview.
     pub(super) fn close_settings(&mut self) {
+        self.flush_config_save();
         let Some(mut state) = self.settings.take() else {
             return;
         };
@@ -183,6 +241,7 @@ impl App {
                 if let Some(state) = self.settings.as_mut() {
                     state.on_mouse_up();
                 }
+                self.flush_config_save();
             }
             return;
         }
@@ -236,22 +295,68 @@ impl App {
             self.window.preview_palette(preview_cfg.palette());
         }
         if let Some((account, secret)) = outcome.save_secret {
-            let keyring = twitty_store::SystemSecretStore::new();
-            let lang = self.window.ui_language();
-            if let Some(state) = self.settings.as_mut() {
-                state
-                    .ai
-                    .apply_save_secret(&keyring, &account, &secret, lang);
+            self.settings_probe_gen = self.settings_probe_gen.wrapping_add(1);
+            let generation = self.settings_probe_gen;
+            let lang: UiLanguage = self.window.ui_language();
+            let proxy = self.proxy.clone();
+            let detected = self
+                .settings
+                .as_ref()
+                .map(|s| s.ai.detected_cli_agents.clone())
+                .unwrap_or_default();
+            if let Err(err) = std::thread::Builder::new()
+                .name("twitty-settings-secret".into())
+                .spawn(move || {
+                    let keyring = twitty_store::SystemSecretStore::new();
+                    let notice = match keyring.set(&account, secret.expose()) {
+                        Ok(()) => {
+                            Some((false, lang.t("API key saved to system keyring.").to_owned()))
+                        }
+                        Err(err) => Some((true, format!("{err}"))),
+                    };
+                    let saved_keys = probe_keyring_flags(&keyring);
+                    let _ = proxy.send_event(AppEvent::SettingsAiProbed {
+                        generation,
+                        detected_cli_agents: detected,
+                        saved_keys,
+                        notice,
+                        restart_engine: true,
+                    });
+                })
+            {
+                tracing::warn!("twitty settings secret thread failed to start: {err}");
             }
-            self.restart_agent_engine_when_idle();
         }
         if let Some(account) = outcome.delete_secret {
-            let keyring = twitty_store::SystemSecretStore::new();
-            let lang = self.window.ui_language();
-            if let Some(state) = self.settings.as_mut() {
-                state.ai.apply_delete_secret(&keyring, &account, lang);
+            self.settings_probe_gen = self.settings_probe_gen.wrapping_add(1);
+            let generation = self.settings_probe_gen;
+            let lang: UiLanguage = self.window.ui_language();
+            let proxy = self.proxy.clone();
+            let detected = self
+                .settings
+                .as_ref()
+                .map(|s| s.ai.detected_cli_agents.clone())
+                .unwrap_or_default();
+            if let Err(err) = std::thread::Builder::new()
+                .name("twitty-settings-secret".into())
+                .spawn(move || {
+                    let keyring = twitty_store::SystemSecretStore::new();
+                    let notice = match keyring.delete(&account) {
+                        Ok(_) => Some((false, lang.t("API key removed from keyring.").to_owned())),
+                        Err(err) => Some((true, format!("{err}"))),
+                    };
+                    let saved_keys = probe_keyring_flags(&keyring);
+                    let _ = proxy.send_event(AppEvent::SettingsAiProbed {
+                        generation,
+                        detected_cli_agents: detected,
+                        saved_keys,
+                        notice,
+                        restart_engine: true,
+                    });
+                })
+            {
+                tracing::warn!("twitty settings secret thread failed to start: {err}");
             }
-            self.restart_agent_engine_when_idle();
         }
         if outcome.ai_config_changed {
             self.restart_agent_engine_when_idle();
@@ -341,8 +446,7 @@ impl App {
                     | SettingId::CopyConfigPath => {}
                 }
             }
-            self.config.save();
-            self.config_dirty = false;
+            self.schedule_config_save();
             if needs_layout {
                 self.apply_layout();
             }
@@ -353,6 +457,7 @@ impl App {
             return;
         }
         if outcome.close {
+            self.flush_config_save();
             self.settings = None;
             self.window.set_settings_panel(None);
             self.refresh_pointer_hover();

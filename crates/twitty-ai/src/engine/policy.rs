@@ -22,9 +22,14 @@ fn outside(path: &Path) -> DenyReason {
 }
 
 fn names(path: &Path) -> impl Iterator<Item = String> + '_ {
-    path.components().filter_map(|component| match component {
-        Component::Normal(name) => Some(name.to_string_lossy().to_ascii_lowercase()),
-        _ => None,
+    path.components().flat_map(|component| match component {
+        Component::Normal(name) => name
+            .to_string_lossy()
+            .split('\\')
+            .filter(|part| !part.is_empty())
+            .map(str::to_ascii_lowercase)
+            .collect::<Vec<_>>(),
+        _ => Vec::new(),
     })
 }
 
@@ -505,16 +510,21 @@ fn inspect_words(
 }
 
 fn expand_home(value: &str) -> PathBuf {
-    let stripped = ["~", "$HOME", "${HOME}"].into_iter().find_map(|prefix| {
-        value
-            .strip_prefix(prefix)
-            .filter(|rest| rest.is_empty() || rest.starts_with('/'))
-    });
+    let stripped = ["~", "$HOME", "${HOME}", "%USERPROFILE%"]
+        .into_iter()
+        .find_map(|prefix| {
+            value
+                .strip_prefix(prefix)
+                .filter(|rest| rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\'))
+        });
     if let Some(rest) = stripped {
         let home = std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("/"));
-        return home.join(rest.trim_start_matches('/'));
+        let trimmed = rest.trim_start_matches(['/', '\\']);
+        let normalized = trimmed.replace('\\', "/");
+        return home.join(normalized);
     }
     PathBuf::from(value)
 }

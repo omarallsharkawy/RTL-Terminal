@@ -307,9 +307,49 @@ impl RowShaper<'_> {
                 continue;
             }
 
-            // A fallback glyph (icon, emoji, CJK…) has a different advance: lock every cell to the grid.
-            for c in start..end {
+            // A fallback glyph (icon, emoji, CJK…) has a different advance. Coalesce contiguous
+            // plain ASCII runs into single segments so one emoji does not force cell-by-cell
+            // HarfBuzz shaping across the entire row, locking only non-ASCII/misaligned cells.
+            let mut c = start;
+            while c < end {
                 if cells[c].is_blank() || cells[c].is_spacer() {
+                    c += 1;
+                    continue;
+                }
+                if cells[c].c.is_ascii() && !cells[c].has_shaped_marks() {
+                    let run_start = c;
+                    while c < end
+                        && !cells[c].is_blank()
+                        && !cells[c].is_spacer()
+                        && cells[c].c.is_ascii()
+                        && !cells[c].has_shaped_marks()
+                    {
+                        c += 1;
+                    }
+                    let (buffer, cell_bytes) = self.shape_cells(cells, run_start, c, false, cursor);
+                    if self.is_grid_aligned(&buffer, &cell_bytes) {
+                        segments.push(CachedSegment {
+                            seg_start: run_start,
+                            seg_end: c,
+                            seg_x: run_start as f32 * self.char_width,
+                            buffer,
+                            has_rtl: false,
+                            cell_bytes,
+                        });
+                        continue;
+                    }
+                    for col_idx in run_start..c {
+                        let (buffer, cell_bytes) =
+                            self.shape_cells(cells, col_idx, col_idx + 1, false, cursor);
+                        segments.push(CachedSegment {
+                            seg_start: col_idx,
+                            seg_end: col_idx + 1,
+                            seg_x: col_idx as f32 * self.char_width,
+                            buffer,
+                            has_rtl: false,
+                            cell_bytes,
+                        });
+                    }
                     continue;
                 }
                 let (buffer, cell_bytes) = self.shape_cells(cells, c, c + 1, false, cursor);
@@ -321,6 +361,7 @@ impl RowShaper<'_> {
                     has_rtl: false,
                     cell_bytes,
                 });
+                c += 1;
             }
         }
         segments
