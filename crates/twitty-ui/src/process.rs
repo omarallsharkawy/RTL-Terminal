@@ -1,6 +1,6 @@
 //! Bounded, timeout-guarded subprocess execution shared by git/generator background workers.
 
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -63,25 +63,71 @@ pub(crate) fn read_bounded(reader: impl Read, limit: usize) -> (Vec<u8>, bool) {
 /// stdout, and enforce `timeout` via a watchdog thread that kills and reaps the child on timeout
 /// or truncation.
 pub(crate) fn run_bounded(
+    cmd: Command,
+    thread_name: &str,
+    timeout: Duration,
+    poll_interval: Duration,
+    limit: usize,
+) -> io::Result<BoundedOutput> {
+    run_bounded_inner(cmd, None, thread_name, timeout, poll_interval, limit)
+}
+
+/// Like [`run_bounded`], but pipes `stdin_payload` to the child off-thread so writing cannot
+/// deadlock with stdout capture.
+pub(crate) fn run_bounded_with_stdin(
+    cmd: Command,
+    stdin_payload: &[u8],
+    thread_name: &str,
+    timeout: Duration,
+    poll_interval: Duration,
+    limit: usize,
+) -> io::Result<BoundedOutput> {
+    run_bounded_inner(
+        cmd,
+        Some(stdin_payload),
+        thread_name,
+        timeout,
+        poll_interval,
+        limit,
+    )
+}
+
+fn run_bounded_inner(
     mut cmd: Command,
+    stdin_payload: Option<&[u8]>,
     thread_name: &str,
     timeout: Duration,
     poll_interval: Duration,
     limit: usize,
 ) -> io::Result<BoundedOutput> {
     apply_no_window(&mut cmd);
-    cmd.stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+    cmd.stdin(if stdin_payload.is_some() {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    })
+    .stdout(Stdio::piped())
+    .stderr(Stdio::null());
     let mut child = cmd.spawn()?;
     let Some(stdout) = child.stdout.take() else {
         let _ = child.kill();
         let _ = child.wait();
         return Err(io::Error::other("no output pipe"));
     };
+    let stdin_pipe = child.stdin.take();
 
     let stop = Arc::new(AtomicBool::new(false));
     let mut guard = KillOnDrop::new(child);
+
+    if let (Some(mut stdin), Some(payload)) = (stdin_pipe, stdin_payload) {
+        let bytes = payload.to_vec();
+        let _ = thread::Builder::new()
+            .name(format!("{thread_name}-stdin"))
+            .spawn(move || {
+                let _ = stdin.write_all(&bytes);
+                let _ = stdin.flush();
+            });
+    }
     let watchdog = {
         let stop = stop.clone();
         thread::Builder::new()

@@ -118,4 +118,18 @@ impl App {
         }
         stopped
     }
+
+    /// Force an immediate SSH reconnect on `id`, cancelling any retry backoff or stalled PTY.
+    pub(super) fn reconnect_ssh_pane(&mut self, id: PaneId) {
+        let Some(pane) = self.ws.pane_mut(id) else {
+            return;
+        };
+        let Some(remote) = pane.remote.as_mut() else {
+            return;
+        };
+        pane.pty = None;
+        remote.reset_for_manual_reconnect();
+        start_remote_pty(&self.proxy, pane);
+        self.window.request_redraw();
+    }
 }

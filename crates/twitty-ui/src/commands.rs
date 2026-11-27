@@ -85,6 +85,7 @@ commands! {
     "agent.ask", en!("Ask an agent about this output"), Some("Ctrl+Shift+A") => InputAction::AskAgent;
     "agent.panel", en!("Agent panel"), Some("Ctrl+Shift+.") => InputAction::ToggleAgentPanel;
     "review.toggle", en!("Review changes"), Some("Ctrl+Shift+R") => InputAction::ToggleReview;
+    "ssh.reconnect", en!("Reconnect SSH"), None => InputAction::ReconnectSsh;
     "edit.copy", en!("Copy"), Some("Ctrl+Shift+C") => InputAction::Copy;
     "edit.paste", en!("Paste"), Some("Ctrl+Shift+V") => InputAction::Paste;
     "search.open", en!("Find in scrollback"), Some("Ctrl+Shift+F") => InputAction::Search;

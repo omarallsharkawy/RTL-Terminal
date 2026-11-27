@@ -272,6 +272,7 @@ impl App {
             InputAction::Settings => self.open_settings(),
             InputAction::ProjectMemory => self.open_memory(),
             InputAction::Welcome => self.open_welcome(),
+            InputAction::ReconnectSsh => self.reconnect_ssh_pane(id),
             InputAction::PrevBlock => self.navigate_blocks(id, BlockList::select_prev),
             InputAction::NextBlock => self.navigate_blocks(id, BlockList::select_next),
             InputAction::CopyBlockOutput => self.copy_block_output(id),

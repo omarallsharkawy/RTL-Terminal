@@ -61,6 +61,10 @@ pub enum PanelCmd {
     StageFile(String),
     /// Unstage the selected file (`git reset HEAD -- <path>`) off the UI thread and refresh.
     UnstageFile(String),
+    /// Stage the selected hunk (`git apply --cached`) off the UI thread and refresh.
+    StageHunk(String),
+    /// Unstage the selected hunk (`git apply --cached --reverse`) off the UI thread and refresh.
+    UnstageHunk(String),
     /// Open Twitty's built-in Agent Panel pre-filled with a review prompt for the user to review/send.
     SendToAgentPanel(String),
 }
@@ -672,6 +676,16 @@ impl ReviewPanel {
                 Some(prompt) => PanelCmd::SendToAgentPanel(prompt),
                 None => PanelCmd::None,
             },
+            (_, Some('s')) if modifiers.shift_key() => self
+                .selected_hunk_patch()
+                .map(PanelCmd::StageHunk)
+                .or_else(|| self.current_file_path().map(PanelCmd::StageFile))
+                .unwrap_or(PanelCmd::None),
+            (_, Some('u')) if modifiers.shift_key() => self
+                .selected_hunk_patch()
+                .map(PanelCmd::UnstageHunk)
+                .or_else(|| self.current_file_path().map(PanelCmd::UnstageFile))
+                .unwrap_or(PanelCmd::None),
             (_, Some('s')) => match self.current_file_path() {
                 Some(path) => PanelCmd::StageFile(path),
                 None => PanelCmd::None,
@@ -742,6 +756,19 @@ impl ReviewPanel {
                 Some(format!("Review changes in {path}: "))
             }
         }
+    }
+
+    /// Standalone unified patch for the hunk containing the selected row, if on a diff line/hunk.
+    fn selected_hunk_patch(&self) -> Option<String> {
+        let snapshot = self.snapshot.as_ref()?;
+        let (f, h) = match *self.rows.get(self.selected?)? {
+            Row::Line(r) | Row::NoNewline(r) => (r.file, r.hunk),
+            Row::Hunk(f, h) => (f, h),
+            _ => return None,
+        };
+        let file = snapshot.diff.files.get(f)?;
+        let hunk = file.hunks.get(h)?;
+        super::diff::format_hunk_patch(file, hunk)
     }
 
     /// Repository-relative path of the currently selected file or diff line, if any.

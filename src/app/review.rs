@@ -287,6 +287,8 @@ impl App {
             PanelCmd::StartAgent(target) => self.start_review_agent(&target),
             PanelCmd::StageFile(rel_path) => self.run_review_stage(rel_path, true),
             PanelCmd::UnstageFile(rel_path) => self.run_review_stage(rel_path, false),
+            PanelCmd::StageHunk(patch) => self.run_review_hunk_stage(patch, true),
+            PanelCmd::UnstageHunk(patch) => self.run_review_hunk_stage(patch, false),
             PanelCmd::SendToAgentPanel(prompt) => {
                 self.open_agent_panel_with_draft(prompt);
                 return false;
@@ -327,6 +329,37 @@ impl App {
                     crate::review::git::stage_file(&root, &rel_path)
                 } else {
                     crate::review::git::unstage_file(&root, &rel_path)
+                };
+                let result = match op {
+                    Ok(()) => crate::review::git::load(&root),
+                    Err(err) => Err(err),
+                };
+                let _ = proxy.send_event(AppEvent::Review(generation, result));
+            });
+        if spawned.is_err() {
+            self.review.finish_refresh(
+                generation,
+                Err(LoadError::Failed("could not start a thread".into())),
+            );
+        }
+    }
+
+    /// Stage or unstage a single unified-diff hunk patch off the UI thread and reload.
+    fn run_review_hunk_stage(&mut self, patch: String, stage: bool) {
+        let Some(root) = self.review.snapshot().map(|s| s.root.clone()) else {
+            return;
+        };
+        let Some(generation) = self.review.begin_refresh() else {
+            return;
+        };
+        let proxy = self.proxy.clone();
+        let spawned = std::thread::Builder::new()
+            .name("twitty-review-hunk".into())
+            .spawn(move || {
+                let op = if stage {
+                    crate::review::git::stage_hunk(&root, &patch)
+                } else {
+                    crate::review::git::unstage_hunk(&root, &patch)
                 };
                 let result = match op {
                     Ok(()) => crate::review::git::load(&root),

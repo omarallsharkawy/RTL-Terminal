@@ -11,7 +11,7 @@ use std::process::{Command, ExitStatus};
 use std::time::Duration;
 
 use super::diff::{parse, Diff, Limits, Untracked, MAX_DIFF_BYTES};
-use crate::process::{read_bounded, run_bounded};
+use crate::process::{read_bounded, run_bounded, run_bounded_with_stdin};
 
 /// Longest a git command may run.
 const TIMEOUT: Duration = Duration::from_secs(20);
@@ -198,6 +198,59 @@ pub fn unstage_file(root: &Path, rel_path: &str) -> Result<(), LoadError> {
         Ok(())
     } else {
         Err(LoadError::Failed("git unstage failed".into()))
+    }
+}
+
+/// Stage a single unified-diff hunk patch into the index (`git apply --cached`).
+pub fn stage_hunk(root: &Path, patch: &str) -> Result<(), LoadError> {
+    apply_hunk_patch(root, patch, false)
+}
+
+/// Unstage a single unified-diff hunk patch from the index (`git apply --cached --reverse`).
+pub fn unstage_hunk(root: &Path, patch: &str) -> Result<(), LoadError> {
+    apply_hunk_patch(root, patch, true)
+}
+
+fn apply_hunk_patch(root: &Path, patch: &str, reverse: bool) -> Result<(), LoadError> {
+    if patch.is_empty() {
+        return Err(LoadError::Failed("empty hunk patch".into()));
+    }
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(root).args([
+        "-c",
+        "core.quotepath=false",
+        "-c",
+        "core.fsmonitor=false",
+        "apply",
+        "--cached",
+        "--unidiff-zero",
+        "--whitespace=nowarn",
+    ]);
+    if reverse {
+        cmd.arg("--reverse");
+    }
+    cmd.arg("-")
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("LC_ALL", "C");
+    let out = run_bounded_with_stdin(
+        cmd,
+        patch.as_bytes(),
+        "twitty-review-hunk",
+        TIMEOUT,
+        Duration::from_millis(15),
+        16 * 1024,
+    )
+    .map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => LoadError::NoGit,
+        _ => LoadError::Failed(format!("git: {e}")),
+    })?;
+    if out.status.is_some_and(|s| s.success()) {
+        Ok(())
+    } else if reverse {
+        Err(LoadError::Failed("git unstage hunk failed".into()))
+    } else {
+        Err(LoadError::Failed("git stage hunk failed".into()))
     }
 }
 

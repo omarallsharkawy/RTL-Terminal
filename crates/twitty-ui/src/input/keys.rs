@@ -100,6 +100,8 @@ pub enum InputAction {
     ProjectMemory,
     /// Open the first-run welcome wizard.
     Welcome,
+    /// Force an immediate reconnect on the focused SSH pane (cancelling backoff or stalled PTY).
+    ReconnectSsh,
 }
 
 /// One key event with everything the encoders look at. Window-free, so the `*_raw` entry

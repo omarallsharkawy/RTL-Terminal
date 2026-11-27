@@ -1370,4 +1370,65 @@ fn review_panel_stage_and_unstage_keys_work_on_latin_and_arabic_layouts() {
         twitty::review::git::unstage_file(std::path::Path::new("/tmp"), "/etc/passwd").is_err()
     );
     assert!(twitty::review::git::stage_file(std::path::Path::new("/tmp"), "").is_err());
+
+    // Pressing 'a' (Arabic KeyA 'ش') hands off a draft prompt to the built-in Agent panel.
+    let cmd_agent = panel.key(
+        &Key::Character("ش".into()),
+        Some(KeyCode::KeyA),
+        Some("ش"),
+        ModifiersState::empty(),
+        20,
+    );
+    assert_eq!(
+        cmd_agent,
+        PanelCmd::SendToAgentPanel("Review changes in src/app.rs: ".into())
+    );
+
+    // Move to the first diff line and test Shift+S / Shift+U hunk-level patch staging.
+    assert_eq!(
+        panel.key(
+            &Key::Named(NamedKey::ArrowDown),
+            None,
+            None,
+            ModifiersState::empty(),
+            20,
+        ),
+        PanelCmd::Redraw
+    );
+    let hunk_stage = panel.key(
+        &Key::Character("S".into()),
+        Some(KeyCode::KeyS),
+        Some("S"),
+        ModifiersState::SHIFT,
+        20,
+    );
+    let PanelCmd::StageHunk(patch) = hunk_stage else {
+        panic!("expected PanelCmd::StageHunk, got {hunk_stage:?}");
+    };
+    assert!(patch.contains("--- a/src/app.rs\n+++ b/src/app.rs\n"));
+    assert!(patch.contains("@@ -1,1 +1,2 @@\n"));
+    assert!(patch.contains("+// added\n"));
+
+    let hunk_unstage = panel.key(
+        &Key::Character("U".into()),
+        Some(KeyCode::KeyU),
+        Some("U"),
+        ModifiersState::SHIFT,
+        20,
+    );
+    assert_eq!(hunk_unstage, PanelCmd::UnstageHunk(patch));
+
+    // Verify ssh.reconnect command registration and RemotePane manual reconnect reset.
+    assert_eq!(
+        commands::action("ssh.reconnect"),
+        Some(InputAction::ReconnectSsh)
+    );
+    let target = twitty::remote::Target::new("user@example.com", "dev").unwrap();
+    let mut remote = twitty::remote::RemotePane::new(target);
+    let _ = remote.disconnected(false);
+    assert!(remote.waiting_for_enter);
+    remote.reset_for_manual_reconnect();
+    assert!(!remote.waiting_for_enter);
+    assert_eq!(remote.state, twitty::remote::ConnectionState::Disconnected);
+    assert!(remote.next_retry_deadline().is_none());
 }

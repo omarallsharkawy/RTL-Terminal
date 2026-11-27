@@ -79,6 +79,53 @@ impl Hunk {
     }
 }
 
+/// Format a single `hunk` of `file` as a standalone unified diff patch suitable for
+/// `git apply --cached`. Returns `None` for binary/one-line entries or invalid paths.
+pub fn format_hunk_patch(file: &FileDiff, hunk: &Hunk) -> Option<String> {
+    if file.one_line.is_some() || hunk.lines.is_empty() {
+        return None;
+    }
+    let path = file.path();
+    if path.is_empty() || path.contains('\n') || path.contains('\r') {
+        return None;
+    }
+    let mut out = String::new();
+    match file.old_path.as_deref() {
+        Some(old) => {
+            out.push_str("--- a/");
+            out.push_str(old);
+            out.push('\n');
+        }
+        None => out.push_str("--- /dev/null\n"),
+    }
+    match file.new_path.as_deref() {
+        Some(new) => {
+            out.push_str("+++ b/");
+            out.push_str(new);
+            out.push('\n');
+        }
+        None => out.push_str("+++ /dev/null\n"),
+    }
+    out.push_str(&format!(
+        "@@ -{},{} +{},{} @@\n",
+        hunk.old_start, hunk.old_count, hunk.new_start, hunk.new_count
+    ));
+    for line in &hunk.lines {
+        let prefix = match line.kind {
+            LineKind::Context => ' ',
+            LineKind::Add => '+',
+            LineKind::Del => '-',
+        };
+        out.push(prefix);
+        out.push_str(&line.text);
+        out.push('\n');
+        if line.no_newline {
+            out.push_str("\\ No newline at end of file\n");
+        }
+    }
+    Some(out)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FileStatus {
     Modified,

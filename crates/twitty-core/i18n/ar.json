@@ -347,6 +347,7 @@
   "Read needs approval": "قراءة تحتاج موافقة",
   "Reads from ~/.ssh, ~/.gnupg, ~/.aws, ~/.config/gh, .netrc, keyrings": "قراءة ~/.ssh و ~/.gnupg و ~/.aws و ~/.config/gh و .netrc ومخازن المفاتيح",
   "Recent": "حديث",
+  "Reconnect SSH": "إعادة اتصال SSH",
   "Record command history": "حفظ سجل الأوامر",
   "Reduce motion": "تقليل الحركة",
   "Refresh": "تحديث",

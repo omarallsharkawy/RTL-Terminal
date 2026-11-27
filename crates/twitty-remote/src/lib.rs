@@ -178,6 +178,15 @@ impl RemotePane {
         self.may_retry(generation).then_some(at)
     }
 
+    /// Cancel any pending backoff timer and reset retry attempts so a manual reconnect runs now.
+    pub fn reset_for_manual_reconnect(&mut self) {
+        self.state = ConnectionState::Disconnected;
+        self.attempts = 0;
+        self.waiting_for_enter = false;
+        self.retry_generation = self.retry_generation.wrapping_add(1);
+        self.retry_at = None;
+    }
+
     pub fn connecting(&mut self) {
         if self.waiting_for_enter {
             self.attempts = 0;
