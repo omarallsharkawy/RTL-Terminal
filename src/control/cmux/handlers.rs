@@ -55,6 +55,7 @@ pub(super) fn handle_workspace_list(host: &impl ControlHost, id: Value) -> Respo
                 "index": index,
                 "id": tab.id.to_string(),
                 "title": clean_text(&host.ws().tab_title(index), MAX_TITLE_CHARS),
+                "color": tab.color.map(|c| c.as_str()),
                 "directory": cwd,
                 "panel_count": leaves.len(),
                 "unread_count": unread_count,
@@ -84,6 +85,7 @@ pub(super) fn handle_workspace_current(host: &impl ControlHost, id: Value) -> Re
             "index": active,
             "id": tab.id.to_string(),
             "title": clean_text(&host.ws().tab_title(active), MAX_TITLE_CHARS),
+            "color": tab.color.map(|c| c.as_str()),
             "directory": cwd,
             "panel_count": tab.root.leaves().len(),
             "focused_panel_id": tab.focused.0.to_string(),
@@ -280,6 +282,55 @@ pub(super) fn handle_workspace_rename(
             "ok": true,
             "workspace_id": tab_id.to_string(),
             "title": shown,
+        }),
+    )
+}
+
+pub(super) fn handle_workspace_set_color(
+    host: &mut impl ControlHost,
+    id: Value,
+    params: &Map<String, Value>,
+) -> Response {
+    let target_index = match resolve_workspace_index(host, params) {
+        Ok(idx) => idx,
+        Err((code, msg)) => return Response::cmux_err(id, code, msg),
+    };
+    let color = match params.get("color") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(s)) => {
+            let trimmed = s.trim();
+            if trimmed.is_empty()
+                || trimmed.eq_ignore_ascii_case("none")
+                || trimmed.eq_ignore_ascii_case("clear")
+            {
+                None
+            } else if let Some(c) = twitty_core::color::WorkspaceColor::from_name(trimmed) {
+                Some(c)
+            } else {
+                return Response::cmux_err(
+                    id,
+                    "invalid_params",
+                    "Unknown color; use blue, green, amber, red, purple, teal, or none",
+                );
+            }
+        }
+        Some(_) => {
+            return Response::cmux_err(
+                id,
+                "invalid_params",
+                "'color' must be a color name string or null",
+            );
+        }
+    };
+    host.ws_mut().set_tab_color(target_index, color);
+    let tab_id = host.ws().tabs()[target_index].id;
+    host.request_redraw();
+    Response::ok(
+        id,
+        json!({
+            "ok": true,
+            "workspace_id": tab_id.to_string(),
+            "color": color.map(|c| c.as_str()),
         }),
     )
 }

@@ -2,7 +2,7 @@
 //! picks. Drawing lives in `render::scene::context_menu`; the app builds the entries for what was
 //! clicked (`app::context_menu`) and runs the chosen action.
 
-use crate::layout::Rect;
+use crate::layout::{PaneId, Rect};
 use crate::ui::chrome::UiLanguage;
 
 /// Logical sizes; multiply by the window scale.
@@ -26,6 +26,16 @@ pub enum MenuAction {
     RenameTab(usize),
     CloseTab(usize),
     CloseOtherTabs(usize),
+    /// Reconnect the SSH pane inside tab `index`.
+    ReconnectSshTab(usize),
+    /// Open a split connected to the same SSH host as `pane`.
+    SplitSshSameHost(PaneId),
+    /// Copy an SSH destination string to the clipboard.
+    CopySshDestination(String),
+    /// Cycle the workspace accent color tag of tab `index`.
+    CycleTabColor(usize),
+    /// Clear the workspace accent color tag of tab `index`.
+    ClearTabColor(usize),
 }
 
 /// Actions on one command block.

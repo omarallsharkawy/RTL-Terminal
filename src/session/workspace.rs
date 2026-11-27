@@ -97,6 +97,8 @@ pub struct Tab {
     pub id: u64,
     /// Optional user/control-socket custom title (overrides the focused pane's OSC title).
     pub title: Option<String>,
+    /// Optional user/control-socket workspace accent color tag.
+    pub color: Option<twitty_core::color::WorkspaceColor>,
     pub root: Node,
     pub focused: PaneId,
 }
@@ -244,6 +246,19 @@ impl Workspace {
             return false;
         };
         tab.title = title.filter(|t| !t.is_empty());
+        true
+    }
+
+    /// Set or clear the accent color tag of tab `index`. Returns false when out of range.
+    pub(crate) fn set_tab_color(
+        &mut self,
+        index: usize,
+        color: Option<twitty_core::color::WorkspaceColor>,
+    ) -> bool {
+        let Some(tab) = self.tabs.get_mut(index) else {
+            return false;
+        };
+        tab.color = color;
         true
     }
 
@@ -417,6 +432,7 @@ impl Workspace {
         self.tabs.push(Tab {
             id: tab_id,
             title: None,
+            color: None,
             root: Node::Leaf(id),
             focused: id,
         });
@@ -630,6 +646,7 @@ impl Workspace {
         self.tabs.push(Tab {
             id: tab_id,
             title: closed.tab_title.clone(),
+            color: None,
             root: Node::Leaf(id),
             focused: id,
         });
@@ -688,6 +705,7 @@ impl Workspace {
         self.tabs.push(Tab {
             id: tab_id,
             title: tab_title,
+            color: None,
             root,
             focused,
         });
@@ -724,6 +742,7 @@ impl Workspace {
                     Tab {
                         id: tab.id,
                         title: tab.title,
+                        color: tab.color,
                         root,
                         focused,
                     },

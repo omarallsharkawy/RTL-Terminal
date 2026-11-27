@@ -785,6 +785,7 @@ pub fn default_chords_for(command_name: &str) -> Vec<Chord> {
         "agent.ask" => vec![cs(KeyA)],
         "agent.panel" => vec![cs(Period)],
         "review.toggle" => vec![cs(KeyR)],
+        "ssh.connect" => vec![cs(KeyS)],
         "edit.copy" => vec![cs(KeyC)],
         "edit.paste" => vec![cs(KeyV)],
         "search.open" => vec![cs(KeyF)],

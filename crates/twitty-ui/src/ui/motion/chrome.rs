@@ -100,6 +100,7 @@ impl ChromeAnimations {
             .map(|&id| self.close_hover.value(id, now))
             .collect();
         view.new_tab_mix = Some(self.actions.value(ChromeAction::NewTab, now));
+        view.new_ssh_mix = Some(self.actions.value(ChromeAction::NewSsh, now));
         if !occluded && !self.reduced && view.animates() {
             let started = *self.working_since.get_or_insert(now);
             let cycle = DOT_INTERVAL * 3;

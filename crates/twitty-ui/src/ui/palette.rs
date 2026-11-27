@@ -45,6 +45,8 @@ pub enum PaletteMode {
     DeleteLayout,
     /// Pick an installed local coding-agent CLI to launch in a split or new tab.
     LaunchAgent,
+    /// Connect to a persistent SSH session (`~/.ssh/config`, recent hosts, or ad-hoc `user@host`).
+    Ssh,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]

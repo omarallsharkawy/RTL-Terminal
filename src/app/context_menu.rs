@@ -126,6 +126,23 @@ impl App {
             ));
             entries.push(MenuEntry::Separator);
         }
+        if let Some(dest) = self
+            .ws
+            .pane(id)
+            .and_then(|p| p.remote.as_ref())
+            .map(|r| r.target.destination().to_owned())
+        {
+            entries.push(self.command_entry("ssh.reconnect"));
+            entries.push(MenuEntry::item(
+                t("Split on same SSH host"),
+                MenuAction::SplitSshSameHost(id),
+            ));
+            entries.push(MenuEntry::item(
+                t("Copy SSH destination"),
+                MenuAction::CopySshDestination(dest),
+            ));
+            entries.push(MenuEntry::Separator);
+        }
         entries.push(self.command_entry("split.right"));
         entries.push(self.command_entry("split.down"));
         if !self.ws.single_pane() {
@@ -144,8 +161,37 @@ impl App {
             self.command_entry("tab.new"),
             MenuEntry::item(t("Rename tab…"), MenuAction::RenameTab(index))
                 .with_shortcut(self.keybindings.display_shortcut("tab.rename")),
-            MenuEntry::Separator,
+            MenuEntry::item(t("Cycle tab color"), MenuAction::CycleTabColor(index)),
         ];
+        if let Some(tab) = self.ws.tabs().get(index) {
+            if tab.color.is_some() {
+                entries.push(MenuEntry::item(
+                    t("Clear tab color"),
+                    MenuAction::ClearTabColor(index),
+                ));
+            }
+            let ssh_dest = std::iter::once(tab.focused)
+                .chain(tab.root.leaves())
+                .find_map(|pid| {
+                    self.ws
+                        .pane(pid)?
+                        .remote
+                        .as_ref()
+                        .map(|r| r.target.destination().to_owned())
+                });
+            if let Some(dest) = ssh_dest {
+                entries.push(MenuEntry::Separator);
+                entries.push(MenuEntry::item(
+                    t("Reconnect SSH"),
+                    MenuAction::ReconnectSshTab(index),
+                ));
+                entries.push(MenuEntry::item(
+                    t("Copy SSH destination"),
+                    MenuAction::CopySshDestination(dest),
+                ));
+            }
+        }
+        entries.push(MenuEntry::Separator);
         if self.ws.tabs().len() > 1 {
             entries.push(MenuEntry::item(
                 t("Close other tabs"),
@@ -272,6 +318,32 @@ impl App {
                     if self.ws.tabs().get(i).map(|t| t.id) != keep && self.close_tab(i) {
                         return true;
                     }
+                }
+            }
+            MenuAction::ReconnectSshTab(index) => {
+                self.reconnect_ssh_tab(index);
+            }
+            MenuAction::SplitSshSameHost(id) => {
+                self.split_ssh_same_host(id);
+            }
+            MenuAction::CopySshDestination(dest) => {
+                self.clipboard.set_text(dest);
+                self.toast(crate::ui::toast::ToastKind::Success, t("Copied"));
+            }
+            MenuAction::CycleTabColor(index) => {
+                let next = self
+                    .ws
+                    .tabs()
+                    .get(index)
+                    .map(|tab| twitty_core::color::WorkspaceColor::cycle(tab.color))
+                    .unwrap_or(None);
+                if self.ws.set_tab_color(index, next) {
+                    self.mark_session_dirty();
+                }
+            }
+            MenuAction::ClearTabColor(index) => {
+                if self.ws.set_tab_color(index, None) {
+                    self.mark_session_dirty();
                 }
             }
         }

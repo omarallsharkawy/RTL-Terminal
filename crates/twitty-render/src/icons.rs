@@ -43,6 +43,7 @@ impl Icon {
             "project.open" => Some(Self::Project),
             "layout.save" | "layout.open" | "layout.delete" => Some(Self::Layout),
             "input.broadcast" => Some(Self::Broadcast),
+            "ssh.connect" => Some(Self::Terminal),
             _ => None,
         }
     }

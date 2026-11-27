@@ -70,6 +70,7 @@ pub enum ChromeAction {
     Diff,
     Notifications,
     NewTab,
+    NewSsh,
     CloseTab(usize),
     ReconnectTab(usize),
     FocusPane(PaneId),

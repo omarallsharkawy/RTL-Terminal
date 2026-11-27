@@ -86,6 +86,7 @@ commands! {
     "agent.launch", en!("Launch coding agent…"), None => InputAction::LaunchAgent;
     "agent.panel", en!("Agent panel"), Some("Ctrl+Shift+.") => InputAction::ToggleAgentPanel;
     "review.toggle", en!("Review changes"), Some("Ctrl+Shift+R") => InputAction::ToggleReview;
+    "ssh.connect", en!("Connect via SSH…"), Some("Ctrl+Shift+S") => InputAction::ConnectSsh;
     "ssh.reconnect", en!("Reconnect SSH"), None => InputAction::ReconnectSsh;
     "edit.copy", en!("Copy"), Some("Ctrl+Shift+C") => InputAction::Copy;
     "edit.paste", en!("Paste"), Some("Ctrl+Shift+V") => InputAction::Paste;

@@ -36,6 +36,8 @@ struct SavedTab {
     focused: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    color: Option<String>,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
@@ -80,6 +82,7 @@ impl Session {
                         nodes: Vec::new(),
                         focused: 0,
                         title: tab.title.clone(),
+                        color: tab.color.map(|c| c.as_str().to_owned()),
                     };
                     saved.capture_node(workspace, &tab.root, tab.focused);
                     saved
@@ -135,6 +138,10 @@ impl Session {
                         .as_deref()
                         .map(|s| clean_text(s, MAX_TITLE_CHARS))
                         .filter(|s| !s.is_empty()),
+                    color: tab
+                        .color
+                        .as_deref()
+                        .and_then(twitty_core::color::WorkspaceColor::from_name),
                     focused: focused.unwrap_or_else(|| root.leaves()[0]),
                     root,
                 }
@@ -676,6 +683,7 @@ mod tests {
                 nodes,
                 focused,
                 title: None,
+                color: None,
             }],
         }
     }
@@ -880,6 +888,7 @@ mod tests {
                 nodes: vec![leaf(None), leaf(None), split(0, 1)],
                 focused: 0,
                 title: None,
+                color: None,
             });
         }
         session.active_tab = MAX_TABS + 1;

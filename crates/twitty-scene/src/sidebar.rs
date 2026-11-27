@@ -309,6 +309,7 @@ pub fn build(
         draw.card(item, home.as_deref());
     }
     draw.new_tab();
+    draw.new_ssh();
     draw.cache.labels.retain(|_, (_, drawn)| *drawn);
     draw.scene
 }
@@ -352,13 +353,19 @@ impl Cards<'_, '_> {
                 })
                 .collect();
         }
-        if (selected > 0.0 || hovered > 0.0 || drop || self.view.reordering)
+        let entry = &item.card.entry;
+        let tag_color = entry.color.map(|c| c.rgba());
+        if (selected > 0.0 || hovered > 0.0 || drop || self.view.reordering || tag_color.is_some())
             && intersect(item.rect, self.view.area).w > 0.0
         {
-            let fill = s
+            let mut fill = s
                 .bg1
                 .mix(s.bg2, if drop { 1.0 } else { hovered })
                 .mix(s.bg3.mix(s.text, 0.025 * hovered), selected);
+            if let Some(tag) = tag_color {
+                let tint = if selected > 0.0 { 0.12 } else { 0.06 };
+                fill = fill.mix(tag, tint);
+            }
             self.panel(item.rect, RADIUS_8, fill);
             if drop {
                 if let Some(Shape::RoundedRect { border, .. }) = self.scene.shapes.last_mut() {
@@ -369,9 +376,8 @@ impl Cards<'_, '_> {
                 }
             }
         }
-        let entry = &item.card.entry;
         let parts = item.layout(self.view);
-        if selected > 0.0 {
+        if selected > 0.0 || tag_color.is_some() {
             let w = s.px(2.0).round().min(item.rect.w);
             let inset = s.px(SPACE_4);
             let x = if self.view.mirrored {
@@ -380,8 +386,12 @@ impl Cards<'_, '_> {
                 item.rect.x + inset
             };
             let marker = Rect::new(x, parts.title.y, w, parts.title.h);
-            let mut accent = s.accent;
-            accent.a *= selected;
+            let mut accent = tag_color.unwrap_or(s.accent);
+            if tag_color.is_some() {
+                accent.a *= 0.85 + 0.15 * selected;
+            } else {
+                accent.a *= selected;
+            }
             self.panel(center_height(marker, s.px(SPACE_12)), RADIUS_6, accent);
         }
         let title = entry.title.trim();
@@ -651,6 +661,22 @@ impl Cards<'_, '_> {
             self.leading_align(),
             ink,
         );
+    }
+
+    fn new_ssh(&mut self) {
+        let rect = self.view.new_ssh;
+        if rect.w <= 0.0 || rect.h <= 0.0 {
+            return;
+        }
+        let s = self.style;
+        let hover = self
+            .view
+            .new_ssh_mix
+            .unwrap_or(f32::from(self.view.new_ssh_hover));
+        let fill = s.bg2.mix(s.bg3, hover);
+        self.panel(rect, RADIUS_8, fill);
+        let ink = s.text_dim.mix(s.text, hover);
+        self.icon(rect, Icon::Terminal, s.px(SPACE_16), ink);
     }
 
     fn panel(&mut self, rect: Rect, radius: f32, color: Rgba) {

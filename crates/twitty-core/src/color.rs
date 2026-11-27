@@ -21,7 +21,82 @@ impl Rgba {
             a: 1.0,
         }
     }
+}
 
+/// Optional accent color tag attached to a workspace tab in the sidebar (cmux-style).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum WorkspaceColor {
+    Blue,
+    Green,
+    Amber,
+    Red,
+    Purple,
+    Teal,
+}
+
+impl WorkspaceColor {
+    /// All preset workspace colors in cycling order.
+    pub const ALL: [Self; 6] = [
+        Self::Blue,
+        Self::Green,
+        Self::Amber,
+        Self::Red,
+        Self::Purple,
+        Self::Teal,
+    ];
+
+    /// Stable lowercase identifier for persistence and control-socket protocols.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Blue => "blue",
+            Self::Green => "green",
+            Self::Amber => "amber",
+            Self::Red => "red",
+            Self::Purple => "purple",
+            Self::Teal => "teal",
+        }
+    }
+
+    /// Parse a color name (case-insensitive). Returns `None` for unknown names.
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "blue" => Some(Self::Blue),
+            "green" => Some(Self::Green),
+            "amber" | "yellow" | "orange" => Some(Self::Amber),
+            "red" => Some(Self::Red),
+            "purple" | "violet" | "magenta" => Some(Self::Purple),
+            "teal" | "cyan" => Some(Self::Teal),
+            _ => None,
+        }
+    }
+
+    /// Cycle through `None -> Blue -> Green -> Amber -> Red -> Purple -> Teal -> None`.
+    pub const fn cycle(current: Option<Self>) -> Option<Self> {
+        match current {
+            None => Some(Self::Blue),
+            Some(Self::Blue) => Some(Self::Green),
+            Some(Self::Green) => Some(Self::Amber),
+            Some(Self::Amber) => Some(Self::Red),
+            Some(Self::Red) => Some(Self::Purple),
+            Some(Self::Purple) => Some(Self::Teal),
+            Some(Self::Teal) => None,
+        }
+    }
+
+    /// sRGB color rendered on the sidebar workspace card indicator.
+    pub fn rgba(self) -> Rgba {
+        match self {
+            Self::Blue => Rgba::from_rgb8(0x5B, 0x9B, 0xF5),
+            Self::Green => Rgba::from_rgb8(0x4E, 0xC9, 0x7A),
+            Self::Amber => Rgba::from_rgb8(0xE8, 0xA8, 0x38),
+            Self::Red => Rgba::from_rgb8(0xE0, 0x62, 0x62),
+            Self::Purple => Rgba::from_rgb8(0xA9, 0x7C, 0xF5),
+            Self::Teal => Rgba::from_rgb8(0x3B, 0xC4, 0xC0),
+        }
+    }
+}
+
+impl Rgba {
     /// Linear blend towards `other` (`t` = 0 keeps `self`).
     #[doc(hidden)]
     pub fn mix(self, other: Rgba, t: f32) -> Rgba {

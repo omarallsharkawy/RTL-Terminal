@@ -152,6 +152,10 @@ pub struct App {
     closed_tabs: crate::session::closed::ClosedTabs,
     /// Per-tab broadcast input toggle and Esc-Esc state.
     broadcast: crate::input::broadcast::BroadcastState,
+    /// `~/.ssh/config` hosts loaded off-thread for the SSH palette.
+    ssh_hosts: Vec<crate::composer::generators::GeneratedItem>,
+    /// Most-recently-used SSH destinations in this session.
+    recent_ssh: Vec<String>,
 }
 
 impl App {
@@ -219,6 +223,8 @@ impl App {
             shell_name: crate::history::detect_shell_name(),
             closed_tabs: crate::session::closed::ClosedTabs::new(),
             broadcast: crate::input::broadcast::BroadcastState::new(),
+            ssh_hosts: Vec::new(),
+            recent_ssh: Vec::new(),
         }
     }
 
@@ -464,6 +470,7 @@ impl ApplicationHandler<AppEvent> for App {
                 detected_cli_agents,
             } => self.on_agent_engine_config_ready(generation, *config, detected_cli_agents),
             AppEvent::AgentClisProbed(clis) => self.on_agent_clis_probed(clis),
+            AppEvent::SshHostsLoaded(hosts) => self.on_ssh_hosts_loaded(hosts),
             AppEvent::AgentStartReady {
                 generation,
                 session,

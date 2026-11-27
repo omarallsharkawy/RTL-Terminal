@@ -138,6 +138,24 @@ impl App {
         dir: SplitDir,
         options: SpawnOptions,
     ) -> Result<PaneId, SplitFailure> {
+        self.split_focused_with_process(dir, options, None)
+    }
+
+    /// Split the focused pane with a persistent SSH session targeting `target`.
+    pub(super) fn split_ssh_focused(
+        &mut self,
+        dir: SplitDir,
+        target: Target,
+    ) -> Result<PaneId, SplitFailure> {
+        self.split_focused_with_process(dir, SpawnOptions::default(), Some(target))
+    }
+
+    fn split_focused_with_process(
+        &mut self,
+        dir: SplitDir,
+        options: SpawnOptions,
+        remote: Option<Target>,
+    ) -> Result<PaneId, SplitFailure> {
         let Some(r) = self.window.grid() else {
             return Err(SplitFailure::for_size(None, dir));
         };
@@ -146,6 +164,7 @@ impl App {
         }
         let socket = self.control_socket_path();
         let mut shells = make_shell_factory(&self.proxy, &self.config, socket, options);
+        shells.remote = remote;
         let Some((old, new)) = self.ws.split_focused(r, &mut shells, dir) else {
             return Err(self.ws.split_failure_reason(r, dir));
         };

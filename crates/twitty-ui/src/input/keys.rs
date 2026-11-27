@@ -102,6 +102,8 @@ pub enum InputAction {
     Welcome,
     /// Force an immediate reconnect on the focused SSH pane (cancelling backoff or stalled PTY).
     ReconnectSsh,
+    /// Open the interactive SSH connection palette (`Ctrl+Shift+S`).
+    ConnectSsh,
     /// Open the coding-agent launcher palette to start an installed CLI in a split or tab.
     LaunchAgent,
 }

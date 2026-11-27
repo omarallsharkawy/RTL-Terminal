@@ -27,6 +27,7 @@ impl TipTarget {
                 ChromeAction::Diff => (t("Review changes"), Some("review.toggle")),
                 ChromeAction::Notifications => (t("Notifications"), Some("notifications.list")),
                 ChromeAction::NewTab => (t("New tab"), Some("tab.new")),
+                ChromeAction::NewSsh => (t("Connect via SSH…"), Some("ssh.connect")),
                 ChromeAction::CloseTab(_) => (t("Close tab"), None),
                 ChromeAction::ReconnectTab(_) => (t("Reconnect SSH"), Some("ssh.reconnect")),
                 ChromeAction::SplitRight(_) => (t("Split right"), Some("split.right")),

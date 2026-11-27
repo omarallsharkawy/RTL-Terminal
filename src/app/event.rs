@@ -75,6 +75,8 @@ pub enum AppEvent {
     },
     /// Off-thread `$PATH` probe of installed local coding-agent CLIs.
     AgentClisProbed(Vec<String>),
+    /// Off-thread `~/.ssh/config` host scan for the interactive SSH palette.
+    SshHostsLoaded(Vec<crate::composer::generators::GeneratedItem>),
     /// Assembled context ready to start an agent session without blocking the UI thread.
     AgentStartReady {
         generation: u64,

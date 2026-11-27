@@ -145,4 +145,83 @@ impl App {
             self.reconnect_ssh_pane(id);
         }
     }
+
+    /// Load `~/.ssh/config` hosts on a background thread for the SSH connection palette.
+    pub(super) fn spawn_ssh_hosts_load(&self) {
+        let proxy = self.proxy.clone();
+        if let Err(err) = std::thread::Builder::new()
+            .name("twitty-ssh-hosts".into())
+            .spawn(move || {
+                let hosts = crate::composer::generators::ssh_hosts_from_default();
+                let _ = proxy.send_event(super::event::AppEvent::SshHostsLoaded(hosts));
+            })
+        {
+            tracing::warn!("twitty ssh hosts thread failed to start: {err}");
+        }
+    }
+
+    pub(super) fn on_ssh_hosts_loaded(
+        &mut self,
+        hosts: Vec<crate::composer::generators::GeneratedItem>,
+    ) {
+        self.ssh_hosts = hosts;
+        if self.ssh_palette_open() {
+            self.sync_palette();
+        }
+    }
+
+    fn record_recent_ssh(&mut self, destination: &str) {
+        let dest = destination.trim();
+        if dest.is_empty() {
+            return;
+        }
+        self.recent_ssh.retain(|existing| existing != dest);
+        self.recent_ssh.insert(0, dest.to_owned());
+        self.recent_ssh.truncate(16);
+    }
+
+    /// Parse user SSH input (`host`, `user@host`, or `user@host:session`) and open it either in a
+    /// new persistent SSH tab or as a split in the active tab.
+    pub(super) fn connect_ssh_input(&mut self, raw: &str, split: bool) {
+        let target = match crate::remote::parse_ssh_input(raw) {
+            Ok(target) => target,
+            Err(err) => {
+                self.toast(crate::ui::toast::ToastKind::Error, &err);
+                return;
+            }
+        };
+        let dest = target.destination().to_owned();
+        let opened = if split {
+            if self.can_split_focused(crate::layout::SplitDir::Horizontal) {
+                self.split_ssh_focused(crate::layout::SplitDir::Horizontal, target)
+                    .ok()
+            } else if self.can_split_focused(crate::layout::SplitDir::Vertical) {
+                self.split_ssh_focused(crate::layout::SplitDir::Vertical, target)
+                    .ok()
+            } else {
+                self.new_ssh_tab(target)
+            }
+        } else {
+            self.new_ssh_tab(target)
+        };
+        if opened.is_some() {
+            self.record_recent_ssh(&dest);
+        } else {
+            let msg = fill(t("Could not connect to {}. Press Enter to retry"), &[&dest]);
+            self.toast(crate::ui::toast::ToastKind::Error, &msg);
+        }
+    }
+
+    /// Open a new split connected to the same SSH host as pane `id` (fresh remote session).
+    pub(super) fn split_ssh_same_host(&mut self, id: PaneId) {
+        let Some(dest) = self
+            .ws
+            .pane(id)
+            .and_then(|pane| pane.remote.as_ref())
+            .map(|remote| remote.target.destination().to_owned())
+        else {
+            return;
+        };
+        self.connect_ssh_input(&dest, true);
+    }
 }

@@ -249,17 +249,20 @@ pub struct View {
     pub position: SidebarPosition,
     pub items: Vec<Item>,
     pub new_tab: Rect,
+    pub new_ssh: Rect,
     pub language: UiLanguage,
     pub hover: Option<usize>,
     pub close_hover: bool,
     pub reconnect_hover: bool,
     pub new_tab_hover: bool,
+    pub new_ssh_hover: bool,
     pub dot_phase: usize,
     pub dot_progress: Option<f32>,
     pub reordering: bool,
     pub highlights: Option<Vec<(f32, f32)>>,
     pub close_mixes: Vec<f32>,
     pub new_tab_mix: Option<f32>,
+    pub new_ssh_mix: Option<f32>,
     first_y: f32,
     pub drop_target: Option<usize>,
     card_count: usize,
@@ -277,13 +280,16 @@ impl View {
         now: Instant,
         reduced: bool,
     ) {
+        let margin = SPACE_8 * self.scale;
+        let card_x = self.area.x + margin.min(self.area.w / 2.0);
+        let card_w = CardLayout::card_width(self.area, self.scale);
         let mut y = self.first_y;
         let slots = cards
             .iter()
             .zip(ids)
             .map(|(card, &id)| {
                 let h = CardLayout::height(card, self.scale);
-                let rect = Rect::new(self.new_tab.x, y, self.new_tab.w, h);
+                let rect = Rect::new(card_x, y, card_w, h);
                 y += h + SPACE_4 * self.scale;
                 (id, rect)
             })
@@ -335,6 +341,9 @@ impl View {
         if self.new_tab.contains(x, y) {
             return Some(Hit::Chrome(ChromeAction::NewTab));
         }
+        if self.new_ssh.w > 0.0 && self.new_ssh.contains(x, y) {
+            return Some(Hit::Chrome(ChromeAction::NewSsh));
+        }
         let Some(item) = self
             .items
             .iter()
@@ -374,6 +383,8 @@ impl View {
         self.close_hover = matches!(hit, Some(Hit::Chrome(ChromeAction::CloseTab(_))));
         self.reconnect_hover = matches!(hit, Some(Hit::Chrome(ChromeAction::ReconnectTab(_))));
         self.new_tab_hover = self.area.contains(x, y) && self.new_tab.contains(x, y);
+        self.new_ssh_hover =
+            self.area.contains(x, y) && self.new_ssh.w > 0.0 && self.new_ssh.contains(x, y);
     }
 }
 
@@ -462,24 +473,47 @@ impl ScrollState {
                 });
             }
         }
+        let mirrored = language == UiLanguage::Arabic;
+        let btn_h = NEW_TAB_HEIGHT * scale;
+        let (new_tab, new_ssh) = if w >= 140.0 * scale {
+            let gap = SPACE_4 * scale;
+            let ssh_w = btn_h.min(w * 0.25);
+            let tab_w = (w - ssh_w - gap).max(0.0);
+            if mirrored {
+                (
+                    Rect::new(x + ssh_w + gap, y, tab_w, btn_h),
+                    Rect::new(x, y, ssh_w, btn_h),
+                )
+            } else {
+                (
+                    Rect::new(x, y, tab_w, btn_h),
+                    Rect::new(x + tab_w + gap, y, ssh_w, btn_h),
+                )
+            }
+        } else {
+            (Rect::new(x, y, w, btn_h), Rect::new(x, y, 0.0, 0.0))
+        };
         View {
             area,
             scale,
-            mirrored: language == UiLanguage::Arabic,
+            mirrored,
             position,
             items,
-            new_tab: Rect::new(x, y, w, NEW_TAB_HEIGHT * scale),
+            new_tab,
+            new_ssh,
             language,
             hover: None,
             close_hover: false,
             reconnect_hover: false,
             new_tab_hover: false,
+            new_ssh_hover: false,
             dot_phase: 0,
             dot_progress: None,
             reordering: false,
             highlights: None,
             close_mixes: Vec::new(),
             new_tab_mix: None,
+            new_ssh_mix: None,
             first_y,
             drop_target: None,
             card_count: cards.len(),

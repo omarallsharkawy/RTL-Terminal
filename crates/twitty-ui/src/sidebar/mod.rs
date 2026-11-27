@@ -9,6 +9,7 @@ use crate::layout::{PaneId, SidebarPosition};
 use crate::shell_integration::{clean_text, MAX_NOTIFY_CHARS};
 use crate::ui::chrome::UiLanguage;
 use crate::ui::notifications::HistoryEntry;
+use twitty_core::color::WorkspaceColor;
 use twitty_core::remote::ConnectionState;
 
 /// A desktop notification a pane asked for (OSC 9/99/777), waiting to be seen.
@@ -188,6 +189,8 @@ pub struct Entry {
     /// Agent status (working / needs input / done) reported for a pane in this tab.
     pub agent_status: Option<AgentStatus>,
     pub remote_state: Option<ConnectionState>,
+    /// Optional user/control-socket workspace accent color tag.
+    pub color: Option<WorkspaceColor>,
 }
 
 impl Entry {
@@ -213,7 +216,14 @@ impl Entry {
             ports: Vec::new(),
             agent_status: None,
             remote_state: None,
+            color: None,
         }
+    }
+
+    /// The entry with this workspace accent color tag.
+    pub fn with_color(mut self, color: Option<WorkspaceColor>) -> Self {
+        self.color = color;
+        self
     }
 
     /// The entry with these listening ports.

@@ -87,6 +87,72 @@ fn launch_agent_entries_for(
         .collect()
 }
 
+struct SshPaletteEntry {
+    destination: String,
+    title_en: String,
+    title_ar: String,
+    tag: Option<String>,
+    search_extra: String,
+}
+
+impl crate::ui::palette::Searchable for SshPaletteEntry {
+    fn search_fields(&self) -> Vec<&str> {
+        vec![
+            self.destination.as_str(),
+            self.title_en.as_str(),
+            self.search_extra.as_str(),
+        ]
+    }
+}
+
+fn ssh_palette_entries_for(
+    recent: &[String],
+    hosts: &[crate::composer::generators::GeneratedItem],
+    query: &str,
+    lang: twitty_core::language::UiLanguage,
+) -> Vec<SshPaletteEntry> {
+    let mut entries = Vec::new();
+    let recent_tag = lang.t("Recent").to_owned();
+    let mut seen = std::collections::HashSet::new();
+
+    for dest in recent {
+        if seen.insert(dest.clone()) {
+            entries.push(SshPaletteEntry {
+                destination: dest.clone(),
+                title_en: dest.clone(),
+                title_ar: dest.clone(),
+                tag: Some(recent_tag.clone()),
+                search_extra: String::new(),
+            });
+        }
+    }
+    for host in hosts {
+        if seen.insert(host.value.clone()) {
+            entries.push(SshPaletteEntry {
+                destination: host.value.clone(),
+                title_en: host.value.clone(),
+                title_ar: host.value.clone(),
+                tag: host.desc.clone(),
+                search_extra: host.desc.clone().unwrap_or_default(),
+            });
+        }
+    }
+    let trimmed = query.trim();
+    if !trimmed.is_empty() && !seen.contains(trimmed) {
+        let mut item = PaletteItem::text(en!("Connect to {}"), false);
+        item.title_en = fill(&item.title_en, &[&trimmed]);
+        item.title_ar = fill(&item.title_ar, &[&trimmed]);
+        entries.push(SshPaletteEntry {
+            destination: trimmed.to_owned(),
+            title_en: item.title_en,
+            title_ar: item.title_ar,
+            tag: Some("SSH".to_owned()),
+            search_extra: trimmed.to_owned(),
+        });
+    }
+    entries
+}
+
 impl App {
     pub(super) fn palette_open(&self) -> bool {
         self.palette.is_some()
@@ -129,6 +195,8 @@ impl App {
         } else if mode == PaletteMode::LaunchAgent {
             self.sync_agent_panel_active_cli();
             self.spawn_cli_agents_probe();
+        } else if mode == PaletteMode::Ssh {
+            self.spawn_ssh_hosts_load();
         } else if matches!(
             mode,
             PaletteMode::SaveLayout | PaletteMode::OpenLayout | PaletteMode::DeleteLayout
@@ -211,6 +279,13 @@ impl App {
             .is_some_and(|p| p.state.mode == PaletteMode::LaunchAgent)
     }
 
+    /// The SSH connection palette is on screen (refreshed when `~/.ssh/config` finishes loading).
+    pub(super) fn ssh_palette_open(&self) -> bool {
+        self.palette
+            .as_ref()
+            .is_some_and(|p| p.state.mode == PaletteMode::Ssh)
+    }
+
     fn launch_agent_entries(&self) -> Vec<LaunchAgentEntry> {
         launch_agent_entries_for(&self.agent_panel.state)
     }
@@ -243,6 +318,7 @@ impl App {
             leading: match state.mode {
                 PaletteMode::Projects => Icon::Project,
                 PaletteMode::LaunchAgent => Icon::Agent,
+                PaletteMode::Ssh => Icon::Terminal,
                 PaletteMode::SaveLayout | PaletteMode::OpenLayout | PaletteMode::DeleteLayout => {
                     Icon::Layout
                 }
@@ -377,6 +453,33 @@ impl App {
                     ),
                 )
             }
+            PaletteMode::Ssh => {
+                let entries = ssh_palette_entries_for(
+                    &self.recent_ssh,
+                    &self.ssh_hosts,
+                    &state.query,
+                    self.window.ui_language(),
+                );
+                let rows = matches(&entries, &state.query)
+                    .into_iter()
+                    .map(|i| {
+                        let e = &entries[i];
+                        PaletteItem {
+                            title_en: e.title_en.clone(),
+                            title_ar: e.title_ar.clone(),
+                            shortcut: e.tag.clone(),
+                            dimmed: false,
+                        }
+                    })
+                    .collect();
+                (
+                    rows,
+                    Some(
+                        crate::ui::chrome::t("Connect via SSH (Enter: tab, Alt+Enter: split)…")
+                            .into(),
+                    ),
+                )
+            }
         };
         let shown = visible_window_in(rows.len(), state.selected, self.palette_capacity());
         let selected = state.selected.min(rows.len().saturating_sub(1)) - shown.start;
@@ -399,6 +502,10 @@ impl App {
                 }
                 PaletteMode::LaunchAgent => items.push(PaletteItem::text(
                     en!("No coding agents found on PATH"),
+                    true,
+                )),
+                PaletteMode::Ssh => items.push(PaletteItem::text(
+                    en!("Type user@host or pick from ~/.ssh/config"),
                     true,
                 )),
                 _ => {}
@@ -440,6 +547,10 @@ impl App {
             }
             Some(InputAction::OpenProject) => {
                 self.toggle_palette_mode(PaletteMode::Projects);
+                return false;
+            }
+            Some(InputAction::ConnectSsh) => {
+                self.toggle_palette_mode(PaletteMode::Ssh);
                 return false;
             }
             Some(InputAction::Settings) => {
@@ -571,6 +682,24 @@ impl App {
                         if let Some(program) = entries.get(i).map(|e| e.program.clone()) {
                             self.close_palette();
                             self.launch_agent_cli(&program, modifiers.alt_key());
+                        }
+                    }
+                    PaletteCmd::Close => self.close_palette(),
+                    PaletteCmd::None | PaletteCmd::Run(_) => self.sync_palette(),
+                }
+            }
+            PaletteMode::Ssh => {
+                let entries = ssh_palette_entries_for(
+                    &self.recent_ssh,
+                    &self.ssh_hosts,
+                    &open.state.query,
+                    self.window.ui_language(),
+                );
+                match open.state.key_in(&entries, key, text, modifiers) {
+                    PaletteCmd::Choose(i) => {
+                        if let Some(dest) = entries.get(i).map(|e| e.destination.clone()) {
+                            self.close_palette();
+                            self.connect_ssh_input(&dest, modifiers.alt_key());
                         }
                     }
                     PaletteCmd::Close => self.close_palette(),
@@ -715,6 +844,27 @@ impl App {
                     let new_tab = self.modifiers.alt_key();
                     self.close_palette();
                     self.launch_agent_cli(&program, new_tab);
+                }
+                false
+            }
+            PaletteMode::Ssh => {
+                let entries = ssh_palette_entries_for(
+                    &self.recent_ssh,
+                    &self.ssh_hosts,
+                    &state.query,
+                    self.window.ui_language(),
+                );
+                let results = matches(&entries, &state.query);
+                let shown =
+                    visible_window_in(results.len(), state.selected, self.palette_capacity());
+                if let Some(dest) = results
+                    .get(shown.start + row)
+                    .and_then(|&i| entries.get(i))
+                    .map(|e| e.destination.clone())
+                {
+                    let split = self.modifiers.alt_key();
+                    self.close_palette();
+                    self.connect_ssh_input(&dest, split);
                 }
                 false
             }

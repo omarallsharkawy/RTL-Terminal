@@ -98,6 +98,38 @@ impl Target {
     }
 }
 
+/// Parse user-typed SSH palette input into a persistent [`Target`].
+///
+/// Accepts `host`, `user@host`, an optional leading `ssh ` prefix, or `user@host:session_name`
+/// (when there is a single `:` whose suffix is a valid session name containing at least one
+/// ASCII letter, keeping IPv6 addresses intact).
+pub fn parse_ssh_input(raw: &str) -> Result<Target, String> {
+    let mut trimmed = raw.trim();
+    if let Some(rest) = trimmed
+        .strip_prefix("ssh ")
+        .or_else(|| trimmed.strip_prefix("SSH "))
+    {
+        trimmed = rest.trim();
+    }
+    if trimmed.is_empty() {
+        return Err("enter an SSH host or user@host".into());
+    }
+    let (destination, session_name) = match trimmed.split_once(':') {
+        Some((dest, rest))
+            if !dest.is_empty()
+                && !rest.is_empty()
+                && !rest.contains(':')
+                && !dest.contains('[')
+                && rest.chars().any(|c| c.is_ascii_alphabetic())
+                && validate_name(rest).is_ok() =>
+        {
+            (dest, Some(rest))
+        }
+        _ => (trimmed, None),
+    };
+    Target::for_tab(destination, session_name)
+}
+
 pub fn retry_delay(attempt: usize) -> Option<Duration> {
     [1, 2, 4, 8, 16]
         .get(attempt)

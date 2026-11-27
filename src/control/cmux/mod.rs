@@ -45,6 +45,7 @@ pub const SUPPORTED_METHODS: &[&str] = &[
     "tab.list",
     "tab.new",
     "tab.new-ssh",
+    "tab.color",
     "pane.send-text",
     "pane.read",
     "notify",
@@ -56,6 +57,7 @@ pub const SUPPORTED_METHODS: &[&str] = &[
     "workspace.select",
     "workspace.close",
     "workspace.rename",
+    "workspace.set_color",
     "workspace.set_status",
     "workspace.clear_status",
     "workspace.list_status",
@@ -224,6 +226,9 @@ pub(crate) fn dispatch_request(host: &mut impl ControlHost, req: Request) -> (Re
         "workspace.select" => (handle_workspace_select(host, id, params), false),
         "workspace.close" => handle_workspace_close(host, id, params),
         "workspace.rename" => (handle_workspace_rename(host, id, params), false),
+        "workspace.set_color" | "tab.color" => {
+            (handle_workspace_set_color(host, id, params), false)
+        }
         "workspace.set_status" => (handle_workspace_set_status(host, id, params), false),
         "workspace.clear_status" => (handle_workspace_clear_status(host, id, params), false),
         "workspace.list_status" => (handle_workspace_list_status(host, id, params), false),

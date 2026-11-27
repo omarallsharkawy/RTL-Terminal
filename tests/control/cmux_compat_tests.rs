@@ -1198,3 +1198,43 @@ fn ssh_tab_method_reaches_the_native_dispatcher() {
     });
     assert!(!bad.ok);
 }
+
+#[test]
+fn cmux_workspace_set_color_and_tab_color_update_and_clear() {
+    let mut host = HeadlessHost::new();
+
+    // Set color via `workspace.set_color`.
+    let (resp, _) = host.dispatch(Request {
+        id: json!(1),
+        method: "workspace.set_color".into(),
+        params: json!({ "color": "amber" }),
+    });
+    assert!(resp.ok, "{resp:?}");
+    assert_eq!(resp.result.as_ref().unwrap()["color"], "amber");
+
+    // Reflected in `workspace.list` and `workspace.current`.
+    let (list, _) = host.dispatch(Request {
+        id: json!(2),
+        method: "workspace.list".into(),
+        params: json!({}),
+    });
+    assert_eq!(list.result.unwrap()["workspaces"][0]["color"], "amber");
+
+    // Alias `tab.color` clears when given "none" or null.
+    let (cleared, _) = host.dispatch(Request {
+        id: json!(3),
+        method: "tab.color".into(),
+        params: json!({ "color": "none" }),
+    });
+    assert!(cleared.ok, "{cleared:?}");
+    assert!(cleared.result.unwrap()["color"].is_null());
+
+    // Unknown color returns invalid_params.
+    let (bad, _) = host.dispatch(Request {
+        id: json!(4),
+        method: "workspace.set_color".into(),
+        params: json!({ "color": "ultraviolet" }),
+    });
+    assert!(!bad.ok);
+    assert_eq!(bad.error_code.as_deref(), Some("invalid_params"));
+}

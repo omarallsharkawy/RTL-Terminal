@@ -223,6 +223,7 @@ impl App {
             ChromeAction::Diff => self.run_command("review.toggle"),
             ChromeAction::Notifications => self.run_command("notifications.list"),
             ChromeAction::NewTab => self.run_command("tab.new"),
+            ChromeAction::NewSsh => self.run_command("ssh.connect"),
             ChromeAction::CloseTab(index) => self.close_tab(index),
             ChromeAction::ReconnectTab(index) => {
                 self.reconnect_ssh_tab(index);

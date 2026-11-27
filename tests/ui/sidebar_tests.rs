@@ -1565,3 +1565,90 @@ fn disconnected_ssh_card_exposes_clickable_reconnect_button() {
         Some(("Reconnect SSH", Some("ssh.reconnect")))
     );
 }
+
+#[test]
+fn sidebar_quick_ssh_button_workspace_color_and_ssh_input_parser() {
+    use twitty::color::WorkspaceColor;
+    use twitty::input::keybindings::KeyBindings;
+    use twitty::input::InputAction;
+    use twitty::remote::parse_ssh_input;
+    use twitty::ui::tooltip::TipTarget;
+
+    // 1. Sidebar footer splits cleanly into NewTab + NewSsh in both English (LTR) and Arabic (RTL).
+    let tagged =
+        Entry::new("prod-api", None, false, None, []).with_color(Some(WorkspaceColor::Teal));
+    let plain = Entry::new("local", None, false, None, []);
+    let cards = vec![Card::new(tagged), Card::new(plain)];
+    let area = Rect::new(0.0, 0.0, 240.0, 300.0);
+    for lang in [UiLanguage::English, UiLanguage::Arabic] {
+        let mut view =
+            ScrollState::default().view(&cards, 0, area, 1.0, SidebarPosition::Left, lang);
+        assert!(view.new_ssh.w > 0.0 && view.new_ssh.h > 0.0);
+        if lang == UiLanguage::English {
+            assert!(view.new_tab.right() <= view.new_ssh.x);
+        } else {
+            assert!(view.new_ssh.right() <= view.new_tab.x);
+        }
+        let ssh_center = (
+            f64::from(view.new_ssh.x + view.new_ssh.w * 0.5),
+            f64::from(view.new_ssh.y + view.new_ssh.h * 0.5),
+        );
+        assert_eq!(
+            view.pointer_hit(ssh_center.0, ssh_center.1),
+            Some(Hit::Chrome(ChromeAction::NewSsh))
+        );
+        view.update_hover(ssh_center);
+        assert!(view.new_ssh_hover);
+        assert!(!view.new_tab_hover);
+    }
+    assert_eq!(
+        TipTarget::Chrome(ChromeAction::NewSsh).label(),
+        Some(("Connect via SSH…", Some("ssh.connect")))
+    );
+
+    // 2. `ssh.connect` command and default Ctrl+Shift+S binding are registered.
+    assert_eq!(
+        twitty::commands::action("ssh.connect"),
+        Some(InputAction::ConnectSsh)
+    );
+    assert_eq!(
+        KeyBindings::defaults()
+            .display_shortcut("ssh.connect")
+            .as_deref(),
+        Some("Ctrl+Shift+S")
+    );
+
+    // 3. `parse_ssh_input` supports host, user@host, optional `ssh ` prefix, and `:session`, while
+    //    rejecting option-injection and preserving IPv6 literals.
+    let named = parse_ssh_input("ssh alice@prod.internal:deploy").unwrap();
+    assert_eq!(named.destination(), "alice@prod.internal");
+    assert_eq!(named.name(), "deploy");
+    let ipv6 = parse_ssh_input("root@[2001:db8::1]").unwrap();
+    assert_eq!(ipv6.destination(), "root@[2001:db8::1]");
+    assert!(parse_ssh_input("-oProxyCommand=id host").is_err());
+    assert!(parse_ssh_input("   ").is_err());
+
+    // 4. WorkspaceColor cycling and parsing.
+    assert_eq!(
+        WorkspaceColor::from_name("BLUE"),
+        Some(WorkspaceColor::Blue)
+    );
+    assert_eq!(
+        WorkspaceColor::from_name("cyan"),
+        Some(WorkspaceColor::Teal)
+    );
+    assert_eq!(WorkspaceColor::from_name("unknown"), None);
+    let mut c = None;
+    for expected in [
+        Some(WorkspaceColor::Blue),
+        Some(WorkspaceColor::Green),
+        Some(WorkspaceColor::Amber),
+        Some(WorkspaceColor::Red),
+        Some(WorkspaceColor::Purple),
+        Some(WorkspaceColor::Teal),
+        None,
+    ] {
+        c = WorkspaceColor::cycle(c);
+        assert_eq!(c, expected);
+    }
+}

@@ -1153,6 +1153,7 @@ fn sidebar_entries(
             )
             .with_ports(tab_ports)
             .with_agent_status(agent_status)
+            .with_color(tab.color)
             .with_notification_history(&panes, &history, pending);
             entry.remote_state = remote.map(|remote| remote.state);
             entry.last_command = focused
