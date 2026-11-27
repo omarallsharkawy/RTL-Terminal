@@ -199,6 +199,9 @@ pub struct SpawnOptions {
     pub command: Vec<String>,
     /// Extra environment variables, applied last.
     pub env: Vec<(String, String)>,
+    /// `command` starts the user's shell (with Twitty's integration loaded), not a program:
+    /// the pane is idle at its prompt unless the shell runs a foreground job.
+    pub shell: bool,
 }
 
 impl Pty {
@@ -406,7 +409,7 @@ impl Pty {
             writer,
             killer,
             program_name,
-            direct_program: !options.command.is_empty(),
+            direct_program: !options.command.is_empty() && !options.shell,
             pid,
         })
     }

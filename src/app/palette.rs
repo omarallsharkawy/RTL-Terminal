@@ -936,6 +936,7 @@ impl App {
                     cwd,
                     command: run_shell_argv(&workflow.spec.command),
                     env: Vec::new(),
+                    shell: false,
                 };
                 let spawned = if self.can_split_focused(SplitDir::Horizontal) {
                     self.split_focused_with(SplitDir::Horizontal, options).ok()

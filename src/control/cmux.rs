@@ -590,6 +590,7 @@ fn exec_twitty_call(
                 cwd,
                 command,
                 env: Vec::new(),
+                shell: false,
             };
             let id = host
                 .new_tab_with(options)
@@ -624,6 +625,7 @@ fn exec_twitty_call(
                 cwd,
                 command,
                 env: Vec::new(),
+                shell: false,
             };
             let id = host
                 .split_focused_with(direction, options)
@@ -772,6 +774,7 @@ fn handle_workspace_create(
         cwd,
         command,
         env: Vec::new(),
+        shell: false,
     };
     let Some(pane_id) = host.new_tab_with(options) else {
         return Response::cmux_err(id, "internal", "failed to create workspace");
@@ -1170,6 +1173,7 @@ fn handle_cmux_split(
         cwd,
         command,
         env: Vec::new(),
+        shell: false,
     };
     let new_id = match host.split_focused_with(dir, options) {
         Ok(id) => id,

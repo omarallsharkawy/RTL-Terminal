@@ -449,5 +449,6 @@ pub fn apply(options: &mut SpawnOptions) {
         tracing::debug!("shell integration for {shell:?}");
         options.command = integration.command;
         options.env.extend(integration.env);
+        options.shell = true;
     }
 }

@@ -238,3 +238,31 @@ fn saving_a_symlinked_config_keeps_the_link() {
     assert!(std::fs::read_to_string(&real).unwrap().contains("20"));
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// A shell started with Twitty's integration (an explicit `bash --rcfile ...` command) is idle at
+/// its prompt, not "a program running": otherwise the always-on composer never shows.
+#[cfg(target_os = "linux")]
+#[test]
+fn integrated_shell_is_not_a_foreground_program() {
+    use std::time::{Duration, Instant};
+    use twitty::pty::{Pty, SpawnOptions};
+    let shell = SpawnOptions {
+        command: vec!["sh".into()],
+        shell: true,
+        ..SpawnOptions::default()
+    };
+    let pty = Pty::spawn_with(&shell, 80, 24, || {}, || {}).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while pty.cwd().is_none() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(!pty.has_foreground_program());
+    assert_eq!(pty.foreground_argv(), None);
+
+    let program = SpawnOptions {
+        command: vec!["sleep".into(), "5".into()],
+        ..SpawnOptions::default()
+    };
+    let pty = Pty::spawn_with(&program, 80, 24, || {}, || {}).unwrap();
+    assert!(pty.has_foreground_program());
+}

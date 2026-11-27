@@ -101,6 +101,7 @@ impl App {
             cwd,
             command: agent_argv(&agent, prompt),
             env: Vec::new(),
+            shell: false,
         };
         // Prefer a side-by-side split; when the sidebar or existing splits leave the pane too
         // narrow for MIN_SPLIT_COLS, fall back to a stacked split, then a new tab.
