@@ -604,7 +604,7 @@ fn command_and_shortcut() {
         (c.title_en, c.title_ar, c.shortcut),
         (
             "Search all terminals",
-            "دوّر في كل الترمينالات",
+            "البحث في جميع الطرفيات",
             Some("Ctrl+Shift+G")
         )
     );

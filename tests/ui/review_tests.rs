@@ -948,7 +948,7 @@ fn review_toggle_is_a_command_with_a_shortcut() {
         .find(|c| c.name == "review.toggle")
         .unwrap();
     assert_eq!(command.title_en, "Review changes");
-    assert_eq!(command.title_ar, "راجع التغييرات");
+    assert_eq!(command.title_ar, "مراجعة التغييرات");
     assert_eq!(command.shortcut, Some("Ctrl+Shift+R"));
     let pressed = handle_key_mode_raw(
         Some(KeyCode::KeyR),

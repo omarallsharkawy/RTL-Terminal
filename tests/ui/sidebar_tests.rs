@@ -987,7 +987,7 @@ fn status_line_measures_the_whole_label_then_falls_back_to_the_icon() {
     let mut cache = LabelCache::default();
     for (language, name) in [
         (UiLanguage::English, "Working"),
-        (UiLanguage::Arabic, "شغّال"),
+        (UiLanguage::Arabic, "قيد العمل"),
     ] {
         let label = font.shape(
             ctx.font_system,
@@ -1510,7 +1510,7 @@ fn workspace_titles_and_badges_follow_ui_direction_on_both_sidebar_sides() {
             let arabic = label(arabic_title);
             let english = label(english_title);
             let badge = label("1");
-            let button = label(language.text("New tab", "تاب جديد"));
+            let button = label(language.text("New tab", "تبويب جديد"));
             let arabic_right = arabic.left + label_width(&arabic.buffer);
             let english_right = english.left + label_width(&english.buffer);
             let gap = 4.0 * scale;

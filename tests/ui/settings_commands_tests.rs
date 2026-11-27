@@ -184,7 +184,7 @@ fn form_refuses_missing_fields_and_duplicate_names_with_bilingual_errors() {
         .error
         .clone()
         .unwrap();
-    assert_eq!(err.1, "اكتب اسم للأمر");
+    assert_eq!(err.1, "أدخل اسماً للأمر");
 
     type_text(&mut state, &mut cfg, "x");
     assert!(

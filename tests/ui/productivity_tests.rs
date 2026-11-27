@@ -686,13 +686,17 @@ fn broadcast_is_off_by_default_routes_to_all_panes_and_turns_off_cleanly() {
 #[test]
 fn all_n12_commands_have_english_and_arabic_names_and_match_in_palette() {
     let expected = [
-        ("project.open", "Open project", "افتح مشروع"),
-        ("layout.save", "Save layout…", "احفظ التخطيط…"),
-        ("layout.open", "Open layout…", "افتح تخطيط…"),
-        ("layout.delete", "Delete layout…", "احذف تخطيط…"),
-        ("tab.move-left", "Move tab left", "حرّك التاب شمال"),
-        ("tab.move-right", "Move tab right", "حرّك التاب يمين"),
-        ("tab.reopen", "Reopen closed tab", "رجّع آخر تاب اتقفل"),
+        ("project.open", "Open project", "فتح مشروع"),
+        ("layout.save", "Save layout…", "حفظ التخطيط…"),
+        ("layout.open", "Open layout…", "فتح تخطيط…"),
+        ("layout.delete", "Delete layout…", "حذف تخطيط…"),
+        ("tab.move-left", "Move tab left", "نقل التبويب يساراً"),
+        ("tab.move-right", "Move tab right", "نقل التبويب يميناً"),
+        (
+            "tab.reopen",
+            "Reopen closed tab",
+            "إعادة فتح آخر تبويب مغلق",
+        ),
         (
             "input.broadcast",
             "Type in all panes of this tab",
@@ -716,10 +720,10 @@ fn all_n12_commands_have_english_and_arabic_names_and_match_in_palette() {
         assert!(!matches(&entries, ar).is_empty(), "Arabic match for {name}");
     }
     // Verify Arabic query without tashkeel/hamza matches too.
-    assert!(!matches(&entries, "افتح مشروع").is_empty());
-    assert!(!matches(&entries, "رجع اخر تاب").is_empty());
+    assert!(!matches(&entries, "فتح مشروع").is_empty());
+    assert!(!matches(&entries, "اعاده فتح اخر تبويب").is_empty());
     assert!(!matches(&entries, "اكتب في كل اللوحات").is_empty());
-    assert!(!matches(&entries, "حرك التاب").is_empty());
+    assert!(!matches(&entries, "نقل التبويب").is_empty());
 
     // Sanity check ProjectItem with Arabic directory name.
     let item = ProjectItem::new(

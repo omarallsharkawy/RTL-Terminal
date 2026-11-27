@@ -165,7 +165,7 @@ fn shortcut_and_palette_command_registered() {
         .find(|c| c.name == "composer.open")
         .expect("composer.open command must exist");
     assert_eq!(cmd.title_en, "Compose command");
-    assert_eq!(cmd.title_ar, "اكتب أمر");
+    assert_eq!(cmd.title_ar, "كتابة أمر");
     assert_eq!(cmd.shortcut, Some("Ctrl+Shift+Space"));
     assert_eq!(
         commands::action("composer.open"),

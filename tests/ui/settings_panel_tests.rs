@@ -764,8 +764,8 @@ fn arabic_ime_input_works_in_agent_command_font_search_and_keys_search() {
     // 1. Arabic IME in Keys search (matches Arabic command titles with hamza/tashkeel folding).
     state.select_section(SettingsSection::Keys, &cfg);
     state.focus = FocusZone::Content;
-    state.on_text("قسم يمين", &mut cfg);
-    assert_eq!(state.keys_query, "قسم يمين");
+    state.on_text("تقسيم لليمين", &mut cfg);
+    assert_eq!(state.keys_query, "تقسيم لليمين");
     let cmds = state.filtered_commands();
     assert!(cmds.iter().any(|c| c.name == "split.right"), "{cmds:?}");
     state.on_key(
@@ -776,7 +776,7 @@ fn arabic_ime_input_works_in_agent_command_font_search_and_keys_search() {
         SURFACE,
         1.0,
     );
-    assert_eq!(state.keys_query, "قسم ");
+    assert_eq!(state.keys_query, "تقسيم ");
 
     // 2. Arabic IME in Behaviour -> Agent command text field.
     state.select_section(SettingsSection::Behaviour, &cfg);

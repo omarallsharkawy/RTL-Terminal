@@ -38,11 +38,11 @@ fn english_queries() {
 
 #[test]
 fn arabic_queries_ignore_tashkeel_and_hamza_forms() {
-    // "قسّم" is stored with a shadda; people type it without.
-    assert_eq!(first("قسم يمين"), "split.right");
+    // "تقسيم لليمين" and "إظهار": verify tashkeel and hamza folding in palette search.
+    assert_eq!(first("تقسيم لليمين"), "split.right");
     assert_eq!(first("اظهار"), "sidebar.toggle");
-    assert_eq!(first("تاب جديد"), "tab.new");
-    assert_eq!(first("انسخ ناتج"), "block.copy-output");
+    assert_eq!(first("تبويب جديد"), "tab.new");
+    assert_eq!(first("نسخ ناتج"), "block.copy-output");
     assert_eq!(fold("إظهارٌ ـآخر"), "اظهار اخر");
     assert_eq!(fold("مكتبة"), "مكتبه");
 }

@@ -1022,27 +1022,27 @@ fn check_context_menu_golden(name: &str, palette_name: &str, lang: twitty::ui::c
                 .with_shortcut(keys("Ctrl+Shift+V")),
             MenuEntry::Separator,
             MenuEntry::item(
-                t("Copy output", "انسخ الناتج"),
+                t("Copy output", "نسخ الناتج"),
                 MenuAction::Block(BlockAction::CopyOutput, 1),
             ),
             MenuEntry::item(
-                t("Run again", "شغّله تاني"),
+                t("Run again", "إعادة التشغيل"),
                 MenuAction::Block(BlockAction::Rerun, 1),
             ),
             MenuEntry::Separator,
             MenuEntry::item(
-                t("Split right", "قسّم يمين"),
+                t("Split right", "تقسيم لليمين"),
                 MenuAction::Command("split.right"),
             )
             .with_shortcut(keys("Ctrl+Shift+E")),
             MenuEntry::item(
-                t("Split down", "قسّم تحت"),
+                t("Split down", "تقسيم للأسفل"),
                 MenuAction::Command("split.down"),
             )
             .with_shortcut(keys("Ctrl+Shift+O")),
             MenuEntry::Separator,
             MenuEntry::item(
-                t("Close pane", "قفل اللوحة"),
+                t("Close pane", "إغلاق اللوحة"),
                 MenuAction::Command("pane.close"),
             )
             .with_shortcut(keys("Ctrl+Shift+W"))
@@ -1055,12 +1055,12 @@ fn check_context_menu_golden(name: &str, palette_name: &str, lang: twitty::ui::c
     let layout = menu.layout(scene.window(), 1.0, lang);
     let now = std::time::Instant::now();
     let mut toasts = Toasts::default();
-    toasts.push(ToastKind::Success, t("Output copied", "اتنسخ الناتج"), now);
+    toasts.push(ToastKind::Success, t("Output copied", "تم نسخ الناتج"), now);
     toasts.push(
         ToastKind::Error,
         t(
             "Could not save layout: disk full",
-            "تعذر حفظ التخطيط: المساحة خلصت",
+            "تعذّر حفظ التخطيط: القرص ممتلئ",
         ),
         now,
     );

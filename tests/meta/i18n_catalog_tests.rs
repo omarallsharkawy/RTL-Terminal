@@ -267,7 +267,7 @@ fn translations_are_filled_and_keep_their_placeholders() {
 #[test]
 fn lookup_follows_the_language_and_falls_back_to_english() {
     assert_eq!(UiLanguage::English.t("Copied"), "Copied");
-    assert_eq!(UiLanguage::Arabic.t("Copied"), "اتنسخ");
+    assert_eq!(UiLanguage::Arabic.t("Copied"), "تم النسخ");
     assert_eq!(
         UiLanguage::Arabic.t("A text nobody translated"),
         "A text nobody translated"

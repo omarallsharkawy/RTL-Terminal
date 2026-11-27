@@ -595,7 +595,7 @@ fn trust_confirmation_shows_bilingual_prompt_and_full_command_list_and_renders()
     // Confirmation item, then per command a header row and the command on its own row(s).
     assert_eq!(view.items.len(), 5);
     assert_eq!(view.items[0].title_en, "Trust commands in مشروع?");
-    assert_eq!(view.items[0].title_ar, "تثق في أوامر مشروع؟");
+    assert_eq!(view.items[0].title_ar, "هل تثق في أوامر مشروع؟");
     assert!(view.items[1].title_en.contains("Test"));
     assert!(view.items[1].title_en.contains("api"));
     assert!(view.items[2].title_en.contains("cargo test"));
