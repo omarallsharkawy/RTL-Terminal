@@ -1564,7 +1564,7 @@ fn check_context_menu_golden(name: &str, palette_name: &str, lang: twitty::ui::c
             .with_shortcut(keys("Ctrl+Shift+W"))
             .danger(),
         ],
-        if ar { (420.0, 40.0) } else { (220.0, 40.0) },
+        if ar { (420.0, 130.0) } else { (220.0, 130.0) },
     )
     .unwrap();
     menu.selected = Some(3);

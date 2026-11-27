@@ -156,7 +156,7 @@ pub fn draw_tooltip(
     )
 }
 
-/// Draw notices stacked above the bottom center of `surface`, newest lowest. Returns their
+/// Draw notices stacked down from just under the top bar, centered, newest on top. Returns their
 /// labels and rects.
 pub fn draw_toasts(
     ctx: &mut DrawContext,
@@ -174,7 +174,8 @@ pub fn draw_toasts(
     let h = style.px(34.0);
     let gap = style.px(SPACE_8);
     let max_w = (surface.0 - 2.0 * style.px(16.0)).max(0.0);
-    let mut bottom = surface.1 - style.px(24.0);
+    // Below the 36 px top bar, clear of the composer at the bottom.
+    let mut top = style.px(36.0 + 12.0);
     for toast in toasts.iter().rev() {
         let icon_side = style.px(14.0);
         let pad = style.px(SPACE_12);
@@ -189,7 +190,7 @@ pub fn draw_toasts(
         );
         let text_w = label_width(&buffer).ceil().min(text_room);
         let w = (2.0 * pad + icon_side + gap + text_w).min(max_w);
-        let rect = Rect::new(((surface.0 - w) / 2.0).round(), (bottom - h).round(), w, h);
+        let rect = Rect::new(((surface.0 - w) / 2.0).round(), top.round(), w, h);
         let (icon, color) = match toast.kind {
             ToastKind::Success => (Icon::Check, style.ok),
             ToastKind::Error => (Icon::Warning, style.danger),
@@ -225,8 +226,8 @@ pub fn draw_toasts(
         );
         labels.push(UiLabel::new(buffer, text_rect, UiAlign::Start, style.text));
         rects.push(rect);
-        bottom = rect.y - gap;
-        if bottom - h < 0.0 {
+        top = rect.bottom() + gap;
+        if top + h > surface.1 {
             break;
         }
     }

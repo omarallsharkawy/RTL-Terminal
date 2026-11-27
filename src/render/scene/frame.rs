@@ -100,8 +100,9 @@ pub struct Frame {
     /// Failed-block AI explanation popover labels and clip rect.
     block_ai_labels: Vec<UiLabel>,
     block_ai_rect: Option<Rect>,
-    menu_labels: Vec<UiLabel>,
-    menu_holes: Vec<Rect>,
+    /// Floating layers drawn last, in order (menu, notices, tooltip): each hides the text
+    /// under its rects, then draws its labels.
+    floating: Vec<(Vec<Rect>, Vec<UiLabel>)>,
     /// One-time AI privacy consent modal labels and clip rect (drawn above everything).
     consent_labels: Vec<UiLabel>,
     consent_rect: Option<Rect>,
@@ -356,8 +357,7 @@ pub(crate) fn build_frame_base(
         composer_clips: Vec::new(),
         block_ai_labels: Vec::new(),
         block_ai_rect: None,
-        menu_labels: Vec::new(),
-        menu_holes: Vec::new(),
+        floating: Vec::new(),
         consent_labels: Vec::new(),
         consent_rect: None,
     }
@@ -537,11 +537,10 @@ impl Frame {
             language,
             &mut self.shapes.overlay,
         );
-        self.menu_labels.extend(labels);
-        self.menu_holes.push(layout.rect);
+        self.floating.push((vec![layout.rect], labels));
     }
 
-    /// Draw short notices above the bottom center of the window.
+    /// Draw short notices at the top center of the window.
     pub fn add_toasts(
         &mut self,
         ctx: &mut DrawContext,
@@ -559,8 +558,7 @@ impl Frame {
             language,
             &mut self.shapes.overlay,
         );
-        self.menu_labels.extend(labels);
-        self.menu_holes.extend(rects);
+        self.floating.push((rects, labels));
     }
 
     /// Draw a hover tooltip near pointer `at`, above everything else.
@@ -581,8 +579,7 @@ impl Frame {
             self.surface,
             &mut self.shapes.overlay,
         );
-        self.menu_labels.push(label);
-        self.menu_holes.push(rect);
+        self.floating.push((vec![rect], vec![label]));
     }
 
     /// Draw the one-time AI privacy consent modal above everything else.
@@ -1044,10 +1041,12 @@ impl Frame {
             runs = clip_runs(runs, hole);
         }
         runs.extend(self.consent_labels.iter().map(ui_run));
-        for &hole in &self.menu_holes {
-            runs = clip_runs(runs, hole);
+        for (holes, labels) in &self.floating {
+            for &hole in holes {
+                runs = clip_runs(runs, hole);
+            }
+            runs.extend(labels.iter().map(ui_run));
         }
-        runs.extend(self.menu_labels.iter().map(ui_run));
         runs
     }
 }
