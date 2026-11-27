@@ -392,5 +392,6 @@ fn block(
         badge: None,
         meta: meta.map(str::to_owned),
         has_command: true,
+        bookmarked: false,
     }
 }

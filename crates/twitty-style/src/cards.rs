@@ -137,6 +137,7 @@ pub struct CardLayout {
     pub status: BlockStatus,
     pub selected: bool,
     pub hovered: bool,
+    pub bookmarked: bool,
     /// Rounded background rectangle (strictly inside `pane_rect`; never shifts the terminal grid).
     pub card: Rect,
     /// Corner radii `[top_left, top_right, bottom_right, bottom_left]`; 0 on clipped viewport edges.
@@ -265,6 +266,7 @@ pub fn layout_cards(
             status: decor.status,
             selected: decor.selected,
             hovered,
+            bookmarked: decor.bookmarked,
             card,
             radii,
             strip,

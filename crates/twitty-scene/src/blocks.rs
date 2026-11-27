@@ -168,8 +168,17 @@ pub fn draw_cards(
             shadow: None,
         });
 
-        if let Some(strip_color) = card_strip_color(style, card.status) {
-            let strip = language.mirror(card.strip, card.card);
+        let strip_color = if card.bookmarked {
+            Some(Rgba::from_rgb8(0xE8, 0xA8, 0x38))
+        } else {
+            card_strip_color(style, card.status)
+        };
+        if let Some(strip_color) = strip_color {
+            let mut strip = card.strip;
+            if card.bookmarked {
+                strip.w = (3.0 * style.scale).round().max(strip.w).min(card.card.w);
+            }
+            let strip = language.mirror(strip, card.card);
             let radii = if language == UiLanguage::Arabic {
                 [0.0, card.radii[1], card.radii[2], 0.0]
             } else {

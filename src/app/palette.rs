@@ -51,6 +51,7 @@ pub(super) struct OpenPalette {
     /// Built-in and custom commands, in palette order.
     entries: Vec<PaletteEntry>,
     pending_trust: Option<PendingTrust>,
+    pending_params: Option<PendingWorkflowParams>,
     close_others: Option<CloseOthers>,
     rename_tab: Option<u64>,
     /// Results of searching every pane (search mode).
@@ -60,6 +61,32 @@ pub(super) struct OpenPalette {
 struct PendingTrust {
     workflow_index: usize,
     confirm: TrustConfirmState,
+}
+
+struct PendingWorkflowParams {
+    workflow: Workflow,
+    params: Vec<crate::workflows::WorkflowParam>,
+    values: Vec<String>,
+    step: usize,
+}
+
+impl PendingWorkflowParams {
+    fn preview(&self, current_query: &str) -> String {
+        let pairs: Vec<(&str, &str)> = self
+            .params
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let val = if i == self.step {
+                    current_query
+                } else {
+                    self.values.get(i).map_or("", String::as_str)
+                };
+                (p.name.as_str(), val)
+            })
+            .collect();
+        crate::workflows::substitute_workflow_params(&self.workflow.spec.command, &pairs)
+    }
 }
 
 struct LaunchAgentEntry {
@@ -211,6 +238,7 @@ impl App {
             workflows,
             entries,
             pending_trust: None,
+            pending_params: None,
             close_others: None,
             rename_tab: self
                 .ws
@@ -480,6 +508,32 @@ impl App {
                     ),
                 )
             }
+            PaletteMode::WorkflowParams => {
+                if let Some(pending) = &open.pending_params {
+                    let preview = pending.preview(&state.query);
+                    let param_name = pending
+                        .params
+                        .get(pending.step)
+                        .map_or("", |p| p.name.as_str());
+                    let step_num = (pending.step + 1).to_string();
+                    let total_num = pending.params.len().to_string();
+                    let prompt = fill(
+                        self.window
+                            .ui_language()
+                            .t("Value for {} ({}/{}) — Enter: next · Alt+Enter: Composer"),
+                        &[&param_name, &step_num, &total_num],
+                    );
+                    let item = PaletteItem {
+                        title_en: preview.clone(),
+                        title_ar: preview,
+                        shortcut: Some(pending.workflow.spec.name.clone()),
+                        dimmed: false,
+                    };
+                    (vec![item], Some(prompt))
+                } else {
+                    (Vec::new(), None)
+                }
+            }
         };
         let shown = visible_window_in(rows.len(), state.selected, self.palette_capacity());
         let selected = state.selected.min(rows.len().saturating_sub(1)) - shown.start;
@@ -706,6 +760,35 @@ impl App {
                     PaletteCmd::None | PaletteCmd::Run(_) => self.sync_palette(),
                 }
             }
+            PaletteMode::WorkflowParams => match key {
+                Key::Named(NamedKey::Escape) => self.close_palette(),
+                Key::Named(NamedKey::Tab) => {
+                    if let Some(pending) = open.pending_params.as_mut() {
+                        if let Some(slot) = pending.values.get_mut(pending.step) {
+                            *slot = open.state.query.clone();
+                        }
+                        let len = pending.params.len().max(1);
+                        pending.step = if modifiers.shift_key() {
+                            (pending.step + len - 1) % len
+                        } else {
+                            (pending.step + 1) % len
+                        };
+                        open.state.query = pending
+                            .values
+                            .get(pending.step)
+                            .cloned()
+                            .unwrap_or_default();
+                    }
+                    self.sync_palette();
+                }
+                Key::Named(NamedKey::Enter) => {
+                    self.advance_workflow_params(modifiers.alt_key());
+                }
+                _ => {
+                    let _ = open.state.key_list(1, key, text, modifiers);
+                    self.sync_palette();
+                }
+            },
         }
         false
     }
@@ -868,6 +951,11 @@ impl App {
                 }
                 false
             }
+            PaletteMode::WorkflowParams => {
+                let to_composer = self.modifiers.alt_key();
+                self.advance_workflow_params(to_composer);
+                false
+            }
         }
     }
 
@@ -915,13 +1003,80 @@ impl App {
                     self.sync_palette();
                     return false;
                 }
-                self.close_palette();
-                if let Some(pane_id) = self.focused_id() {
-                    if let Err(err) = self.run_workflow(pane_id, &workflow) {
-                        self.show_pane_warning(pane_id, &err);
-                    }
-                }
+                self.activate_trusted_workflow(workflow);
                 false
+            }
+        }
+    }
+
+    fn activate_trusted_workflow(&mut self, workflow: Workflow) {
+        let params = crate::workflows::extract_workflow_params(&workflow.spec.command);
+        if !params.is_empty() {
+            let values: Vec<String> = params
+                .iter()
+                .map(|p| p.default.clone().unwrap_or_default())
+                .collect();
+            let initial_query = values.first().cloned().unwrap_or_default();
+            if let Some(open) = self.palette.as_mut() {
+                open.pending_trust = None;
+                open.state.mode = PaletteMode::WorkflowParams;
+                open.state.query = initial_query;
+                open.state.selected = 0;
+                open.pending_params = Some(PendingWorkflowParams {
+                    workflow,
+                    params,
+                    values,
+                    step: 0,
+                });
+                self.sync_palette();
+                return;
+            }
+        }
+        self.close_palette();
+        if let Some(pane_id) = self.focused_id() {
+            if let Err(err) = self.run_workflow(pane_id, &workflow) {
+                self.show_pane_warning(pane_id, &err);
+            }
+        }
+    }
+
+    fn advance_workflow_params(&mut self, open_in_composer: bool) {
+        let finished = {
+            let Some(open) = self.palette.as_mut() else {
+                return;
+            };
+            let Some(pending) = open.pending_params.as_mut() else {
+                self.close_palette();
+                return;
+            };
+            if let Some(slot) = pending.values.get_mut(pending.step) {
+                *slot = open.state.query.clone();
+            }
+            if !open_in_composer && pending.step + 1 < pending.params.len() {
+                pending.step += 1;
+                open.state.query = pending
+                    .values
+                    .get(pending.step)
+                    .cloned()
+                    .unwrap_or_default();
+                None
+            } else {
+                let resolved_cmd = pending.preview(&open.state.query);
+                let mut wf = pending.workflow.clone();
+                wf.spec.command = resolved_cmd;
+                Some(wf)
+            }
+        };
+        let Some(workflow) = finished else {
+            self.sync_palette();
+            return;
+        };
+        self.close_palette();
+        if open_in_composer {
+            self.open_composer_with_command(&workflow.spec.command);
+        } else if let Some(pane_id) = self.focused_id() {
+            if let Err(err) = self.run_workflow(pane_id, &workflow) {
+                self.show_pane_warning(pane_id, &err);
             }
         }
     }
@@ -955,12 +1110,7 @@ impl App {
             return;
         }
         workflow.trusted = true;
-        self.close_palette();
-        if let Some(pane_id) = self.focused_id() {
-            if let Err(err) = self.run_workflow(pane_id, &workflow) {
-                self.show_pane_warning(pane_id, &err);
-            }
-        }
+        self.activate_trusted_workflow(workflow);
     }
 
     fn jump_or_stay(&mut self, target: Option<PaneId>) {

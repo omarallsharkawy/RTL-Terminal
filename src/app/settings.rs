@@ -58,6 +58,26 @@ impl App {
         self.sync_settings();
     }
 
+    /// Open Settings directly to the Commands tab with the Add Command form pre-filled from
+    /// a command block ("Save as workflow…").
+    pub(super) fn open_settings_save_workflow(&mut self, command: String) {
+        if self.settings.is_none() {
+            self.open_settings();
+        }
+        let cleaned_cmd = crate::blocks::rerun_text(&command);
+        let suggested_name: String = cleaned_cmd.chars().take(28).collect();
+        if let Some(panel) = self.settings.as_mut() {
+            panel.select_section(
+                crate::ui::settings_panel::SettingsSection::Commands,
+                &self.config,
+            );
+            panel
+                .commands_editor
+                .start_add_prefilled(suggested_name, cleaned_cmd);
+        }
+        self.sync_settings();
+    }
+
     fn spawn_settings_ai_probe(&mut self) {
         self.settings_probe_gen = self.settings_probe_gen.wrapping_add(1);
         let generation = self.settings_probe_gen;

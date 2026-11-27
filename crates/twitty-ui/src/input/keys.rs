@@ -82,6 +82,10 @@ pub enum InputAction {
     NextBlock,
     /// Copy the output of the selected (or last) command block.
     CopyBlockOutput,
+    /// Bookmark or unbookmark the selected (or last) command block.
+    ToggleBlockBookmark,
+    /// Jump to the next bookmarked command block in the focused pane.
+    NextBookmarkedBlock,
     /// Ask a coding agent about the selected (or last) command block.
     AskAgent,
     /// Explain a failed command block using the built-in non-interactive AI agent.

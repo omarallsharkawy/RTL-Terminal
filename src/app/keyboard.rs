@@ -277,6 +277,10 @@ impl App {
             InputAction::LaunchAgent => self.open_palette(PaletteMode::LaunchAgent),
             InputAction::PrevBlock => self.navigate_blocks(id, BlockList::select_prev),
             InputAction::NextBlock => self.navigate_blocks(id, BlockList::select_next),
+            InputAction::NextBookmarkedBlock => {
+                self.navigate_blocks(id, BlockList::select_next_bookmark)
+            }
+            InputAction::ToggleBlockBookmark => self.toggle_selected_block_bookmark(id),
             InputAction::CopyBlockOutput => self.copy_block_output(id),
         }
         false
@@ -313,6 +317,28 @@ impl App {
                 crate::ui::toast::ToastKind::Success,
                 crate::ui::chrome::t("Output copied"),
             );
+        }
+    }
+
+    fn toggle_selected_block_bookmark(&mut self, id: PaneId) {
+        let bookmarked = {
+            let Some(pane) = self.ws.pane_mut(id) else {
+                return;
+            };
+            pane.blocks.refresh(&pane.terminal);
+            let Some(block_id) = pane.blocks.selected_or_last().map(|b| b.id()) else {
+                return;
+            };
+            pane.blocks.toggle_bookmark(block_id)
+        };
+        if let Some(is_bookmarked) = bookmarked {
+            let label = if is_bookmarked {
+                crate::ui::chrome::t("Block bookmarked")
+            } else {
+                crate::ui::chrome::t("Bookmark removed")
+            };
+            self.toast(crate::ui::toast::ToastKind::Info, label);
+            self.window.request_redraw();
         }
     }
 

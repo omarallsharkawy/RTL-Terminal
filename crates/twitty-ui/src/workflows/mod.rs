@@ -325,6 +325,103 @@ impl WorkflowSet {
     }
 }
 
+/// One `{{name}}` or `{{name:default}}` parameter extracted from a workflow command template.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkflowParam {
+    pub name: String,
+    pub default: Option<String>,
+}
+
+/// Extract unique `{{name}}` / `{{name:default}}` placeholders from `command` in first-appearance
+/// order. Malformed, empty, or control-character parameter names are ignored.
+pub fn extract_workflow_params(command: &str) -> Vec<WorkflowParam> {
+    let mut out: Vec<WorkflowParam> = Vec::new();
+    let mut rest = command;
+    while let Some(open) = rest.find("{{") {
+        let after_open = &rest[open + 2..];
+        let Some(close) = after_open.find("}}") else {
+            break;
+        };
+        let inside = &after_open[..close];
+        rest = &after_open[close + 2..];
+        if inside.contains('{') || inside.contains('}') {
+            continue;
+        }
+        let (raw_name, raw_default) = match inside.split_once(':') {
+            Some((n, d)) => (n.trim(), Some(d.trim())),
+            None => (inside.trim(), None),
+        };
+        if raw_name.is_empty() || raw_name.chars().any(char::is_control) {
+            continue;
+        }
+        let default = raw_default
+            .map(|d| clean_text(d, 256))
+            .filter(|d| !d.is_empty());
+        if let Some(existing) = out.iter_mut().find(|p| p.name == raw_name) {
+            if existing.default.is_none() && default.is_some() {
+                existing.default = default;
+            }
+        } else {
+            out.push(WorkflowParam {
+                name: raw_name.to_owned(),
+                default,
+            });
+        }
+    }
+    out
+}
+
+/// Substitute `{{name}}` / `{{name:default}}` placeholders in `command` using sanitized values
+/// from `values` (falling back to each placeholder's inline default when empty/missing).
+pub fn substitute_workflow_params(command: &str, values: &[(&str, &str)]) -> String {
+    let extracted = extract_workflow_params(command);
+    let mut out = String::with_capacity(command.len());
+    let mut rest = command;
+    while let Some(open) = rest.find("{{") {
+        out.push_str(&rest[..open]);
+        let after_open = &rest[open + 2..];
+        let Some(close) = after_open.find("}}") else {
+            out.push_str("{{");
+            rest = after_open;
+            break;
+        };
+        let inside = &after_open[..close];
+        let (raw_name, raw_default) = match inside.split_once(':') {
+            Some((n, d)) => (n.trim(), Some(d.trim())),
+            None => (inside.trim(), None),
+        };
+        if inside.contains('{')
+            || inside.contains('}')
+            || raw_name.is_empty()
+            || raw_name.chars().any(char::is_control)
+        {
+            out.push_str(&rest[open..open + 2 + close + 2]);
+            rest = &after_open[close + 2..];
+            continue;
+        }
+        let provided = values
+            .iter()
+            .find(|&&(k, _)| k == raw_name)
+            .map(|&(_, v)| clean_text(v, 1024))
+            .filter(|v| !v.is_empty());
+        let fallback = raw_default
+            .map(|d| clean_text(d, 256))
+            .filter(|d| !d.is_empty())
+            .or_else(|| {
+                extracted
+                    .iter()
+                    .find(|p| p.name == raw_name)
+                    .and_then(|p| p.default.clone())
+            });
+        if let Some(val) = provided.or(fallback) {
+            out.push_str(&val);
+        }
+        rest = &after_open[close + 2..];
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Encode a command for `insert` mode: never emits a newline, and wraps in bracketed paste when
 /// `bracketed` is true.
 pub fn encode_insert(command: &str, bracketed: bool) -> Vec<u8> {

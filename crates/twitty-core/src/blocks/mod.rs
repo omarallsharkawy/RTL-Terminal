@@ -50,6 +50,8 @@ pub struct Block {
     pub command: Option<String>,
     pub started: Option<Instant>,
     pub finished: Option<Instant>,
+    /// User-bookmarked block for quick jump (`block.next-bookmark`).
+    pub bookmarked: bool,
 }
 
 impl Block {
@@ -64,6 +66,7 @@ impl Block {
             command: None,
             started: None,
             finished: None,
+            bookmarked: false,
         }
     }
 
@@ -189,6 +192,8 @@ pub struct BlockDecor {
     pub meta: Option<String>,
     /// Whether this block has a known command string (enables copy-command and rerun).
     pub has_command: bool,
+    /// Whether this block is bookmarked/pinned by the user.
+    pub bookmarked: bool,
 }
 
 /// A block's text, e.g. for asking an agent about it.
@@ -439,6 +444,37 @@ impl BlockList {
         BlockNav::ScrollTo(block.prompt.line)
     }
 
+    /// Toggle the bookmark flag on block `id`. Returns the new bookmarked state, or `None` if
+    /// no block with `id` exists.
+    pub fn toggle_bookmark(&mut self, id: u64) -> Option<bool> {
+        let block = self.blocks.iter_mut().find(|b| b.id == id)?;
+        block.bookmarked = !block.bookmarked;
+        Some(block.bookmarked)
+    }
+
+    /// Jump to the next bookmarked block (wrapping around). Returns [`BlockNav::None`] if no
+    /// blocks are bookmarked.
+    pub fn select_next_bookmark(&mut self) -> BlockNav {
+        let bookmarked: Vec<usize> = self
+            .blocks
+            .iter()
+            .enumerate()
+            .filter_map(|(i, b)| b.bookmarked.then_some(i))
+            .collect();
+        if bookmarked.is_empty() {
+            return BlockNav::None;
+        }
+        let target = match self.selected_index() {
+            Some(cur) => bookmarked
+                .iter()
+                .copied()
+                .find(|&i| i > cur)
+                .unwrap_or(bookmarked[0]),
+            None => *bookmarked.last().unwrap(),
+        };
+        self.select_index(target)
+    }
+
     /// Select the block drawn on viewport row `row`. Returns false when no block is there.
     pub fn select_at_row(&mut self, term: &Terminal, row: usize) -> bool {
         let Some(view) = self.current_view(term) else {
@@ -563,6 +599,7 @@ impl BlockList {
                     .command
                     .as_deref()
                     .is_some_and(|c| !rerun_text(c).is_empty()),
+                bookmarked: block.bookmarked,
             });
         }
         if let Some(pending) = &self.pending {
@@ -577,6 +614,7 @@ impl BlockList {
                     badge: None,
                     meta: None,
                     has_command: false,
+                    bookmarked: false,
                 });
             }
         }
@@ -605,6 +643,67 @@ pub fn encode_rerun(command: &str, bracketed: bool) -> Vec<u8> {
         return Vec::new();
     }
     crate::paste::encode_paste(&text, bracketed)
+}
+
+/// Format a command block's command, exit status, and output as a fenced Markdown snippet
+/// ready to paste into an issue, doc, or coding agent.
+pub fn format_block_markdown(block: &BlockText) -> String {
+    let fence = safe_markdown_fence(
+        block.command.as_deref().unwrap_or(""),
+        block.output.as_str(),
+    );
+    let mut out = String::new();
+    if let Some(cmd) = block
+        .command
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        out.push_str(&fence);
+        out.push_str("sh\n$ ");
+        out.push_str(cmd);
+        out.push('\n');
+        out.push_str(&fence);
+        out.push('\n');
+    }
+    if let Some(code) = block.exit.filter(|&c| c != 0) {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(&format!("Exit code: {code}\n"));
+    }
+    if !block.output.trim().is_empty() {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(&fence);
+        out.push_str("text\n");
+        out.push_str(&block.output);
+        if !block.output.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push_str(&fence);
+        out.push('\n');
+    }
+    out
+}
+
+fn safe_markdown_fence(a: &str, b: &str) -> String {
+    let mut run = 3usize;
+    for s in [a, b] {
+        let mut cur = 0usize;
+        for ch in s.chars() {
+            if ch == '`' {
+                cur += 1;
+                if cur >= run {
+                    run = cur + 1;
+                }
+            } else {
+                cur = 0;
+            }
+        }
+    }
+    "`".repeat(run)
 }
 
 /// `text` without the blank lines (and spaces) it ends with.

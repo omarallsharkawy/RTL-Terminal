@@ -336,11 +336,26 @@ impl App {
         }
         let commands = self.config.commands.clone();
         let proxy = self.proxy.clone();
+        let store = self.store.clone();
         self.workflows_pending = true;
         if std::thread::Builder::new()
             .name("twitty-workflows".into())
             .spawn(move || {
                 let set = crate::workflows::WorkflowSet::load(&commands, cwd.as_deref());
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs() as i64);
+                for wf in set.workflows() {
+                    let path = format!("workflow:{}:{}", wf.source.as_str(), wf.spec.name);
+                    let hash = twitty_core::sha256::sha256_hex(wf.spec.command.as_bytes());
+                    let _ = store.upsert_drive_index(twitty_store::DriveIndexEntry {
+                        path,
+                        kind: "workflow".to_owned(),
+                        title: wf.spec.name.clone(),
+                        updated_at: now,
+                        hash,
+                    });
+                }
                 let _ = proxy.send_event(AppEvent::WorkflowsLoaded {
                     cwd,
                     workflows: Box::new(set),

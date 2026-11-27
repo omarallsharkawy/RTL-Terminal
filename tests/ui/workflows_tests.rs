@@ -878,3 +878,67 @@ fn trust_confirmation_never_hides_the_end_of_a_padded_or_long_command() {
     assert!(rows.iter().all(|r| r.chars().count() <= CONFIRM_ROW_CHARS));
     assert_eq!(rows.concat(), long);
 }
+
+#[test]
+fn parameterized_workflows_extract_substitute_and_sanitize_control_chars() {
+    use twitty::blocks::{format_block_markdown, BlockList, BlockNav, BlockText};
+    use twitty::ui::settings_commands::CommandsEditorState;
+    use twitty::workflows::{extract_workflow_params, substitute_workflow_params, WorkflowParam};
+
+    // 1. Parameter extraction deduplicates while preserving first-appearance order & defaults.
+    let tmpl = "git checkout -b {{branch:feat/demo}} && git push -u {{remote:origin}} {{branch}}";
+    let params = extract_workflow_params(tmpl);
+    assert_eq!(
+        params,
+        vec![
+            WorkflowParam {
+                name: "branch".into(),
+                default: Some("feat/demo".into()),
+            },
+            WorkflowParam {
+                name: "remote".into(),
+                default: Some("origin".into()),
+            },
+        ]
+    );
+
+    // 2. Substitution fills defaults, applies user values, and strips control/newline injection.
+    assert_eq!(
+        substitute_workflow_params(tmpl, &[("branch", "fix/rtl\nrm -rf /")]),
+        "git checkout -b fix/rtlrm -rf / && git push -u origin fix/rtlrm -rf /"
+    );
+    assert_eq!(
+        substitute_workflow_params(tmpl, &[]),
+        "git checkout -b feat/demo && git push -u origin feat/demo"
+    );
+
+    // 3. Markdown block formatting picks safe fences when output contains triple backticks.
+    let md = format_block_markdown(&BlockText {
+        command: Some("cargo test".into()),
+        output: "```json\n{\"ok\":true}\n```".into(),
+        exit: Some(1),
+        running: false,
+    });
+    assert!(md.contains("````sh\n$ cargo test\n````"));
+    assert!(md.contains("Exit code: 1"));
+    assert!(md.contains("````text\n```json"));
+
+    // 4. Settings → Commands prefill helper for "Save as workflow…".
+    let mut editor = CommandsEditorState::default();
+    editor.start_add_prefilled("Deploy".into(), "cargo build --release".into());
+    let form = editor.form.as_ref().expect("prefilled form");
+    assert_eq!(form.name, "Deploy");
+    assert_eq!(form.command, "cargo build --release");
+
+    // 5. Block bookmark commands exist and empty BlockList bookmark jump returns None.
+    assert_eq!(
+        twitty::commands::action("block.toggle-bookmark"),
+        Some(twitty::input::InputAction::ToggleBlockBookmark)
+    );
+    assert_eq!(
+        twitty::commands::action("block.next-bookmark"),
+        Some(twitty::input::InputAction::NextBookmarkedBlock)
+    );
+    let mut list = BlockList::new();
+    assert_eq!(list.select_next_bookmark(), BlockNav::None);
+}

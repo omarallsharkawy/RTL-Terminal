@@ -47,6 +47,8 @@ pub enum PaletteMode {
     LaunchAgent,
     /// Connect to a persistent SSH session (`~/.ssh/config`, recent hosts, or ad-hoc `user@host`).
     Ssh,
+    /// Prompt interactively for `{{param}}` values of a parameterized workflow command.
+    WorkflowParams,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]

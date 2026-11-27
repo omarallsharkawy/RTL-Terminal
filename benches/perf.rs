@@ -558,6 +558,7 @@ impl WorkspaceFrame {
                         badge: None,
                         meta: Some("0.4s".into()),
                         has_command: true,
+                        bookmarked: false,
                     })
                     .collect(),
             });

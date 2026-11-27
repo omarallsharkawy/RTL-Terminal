@@ -88,16 +88,12 @@ impl App {
         entries.push(self.command_entry("edit.paste"));
         entries.push(MenuEntry::Separator);
         if let Some((block, _)) = self.block_card_hit(id, x, y) {
-            let failed = self
-                .ws
-                .pane(id)
-                .and_then(|p| p.blocks.block_by_id(block))
-                .is_some_and(|b| matches!(b.status(), BlockStatus::Failed(_)));
-            let has_command = self
-                .ws
-                .pane(id)
-                .and_then(|p| p.blocks.block_by_id(block))
-                .is_some_and(|b| b.command.as_deref().is_some_and(|c| !c.trim().is_empty()));
+            let block_ref = self.ws.pane(id).and_then(|p| p.blocks.block_by_id(block));
+            let failed = block_ref.is_some_and(|b| matches!(b.status(), BlockStatus::Failed(_)));
+            let bookmarked = block_ref.is_some_and(|b| b.bookmarked);
+            let has_command = block_ref
+                .and_then(|b| b.command.as_deref())
+                .is_some_and(|c| !c.trim().is_empty());
             if has_command {
                 entries.push(MenuEntry::item(
                     t("Copy command"),
@@ -108,18 +104,38 @@ impl App {
                 t("Copy output"),
                 MenuAction::Block(BlockAction::CopyOutput, block),
             ));
+            entries.push(MenuEntry::item(
+                t("Copy as Markdown"),
+                MenuAction::Block(BlockAction::CopyMarkdown, block),
+            ));
             if has_command {
                 entries.push(MenuEntry::item(
                     t("Run again"),
                     MenuAction::Block(BlockAction::Rerun, block),
                 ));
+                entries.push(MenuEntry::item(
+                    t("Save as workflow…"),
+                    MenuAction::Block(BlockAction::SaveAsWorkflow, block),
+                ));
             }
+            entries.push(MenuEntry::item(
+                if bookmarked {
+                    t("Remove bookmark")
+                } else {
+                    t("Bookmark block")
+                },
+                MenuAction::Block(BlockAction::ToggleBookmark, block),
+            ));
             if failed && self.config.ai {
                 entries.push(MenuEntry::item(
                     t("Explain error"),
                     MenuAction::Block(BlockAction::ExplainError, block),
                 ));
             }
+            entries.push(MenuEntry::item(
+                t("Send to Agent panel"),
+                MenuAction::Block(BlockAction::SendToAgentPanel, block),
+            ));
             entries.push(MenuEntry::item(
                 t("Ask an agent about this"),
                 MenuAction::Block(BlockAction::AskAgent, block),
@@ -298,14 +314,68 @@ impl App {
                 let Some(id) = pane else {
                     return false;
                 };
-                let button = match action {
-                    BlockAction::CopyCommand => BlockButton::CopyCommand,
-                    BlockAction::CopyOutput => BlockButton::CopyOutput,
-                    BlockAction::Rerun => BlockButton::Rerun,
-                    BlockAction::ExplainError => BlockButton::ExplainError,
-                    BlockAction::AskAgent => BlockButton::AskAgent,
-                };
-                self.run_block_button(id, block, button);
+                match action {
+                    BlockAction::CopyCommand => {
+                        self.run_block_button(id, block, BlockButton::CopyCommand)
+                    }
+                    BlockAction::CopyOutput => {
+                        self.run_block_button(id, block, BlockButton::CopyOutput)
+                    }
+                    BlockAction::Rerun => self.run_block_button(id, block, BlockButton::Rerun),
+                    BlockAction::ExplainError => {
+                        self.run_block_button(id, block, BlockButton::ExplainError)
+                    }
+                    BlockAction::AskAgent => {
+                        self.run_block_button(id, block, BlockButton::AskAgent)
+                    }
+                    BlockAction::CopyMarkdown => {
+                        let md = self
+                            .ws
+                            .pane(id)
+                            .and_then(|p| p.blocks.block_text_by_id(block, &p.terminal))
+                            .map(|b| crate::blocks::format_block_markdown(&b))
+                            .filter(|s| !s.is_empty());
+                        if let Some(md) = md {
+                            self.clipboard.set_text(md);
+                            self.toast(crate::ui::toast::ToastKind::Success, t("Copied"));
+                        }
+                    }
+                    BlockAction::ToggleBookmark => {
+                        let bookmarked = self
+                            .ws
+                            .pane_mut(id)
+                            .and_then(|p| p.blocks.toggle_bookmark(block));
+                        if let Some(is_bookmarked) = bookmarked {
+                            let label = if is_bookmarked {
+                                t("Block bookmarked")
+                            } else {
+                                t("Bookmark removed")
+                            };
+                            self.toast(crate::ui::toast::ToastKind::Info, label);
+                        }
+                    }
+                    BlockAction::SaveAsWorkflow => {
+                        let cmd = self
+                            .ws
+                            .pane(id)
+                            .and_then(|p| p.blocks.block_by_id(block))
+                            .and_then(|b| b.command.clone());
+                        if let Some(cmd) = cmd {
+                            self.open_settings_save_workflow(cmd);
+                        }
+                    }
+                    BlockAction::SendToAgentPanel => {
+                        let draft = self
+                            .ws
+                            .pane(id)
+                            .and_then(|p| p.blocks.block_text_by_id(block, &p.terminal))
+                            .map(|b| crate::blocks::format_block_markdown(&b))
+                            .filter(|s| !s.is_empty());
+                        if let Some(draft) = draft {
+                            self.open_agent_panel_with_draft(draft);
+                        }
+                    }
+                }
             }
             MenuAction::RenameTab(index) => {
                 self.set_active_tab(index);

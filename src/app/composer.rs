@@ -270,6 +270,30 @@ impl App {
         self.window.request_redraw();
     }
 
+    /// Open the composer pre-filled with `command` (e.g. from a parameterized workflow via
+    /// `Alt+Enter`) so the user can review/edit before executing.
+    pub(super) fn open_composer_with_command(&mut self, command: &str) {
+        if self.config.composer_mode() == ComposerMode::Off {
+            if let Some(id) = self.focused_id() {
+                let bracketed = self.mode_of(id).contains(TermMode::BRACKETED_PASTE);
+                let bytes = crate::workflows::encode_insert(command, bracketed);
+                self.send_input(id, &bytes);
+                self.cursor_blink.reset(Instant::now());
+            }
+            return;
+        }
+        self.reset_pointer_gesture();
+        self.clear_composer_ai_state();
+        self.composer.manual_open = true;
+        self.composer.dismissed_for_prompt = false;
+        self.composer.focused = true;
+        self.composer.state.ai_enabled = self.config.ai;
+        self.composer.state.apply_ai_command(command);
+        self.prepare_composer_sources();
+        self.cursor_blink.reset(Instant::now());
+        self.window.request_redraw();
+    }
+
     pub(super) fn close_composer(&mut self) {
         self.clear_composer_ai_state();
         let mode = self.config.composer_mode();

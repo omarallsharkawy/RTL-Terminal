@@ -43,8 +43,12 @@ pub enum MenuAction {
 pub enum BlockAction {
     CopyCommand,
     CopyOutput,
+    CopyMarkdown,
     Rerun,
+    ToggleBookmark,
+    SaveAsWorkflow,
     ExplainError,
+    SendToAgentPanel,
     AskAgent,
 }
 

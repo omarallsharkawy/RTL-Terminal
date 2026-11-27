@@ -80,6 +80,8 @@ commands! {
     "block.prev", en!("Previous command block"), Some("Ctrl+Shift+Up") => InputAction::PrevBlock;
     "block.next", en!("Next command block"), Some("Ctrl+Shift+Down") => InputAction::NextBlock;
     "block.copy-output", en!("Copy command output"), Some("Ctrl+Shift+Y") => InputAction::CopyBlockOutput;
+    "block.toggle-bookmark", en!("Toggle block bookmark"), None => InputAction::ToggleBlockBookmark;
+    "block.next-bookmark", en!("Next bookmarked block"), None => InputAction::NextBookmarkedBlock;
     "ai.explain-error", en!("Explain error"), None => InputAction::ExplainBlockError;
     "ai.suggest-fix", en!("Suggest a fix"), None => InputAction::SuggestBlockFix;
     "agent.ask", en!("Ask an agent about this output"), Some("Ctrl+Shift+A") => InputAction::AskAgent;

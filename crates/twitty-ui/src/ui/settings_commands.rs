@@ -129,6 +129,19 @@ impl CommandsEditorState {
         });
     }
 
+    /// Open the Add Command form pre-populated from an existing block's command.
+    pub fn start_add_prefilled(&mut self, name: String, command: String) {
+        self.form = Some(CommandForm {
+            editing: None,
+            name,
+            name_ar: String::new(),
+            command,
+            mode: CommandMode::Insert,
+            field: FormField::Name,
+            error: None,
+        });
+    }
+
     pub fn start_edit(&mut self, index: usize, config: &TwittyConfig) {
         let Some(spec) = config.commands.get(index) else {
             return;
