@@ -136,3 +136,6 @@ Each step lands on its own with green CI and no behavior change.
 - Step 3 done: `SETTINGS` table (one entry per setting, checked at compile time against the
   `SettingId` order); `ui/settings_panel` split into table, values, keys, pointer, layout and
   state; `render/scene/settings` split by section. Largest file there is now 1.2k lines.
+- Step 4 done: `tests/support/golden.rs` holds fonts, the GPU target, comparison and
+  `GoldenScene`; overlay goldens are 10 to 25 lines each, and all 18 references pass
+  unchanged.

@@ -1,11 +1,13 @@
 //! Window-free and offscreen-GPU tests for Warp-style command block cards and cmux-style pane
 //! features (zoom indicator, flash outline, rename mode, shortcuts, and dark/light rendering).
 
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+#[path = "support/golden.rs"]
+mod golden;
+
 use alacritty_terminal::index::Side;
-use cosmic_text::{fontdb, FontSystem};
+use cosmic_text::FontSystem;
 use twitty::blocks::cards::{hit_test_cards, layout_cards, BlockButton, BlockHover};
 use twitty::blocks::{encode_rerun, rerun_text, BlockList};
 use twitty::color::Palette;
@@ -13,7 +15,6 @@ use twitty::commands;
 use twitty::config::TwittyConfig;
 use twitty::input::{handle_key_raw, InputAction};
 use twitty::layout::{PaneId, Rect, SidebarPosition};
-use twitty::render::gpu::offscreen::Offscreen;
 use twitty::render::scene::context::DrawContext;
 use twitty::render::scene::frame::{build_frame_with_cards, FrameOptions};
 use twitty::render::scene::preedit::PreeditState;
@@ -507,24 +508,10 @@ fn config_block_cards_defaults_true_and_parses_false() {
     assert!(!disabled.block_cards);
 }
 
-const NASKH: &[u8] = include_bytes!("../assets/fonts/NotoNaskhArabic-Regular.ttf");
-const MONO: &[u8] = include_bytes!("golden/fonts/NotoSansMono-Subset.ttf");
-
-fn test_font_system() -> FontSystem {
-    let mut db = fontdb::Database::new();
-    db.load_font_data(MONO.to_vec());
-    db.load_font_data(NASKH.to_vec());
-    db.set_monospace_family("Noto Sans Mono");
-    db.set_sans_serif_family("Noto Sans Mono");
-    FontSystem::new_with_locale_and_db("en-US".into(), db)
-}
-
-static GPU: Mutex<()> = Mutex::new(());
-
 #[test]
 fn headless_render_two_block_cards_ok_and_failed_dark_and_light() {
     for theme_name in ["tokyo-night", "github-light"] {
-        let mut font_system = test_font_system();
+        let mut font_system = golden::font_system();
         let ui_font = UiFont::new(&mut font_system, Some("Noto Sans Mono"));
         let palette = Palette::named(theme_name).unwrap();
         let m = CellMetrics::measure(&mut font_system, None, 15.0, 1.0);
@@ -677,19 +664,8 @@ fn headless_render_two_block_cards_ok_and_failed_dark_and_light() {
 
         // Offscreen GPU pixel check (runs under Mesa llvmpipe; skips only if unavailable and
         // TWITTY_REQUIRE_GOLDEN is unset).
-        let _gpu = GPU.lock().unwrap_or_else(|e| e.into_inner());
-        let mut target = match Offscreen::new(width as u32, height as u32) {
-            Ok(t) => t,
-            Err(e) => {
-                assert!(
-                    std::env::var("TWITTY_REQUIRE_GOLDEN")
-                        .ok()
-                        .filter(|v| !v.is_empty() && v != "0")
-                        .is_none(),
-                    "TWITTY_REQUIRE_GOLDEN is set but offscreen failed: {e}"
-                );
-                continue;
-            }
+        let Some(mut target) = golden::offscreen(theme_name, width as u32, height as u32) else {
+            continue;
         };
         let pixels = target
             .render_layers(

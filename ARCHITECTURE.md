@@ -207,6 +207,15 @@ shown, sent to `notify-send`, returned over the control socket or put into an ag
 | Whole CPU frame | `scene::frame::build_frame` headless |
 | GPU pipelines | Offscreen llvmpipe golden frames and pixel assertions in `tests/golden_tests.rs` |
 
+A new golden image is one `GoldenScene` from `tests/support/golden.rs` (bundled fonts, the
+software GPU, comparison and `TWITTY_BLESS=1`):
+
+```rust
+GoldenScene::new("thing_ar_light", 640, 400, "twitty-light")
+    .terminal(b"$ cargo test\r\n")
+    .check(|frame, ctx, style, ui_font| frame.add_thing(ctx, style, ui_font, &view));
+```
+
 ## Where to start
 
 - A rendering bug in Arabic text: write a failing test modelled on `tests/bidi_layout_tests.rs`,
