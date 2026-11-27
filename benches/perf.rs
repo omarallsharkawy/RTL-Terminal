@@ -563,6 +563,7 @@ impl WorkspaceFrame {
             });
         }
         let composer = ComposerView {
+            context: None,
             pane_rect: panes[0].rect,
             lines: vec!["git log --grep='تم حفظ الملف'".into()],
             caret: (0, 3),

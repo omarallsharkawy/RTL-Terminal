@@ -338,7 +338,7 @@ pub fn block_ai_overlay(
     }
 
     let title_str = if title_w >= style.px(180.0) {
-        view.mode.title_bilingual()
+        view.mode.title_localized()
     } else if view.language == UiLanguage::Arabic {
         view.mode.title_ar()
     } else {

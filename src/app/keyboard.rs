@@ -351,7 +351,7 @@ impl App {
     pub(super) fn search_bar_text(&self, id: PaneId, query: &str) -> String {
         match self.ws.pane(id).map(|p| &p.terminal) {
             Some(t) => search_bar_text(query, t.has_search_match(), || t.search_position()),
-            None => format!("Find / بحث: {query}"),
+            None => format!("{}: {query}", crate::ui::chrome::tr("Find", "بحث")),
         }
     }
 

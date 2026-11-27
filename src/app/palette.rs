@@ -35,7 +35,7 @@ use crate::ui::palette::{
     RenameCmd, RENAME_TAB_PLACEHOLDER,
 };
 use crate::ui::search_all::{
-    jump_target as search_target, PaneInfo, Query, SearchAll, SearchHit, PLACEHOLDER, SLICE,
+    jump_target as search_target, placeholder, PaneInfo, Query, SearchAll, SearchHit, SLICE,
 };
 use crate::workflows::{
     encode_insert, resolve_run_cwd, run_shell_argv, trust_confirm_view, CommandMode, ConfirmCmd,
@@ -223,7 +223,10 @@ impl App {
                     .collect();
                 (
                     rows,
-                    Some("Filter notifications… / دوّر في الإشعارات…".to_string()),
+                    Some(
+                        crate::ui::chrome::tr("Filter notifications…", "دوّر في الإشعارات…")
+                            .to_string(),
+                    ),
                 )
             }
             PaletteMode::RenameTab => (
@@ -233,7 +236,7 @@ impl App {
                     shortcut: None,
                     dimmed: false,
                 }],
-                Some(RENAME_TAB_PLACEHOLDER.into()),
+                Some(crate::ui::chrome::tr(RENAME_TAB_PLACEHOLDER, "غيّر اسم التاب…").into()),
             ),
             PaletteMode::CloseOtherPanes => (
                 vec![
@@ -254,7 +257,7 @@ impl App {
             ),
             PaletteMode::Search => (
                 open.search.rows(&state.query),
-                Some(PLACEHOLDER.to_string()),
+                Some(placeholder().to_string()),
             ),
             PaletteMode::Projects => {
                 let items = self.projects.items();
@@ -262,7 +265,7 @@ impl App {
                     .into_iter()
                     .map(|i| items[i].to_palette_item())
                     .collect();
-                (rows, Some(crate::projects::PROJECTS_PLACEHOLDER.into()))
+                (rows, Some(crate::projects::projects_placeholder().into()))
             }
             PaletteMode::SaveLayout => {
                 let cleaned = crate::layouts::clean_layout_name(&state.query);
@@ -290,7 +293,7 @@ impl App {
                         shortcut: None,
                         dimmed: state.query.trim().is_empty(),
                     }],
-                    Some(crate::layouts::SAVE_LAYOUT_PLACEHOLDER.into()),
+                    Some(crate::layouts::save_layout_placeholder().into()),
                 )
             }
             PaletteMode::OpenLayout => {
@@ -299,7 +302,7 @@ impl App {
                     .into_iter()
                     .map(|i| list[i].to_palette_item())
                     .collect();
-                (rows, Some(crate::layouts::OPEN_LAYOUT_PLACEHOLDER.into()))
+                (rows, Some(crate::layouts::open_layout_placeholder().into()))
             }
             PaletteMode::DeleteLayout => {
                 let list = self.layouts.layouts();
@@ -307,7 +310,10 @@ impl App {
                     .into_iter()
                     .map(|i| list[i].to_palette_item())
                     .collect();
-                (rows, Some(crate::layouts::DELETE_LAYOUT_PLACEHOLDER.into()))
+                (
+                    rows,
+                    Some(crate::layouts::delete_layout_placeholder().into()),
+                )
             }
         };
         let shown = visible_window_in(rows.len(), state.selected, self.palette_capacity());

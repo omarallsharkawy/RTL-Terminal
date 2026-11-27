@@ -725,9 +725,9 @@ fn runner_enforces_output_size_bound() {
     ] {
         let en = err.message_en();
         let ar = err.message_ar();
-        let bi = err.message_bilingual();
+        let shown = err.message_localized();
         assert!(!en.is_empty() && !ar.is_empty());
-        assert!(bi.contains(&en) && bi.contains(&ar));
+        assert!(shown == en || shown == ar);
     }
 }
 
@@ -1146,6 +1146,7 @@ fn ai_overlays_and_composer_banner_render_and_clip_terminal_text_in_both_themes_
 
         // 1. Composer with Generate button and AI banner (Ready).
         let comp_view = ComposerView {
+            context: None,
             pane_rect,
             lines: vec!["find . -size +10M".into()],
             caret: (0, 17),

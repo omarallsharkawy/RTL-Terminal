@@ -516,7 +516,9 @@ fn note(title_en: &str, title_ar: &str) -> PaletteItem {
 }
 
 /// Shown in the query line while it is empty.
-pub const PLACEHOLDER: &str = "Search all terminals… / دوّر في كل الترمينالات…";
+pub fn placeholder() -> &'static str {
+    crate::ui::chrome::tr("Search all terminals…", "دوّر في كل الترمينالات…")
+}
 
 /// How long one slice of a scan may take before the window gets to handle input and draw.
 pub const SLICE: Duration = Duration::from_millis(8);

@@ -477,12 +477,12 @@ fn selection_and_ssh_deadlines_replace_threads_and_reject_stale_generations() {
     assert_eq!(remote.next_retry_deadline(), None);
 }
 
-// 10. Split failure reason is bilingual and propagates through command.run("split.right"/"split.down").
+// 10. Split failure reason is explained and propagates through command.run("split.right"/"split.down").
 #[test]
-fn split_failure_reason_is_bilingual_and_propagates_through_command_run() {
+fn split_failure_reason_is_explained_and_propagates_through_command_run() {
     let h = SplitFailure::for_size(Some((24, 30)), SplitDir::Horizontal);
     assert_eq!(h.code, "pane_too_small");
-    assert!(h.message.contains("too small") && h.message.contains("صغيرة جداً"));
+    assert!(h.message.contains("too narrow") && h.message.contains("48"));
 
     let mut host = HeadlessHost::new();
     for _ in 0..2 {
@@ -501,8 +501,8 @@ fn split_failure_reason_is_bilingual_and_propagates_through_command_run() {
     assert!(!err.ok);
     let msg = err.error.as_deref().unwrap_or("");
     assert!(
-        msg.contains("too small") && msg.contains("صغيرة جداً"),
-        "expected bilingual split failure, got {msg:?}"
+        msg.contains("too narrow"),
+        "expected a split failure reason, got {msg:?}"
     );
 }
 

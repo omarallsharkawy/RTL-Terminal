@@ -8,8 +8,8 @@ selection and attention. The terminal grid stays logical while drawing handles b
 
 - The **36 px top bar** has a flat sidebar toggle, a centered search control and trailing
   git counts and notifications. The search field opens the command palette by click or
-  `Ctrl+Shift+P`. It shows both languages when they fit, then the UI language, and shortens
-  the placeholder on narrow windows. Show the shortcut keycap when there is room. The git
+  `Ctrl+Shift+P`. It shows the placeholder in the UI language and shortens it on narrow
+  windows. Show the shortcut keycap when there is room. The git
   counts open code review. The bell opens notification history and shows its unread count.
 - **The workspace sidebar** replaces the horizontal tab strip when visible. When it is hidden,
   the tab strip keeps a pill for each tab, a hover close control and a plus button.

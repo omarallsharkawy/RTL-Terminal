@@ -73,13 +73,17 @@ impl EngineConfig {
                     .file_stem()
                     .and_then(|s| s.to_str())
                     .unwrap_or("CLI");
-                (&self.models.cli, format!("{name} · CLI / سطر الأوامر"))
+                (
+                    &self.models.cli,
+                    format!(
+                        "{name} · {}",
+                        twitty_core::language::tr("CLI", "سطر الأوامر")
+                    ),
+                )
             }
-            ProviderKind::Anthropic => {
-                (&self.models.anthropic, "Claude · API / واجهة برمجية".into())
-            }
-            ProviderKind::OpenAi => (&self.models.openai, "OpenAI · API / واجهة برمجية".into()),
-            ProviderKind::Gemini => (&self.models.gemini, "Gemini · API / واجهة برمجية".into()),
+            ProviderKind::Anthropic => (&self.models.anthropic, "Claude · API".into()),
+            ProviderKind::OpenAi => (&self.models.openai, "OpenAI · API".into()),
+            ProviderKind::Gemini => (&self.models.gemini, "Gemini · API".into()),
             ProviderKind::Ollama { base_url } => {
                 if base_url.is_empty() {
                     *base_url = DEFAULT_OLLAMA_URL.into();

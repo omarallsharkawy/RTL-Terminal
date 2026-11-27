@@ -181,7 +181,7 @@ pub(crate) fn palette_overlay(
             let placeholder = view
                 .placeholder
                 .as_deref()
-                .unwrap_or("Type a command… / اكتب أمر…");
+                .unwrap_or(crate::ui::chrome::tr("Type a command…", "اكتب أمر…"));
             (
                 font.fit(
                     ctx.font_system,

@@ -1,6 +1,20 @@
 //! Window-independent interface language and locale resolution.
 
+use std::sync::atomic::{AtomicU8, Ordering};
+
 use crate::layout::Rect;
+
+/// The running app's interface language, for messages built away from any window (errors,
+/// toasts, PTY notices). The window keeps it in sync with `ui_language`.
+static CURRENT: AtomicU8 = AtomicU8::new(0);
+
+/// `english` or `arabic`, whichever matches the current interface language.
+pub fn tr<'a>(english: &'a str, arabic: &'a str) -> &'a str {
+    match UiLanguage::current() {
+        UiLanguage::English => english,
+        UiLanguage::Arabic => arabic,
+    }
+}
 
 /// Configured interface language preference (`config.json` key `"ui_language"`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -68,6 +82,19 @@ impl UiLanguage {
         } else {
             Self::English
         }
+    }
+
+    /// The interface language set with [`UiLanguage::set_current`] (English until then).
+    pub fn current() -> Self {
+        match CURRENT.load(Ordering::Relaxed) {
+            1 => Self::Arabic,
+            _ => Self::English,
+        }
+    }
+
+    /// Make this the language [`tr`] and [`UiLanguage::current`] answer with.
+    pub fn set_current(self) {
+        CURRENT.store(u8::from(self == Self::Arabic), Ordering::Relaxed);
     }
 
     pub fn from_environment() -> Self {

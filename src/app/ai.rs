@@ -173,7 +173,7 @@ impl App {
             Ok(a) => a,
             Err(err) => {
                 self.ai.composer_ai = ComposerAiState::Error {
-                    message: err.message_bilingual(),
+                    message: err.message_localized(),
                 };
                 self.composer.state.ai_loading = false;
                 self.window.request_redraw();
@@ -233,7 +233,7 @@ impl App {
             self.ai.active = None;
             self.composer.state.ai_loading = false;
             self.ai.composer_ai = ComposerAiState::Error {
-                message: AiError::SpawnFailed(err.to_string()).message_bilingual(),
+                message: AiError::SpawnFailed(err.to_string()).message_localized(),
             };
             self.sync_ai_spinner();
         }
@@ -268,8 +268,11 @@ impl App {
                 command: None,
                 exit_code: 0,
                 status: BlockAiCardStatus::Error(
-                    "No failed command block found in this pane. / مفيش أمر فاشل في اللوحة دي."
-                        .into(),
+                    crate::ui::chrome::tr(
+                        "No failed command in this pane.",
+                        "مفيش أمر فاشل في اللوحة دي.",
+                    )
+                    .into(),
                 ),
                 scroll_lines: 0,
             });
@@ -295,7 +298,7 @@ impl App {
                     mode,
                     command: block_text.command,
                     exit_code,
-                    status: BlockAiCardStatus::Error(err.message_bilingual()),
+                    status: BlockAiCardStatus::Error(err.message_localized()),
                     scroll_lines: 0,
                 });
                 self.window.request_redraw();
@@ -384,7 +387,7 @@ impl App {
             self.ai.active = None;
             if let Some(card) = self.ai.block_card.as_mut() {
                 card.status = BlockAiCardStatus::Error(
-                    AiError::SpawnFailed(err.to_string()).message_bilingual(),
+                    AiError::SpawnFailed(err.to_string()).message_localized(),
                 );
             }
             self.sync_ai_spinner();
@@ -434,7 +437,7 @@ impl App {
                     }
                     Err(err) => {
                         self.ai.composer_ai = ComposerAiState::Error {
-                            message: err.message_bilingual(),
+                            message: err.message_localized(),
                         };
                     }
                 }
@@ -458,7 +461,7 @@ impl App {
                     }
                     Err(err) => {
                         if let Some(card) = self.ai.block_card.as_mut() {
-                            card.status = BlockAiCardStatus::Error(err.message_bilingual());
+                            card.status = BlockAiCardStatus::Error(err.message_localized());
                         }
                     }
                 }
@@ -551,7 +554,7 @@ impl App {
                 match pending.action {
                     PendingAiAction::ComposerGenerate { .. } => {
                         self.ai.composer_ai = ComposerAiState::Error {
-                            message: err.message_bilingual(),
+                            message: err.message_localized(),
                         };
                     }
                     PendingAiAction::BlockAnalyze {
@@ -565,7 +568,7 @@ impl App {
                             mode,
                             command: None,
                             exit_code: 1,
-                            status: BlockAiCardStatus::Error(err.message_bilingual()),
+                            status: BlockAiCardStatus::Error(err.message_localized()),
                             scroll_lines: 0,
                         });
                     }

@@ -222,26 +222,12 @@ impl Chrome<'_, '_> {
 
     fn search_contents(&mut self, rect: Rect, language: UiLanguage) {
         let s = self.style;
-        let en = self.font.shape(
+        let local = self.font.shape(
             self.ctx.font_system,
             UiSize::Caption,
             UiWeight::Regular,
             s.scale,
-            SEARCH_EN,
-        );
-        let ar = self.font.shape(
-            self.ctx.font_system,
-            UiSize::Caption,
-            UiWeight::Regular,
-            s.scale,
-            SEARCH_AR,
-        );
-        let divider = self.font.shape(
-            self.ctx.font_system,
-            UiSize::Caption,
-            UiWeight::Regular,
-            s.scale,
-            "/",
+            language.text(SEARCH_EN, SEARCH_AR),
         );
         let key = self.font.shape(
             self.ctx.font_system,
@@ -253,13 +239,7 @@ impl Chrome<'_, '_> {
         let width = |buffer: &cosmic_text::Buffer| label_width(buffer).ceil() + 1.0;
         let gap = s.px(SPACE_4);
         let key_w = width(&key) + 2.0 * gap;
-        let bilingual = width(&en) + width(&divider) + width(&ar) + 2.0 * gap;
-        let (local, secondary) = if language == UiLanguage::Arabic {
-            (ar, en)
-        } else {
-            (en, ar)
-        };
-        let choice = SearchContents::fit(rect.w, bilingual, width(&local), key_w + gap);
+        let choice = SearchContents::fit(rect.w, width(&local), key_w + gap);
         let mut remaining = rect;
         if choice.keycap {
             let h = s.px(SPACE_16).min(rect.h);
@@ -271,21 +251,6 @@ impl Chrome<'_, '_> {
             remaining.w -= key_w + gap;
         }
         match choice.placeholder {
-            SearchPlaceholder::Bilingual => {
-                let mut x = rect.x;
-                for buffer in [local, divider, secondary] {
-                    let w = width(&buffer);
-                    let label = language.mirror(Rect::new(x, rect.y, w, rect.h), rect);
-                    let align = if language == UiLanguage::Arabic {
-                        UiAlign::Right
-                    } else {
-                        UiAlign::Left
-                    };
-                    self.labels
-                        .push(UiLabel::new(buffer, label, align, s.text_dim));
-                    x += w + gap;
-                }
-            }
             SearchPlaceholder::Local => self.labels.push(UiLabel::new(
                 local,
                 language.mirror(remaining, rect),

@@ -21,7 +21,7 @@ pub const MAX_RESULTS: usize = 10;
 /// Longest query kept, in characters.
 const MAX_QUERY_CHARS: usize = 200;
 
-pub const RENAME_TAB_PLACEHOLDER: &str = "Rename tab… / غيّر اسم التاب…";
+pub const RENAME_TAB_PLACEHOLDER: &str = "Rename tab…";
 
 /// What the palette lists.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]

@@ -204,7 +204,7 @@ fn shell_setup_enforces_private_modes_and_refuses_wrapper_symlinks() {
 }
 
 #[test]
-fn control_split_pane_too_small_reports_bilingual_reason() {
+fn control_split_pane_too_small_reports_the_reason() {
     let mut host = HeadlessHost::new();
 
     // Initial pane is 100x30 (HeadlessGrid is 1000x600, 10x20 cells).
@@ -218,7 +218,7 @@ fn control_split_pane_too_small_reports_bilingual_reason() {
         assert!(resp.ok, "initial split should succeed: {resp:?}");
     }
 
-    // 3rd horizontal split via Twitty native pane.split must explain WHY in English & Arabic.
+    // 3rd horizontal split via Twitty native pane.split must explain WHY.
     let (native_err, _) = host.dispatch(Request {
         id: json!(2),
         method: "pane.split".into(),
@@ -226,12 +226,11 @@ fn control_split_pane_too_small_reports_bilingual_reason() {
     });
     assert!(!native_err.ok);
     let msg = native_err.error.as_deref().unwrap_or("");
-    assert!(msg.contains("too small"), "expected 'too small' in {msg:?}");
-    assert!(msg.contains("48"), "expected minimum columns in {msg:?}");
     assert!(
-        msg.contains("صغيرة جداً"),
-        "expected Arabic explanation in {msg:?}"
+        msg.contains("too narrow"),
+        "expected 'too narrow' in {msg:?}"
     );
+    assert!(msg.contains("48"), "expected minimum columns in {msg:?}");
 
     // Same via cmux surface.split returns structured code "pane_too_small".
     let (cmux_err, _) = host.dispatch(Request {
@@ -242,10 +241,7 @@ fn control_split_pane_too_small_reports_bilingual_reason() {
     assert!(!cmux_err.ok);
     assert_eq!(cmux_err.error_code.as_deref(), Some("pane_too_small"));
     let cmsg = cmux_err.error.as_deref().unwrap_or("");
-    assert!(
-        cmsg.contains("too small") && cmsg.contains("صغيرة جداً"),
-        "{cmsg:?}"
-    );
+    assert!(cmsg.contains("too narrow"), "{cmsg:?}");
 
     // Vertical split: 30 rows -> 14 rows (< 20 rows minimum) -> 2nd vertical split fails with reason.
     let (v1, _) = host.dispatch(Request {
@@ -262,10 +258,9 @@ fn control_split_pane_too_small_reports_bilingual_reason() {
     assert!(!v2.ok);
     let vmsg = v2.error.as_deref().unwrap_or("");
     assert!(
-        vmsg.contains("too small") && vmsg.contains("20"),
+        vmsg.contains("too short") && vmsg.contains("20"),
         "{vmsg:?}"
     );
-    assert!(vmsg.contains("صغيرة جداً"), "{vmsg:?}");
 }
 
 #[test]

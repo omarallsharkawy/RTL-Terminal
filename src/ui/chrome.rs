@@ -7,7 +7,7 @@ use crate::render::ui_style::{SPACE_4, SPACE_8};
 use crate::render::CellMetrics;
 use crate::ui::git_diff::DiffStat;
 
-pub use twitty_core::language::{UiLanguage, UiLanguagePref};
+pub use twitty_core::language::{tr, UiLanguage, UiLanguagePref};
 
 pub const TOP_BAR_HEIGHT: f32 = 36.0;
 pub const PANE_HEADER_HEIGHT: f32 = 24.0;
@@ -286,7 +286,6 @@ pub const SEARCH_KEYCAP: &str = "Ctrl+Shift+P";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SearchPlaceholder {
-    Bilingual,
     Local,
     LocalShortened,
 }
@@ -298,10 +297,10 @@ pub struct SearchContents {
 }
 
 impl SearchContents {
-    pub fn fit(room: f32, bilingual: f32, local: f32, keycap: f32) -> Self {
-        let (placeholder, used) = if room >= bilingual {
-            (SearchPlaceholder::Bilingual, bilingual)
-        } else if room >= local {
+    /// What fits in `room` px: the placeholder in the UI language (`local` px wide), shortened
+    /// when it does not fit, and the keycap (`keycap` px) when room is left for it.
+    pub fn fit(room: f32, local: f32, keycap: f32) -> Self {
+        let (placeholder, used) = if room >= local {
             (SearchPlaceholder::Local, local)
         } else {
             (SearchPlaceholder::LocalShortened, 0.0)

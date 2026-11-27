@@ -1307,6 +1307,7 @@ fn check_slash_menu_golden(name: &str, palette_name: &str, lang: twitty::ui::chr
         style,
         &ui_font,
         &ComposerView {
+            context: None,
             pane_rect: rect,
             lines: vec![format!("/{query}")],
             caret: (0, 1 + query.len()),

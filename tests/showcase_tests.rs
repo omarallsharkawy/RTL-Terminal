@@ -219,6 +219,7 @@ fn render(
             style,
             &font,
             &ComposerView {
+                context: None,
                 pane_rect: panes[0].rect,
                 lines: vec![String::new()],
                 caret: (0, 0),

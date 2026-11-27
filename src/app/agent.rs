@@ -70,11 +70,17 @@ impl App {
         let note = match self.start_agent(cwd, prompt) {
             Ok(_) => return,
             Err(AgentStartError::NotFound) => {
-                "\r\n\x1b[33mTwitty: no coding agent found (claude, codex, gemini, \
-                 opencode, grok). Set \"agent_command\" in config.json. / مفيش وكيل برمجة متسطّب؛ اضبط agent_command في config.json\x1b[0m\r\n"
+                crate::ui::chrome::tr(
+                    "\r\n\x1b[33mTwitty: no coding agent found (claude, codex, gemini, \
+                     opencode, grok, agy). Pick one in Settings → AI.\x1b[0m\r\n",
+                    "\r\n\x1b[33mTwitty: مفيش وكيل برمجة متسطّب. اختار واحد من الإعدادات ← الذكاء الاصطناعي.\x1b[0m\r\n",
+                )
             }
             Err(AgentStartError::Failed) => {
-                "\r\n\x1b[33mTwitty: failed to start the coding agent. / مقدرناش نشغّل وكيل البرمجة.\x1b[0m\r\n"
+                crate::ui::chrome::tr(
+                    "\r\n\x1b[33mTwitty: failed to start the coding agent.\x1b[0m\r\n",
+                    "\r\n\x1b[33mTwitty: مقدرناش نشغّل وكيل البرمجة.\x1b[0m\r\n",
+                )
             }
         };
         self.term(id, |t| t.process_bytes(note.as_bytes()));

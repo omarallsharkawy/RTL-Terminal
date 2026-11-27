@@ -13,9 +13,13 @@ use crate::ui::chrome::UiLanguage;
 /// Maximum interval between two plain Escape presses that disables broadcast mode.
 pub const DOUBLE_ESC_WINDOW: Duration = Duration::from_millis(500);
 
-/// Bilingual status text shown when pane headers are hidden and broadcast is active.
-pub const BROADCAST_STATUS_TEXT: &str =
-    "Broadcast: all panes (Esc-Esc to stop) / البث: الكتابة في كل اللوحات";
+/// Status text shown when pane headers are hidden and broadcast is active.
+pub fn broadcast_status_text() -> &'static str {
+    crate::ui::chrome::tr(
+        "Broadcast: typing goes to all panes (Esc Esc to stop)",
+        "البث: الكتابة بتروح لكل اللوحات (Esc Esc للإيقاف)",
+    )
+}
 
 /// Format a pane header title with a compact bilingual broadcast badge at the front so it stays
 /// visible even in narrow split panes and preserves direction for the active UI language.

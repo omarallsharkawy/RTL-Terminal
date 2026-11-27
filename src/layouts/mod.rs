@@ -40,9 +40,15 @@ pub const MAX_TITLE_CHARS: usize = 256;
 /// Maximum `layouts.json` size read from or written to disk (2 MiB).
 pub const MAX_LAYOUTS_FILE_BYTES: usize = 2 * 1024 * 1024;
 
-pub const SAVE_LAYOUT_PLACEHOLDER: &str = "Save layout name… / اسم التخطيط…";
-pub const OPEN_LAYOUT_PLACEHOLDER: &str = "Open layout… / افتح تخطيط…";
-pub const DELETE_LAYOUT_PLACEHOLDER: &str = "Delete layout… / احذف تخطيط…";
+pub fn save_layout_placeholder() -> &'static str {
+    crate::ui::chrome::tr("Name this layout…", "اسم التخطيط…")
+}
+pub fn open_layout_placeholder() -> &'static str {
+    crate::ui::chrome::tr("Open layout…", "افتح تخطيط…")
+}
+pub fn delete_layout_placeholder() -> &'static str {
+    crate::ui::chrome::tr("Delete layout…", "احذف تخطيط…")
+}
 
 /// Clean and validate a layout name (strips control and bidi-override characters, trims, bounds).
 pub fn clean_layout_name(raw: &str) -> Option<String> {

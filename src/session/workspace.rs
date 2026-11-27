@@ -3,6 +3,7 @@
 //! Window-free: the grid geometry comes in through [`GridGeometry`] and new shells through
 //! [`PaneFactory`], so tab and pane lifecycles can be tested with fake panes.
 
+use crate::ui::chrome::{tr, UiLanguage};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -29,7 +30,7 @@ impl SplitFailure {
         let Some((cols, rows)) = size else {
             return Self {
                 code: "not_found",
-                message: "no focused pane / لا توجد لوحة محددة".into(),
+                message: tr("No focused pane", "مفيش لوحة محددة").into(),
             };
         };
         let min_cols = MIN_SPLIT_COLS * 2;
@@ -37,21 +38,33 @@ impl SplitFailure {
         match dir {
             SplitDir::Horizontal if cols < min_cols => Self {
                 code: "pane_too_small",
-                message: format!(
-                    "cannot split pane horizontally: pane is too small ({cols}x{rows}; need at least {min_cols} columns) / لا يمكن تقسيم اللوحة أفقياً: اللوحة صغيرة جداً ({cols}x{rows}، يلزم {min_cols} عموداً على الأقل)"
-                ),
+                message: match UiLanguage::current() {
+                    UiLanguage::English => format!(
+                        "This pane is too narrow to split side by side ({cols} columns; needs {min_cols})"
+                    ),
+                    UiLanguage::Arabic => format!(
+                        "اللوحة ضيقة على التقسيم جنب بعض ({cols} عمود؛ محتاجة {min_cols})"
+                    ),
+                },
             },
             SplitDir::Vertical if rows < min_rows => Self {
                 code: "pane_too_small",
-                message: format!(
-                    "cannot split pane vertically: pane is too small ({cols}x{rows}; need at least {min_rows} rows) / لا يمكن تقسيم اللوحة رأسياً: اللوحة صغيرة جداً ({cols}x{rows}، يلزم {min_rows} صفاً على الأقل)"
-                ),
+                message: match UiLanguage::current() {
+                    UiLanguage::English => format!(
+                        "This pane is too short to split top and bottom ({rows} rows; needs {min_rows})"
+                    ),
+                    UiLanguage::Arabic => format!(
+                        "اللوحة قصيرة على التقسيم فوق وتحت ({rows} سطر؛ محتاجة {min_rows})"
+                    ),
+                },
             },
             _ => Self {
                 code: "internal",
-                message:
-                    "could not split pane: failed to start shell / تعذر تقسيم اللوحة: فشل تشغيل الصدفة"
-                        .into(),
+                message: tr(
+                    "Could not split the pane: the shell failed to start",
+                    "مقدرناش نقسّم اللوحة: الـshell ما اشتغلش",
+                )
+                .into(),
             },
         }
     }

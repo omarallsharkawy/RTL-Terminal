@@ -109,6 +109,8 @@ pub struct ComposerView {
     pub language: UiLanguage,
     /// Built-in AI button and thinking/review/error banner.
     pub ai: ComposerAiView,
+    /// Where the command will run, shown in the header: `~/src/app · main`.
+    pub context: Option<String>,
 }
 
 /// Pointer hit test target on the composer.
@@ -845,13 +847,7 @@ pub fn build(
                     bi_side,
                 );
                 Icon::Agent.draw(bi_rect, ctx.color(style.accent), &mut scene.shapes);
-                let label_text = if btn.w >= style.px(105.0) {
-                    "Generate / ولّد"
-                } else if view.language == UiLanguage::Arabic {
-                    "ولّد"
-                } else {
-                    "Generate"
-                };
+                let label_text = view.language.text("Generate", "ولّد");
                 let label_x = bi_rect.right() + style.px(4.0);
                 let label_rect = Rect::new(
                     label_x,
@@ -882,7 +878,7 @@ pub fn build(
             UiLanguage::Arabic => "اكتب أمر",
             UiLanguage::English => "Compose command",
         };
-        let bilingual_title = "Compose command / اكتب أمر";
+        let full_title = view.context.as_deref().unwrap_or(title_text);
         let title_x = icon_rect.right() + style.px(6.0);
         let avail_w = (header_right - title_x).max(0.0);
 
@@ -912,7 +908,7 @@ pub fn build(
             UiSize::Small,
             UiWeight::Semibold,
             style.scale,
-            bilingual_title,
+            full_title,
         );
         let title_w_full = label_width(&title_buf_full).ceil() + style.px(8.0);
 
@@ -982,11 +978,9 @@ pub fn build(
     if all_empty {
         let placeholder = match (view.language, view.ai.enabled) {
             (UiLanguage::Arabic, true) => "اكتب أمرك أو # للذكاء الاصطناعي…",
-            (UiLanguage::English, true) => {
-                "Type a command or # for AI… / اكتب أمرك أو # للذكاء الاصطناعي…"
-            }
+            (UiLanguage::English, true) => "Type a command or # for AI…",
             (UiLanguage::Arabic, false) => "اكتب أمرك هنا…",
-            (UiLanguage::English, false) => "Type a command… / اكتب أمرك هنا…",
+            (UiLanguage::English, false) => "Type a command…",
         };
         // Start at the input's text inset and leave room for the empty editor's beam.
         // Reserve it during both blink phases so the placeholder never shifts.

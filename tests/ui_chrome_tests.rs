@@ -391,25 +391,21 @@ fn search_placeholder_and_badges_follow_width_locale_and_counts() {
         assert_eq!(UiLanguage::from_locale(locale), expected);
     }
     assert_eq!(
-        SearchContents::fit(299.0, 300.0, 150.0, 75.0).placeholder,
-        SearchPlaceholder::Local
-    );
-    assert_eq!(
-        SearchContents::fit(375.0, 300.0, 150.0, 75.0),
+        SearchContents::fit(299.0, 150.0, 75.0),
         SearchContents {
-            placeholder: SearchPlaceholder::Bilingual,
+            placeholder: SearchPlaceholder::Local,
             keycap: true
         }
     );
     assert_eq!(
-        SearchContents::fit(300.0, 300.0, 150.0, 75.0),
+        SearchContents::fit(200.0, 150.0, 75.0),
         SearchContents {
-            placeholder: SearchPlaceholder::Bilingual,
+            placeholder: SearchPlaceholder::Local,
             keycap: false
         }
     );
     assert_eq!(
-        SearchContents::fit(74.0, 300.0, 150.0, 75.0),
+        SearchContents::fit(74.0, 150.0, 75.0),
         SearchContents {
             placeholder: SearchPlaceholder::LocalShortened,
             keycap: false
@@ -467,7 +463,7 @@ fn rendered_search_prefers_complete_labels_and_bell_count_is_conditional() {
             456.0,
             UiLanguage::English,
             99,
-            vec![SEARCH_KEYCAP, SEARCH_EN, "/", SEARCH_AR, "99"],
+            vec![SEARCH_KEYCAP, SEARCH_EN, "99"],
         ),
         (en_w + 39.0, UiLanguage::English, 0, vec![SEARCH_EN]),
         (ar_w + 39.0, UiLanguage::Arabic, 0, vec![SEARCH_AR]),

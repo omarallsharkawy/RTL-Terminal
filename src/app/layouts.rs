@@ -4,6 +4,7 @@
 use super::App;
 use crate::layouts::{capture_active_tab, LayoutStore};
 use crate::pty::SpawnOptions;
+use crate::ui::chrome::tr;
 
 impl App {
     /// Reload saved layouts from disk when opening a layout palette mode.
@@ -20,7 +21,7 @@ impl App {
             if let Some(id) = self.focused_id() {
                 self.show_pane_warning(
                     id,
-                    &format!("could not save layout: {err} / تعذر حفظ التخطيط"),
+                    &format!("{}: {err}", tr("Could not save layout", "تعذر حفظ التخطيط")),
                 );
             }
             return;
@@ -29,7 +30,7 @@ impl App {
             if let Some(id) = self.focused_id() {
                 self.show_pane_warning(
                     id,
-                    &format!("could not save layout: {err} / تعذر حفظ التخطيط"),
+                    &format!("{}: {err}", tr("Could not save layout", "تعذر حفظ التخطيط")),
                 );
             }
         }
@@ -55,7 +56,10 @@ impl App {
             if let Some(id) = previous {
                 self.show_pane_warning(
                     id,
-                    "could not open layout: failed to start shells / تعذر فتح التخطيط",
+                    tr(
+                        "Could not open layout: the shells failed to start",
+                        "تعذر فتح التخطيط: الـshell ما اشتغلش",
+                    ),
                 );
             }
             return;
@@ -74,7 +78,10 @@ impl App {
             if let Some(id) = self.focused_id() {
                 self.show_pane_warning(
                     id,
-                    &format!("could not delete layout: {err} / تعذر حذف التخطيط"),
+                    &format!(
+                        "{}: {err}",
+                        tr("Could not delete layout", "تعذر حذف التخطيط")
+                    ),
                 );
             }
         }

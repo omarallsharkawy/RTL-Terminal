@@ -826,6 +826,7 @@ fn pre_run_lint_marks_never_block_and_render_wavy_underlines_and_tooltip() {
         assert!(layout.lint_bar.is_some());
 
         let view = ComposerView {
+            context: None,
             pane_rect,
             lines: vec![bad_cmd.into()],
             caret: (0, bad_cmd.len()),

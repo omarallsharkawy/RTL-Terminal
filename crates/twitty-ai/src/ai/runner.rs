@@ -116,8 +116,12 @@ impl AiError {
     }
 
     /// Compact bilingual message (English + Arabic) for errors shown in both languages.
-    pub fn message_bilingual(&self) -> String {
-        format!("{} / {}", self.message_en(), self.message_ar())
+    /// The message in the current interface language.
+    pub fn message_localized(&self) -> String {
+        match twitty_core::language::UiLanguage::current() {
+            twitty_core::language::UiLanguage::English => self.message_en(),
+            twitty_core::language::UiLanguage::Arabic => self.message_ar(),
+        }
     }
 }
 

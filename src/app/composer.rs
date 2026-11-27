@@ -893,6 +893,14 @@ impl App {
             popup,
             language,
             ai: self.composer_ai_view(),
+            context: cwd.as_deref().map(|dir| {
+                let home = std::env::var_os("HOME").map(PathBuf::from);
+                let path = crate::projects::abbreviate_home(dir, home.as_deref());
+                match self.window.branch_for(dir) {
+                    Some(branch) => format!("{path} · {branch}"),
+                    None => path,
+                }
+            }),
         })
     }
 }

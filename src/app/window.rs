@@ -122,7 +122,11 @@ impl Window {
             occluded: false,
             chrome_hover: None,
             tab_hover: None,
-            language: UiLanguage::from_environment(),
+            language: {
+                let language = UiLanguage::from_environment();
+                language.set_current();
+                language
+            },
             sidebar_view: None,
             sidebar_drag: None,
             motion: ChromeAnimations::default(),
@@ -198,6 +202,7 @@ impl Window {
         self.top_bar = config.top_bar;
         self.pane_headers = config.pane_headers;
         self.language = config.effective_ui_language();
+        self.language.set_current();
         self.renderer = Some(renderer);
         true
     }
@@ -380,6 +385,7 @@ impl Window {
     }
 
     pub(super) fn set_ui_language(&mut self, language: UiLanguage) {
+        language.set_current();
         if self.language != language {
             self.language = language;
             self.request_redraw();
@@ -478,6 +484,11 @@ impl Window {
                 ws.pane(tab.focused)?.meta.cwd.clone()
             })
             .collect()
+    }
+
+    /// The cached git branch of `dir`, when the sidebar has looked it up.
+    pub(super) fn branch_for(&self, dir: &std::path::Path) -> Option<String> {
+        self.branches.cached(dir)
     }
 
     /// Apply git branch lookups produced off the UI thread; returns true when any changed.
@@ -1068,7 +1079,7 @@ fn pane_header_title(pane: &crate::session::pane::Pane) -> (String, bool) {
         .or(program)
         .map(|title| crate::shell_integration::clean_text(title, 256))
         .filter(|title| !title.is_empty())
-        .unwrap_or_else(|| "Terminal / الطرفية".to_owned());
+        .unwrap_or_else(|| crate::ui::chrome::tr("Terminal", "الطرفية").to_owned());
     (
         title,
         agent_name.is_some() || pane.meta.agent_status.is_some(),
@@ -1239,7 +1250,7 @@ impl App {
                     .or_else(|| pane.ui.hover_target.as_ref().map(|t| format!("→ {t}")))
                     .or_else(|| {
                         (broadcast_status && focused == Some(id))
-                            .then(|| crate::input::broadcast::BROADCAST_STATUS_TEXT.to_owned())
+                            .then(|| crate::input::broadcast::broadcast_status_text().to_owned())
                     });
                 Some(PaneFrame {
                     id,

@@ -929,6 +929,7 @@ fn composer_scene_clips_underlying_terminal_text_and_scales_light_dark() {
             let mut frame = build_frame(&mut ctx, &opts, &mut cache, &mut ime, &[], &panes, &[]);
 
             let view = ComposerView {
+                context: None,
                 pane_rect,
                 lines: vec!["echo مرحبا".into(), "ls -la".into()],
                 caret: (0, "echo مرح".len()),
@@ -1029,6 +1030,7 @@ fn empty_composer_hint_starts_after_the_beam_at_each_scale() {
             (UiLanguage::Arabic, "اكتب أمرك هنا"),
         ] {
             let mut view = ComposerView {
+                context: None,
                 pane_rect: Rect::new(120.0, 40.0, 550.0, 280.0),
                 lines: vec![String::new()],
                 caret: (0, 0),

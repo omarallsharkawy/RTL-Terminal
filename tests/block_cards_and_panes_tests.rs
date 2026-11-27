@@ -307,7 +307,7 @@ fn rerun_text_has_no_newline_and_is_paste_safe() {
 
 #[test]
 fn rename_tab_mode_arabic_empty_clears_and_bounded_length() {
-    assert_eq!(RENAME_TAB_PLACEHOLDER, "Rename tab… / غيّر اسم التاب…");
+    assert_eq!(RENAME_TAB_PLACEHOLDER, "Rename tab…");
 
     let none = ModifiersState::empty();
     let mut state = PaletteState {
