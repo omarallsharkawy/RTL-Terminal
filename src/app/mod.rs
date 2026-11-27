@@ -23,6 +23,7 @@ mod control;
 mod event;
 mod git_diff;
 mod keyboard;
+mod layers;
 mod layouts;
 mod memory;
 mod mouse;

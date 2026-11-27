@@ -938,7 +938,7 @@ pub fn build(
                 UiSize::Small,
                 UiWeight::Semibold,
                 style.scale,
-                title_text,
+                full_title,
                 avail_w,
             );
             let title_rect = Rect::new(title_x, layout.header.y, avail_w, layout.header.h);

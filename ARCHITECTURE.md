@@ -44,6 +44,16 @@ the cursor, backgrounds, selection, mouse hits and IME follow the text the user 
 
 Everything above `render/gpu` runs without a GPU and is covered by tests in `tests/`.
 
+## Overlays
+
+Everything that floats over the panes (menus, notices, palette, settings, composer, side
+panels) is a [`Layer`](src/ui/layers.rs). `Layer::STACK` lists them top to bottom and is the
+only place that order is written: `app/layers.rs` routes keys, mouse presses and pointer motion
+through it top first, and the renderer draws it bottom first, so what is on top also gets the
+input first. `Frame` keeps each layer's text in the same order, and every layer hides the text
+beneath its area. To add an overlay, add a variant; the compiler then points at each `match`
+that must route or draw it.
+
 ## Cargo workspace
 
 All packages inherit their version and Rust edition from the root manifest. The root

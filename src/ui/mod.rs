@@ -6,6 +6,7 @@ pub mod clipboard;
 pub mod context_menu;
 pub mod git_diff;
 pub mod hit;
+pub mod layers;
 pub mod memory_panel;
 pub mod motion;
 pub mod notifications;

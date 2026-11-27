@@ -88,24 +88,26 @@ pub struct Frame {
     metrics: CellMetrics,
     foreground: glyphon::Color,
     surface: (f32, f32),
-    /// Overlays drawn above everything (the command palette).
-    overlay: Vec<UiLabel>,
-    /// Area the overlay covers: other text is clipped out of it, since all text is drawn
-    /// after all quads and would otherwise show through the overlay's background.
-    overlay_rect: Option<Rect>,
     /// Command composer shaped lines, chrome labels, and clip rects (drawn below the palette).
     composer_texts: Vec<super::composer::ComposerText>,
     composer_labels: Vec<UiLabel>,
     composer_clips: Vec<Rect>,
-    /// Failed-block AI explanation popover labels and clip rect.
-    block_ai_labels: Vec<UiLabel>,
-    block_ai_rect: Option<Rect>,
-    /// Floating layers drawn last, in order (menu, notices, tooltip): each hides the text
-    /// under its rects, then draws its labels.
-    floating: Vec<(Vec<Rect>, Vec<UiLabel>)>,
-    /// One-time AI privacy consent modal labels and clip rect (drawn above everything).
-    consent_labels: Vec<UiLabel>,
-    consent_rect: Option<Rect>,
+    /// The text of every layer drawn over the panes, bottom to top, in the order the layers
+    /// were added. All text is drawn after all shapes, so each layer first hides the text under
+    /// its area, then adds its own.
+    layers: Vec<TextLayer>,
+}
+
+/// One overlay's text, in [`Frame::layers`].
+enum TextLayer {
+    Review,
+    AgentPanel,
+    Composer,
+    /// Labels over `holes`, which hide the text drawn before them.
+    Plain {
+        holes: Vec<Rect>,
+        labels: Vec<UiLabel>,
+    },
 }
 
 /// The parts of `bounds` outside `hole`: up to four strips (above, below, left, right).
@@ -350,16 +352,10 @@ pub(crate) fn build_frame_base(
         metrics: m,
         foreground: ctx.palette.foreground.to_glyphon(),
         surface: opts.surface,
-        overlay: Vec::new(),
-        overlay_rect: None,
         composer_texts: Vec::new(),
         composer_labels: Vec::new(),
         composer_clips: Vec::new(),
-        block_ai_labels: Vec::new(),
-        block_ai_rect: None,
-        floating: Vec::new(),
-        consent_labels: Vec::new(),
-        consent_rect: None,
+        layers: Vec::new(),
     }
 }
 
@@ -491,6 +487,7 @@ impl Frame {
         self.composer_texts = scene.texts;
         self.composer_labels = scene.labels;
         self.composer_clips = scene.clips;
+        self.layers.push(TextLayer::Composer);
         if open && view.focused {
             if let Some((x, y, w, h)) = scene.ime_area {
                 self.ime_area = Some((x + slide.x as i32, y + slide.y as i32, w, h));
@@ -514,8 +511,15 @@ impl Frame {
             self.surface,
             &mut self.shapes.chrome,
         );
-        self.block_ai_rect = rect;
-        self.block_ai_labels = labels;
+        self.push_layer(rect, labels);
+    }
+
+    /// Add a layer of `labels` that hides the text drawn before it under `hole`.
+    fn push_layer(&mut self, hole: Option<Rect>, labels: Vec<UiLabel>) {
+        self.layers.push(TextLayer::Plain {
+            holes: hole.into_iter().collect(),
+            labels,
+        });
     }
 
     /// Draw an open right-click menu above everything else.
@@ -537,7 +541,7 @@ impl Frame {
             language,
             &mut self.shapes.overlay,
         );
-        self.floating.push((vec![layout.rect], labels));
+        self.push_layer(Some(layout.rect), labels);
     }
 
     /// Draw short notices at the top center of the window.
@@ -558,7 +562,10 @@ impl Frame {
             language,
             &mut self.shapes.overlay,
         );
-        self.floating.push((rects, labels));
+        self.layers.push(TextLayer::Plain {
+            holes: rects,
+            labels,
+        });
     }
 
     /// Draw a hover tooltip near pointer `at`, above everything else.
@@ -579,7 +586,7 @@ impl Frame {
             self.surface,
             &mut self.shapes.overlay,
         );
-        self.floating.push((vec![rect], vec![label]));
+        self.push_layer(Some(rect), vec![label]);
     }
 
     /// Draw the one-time AI privacy consent modal above everything else.
@@ -598,8 +605,7 @@ impl Frame {
             self.surface,
             &mut self.shapes.overlay,
         );
-        self.consent_rect = rect;
-        self.consent_labels = labels;
+        self.push_layer(rect, labels);
     }
 
     /// Draw the command palette above everything else.
@@ -643,8 +649,7 @@ impl Frame {
                 .for_each(|shape| slide.shape(shape));
             texts.iter_mut().for_each(|label| slide.label(label));
         }
-        self.overlay.extend(texts);
-        self.overlay_rect = outer.map(|rect| slide.rect(rect));
+        self.push_layer(outer.map(|rect| slide.rect(rect)), texts);
     }
 
     /// Draw the settings panel above everything else, clipping underlying text behind it.
@@ -663,8 +668,7 @@ impl Frame {
             self.surface,
             &mut self.shapes.overlay,
         );
-        self.overlay.extend(texts);
-        self.overlay_rect = outer;
+        self.push_layer(outer, texts);
     }
 
     /// Draw the first-run welcome wizard above everything else, clipping underlying text behind it.
@@ -683,8 +687,7 @@ impl Frame {
             self.surface,
             &mut self.shapes.overlay,
         );
-        self.overlay.extend(texts);
-        self.overlay_rect = outer;
+        self.push_layer(outer, texts);
     }
 
     /// Draw the Project Memory overlay above everything else, clipping underlying text behind it.
@@ -703,8 +706,7 @@ impl Frame {
             self.surface,
             &mut self.shapes.overlay,
         );
-        self.overlay.extend(texts);
-        self.overlay_rect = outer;
+        self.push_layer(outer, texts);
     }
 
     /// Optional chrome is attached explicitly so offscreen/golden callers keep their layout.
@@ -777,6 +779,7 @@ impl Frame {
         self.review_labels = scene.labels;
         self.review_rect = Some(slide.rect(view.rect));
         self.review_texts = scene.texts;
+        self.layers.push(TextLayer::Review);
     }
 
     /// The Agent side panel, docked beside the panes (clipping underlying terminal text).
@@ -828,6 +831,7 @@ impl Frame {
         self.agent_panel_labels = scene.labels;
         self.agent_panel_rect = Some(slide.rect(view.rect));
         self.agent_panel_texts = scene.texts;
+        self.layers.push(TextLayer::AgentPanel);
     }
 
     pub fn add_attention(&mut self, ctx: &DrawContext, rects: &[Rect]) {
@@ -984,68 +988,52 @@ impl Frame {
         }
         runs.extend(self.block_labels.iter().map(ui_run));
         runs.extend(self.chrome_labels.iter().map(ui_run));
-        if let Some(hole) = self.review_rect {
-            runs = clip_runs(runs, hole);
+        // Terminal-shaped rows of a panel, positioned like the panel drew them.
+        macro_rules! push_rows {
+            ($texts:expr) => {
+                for text in $texts {
+                    for seg in &text.row.segments {
+                        runs.push(TextRun {
+                            buffer: &seg.buffer,
+                            left: text.left + seg.seg_x,
+                            top: text.top,
+                            bounds: text.bounds,
+                            color: fg,
+                        });
+                    }
+                }
+            };
         }
-        for text in &self.review_texts {
-            for seg in &text.row.segments {
-                runs.push(TextRun {
-                    buffer: &seg.buffer,
-                    left: text.left + seg.seg_x,
-                    top: text.top,
-                    bounds: text.bounds,
-                    color: fg,
-                });
+        for layer in &self.layers {
+            match layer {
+                TextLayer::Review => {
+                    if let Some(hole) = self.review_rect {
+                        runs = clip_runs(runs, hole);
+                    }
+                    push_rows!(&self.review_texts);
+                    runs.extend(self.review_labels.iter().map(ui_run));
+                }
+                TextLayer::AgentPanel => {
+                    if let Some(hole) = self.agent_panel_rect {
+                        runs = clip_runs(runs, hole);
+                    }
+                    push_rows!(&self.agent_panel_texts);
+                    runs.extend(self.agent_panel_labels.iter().map(ui_run));
+                }
+                TextLayer::Composer => {
+                    for &hole in &self.composer_clips {
+                        runs = clip_runs(runs, hole);
+                    }
+                    push_rows!(&self.composer_texts);
+                    runs.extend(self.composer_labels.iter().map(ui_run));
+                }
+                TextLayer::Plain { holes, labels } => {
+                    for &hole in holes {
+                        runs = clip_runs(runs, hole);
+                    }
+                    runs.extend(labels.iter().map(ui_run));
+                }
             }
-        }
-        runs.extend(self.review_labels.iter().map(ui_run));
-        if let Some(hole) = self.agent_panel_rect {
-            runs = clip_runs(runs, hole);
-        }
-        for text in &self.agent_panel_texts {
-            for seg in &text.row.segments {
-                runs.push(TextRun {
-                    buffer: &seg.buffer,
-                    left: text.left + seg.seg_x,
-                    top: text.top,
-                    bounds: text.bounds,
-                    color: fg,
-                });
-            }
-        }
-        runs.extend(self.agent_panel_labels.iter().map(ui_run));
-        for &hole in &self.composer_clips {
-            runs = clip_runs(runs, hole);
-        }
-        for text in &self.composer_texts {
-            for seg in &text.row.segments {
-                runs.push(TextRun {
-                    buffer: &seg.buffer,
-                    left: text.left + seg.seg_x,
-                    top: text.top,
-                    bounds: text.bounds,
-                    color: fg,
-                });
-            }
-        }
-        runs.extend(self.composer_labels.iter().map(ui_run));
-        if let Some(hole) = self.block_ai_rect {
-            runs = clip_runs(runs, hole);
-        }
-        runs.extend(self.block_ai_labels.iter().map(ui_run));
-        if let Some(hole) = self.overlay_rect {
-            runs = clip_runs(runs, hole);
-        }
-        runs.extend(self.overlay.iter().map(ui_run));
-        if let Some(hole) = self.consent_rect {
-            runs = clip_runs(runs, hole);
-        }
-        runs.extend(self.consent_labels.iter().map(ui_run));
-        for (holes, labels) in &self.floating {
-            for &hole in holes {
-                runs = clip_runs(runs, hole);
-            }
-            runs.extend(labels.iter().map(ui_run));
         }
         runs
     }

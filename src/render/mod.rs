@@ -33,6 +33,7 @@ use crate::blocks::cards::BlockHover;
 use crate::color::{Palette, Rgba};
 use crate::layout::{PaneId, Rect};
 use crate::terminal::{CursorState, LineData};
+use crate::ui::layers::Layer;
 use crate::ui::motion::{AnimatedView, ChromeMotion, HOVER};
 use gpu::Gpu;
 use scene::blocks::{BlockFades, BlockPaint};
@@ -626,74 +627,114 @@ impl Renderer {
             chrome,
             Some(motion),
         );
-        if let Some((view, opacity, _)) = self.review_view.sample(motion.now) {
-            frame.add_review_motion(
-                &mut ctx,
-                view,
-                &mut self.review_labels,
-                style,
-                &self.ui_font,
-                chrome.language,
-                opacity,
-            );
-        } else {
-            self.review_labels.clear();
-        }
-        if let Some((view, opacity, _)) = self.agent_panel_view.sample(motion.now) {
-            frame.add_agent_panel_motion(&mut ctx, view, style, &self.ui_font, opacity);
-        }
-        if let Some((view, opacity, open)) = self.composer_view.sample(motion.now) {
-            frame.add_composer_motion(&mut ctx, style, &self.ui_font, view, opacity, open);
-        }
-        if let Some(view) = &self.block_ai_view {
-            frame.add_block_ai(&mut ctx, style, &self.ui_font, view);
-        }
-        if let Some(view) = &self.welcome_view {
-            frame.add_welcome(&mut ctx, style, &self.ui_font, view);
-        } else if let Some(((view, icons), opacity, _)) = self.palette_view.sample(motion.now) {
-            frame.add_palette_motion(
-                &mut ctx,
-                style,
-                UiLabels::cached(&self.ui_font, &mut self.ui_labels),
-                view,
-                icons,
-                opacity,
-            );
-        } else if let Some(view) = &self.memory_view {
-            frame.add_memory(&mut ctx, style, &self.ui_font, view);
-        } else if let Some(view) = &self.settings_view {
-            frame.add_settings(&mut ctx, style, &self.ui_font, view);
-        }
-        if let Some(view) = &self.ai_consent_view {
-            frame.add_ai_consent(&mut ctx, style, &self.ui_font, view);
-        }
-        if let Some(menu) = &self.context_menu {
-            let (w, h) = (self.config.width as f32, self.config.height as f32);
-            let layout = menu.layout(
-                Rect::new(0.0, 0.0, w, h),
-                self.metrics.scale,
-                chrome.language,
-            );
-            frame.add_context_menu(
-                &mut ctx,
-                style,
-                &self.ui_font,
-                menu,
-                &layout,
-                chrome.language,
-            );
-        }
-        if !self.toasts.is_empty() {
-            frame.add_toasts(
-                &mut ctx,
-                style,
-                &self.ui_font,
-                &self.toasts,
-                chrome.language,
-            );
-        }
-        if let Some((text, at)) = &self.tooltip {
-            frame.add_tooltip(&mut ctx, style, &self.ui_font, text, *at);
+        // Overlays bottom to top, in the one order input also follows (`ui::layers`).
+        for layer in Layer::draw_order() {
+            match layer {
+                Layer::Review => {
+                    if let Some((view, opacity, _)) = self.review_view.sample(motion.now) {
+                        frame.add_review_motion(
+                            &mut ctx,
+                            view,
+                            &mut self.review_labels,
+                            style,
+                            &self.ui_font,
+                            chrome.language,
+                            opacity,
+                        );
+                    } else {
+                        self.review_labels.clear();
+                    }
+                }
+                Layer::AgentPanel => {
+                    if let Some((view, opacity, _)) = self.agent_panel_view.sample(motion.now) {
+                        frame.add_agent_panel_motion(&mut ctx, view, style, &self.ui_font, opacity);
+                    }
+                }
+                Layer::Composer => {
+                    if let Some((view, opacity, open)) = self.composer_view.sample(motion.now) {
+                        frame.add_composer_motion(
+                            &mut ctx,
+                            style,
+                            &self.ui_font,
+                            view,
+                            opacity,
+                            open,
+                        );
+                    }
+                }
+                Layer::BlockAi => {
+                    if let Some(view) = &self.block_ai_view {
+                        frame.add_block_ai(&mut ctx, style, &self.ui_font, view);
+                    }
+                }
+                Layer::Settings => {
+                    if let Some(view) = &self.settings_view {
+                        frame.add_settings(&mut ctx, style, &self.ui_font, view);
+                    }
+                }
+                Layer::Memory => {
+                    if let Some(view) = &self.memory_view {
+                        frame.add_memory(&mut ctx, style, &self.ui_font, view);
+                    }
+                }
+                Layer::Palette => {
+                    if let Some(((view, icons), opacity, _)) = self.palette_view.sample(motion.now)
+                    {
+                        frame.add_palette_motion(
+                            &mut ctx,
+                            style,
+                            UiLabels::cached(&self.ui_font, &mut self.ui_labels),
+                            view,
+                            icons,
+                            opacity,
+                        );
+                    }
+                }
+                Layer::Welcome => {
+                    if let Some(view) = &self.welcome_view {
+                        frame.add_welcome(&mut ctx, style, &self.ui_font, view);
+                    }
+                }
+                Layer::AiConsent => {
+                    if let Some(view) = &self.ai_consent_view {
+                        frame.add_ai_consent(&mut ctx, style, &self.ui_font, view);
+                    }
+                }
+                Layer::ContextMenu => {
+                    if let Some(menu) = &self.context_menu {
+                        let (w, h) = (self.config.width as f32, self.config.height as f32);
+                        let layout = menu.layout(
+                            Rect::new(0.0, 0.0, w, h),
+                            self.metrics.scale,
+                            chrome.language,
+                        );
+                        frame.add_context_menu(
+                            &mut ctx,
+                            style,
+                            &self.ui_font,
+                            menu,
+                            &layout,
+                            chrome.language,
+                        );
+                    }
+                }
+                Layer::Toasts => {
+                    if !self.toasts.is_empty() {
+                        frame.add_toasts(
+                            &mut ctx,
+                            style,
+                            &self.ui_font,
+                            &self.toasts,
+                            chrome.language,
+                        );
+                    }
+                }
+                Layer::Tooltip => {
+                    if let Some((text, at)) = &self.tooltip {
+                        frame.add_tooltip(&mut ctx, style, &self.ui_font, text, *at);
+                    }
+                }
+            }
         }
         if let Some((x, y, w, h)) = frame.ime_area {
             self.window.set_ime_cursor_area(

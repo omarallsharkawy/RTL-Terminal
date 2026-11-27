@@ -24,34 +24,7 @@ fn is_plain_escape(event: &KeyEvent, modifiers: ModifiersState) -> bool {
 impl App {
     /// A key press or release. Returns true when the window should close.
     pub(super) fn on_key(&mut self, event: &KeyEvent) -> bool {
-        if self.handle_ai_consent_key(event) {
-            return false;
-        }
-        if let Some(close) = self.context_menu_key(event) {
-            return close;
-        }
-        if self.welcome_open() {
-            return self.handle_welcome_key(event);
-        }
-        if self.memory_open() {
-            return self.handle_memory_key(event);
-        }
-        if self.settings_open() {
-            return self.handle_settings_key(event);
-        }
-        if self.palette_open() {
-            return self.handle_palette_key(event);
-        }
-        if let Some(close) = self.handle_composer_key(event) {
-            return close;
-        }
-        if self.handle_block_ai_key(event) {
-            return false;
-        }
-        if let Some(close) = self.handle_review_key(event) {
-            return close;
-        }
-        if let Some(close) = self.handle_agent_panel_key(event) {
+        if let Some(close) = self.route_key(event) {
             return close;
         }
         let Some(id) = self.focused_id() else {

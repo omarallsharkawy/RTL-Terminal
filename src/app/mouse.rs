@@ -35,35 +35,8 @@ impl App {
 
     pub(super) fn on_cursor_moved(&mut self, x: f64, y: f64) {
         self.pointer.pos = (x, y);
-        if self.context_menu_open() {
-            self.context_menu_motion();
-            return;
-        }
         self.window.update_sidebar_drag();
-        if let Some(icon) = self.ai_consent_cursor(x, y) {
-            self.window.set_cursor_icon(icon);
-            return;
-        }
-        if self.welcome_open() {
-            self.on_welcome_cursor_moved(x, y);
-            return;
-        }
-        if self.memory_open() {
-            self.on_memory_cursor_moved(x, y);
-            return;
-        }
-        if self.settings_open() {
-            self.on_settings_cursor_moved(x, y);
-            return;
-        }
-        if self.palette_open() {
-            let hit = self.window.palette_hit(x, y);
-            let icon = if matches!(hit, crate::render::scene::palette::PaletteHit::Item(_)) {
-                CursorIcon::Pointer
-            } else {
-                CursorIcon::Default
-            };
-            self.window.set_cursor_icon(icon);
+        if self.route_modal_motion(x, y) {
             return;
         }
         if let Some(divider) = self.pointer.drag.clone() {
@@ -74,22 +47,18 @@ impl App {
         let over_sidebar = self.window.sidebar_contains(&self.ws, x, y);
         let captured = self.pointer.capture.is_some();
         self.update_chrome_hover(&hit, captured);
-        if let Some(icon) = self.block_ai_cursor(x, y).filter(|_| !captured) {
-            self.window.set_block_hover(None);
-            self.window.set_cursor_icon(icon);
-            return;
-        }
-        if let Some(icon) = self.composer_cursor(x, y).filter(|_| !captured) {
-            self.window.set_block_hover(None);
-            self.window.set_cursor_icon(icon);
-            return;
-        } else if let Some(icon) = self.review_cursor(x, y).filter(|_| !captured) {
-            self.window.set_cursor_icon(icon);
-        } else if let Some(icon) = self.agent_panel_mouse_move(x, y).filter(|_| !captured) {
-            self.window.set_cursor_icon(icon);
-            return;
-        } else if let Some(icon) = cursor_icon_for(&hit, captured, self.window.cursor_icon()) {
-            self.window.set_cursor_icon(icon);
+        match self.route_docked_cursor(x, y, captured) {
+            Some((icon, stop)) => {
+                self.window.set_cursor_icon(icon);
+                if stop {
+                    return;
+                }
+            }
+            None => {
+                if let Some(icon) = cursor_icon_for(&hit, captured, self.window.cursor_icon()) {
+                    self.window.set_cursor_icon(icon);
+                }
+            }
         }
         let previous_hover = self.pointer.hover;
         let (target, left) = self.pointer.moved(&hit);
@@ -159,15 +128,7 @@ impl App {
     }
 
     pub(super) fn on_cursor_left(&mut self) {
-        if self.welcome_open() {
-            self.on_welcome_cursor_left();
-        }
-        if self.memory_open() {
-            self.on_memory_cursor_left();
-        }
-        if self.settings_open() {
-            self.on_settings_cursor_left();
-        }
+        self.route_pointer_left();
         self.window.set_chrome_hover(None, None);
         self.window.cancel_sidebar_drag();
         self.window.set_block_hover(None);
@@ -182,44 +143,8 @@ impl App {
 
     /// Returns true when the press closed the last pane and the window should exit.
     pub(super) fn on_mouse_input(&mut self, button: MouseButton, pressed: bool) -> bool {
-        if self.ai_consent_open() {
-            if pressed {
-                self.ai_consent_mouse_press(button);
-            }
-            return false;
-        }
-        if self.context_menu_open() {
-            return self.context_menu_mouse(button, pressed);
-        }
-        if self.welcome_open() {
-            self.on_welcome_mouse(button, pressed);
-            return false;
-        }
-        if self.memory_open() {
-            self.on_memory_mouse(button, pressed);
-            return false;
-        }
-        if self.settings_open() {
-            self.on_settings_mouse(button, pressed);
-            return false;
-        }
-        if self.palette_open() {
-            return pressed && self.on_palette_mouse_press(button);
-        }
-        if pressed && self.block_ai_mouse_press(button) {
-            return false;
-        }
-        if !pressed && self.agent_panel_mouse_release(button) {
-            return false;
-        }
-        if pressed && self.review_mouse_press(button) {
-            return false;
-        }
-        if pressed && self.agent_panel_mouse_press(button) {
-            return false;
-        }
-        if pressed && self.composer_mouse_press(button) {
-            return self.take_composer_exit_request();
+        if let Some(close) = self.route_mouse(button, pressed) {
+            return close;
         }
         let Some(code) = button_code(button) else {
             return false;
