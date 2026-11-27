@@ -115,6 +115,7 @@ pub(crate) struct Renderer {
     block_ai_view: Option<scene::ai::BlockAiView>,
     context_menu: Option<crate::ui::context_menu::ContextMenu>,
     tooltip: Option<(String, (f32, f32))>,
+    toasts: Vec<crate::ui::toast::Toast>,
     /// The one-time AI privacy consent modal, while it is open.
     ai_consent_view: Option<scene::ai::ConsentOverlayView>,
     /// The settings panel, while it is open.
@@ -186,6 +187,7 @@ impl Renderer {
             block_ai_view: None,
             context_menu: None,
             tooltip: None,
+            toasts: Vec::new(),
             ai_consent_view: None,
             settings_view: None,
             memory_view: None,
@@ -414,6 +416,11 @@ impl Renderer {
     /// Show a right-click menu (`Some`) or hide it.
     pub(crate) fn set_context_menu(&mut self, menu: Option<crate::ui::context_menu::ContextMenu>) {
         self.context_menu = menu;
+    }
+
+    /// The notices to show (empty hides them).
+    pub(crate) fn set_toasts(&mut self, toasts: Vec<crate::ui::toast::Toast>) {
+        self.toasts = toasts;
     }
 
     /// Show a hover tooltip near the pointer (`Some`) or hide it.
@@ -673,6 +680,15 @@ impl Renderer {
                 &self.ui_font,
                 menu,
                 &layout,
+                chrome.language,
+            );
+        }
+        if !self.toasts.is_empty() {
+            frame.add_toasts(
+                &mut ctx,
+                style,
+                &self.ui_font,
+                &self.toasts,
                 chrome.language,
             );
         }

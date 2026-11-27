@@ -979,12 +979,24 @@ impl App {
         }
     }
 
-    pub(super) fn show_pane_warning(&mut self, id: PaneId, message: &str) {
-        let Some(note) = format_pane_warning(message) else {
-            return;
-        };
-        self.term(id, |t| t.process_bytes(note.as_bytes()));
+    /// Tell the user something went wrong while acting on pane `id`, as a notice over the
+    /// window (not text printed into the terminal).
+    pub(super) fn show_pane_warning(&mut self, _id: PaneId, message: &str) {
+        self.toast(crate::ui::toast::ToastKind::Error, message);
+    }
+
+    /// Float a short notice over the window.
+    pub(super) fn toast(&mut self, kind: crate::ui::toast::ToastKind, text: &str) {
+        self.toasts.push(kind, text, Instant::now());
         self.window.request_redraw();
+    }
+
+    /// Drop expired notices; returns when the next one expires.
+    pub(super) fn poll_toasts(&mut self, now: Instant) -> Option<Instant> {
+        if self.toasts.prune(now) {
+            self.window.request_redraw();
+        }
+        self.toasts.next_deadline()
     }
 }
 

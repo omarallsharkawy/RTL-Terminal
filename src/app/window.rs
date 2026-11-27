@@ -468,6 +468,13 @@ impl Window {
         self.block_hover
     }
 
+    /// Hand the visible notices to the renderer.
+    pub(super) fn set_toasts(&mut self, toasts: Vec<crate::ui::toast::Toast>) {
+        if let Some(ref mut r) = self.renderer {
+            r.set_toasts(toasts);
+        }
+    }
+
     /// Show a tooltip (`text` near pointer `at`) or hide it.
     pub(super) fn set_tooltip(&mut self, tip: Option<(String, (f32, f32))>) {
         self.tooltip_shown = tip.is_some();
@@ -1250,6 +1257,7 @@ impl App {
         self.window
             .set_context_menu(self.context_menu.as_ref().map(|h| h.menu.clone()));
         self.sync_tooltip(Instant::now());
+        self.window.set_toasts(self.toasts.visible());
         let (panes, dividers) = self.frame();
         let visible = self.cursor_blink.visible();
         let broadcast = self.active_tab_broadcast();

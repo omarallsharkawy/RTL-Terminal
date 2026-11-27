@@ -247,8 +247,8 @@ impl App {
         match item.action.clone() {
             MenuAction::Command(name) => return self.run_command(name),
             MenuAction::CopySelection => {
-                if let Some(id) = host.pane {
-                    self.copy_selection(id);
+                if host.pane.is_some_and(|id| self.copy_selection(id)) {
+                    self.toast(crate::ui::toast::ToastKind::Success, tr("Copied", "اتنسخ"));
                 }
             }
             MenuAction::Block(action, block) => {

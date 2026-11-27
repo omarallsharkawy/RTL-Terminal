@@ -333,6 +333,10 @@ impl App {
             .and_then(|p| p.blocks.target_text(&p.terminal));
         if let Some(text) = text {
             self.clipboard.set_text(text.output);
+            self.toast(
+                crate::ui::toast::ToastKind::Success,
+                crate::ui::chrome::tr("Output copied", "اتنسخ الناتج"),
+            );
         }
     }
 

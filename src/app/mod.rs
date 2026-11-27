@@ -125,6 +125,8 @@ pub struct App {
     /// An open right-click menu.
     context_menu: Option<context_menu::ContextMenuHost>,
     tooltip: tooltip::TooltipState,
+    /// Short notices floating over the window.
+    toasts: crate::ui::toast::Toasts,
     /// Built-in non-interactive AI assistant (composer generation, block explain/fix, consent).
     ai: ai::AiHost,
     /// Project switcher MRU and off-thread git repo scan state.
@@ -187,6 +189,7 @@ impl App {
             composer: composer::ComposerHost::default(),
             context_menu: None,
             tooltip: tooltip::TooltipState::default(),
+            toasts: crate::ui::toast::Toasts::default(),
             ai: ai::AiHost::load(),
             projects: projects::ProjectState::load(),
             layouts: crate::layouts::LayoutStore::default(),
@@ -342,6 +345,7 @@ impl ApplicationHandler<AppEvent> for App {
             self.window.poll_motion(now),
             self.window.poll_perf(now),
             self.poll_tooltip(now),
+            self.poll_toasts(now),
         ]
         .into_iter()
         .flatten()

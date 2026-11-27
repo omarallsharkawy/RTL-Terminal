@@ -686,6 +686,10 @@ impl App {
                     .filter(|s| !s.is_empty());
                 if let Some(cmd) = cmd {
                     self.clipboard.set_text(cmd);
+                    self.toast(
+                        crate::ui::toast::ToastKind::Success,
+                        crate::ui::chrome::tr("Command copied", "اتنسخ الأمر"),
+                    );
                 }
             }
             BlockButton::CopyOutput => {
@@ -695,6 +699,10 @@ impl App {
                     .and_then(|p| p.blocks.block_text_by_id(block_id, &p.terminal));
                 if let Some(text) = text {
                     self.clipboard.set_text(text.output);
+                    self.toast(
+                        crate::ui::toast::ToastKind::Success,
+                        crate::ui::chrome::tr("Output copied", "اتنسخ الناتج"),
+                    );
                 }
             }
             BlockButton::AskAgent => self.ask_agent_about_block(id, block_id),

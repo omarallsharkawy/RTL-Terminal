@@ -155,3 +155,80 @@ pub fn draw_tooltip(
         rect,
     )
 }
+
+/// Draw notices stacked above the bottom center of `surface`, newest lowest. Returns their
+/// labels and rects.
+pub fn draw_toasts(
+    ctx: &mut DrawContext,
+    style: UiStyle,
+    font: &UiFont,
+    toasts: &[crate::ui::toast::Toast],
+    surface: (f32, f32),
+    language: UiLanguage,
+    shapes: &mut Vec<Shape>,
+) -> (Vec<UiLabel>, Vec<Rect>) {
+    use crate::render::icons::Icon;
+    use crate::ui::toast::ToastKind;
+    let mut labels = Vec::new();
+    let mut rects = Vec::new();
+    let h = style.px(34.0);
+    let gap = style.px(SPACE_8);
+    let max_w = (surface.0 - 2.0 * style.px(16.0)).max(0.0);
+    let mut bottom = surface.1 - style.px(24.0);
+    for toast in toasts.iter().rev() {
+        let icon_side = style.px(14.0);
+        let pad = style.px(SPACE_12);
+        let text_room = (max_w - 2.0 * pad - icon_side - gap).max(0.0);
+        let buffer = font.fit(
+            ctx.font_system,
+            UiSize::Caption,
+            UiWeight::Regular,
+            style.scale,
+            &toast.text,
+            text_room,
+        );
+        let text_w = label_width(&buffer).ceil().min(text_room);
+        let w = (2.0 * pad + icon_side + gap + text_w).min(max_w);
+        let rect = Rect::new(((surface.0 - w) / 2.0).round(), (bottom - h).round(), w, h);
+        let (icon, color) = match toast.kind {
+            ToastKind::Success => (Icon::Check, style.ok),
+            ToastKind::Error => (Icon::Warning, style.danger),
+            ToastKind::Info => (Icon::Check, style.accent),
+        };
+        shapes.push(Shape::RoundedRect {
+            rect,
+            radii: [style.px(RADIUS_8); 4],
+            fill: ctx.color(style.bg2),
+            border: Some(Border {
+                width: style.px(1.0),
+                color: ctx.color(style.border),
+            }),
+            shadow: Some(Shadow {
+                blur: style.px(OVERLAY_BLUR),
+                offset: OVERLAY_OFFSET.map(|v| style.px(v)),
+                color: ctx.color(OVERLAY_SHADOW),
+            }),
+        });
+        let icon_rect = language.mirror(
+            Rect::new(
+                rect.x + pad,
+                rect.y + (h - icon_side) / 2.0,
+                icon_side,
+                icon_side,
+            ),
+            rect,
+        );
+        icon.draw(icon_rect, ctx.color(color), shapes);
+        let text_rect = language.mirror(
+            Rect::new(rect.x + pad + icon_side + gap, rect.y, text_w + 1.0, h),
+            rect,
+        );
+        labels.push(UiLabel::new(buffer, text_rect, UiAlign::Start, style.text));
+        rects.push(rect);
+        bottom = rect.y - gap;
+        if bottom - h < 0.0 {
+            break;
+        }
+    }
+    (labels, rects)
+}

@@ -541,6 +541,28 @@ impl Frame {
         self.menu_holes.push(layout.rect);
     }
 
+    /// Draw short notices above the bottom center of the window.
+    pub fn add_toasts(
+        &mut self,
+        ctx: &mut DrawContext,
+        style: UiStyle,
+        font: &UiFont,
+        toasts: &[crate::ui::toast::Toast],
+        language: crate::ui::chrome::UiLanguage,
+    ) {
+        let (labels, rects) = super::context_menu::draw_toasts(
+            ctx,
+            style,
+            font,
+            toasts,
+            self.surface,
+            language,
+            &mut self.shapes.overlay,
+        );
+        self.menu_labels.extend(labels);
+        self.menu_holes.extend(rects);
+    }
+
     /// Draw a hover tooltip near pointer `at`, above everything else.
     pub fn add_tooltip(
         &mut self,

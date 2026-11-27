@@ -1596,6 +1596,22 @@ fn check_context_menu_golden(name: &str, palette_name: &str, lang: twitty::ui::c
             (40.0, 300.0),
         );
     }
+    let now = std::time::Instant::now();
+    let mut toasts = twitty::ui::toast::Toasts::default();
+    toasts.push(
+        twitty::ui::toast::ToastKind::Success,
+        t("Output copied", "اتنسخ الناتج"),
+        now,
+    );
+    toasts.push(
+        twitty::ui::toast::ToastKind::Error,
+        t(
+            "Could not save layout: disk full",
+            "تعذر حفظ التخطيط: المساحة خلصت",
+        ),
+        now,
+    );
+    frame.add_toasts(&mut ctx, style, &ui_font, &toasts.visible(), lang);
     let runs = frame.text_runs(&panes, &cache, &ime);
     let _gpu = GPU.lock().unwrap_or_else(|e| e.into_inner());
     let mut target = match Offscreen::new(width, height) {
