@@ -81,8 +81,8 @@ impl App {
         })
     }
 
-    /// Track what the pointer rests on and hand the renderer the tooltip once it is due.
-    pub(super) fn sync_tooltip(&mut self, now: Instant) {
+    /// Track what the pointer rests on; the tooltip to draw once it is due.
+    pub(super) fn sync_tooltip(&mut self, now: Instant) -> Option<(String, (f32, f32))> {
         let target = self.tip_target();
         if self.tooltip.target.map(|(t, _)| t) != target {
             self.tooltip.target = target.map(|t| (t, now));
@@ -93,8 +93,7 @@ impl App {
             .filter(|&(_, since)| now.duration_since(since) >= DELAY)
             .and_then(|(t, _)| self.tip_text(t));
         let (x, y) = self.pointer.pos;
-        self.window
-            .set_tooltip(shown.map(|text| (text, (x as f32, y as f32))));
+        shown.map(|text| (text, (x as f32, y as f32)))
     }
 
     /// When a resting pointer's tooltip becomes due; redraws once it is.

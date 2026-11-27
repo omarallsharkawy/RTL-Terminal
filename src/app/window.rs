@@ -285,9 +285,6 @@ impl Window {
     /// Open or close the review panel's area (the caller lays the panes out again).
     pub(super) fn set_review_open(&mut self, open: bool) {
         self.review_open = open;
-        if !open {
-            self.set_review(None);
-        }
     }
 
     /// Where the review panel is drawn, while it is open and fits.
@@ -295,20 +292,10 @@ impl Window {
         self.layout(ws.tabs().len())?.review
     }
 
-    /// Hand the review panel's view to the renderer (`None` hides it).
-    pub(super) fn set_review(&mut self, view: Option<crate::review::panel::View>) {
-        if let Some(ref mut r) = self.renderer {
-            r.set_review(view);
-        }
-    }
-
     /// Open or close the docked Agent side panel area.
     pub(super) fn set_agent_panel_open(&mut self, open: bool, width: Option<f32>) {
         self.agent_panel_open = open;
         self.agent_panel_width = width;
-        if !open {
-            self.set_agent_panel(None);
-        }
     }
 
     /// Where the Agent side panel is drawn, while open and fitting.
@@ -332,37 +319,6 @@ impl Window {
         ))
     }
 
-    /// Hand the Agent panel view to the renderer (`None` hides it).
-    pub(super) fn set_agent_panel(&mut self, view: Option<crate::ui::agent_panel::AgentPanelView>) {
-        if let Some(ref mut r) = self.renderer {
-            r.set_agent_panel(view);
-        }
-    }
-
-    /// Hand the command composer's view to the renderer (`None` hides it).
-    pub(super) fn set_composer(
-        &mut self,
-        view: Option<crate::render::scene::composer::ComposerView>,
-    ) {
-        if let Some(ref mut r) = self.renderer {
-            r.set_composer(view);
-        }
-    }
-
-    /// Hand the failed-block AI explanation/fix popover view to the renderer (`None` hides it).
-    pub(super) fn set_block_ai(&mut self, view: Option<crate::render::scene::ai::BlockAiView>) {
-        if let Some(ref mut r) = self.renderer {
-            r.set_block_ai(view);
-        }
-    }
-
-    /// Hand an open right-click menu to the renderer (`None` hides it).
-    pub(super) fn set_context_menu(&mut self, menu: Option<crate::ui::context_menu::ContextMenu>) {
-        if let Some(ref mut r) = self.renderer {
-            r.set_context_menu(menu);
-        }
-    }
-
     /// Where `menu` is drawn, for hit testing (`None` before the renderer exists).
     pub(super) fn context_menu_layout(
         &self,
@@ -370,16 +326,6 @@ impl Window {
     ) -> Option<crate::ui::context_menu::MenuLayout> {
         let r = self.renderer.as_ref()?;
         Some(r.context_menu_layout(menu, self.language))
-    }
-
-    /// Hand the one-time AI privacy consent modal view to the renderer (`None` hides it).
-    pub(super) fn set_ai_consent(
-        &mut self,
-        view: Option<crate::render::scene::ai::ConsentOverlayView>,
-    ) {
-        if let Some(ref mut r) = self.renderer {
-            r.set_ai_consent(view);
-        }
     }
 
     pub(super) fn ai_consent_hit(&self, x: f64, y: f64) -> crate::render::scene::ai::ConsentHit {
@@ -468,18 +414,11 @@ impl Window {
         self.block_hover
     }
 
-    /// Hand the visible notices to the renderer.
-    pub(super) fn set_toasts(&mut self, toasts: Vec<crate::ui::toast::Toast>) {
+    /// Hand everything drawn over the panes this frame to the renderer.
+    pub(super) fn set_overlays(&mut self, views: crate::render::OverlayViews) {
+        self.tooltip_shown = views.tooltip.is_some();
         if let Some(ref mut r) = self.renderer {
-            r.set_toasts(toasts);
-        }
-    }
-
-    /// Show a tooltip (`text` near pointer `at`) or hide it.
-    pub(super) fn set_tooltip(&mut self, tip: Option<(String, (f32, f32))>) {
-        self.tooltip_shown = tip.is_some();
-        if let Some(ref mut r) = self.renderer {
-            r.set_tooltip(tip);
+            r.set_overlays(views);
         }
     }
 
@@ -1244,20 +1183,18 @@ impl App {
         }
         self.sync_port_watch();
         self.sync_branch_watch();
-        let review = self.review_view();
-        self.window.set_review(review);
-        let agent_panel = self.agent_panel_view();
-        self.window.set_agent_panel(agent_panel);
-        let composer = self.composer_view();
-        self.window.set_composer(composer);
-        let block_ai = self.block_ai_view();
-        self.window.set_block_ai(block_ai);
-        let consent = self.ai_consent_view();
-        self.window.set_ai_consent(consent);
-        self.window
-            .set_context_menu(self.context_menu.as_ref().map(|h| h.menu.clone()));
-        self.sync_tooltip(Instant::now());
-        self.window.set_toasts(self.toasts.visible());
+        let now = Instant::now();
+        let views = crate::render::OverlayViews {
+            review: self.review_view(),
+            agent_panel: self.agent_panel_view(),
+            composer: self.composer_view(),
+            block_ai: self.block_ai_view(),
+            ai_consent: self.ai_consent_view(),
+            context_menu: self.context_menu.as_ref().map(|h| h.menu.clone()),
+            toasts: self.toasts.visible(),
+            tooltip: self.sync_tooltip(now),
+        };
+        self.window.set_overlays(views);
         let (panes, dividers) = self.frame();
         let visible = self.cursor_blink.visible();
         let broadcast = self.active_tab_broadcast();

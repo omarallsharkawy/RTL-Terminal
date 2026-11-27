@@ -77,6 +77,22 @@ pub struct TabLabel {
 
 /// The terminal renderer: lays out each frame on the CPU (`scene`) and draws it on the GPU
 /// (`gpu`). Its state is reached through methods, so the app never depends on its layout.
+/// Everything the app shows over the panes in one frame, built once per redraw and handed
+/// over in one call (`Renderer::set_overlays`). Overlays opened and closed by events (palette,
+/// settings, memory, welcome) are set when they change instead.
+#[derive(Default)]
+pub(crate) struct OverlayViews {
+    pub review: Option<crate::review::panel::View>,
+    pub agent_panel: Option<crate::ui::agent_panel::AgentPanelView>,
+    pub composer: Option<scene::composer::ComposerView>,
+    pub block_ai: Option<scene::ai::BlockAiView>,
+    pub ai_consent: Option<scene::ai::ConsentOverlayView>,
+    pub context_menu: Option<crate::ui::context_menu::ContextMenu>,
+    pub toasts: Vec<crate::ui::toast::Toast>,
+    /// Text and the pointer position it follows.
+    pub tooltip: Option<(String, (f32, f32))>,
+}
+
 pub(crate) struct Renderer {
     window: Arc<Window>,
     /// Surface size and format.
@@ -385,15 +401,6 @@ impl Renderer {
             .set(view, Instant::now(), self.reduce_motion);
     }
 
-    /// Show the command composer (`Some`) or hide it.
-    pub(crate) fn set_composer(&mut self, mut view: Option<scene::composer::ComposerView>) {
-        if let Some(view) = view.as_mut().filter(|_| self.reduce_motion) {
-            view.cursor_blink_on = true;
-        }
-        self.composer_view
-            .set(view, Instant::now(), self.reduce_motion);
-    }
-
     /// Show the settings overlay (`Some`) or hide it.
     pub(crate) fn set_settings_panel(&mut self, view: Option<SettingsView>) {
         self.settings_view = view;
@@ -409,24 +416,22 @@ impl Renderer {
         self.welcome_view = view;
     }
 
-    /// Show the failed-block AI explanation/fix popover (`Some`) or hide it.
-    pub(crate) fn set_block_ai(&mut self, view: Option<scene::ai::BlockAiView>) {
-        self.block_ai_view = view;
-    }
-
-    /// Show a right-click menu (`Some`) or hide it.
-    pub(crate) fn set_context_menu(&mut self, menu: Option<crate::ui::context_menu::ContextMenu>) {
-        self.context_menu = menu;
-    }
-
-    /// The notices to show (empty hides them).
-    pub(crate) fn set_toasts(&mut self, toasts: Vec<crate::ui::toast::Toast>) {
-        self.toasts = toasts;
-    }
-
-    /// Show a hover tooltip near the pointer (`Some`) or hide it.
-    pub(crate) fn set_tooltip(&mut self, tip: Option<(String, (f32, f32))>) {
-        self.tooltip = tip;
+    /// Take everything drawn over the panes this frame.
+    pub(crate) fn set_overlays(&mut self, views: OverlayViews) {
+        let now = Instant::now();
+        let mut composer = views.composer;
+        if let Some(view) = composer.as_mut().filter(|_| self.reduce_motion) {
+            view.cursor_blink_on = true;
+        }
+        self.composer_view.set(composer, now, self.reduce_motion);
+        self.review_view.set(views.review, now, self.reduce_motion);
+        self.agent_panel_view
+            .set(views.agent_panel, now, self.reduce_motion);
+        self.block_ai_view = views.block_ai;
+        self.ai_consent_view = views.ai_consent;
+        self.context_menu = views.context_menu;
+        self.toasts = views.toasts;
+        self.tooltip = views.tooltip;
     }
 
     /// Where `menu` is drawn in the current surface, for hit testing.
@@ -437,11 +442,6 @@ impl Renderer {
     ) -> crate::ui::context_menu::MenuLayout {
         let (w, h) = self.surface_size();
         menu.layout(Rect::new(0.0, 0.0, w, h), self.metrics.scale, language)
-    }
-
-    /// Show the one-time AI privacy consent modal (`Some`) or hide it.
-    pub(crate) fn set_ai_consent(&mut self, view: Option<scene::ai::ConsentOverlayView>) {
-        self.ai_consent_view = view;
     }
 
     /// Hit-test physical pixel `(x, y)` against the open AI privacy consent modal, if any.
@@ -475,18 +475,6 @@ impl Renderer {
             view.language,
         )
         .hit(x, y)
-    }
-
-    /// Show the code review panel (`Some`) or hide it.
-    pub(crate) fn set_review(&mut self, view: Option<crate::review::panel::View>) {
-        self.review_view
-            .set(view, Instant::now(), self.reduce_motion);
-    }
-
-    /// Show the Agent side panel (`Some`) or hide it.
-    pub(crate) fn set_agent_panel(&mut self, view: Option<crate::ui::agent_panel::AgentPanelView>) {
-        self.agent_panel_view
-            .set(view, Instant::now(), self.reduce_motion);
     }
 
     /// Hit-test physical pixel `(x, y)` against the open command palette, if any.
